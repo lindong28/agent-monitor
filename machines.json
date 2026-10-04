@@ -1,0 +1,12 @@
+# 每台机器一行；在行首加 # 或 // 可停止拉取并从页面隐藏，取消注释可恢复历史。
+# 保留恰好一台 self: true；支持尾随逗号，不支持行尾注释。
+{
+  "machines": [
+    {"name": "macbook", "ssh_host": "macbook", "self": true},
+    {"name": "macmini", "ssh_host": "macmini", "self": false},
+    {"name": "macstudio", "ssh_host": "macstudio", "self": false},
+#    {"name": "dgx0023", "ssh_host": "dgx0023", "self": false},
+    {"name": "tencent-webserver-china", "ssh_host": "tencent-webserver-china", "self": false},
+  ],
+  "retired_names": []
+}

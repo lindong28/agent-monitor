@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Resolves symlinks, then cd's to the repo dir so `python3 -m ip_check` works
+# when this script is invoked through ~/.local/bin/ip-check.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+# Prefer this project's own venv (has `requests`); fall back to system python3
+# (ip_check will then error clearly on the missing dependency rather than silently
+# running against the wrong interpreter).
+VENV_PY="$SCRIPT_DIR/.venv/bin/python"
+PY="${AGENT_MONITOR_PYTHON:-$VENV_PY}"; [ -x "$PY" ] || PY="python3"
+cd "$SCRIPT_DIR" && exec "$PY" -m ip_check "$@"

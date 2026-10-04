@@ -1,0 +1,4 @@
+-r requirements.txt
+# Existing GatewayApplication integration fixture imports its HTTP client.
+# Match the independent Gateway package's declared range; not a service dependency.
+httpx>=0.27,<1

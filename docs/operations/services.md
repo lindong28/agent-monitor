@@ -1,0 +1,323 @@
+# agent-monitor service operations
+
+Current source layout is this repository's root. Install runtime and assets with `./install.sh`; stage without changing services with `./install.sh --no-services`. The canonical CLI is `~/.local/bin/agent-monitor`. `com.agent-monitor.rollup` collects locally (Hub mode: `collect`, 120 seconds; standalone: `refresh`, 3600 seconds); `com.agent-monitor.hub` serves MacStudio on port 39001. Configure a role with `./install.sh hub <machine>`. Lifecycle commands are documented in the [README](../../README.md).
+
+State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
+
+## Existing-deployment migration
+
+1. Inspect each active process/service's actual source and state paths, role, service owner and outstanding collectors before changing it. Stage the new code, runtime and assets with `--no-services`; this changes CLI links but leaves services alone.
+2. Stop the old Hub pull schedule and relevant old collectors/writers before changing state. Resolve the real directory behind any release symlink. Wait for the actual locks to be available; do not remove or recreate persistent lock files.
+3. On the same filesystem, move the stopped state directory to `~/.local/share/agent-monitor/state` and point the new `root/state` there. Preserve an old-path compatibility symlink and the old source/service definitions for rollback. Do not copy an active SQLite tree or run parallel old/new writers.
+4. Start the new local exporters/collectors first and verify their source identity and retained history. The old Hub may require a temporary `tt-web` CLI compatibility link during the transition. Switch the Hub only after its new `agent-monitor` remote commands work; then retire old labels and compatibility commands.
+5. Verify source revision, loaded working directory/interpreter, real CLI/API paths, admitted machine identities and history, then browser navigation and refresh persistence. Code tests and a healthy endpoint alone are not deployment acceptance. Rollback restores the old source/service definitions against the preserved data; it does not roll data backward.
+
+Current service status is available through `agent-monitor status`, `./status.sh rollup-daemon` and the per-machine Web sync panel. These are existing observation paths; this extraction does not add independent push monitoring. A fresh deployment must establish its own live status rather than treating the historical records below as current.
+
+## Historical tt-web operations and deployment record
+
+The following content was imported from ai-agent-config `3d61487d5386dfe9bb6ba7d26807005bbf0bd7f2` on 2026-10-04. Original names, paths, revisions, dates and timings are preserved. They document the former installation, not proof that the renamed deployment has been cut over. Parent-repository relative links are converted to immutable source links.
+
+# tt-web Services
+
+This page is the operational inventory for long-running tt-web services. Source,
+state, logs, and generated SQLite files stay inside `tt-web/` unless noted.
+
+## Service Inventory
+
+| Service | Default | Supervisor | State / logs | Purpose |
+| --- | --- | --- | --- | --- |
+| `tt-web` | Manual | PID file in `state/pid`; port in `state/port` | `state/server.log` | Local dashboard server for usage, cost, sessions, Explore pivots, and `/network`. |
+| `com.ttweb.rollup` | Installed on macOS | macOS LaunchAgent at `~/Library/LaunchAgents/com.ttweb.rollup.plist` | `state/rollup.db`, `state/rollup-daemon.log` | Runs `tt-web refresh` hourly: requests or joins dashboard-owned cross-machine sync when available, and otherwise updates only the local rollup with a non-zero partial result. |
+
+## Operations
+
+### 2026-10-03 刷新异步受理与逐机收敛
+
+本次优化以首页点击后可继续操作、后台真实更新为验收对象。MacStudio 独立部署为 `~/.local/share/tt-web/deployments/async-refresh-20261003`：首版 `22816075`，受理脱离快照锁的补丁 `d3c5fe37`。MacMini 同名部署为 `e3b02447`，Tencent 为 `1bfd8cd8`，后二者仅更新 `exporter.py` 和 CLI 的 quota-only 路径；MacBook 使用本地主线。五个 Hub Python/JS 文件与本次源码逐字一致；MacStudio CLI 保留部署基线中没有 `recover-reviewed` 的旧路由差异，本次 quota-only hunk 一致。Hub、MacStudio/MacMini rollup LaunchAgent 与三台远端 CLI 均已切换，原 `state` 和 Mac 上的 `web/vendor` 继续复用。原 release、`previous-cli.txt` 与 `previous-launchagents/` 保留用于恢复匹配的 CLI/采集器/Hub，不回滚统计数据，不重启 Gateway。
+
+受理只读机器配置并登记本次请求序号，`/api/refresh?ack=1` 返回内存状态；浏览器另起后台读取。首次上线仍经 force overview 读取快照，真实点击为 13.855 秒，资源 TTFB 为 13.823 秒；reader 与 publisher 共用机器 GC 锁，因此只移除全轮等待仍不充分。分离 ACK 后，同一个隔离 headless 浏览器两次实际点击为 26.4 / 45.8 ms，均恢复按钮并显示“刷新请求已受理 · 后台更新，当前数据仍可查看”。这是两次点击样本，不是 p95 或全环境保证。
+
+校验缓存首次读取仍付完整验证：新进程首次 sync-status 为 983.8 ms，随后同入口 3.3 ms；overview 两次为 17.4 / 16.1 ms。此前空闲样本分别为 sync-status 356 / 281 ms、overview 294 / 294 ms；它们是跨时样本，不能当作受控倍数对比。发布仍完整校验并复制快照，后台读取仍可能等发布锁；统计/配额收敛时间与 ACK 时间分开报告。属性不变的底层静默损坏不在 stat 缓存检测范围。
+
+首次生产整轮请求完成读数为 clicked +114.880 秒（`completed=requested=1`），四台机器陆续出现新 generation；当时 MacMini GUI 配额拒绝新 CLI，因为 loaded collector 仍指向旧 release。已把其 rollup plist 与 CLI 对齐并重新加载；该校验不能通过仅改变 CLI 路径满足。生产失败提示保留旧配额与原时间；不得以 statistics success 冒充配额查询成功。
+
+最终 ACK 分离版两次点击相隔 10.914 秒，后台请求完成观察点为第一次点击后 113.549 / 222.830 秒，即第二次自身等待约 211.916 秒（含排队）。最终 `refresh_requested=refresh_completed=2`，四机最近 attempt 均 success，页面实际显示新统计和 Codex 新配额；此后定时统计又启动，不把全局 `syncing=true` 当作这两次点击未完成。四机 quota metadata 的 `refresh_error` 均为空；MacMini/MacStudio Claude 当前 signed_out，Tencent 两 provider signed_out，页面另保留一个 MacMini Claude 历史账号的三天前读数及“可能早于一次登录变更”，不把历史值算作新鲜配额。两次点击、四来源、新旧 generation 和 request counter 是本次生产验证范围，没有覆盖长期上游可用性。
+
+相关 9 个测试模块共 175 个 test 方法通过，覆盖缓存命中与 DB/meta/WAL 变更、来源匹配与错误、逐机流水线、重叠请求和初态已完成、ACK 不触达快照、Sessions 后台观察等 fixture/参数；不代表长期稳定性。独立代码审查发现的请求序号竞态已修复并复核，Sessions 观察和重试后旧错误提示残留亦已修复。原有无人值守刷新告警待办不变；本次没有新增告警通道。实测明细位于执行机 `/Users/lindong/.codex/task-artifacts/ttweb-async-20261003/`。
+
+### 2026-10-03 MacStudio schema 8 刷新恢复
+
+MacStudio 数据停在 `2026-10-02T07:53:24.369886Z`；Hub `/api/sync-status` 持续报告 `invalid gateway row fields`。现场 Gateway `f4711f2` 的账本为 schema 8，新增 `caller_route_constraint_json`，但 tt-web `dfcb3745` 的请求字段映射只到 schema 7，schema 8 因而退回 v3/v4 字段表并拒绝整机导出。其他机器仍能更新。修复显式映射 v8 字段，保留 schema 指纹、未知字段拒绝和历史保留检查。
+
+生产修复 `478c24945c2b65b0d8d704665fcb874dfcfaca67` 位于 MacStudio `~/.local/share/tt-web/deployments/schema8-20261003`，由原部署的独立 clone 加本次两文件补丁构成；Hub、rollup LaunchAgent 与 `~/.local/bin/tt-web` 均指向新目录，`state` / `web/vendor` 仍使用原路径。原部署和 `previous-launchagents/` 中的 plist、CLI 目标保留用于回退，远端共享 checkout 和推理 Gateway 未修改。切换 Hub 时一次 `launchctl bootstrap` 返回 5，随后重试成功；只换 plist 不代表服务已加载，须核对实际 PID 和 API。
+
+真实 Gateway writer 的回归在补丁前出现三处 v8 导出错误（含两个 subtest），v7 用例仍通过；补丁后三个 test 方法通过，覆盖 v8 的 null / 非空 constraint、缺失 / 多余字段拒绝，以及非空 v7 快照无迁移读取。另从真实只读账本读出 16,363 条请求和 16,175 条尝试。MacBook 使用 v7 Gateway 的 30 个相关既有用例通过，新三个 v8 用例因该依赖版本跳过，不能以本机结果代替远端 v8 验证；两端最终 runtime 和新测试文件 SHA 已逐一比对相同。修复后 MacStudio 已连续发布 `2026-10-02T22:44:06.304873Z` 和 `2026-10-02T22:44:59.022835Z` 两份 generation，实际总览页面显示本机可用和新时间。
+
+探活入口是同一 Hub 的 `/api/sync-status`：将 `last_attempt_ts` 持续推进但 `last_attempt_outcome=failure`、`generated_at` 停滞视为刷新失败，并读取 `reason`；有新 generation 且最近 attempt 成功是恢复读数。HTTP 200 只证明服务可访问。该失败面尚未纳入 user-scope 增强服务探活清单，待办归 ai-agent-config 维护者；既有无人值守刷新告警待办仍保留，不宣称本次实现了告警。
+
+### 2026-10-01 配额恢复修复部署
+
+用户明确授权本次修复的 push 和部署；源码 `f0d8c282` 已包含在 `origin/main` 的 `ca3a830f`。独立部署 decision-review 七项成立，部署保留两机既有 `~/.local/share/tt-web/deployments/codex-repair-20260921-f0903db` 目录、状态、配置和运行入口，仅应用本次修复：
+
+| 机器 | 部署提交 | 父提交 | 本次更新与源码核对 |
+| --- | --- | --- | --- |
+| MacStudio | `dfcb374582291cacf3a6ecd4b6101665d32d4735` | `bca665a0` | `exporter.py`、`server.py`、`web/app.js` 与修复源码逐文件相同 |
+| MacMini | `0a54a8cca29f3257b9f16115f3dc30ce45c111ce` | `996e09c9` | 仅 `exporter.py`，与修复源码相同 |
+
+两机 `export --version` 均报告各自新提交；MacBook 原 main 已包含源码，无需更新；Tencent 不扩展部署。仅以 `launchctl kickstart` 重启 `com.ttweb.hub`，PID `56377` 的 cwd 经 `lsof` 核为上述 release 的 `tt-web`。HTTP `/web/app.js` 的 SHA256 为 `7a61edd398973bc101413d7406febe2e36d102b7a8c1869a4f6953e60b58d363`，与本地修复源码相同。回退方式为反向提交本次目标文件 patch，必要时重启 Hub，不回滚数据。
+
+部署后通过独立 headless 浏览器在真实页面点击 Refresh，一次请求已满足 `refresh_requested=refresh_completed=1`；页面 `#refresh` 恢复“⟳刷新”、`aria-busy=false`。四台声明机器最近 attempt 均为 success（macbook、macmini、macstudio、tencent-webserver-china），MacMini 的 generation 为部署后的 `2026-10-01T02:59:28.685246Z`。两个 provider 的刷新错误均为空；Codex 显示 7D 30%、更新刚刚，无错误详情，`reading_from=macbook`，读数时间为 `2026-10-01T03:00:13.794Z`。采样时已开始下一轮自动 statistics，`terminal=false`、`completed_at=null`，未捕获空闲终态；请求完成由计数和页面按钮状态共同确认。机器与配额快照保存于主线程本机 `/Users/lindong/.local/state/ttweb-quota-recovery-20260929/deployment-20261001.json`；页面读数来自同轮浏览器观察。
+
+范围外基线仍包括 MacMini statistics 的 `blocked_source_count=1`，以及一个 Claude 历史读数停留在 `2026-09-29T19:12:12.335972+00:00`、`reading_from=null`，页面标注可能早于登录变更；本次不扩展修复，不宣称所有历史读数均已新鲜。以上覆盖一次手动页面刷新、四台机器最近 attempt 和两个 provider 的当前错误状态，不证明长期稳定性或真实上游超时已消失。
+
+### 2026-09-28 LLM 页面组合读取与 MacMini 审定身份应用
+
+用户明确批准本轮生产部署与应用后，本地 tt-web 来源 `72491193`、Gateway 来源 `8f30098` 已整合至各自本地 main。MacStudio 实际部署为 tt-web `bca665a0299f7d6fea0536be0ad8782fd2e095d0`、Gateway reader `7eda44aa978b873dee7b2746443e29d977214226`；MacMini tt-web 为 `996e09c96f4e150e7d935da61e53fe365a0eb513`。tt-web 部署目录均为 `~/.local/share/tt-web/deployments/codex-repair-20260921-f0903db`。Hub PID `38825` 的实际 cwd 已核验，instance 为 `ebac006eadf84703a43d305c3fd6d337`；生产返回的 `llm-calls.js` SHA 为 `08909e141a0d8c48d65be265b2638483aee5ff128f317e3f127fb771b449f7d6`，响应为 `no-store`。仅重启 Hub，推理 Gateway 未重启。
+
+LLM 页面使用组合 reader 后，真实生产 `7d` 初次 rows 可读为 7.6671 秒（API 4.1781 秒），选择 `machine=macbook` 交互为 4.7179 秒，保留该 machine 切换 `30d` 为 3.9783 秒；抽查两条真实 rows 均符合 macbook。最终 LCP 为 8056 ms；早期 3536 ms 不是最终值，首内容可读仍按 7667.1 ms 单独报告。样本为一次首屏、一次机器筛选、一次范围切换，不是冷热或全过滤矩阵。可比较的性能证据仍是固定四来源、完整响应相等的只读 A/B：6.1963 → 3.7367 秒，约减少 40%；生产首屏跨时读数不用于声称受控提速。
+
+MacMini 实际 apply 匹配 41 条审定映射，随后 active blocker 为 0；apply 前后 archive／rollup 文件 SHA 完全相同，身份操作未重写事件或桶。之后的常规 rollup 在 9 月 1 日至 13 日的 46 个桶增加 `entry_count` 共 21,863，9 月 1 日前未变；额外 9 月 28 日变化属于实时增长，不能并入本批恢复。仍有 38,587 条受既有历史保护冻结（并非全在 9 月 1 日前，其中 725 条为 9 月 1 日 ai-radar Codex gpt-5.4 的新模型桶，仍受旧保护规则约束），不宣称全部历史项目总量补齐。备份与 manifest 在 MacMini `~/.local/state/ttweb-followup-20260928/macmini-identity`；回退须考虑常规投影及已发布汇总，不能把只回退 identity 当成完整恢复。
+
+Hub 已成功接收 MacMini generation `4bf7b45a5068ab422d9a505c417791a29456807db5df6036ec775ac986144fcd`，blocked 为 0；实际 Hub pivot 已取得五个目标项目聚合。恢复已消费到真实项目网页：`/explore?range=30d&x=project&group=none&metric=cost&machine=macmini&project=github.com%2FSJTU-AAA%2Fsjtu-aaa-homepage` 显示一个组合 `github.com/SJTU-AAA/sjtu-aaa-homepage`、估算成本 USD 3008.1725，与该项目 9 月 1–13 日 pivot API 一致；主线程已查看真实截图 `production-project.png`。这是一项目／一组合的网页验证，不代表五项目均逐一网页验收。本次获授权的主动 normal round 已收口：`refresh_requested=refresh_completed=1`，四机最近 attempt 均 success、source_error=0、blocked=0；观察时 phase 已转为下一次 automatic statistics，证明本次主动刷新完成且自动轮继续，不声称捕获 terminal=true 瞬间。MacMini `observed_at=2026-09-28T09:21:09.843712+00:00`。一轮 MacMini 曾遇 rollup lock timeout，下一普通轮已成功且解除，无服务停止。
+
+本轮证据位于 `/Users/lindong/.local/state/ttweb-followup-20260928/`：`production-browser.json`、`llm-page-ab.json`、`macmini-production-final.json`、`sync-after-apply-latest.json`、`production-project-pivot.json`。关键身份与读数已在本文保留；`production-browser.json` 有 JSON 字符串封装，`macmini-production-final.json` 有 OSC 前缀，解析时需按实际格式处理。本节是随后已授权应用的当前记录；下方较早 MacMini 调查段的“未恢复”描述保留其当时事实。
+
+### 生命周期操作
+
+| Operation | Web server | Rollup daemon |
+| --- | --- | --- |
+| Install | `./tt-web/install.sh` | `./tt-web/install.sh rollup-daemon` |
+| Status | `./tt-web/status.sh web` or `tt-web status` | `./tt-web/status.sh rollup-daemon` |
+| Integrity check | — | `tt-web rollup --check` or `tt-web rollup --check --json` |
+| Refresh now | `tt-web refresh` | `tt-web refresh` (the scheduled command) |
+| Start | `./tt-web/start.sh web` or `tt-web start` | LaunchAgent runs at load and every 3600 seconds; reinstall to load |
+| Stop | `./tt-web/stop.sh web` or `tt-web stop` | `./tt-web/uninstall.sh rollup-daemon` |
+| Uninstall | `./tt-web/uninstall.sh web` | `./tt-web/uninstall.sh rollup-daemon` |
+
+No-argument `./tt-web/install.sh` installs the web assets and CLI links plus `com.ttweb.rollup` on macOS. The repo-root installer invokes this same default path; `INSTALL_SERVICES=0` only gates the other optional services. Unsupported platforms report `[skipped: platform]` in the root ledger for rollup. The existing `TT_WEB_ROLLUP_INTERVAL_SECONDS` override defaults to 3600; the job runs on load and then at that interval, exiting after each run. It calls `tt-web refresh`. If the dashboard is running, refresh asks that process to own the cross-machine sync or joins its current round. If the dashboard is stopped, refresh still scans local source logs and updates `state/rollup.db`, but reports that cross-machine usage and Quota were not refreshed, exits non-zero, and directs the operator to run `tt-web start` followed by `tt-web refresh`. The schedule does not add or accept a host in `machines.json`.
+
+The schedule is a machine-local singleton. Its rendered plist and loaded program identify the owning checkout. Reinstalling an unchanged loaded schedule does not restart it; a foreign owner is preserved and reported as failed. To move the schedule, run `uninstall.sh rollup-daemon` from its current owner before installing from the new checkout. Removing the schedule keeps the databases; a later default installation reinstalls it. The GUI launchd domain must exist, so a fresh host must have a macOS desktop login before bootstrap can succeed.
+
+The hub must inherit Apple's current login-session SSH agent instead of storing its temporary socket in `com.ttweb.hub.plist`. After updating the code, run `tt-web start` on MacStudio: the installer replaces an old pinned Apple socket and reloads the hub once. Fixed custom agent paths, including 1Password, remain explicit. Subsequent starts after desktop login use the new GUI environment without reinstalling. Diagnose stale data with `/api/sync-status`: a loaded job alone does not prove successful pulls. A missing old socket with current GUI-agent authentication succeeding indicates this installation fault; check a real automatic sync round after migration. This does not enable collection before desktop login or supply unavailable SSH keys.
+
+No-argument `./tt-web/status.sh` is read-only and prints both web and rollup
+daemon status. No-argument `./tt-web/uninstall.sh` removes both service layers
+if present while keeping source, `state/`, and vendored assets.
+
+## Cross-Machine Sync
+
+### 2026-09-28 recovery and deployed freshness change
+
+The actual MacStudio Hub checkout inspected on 2026-09-28 was `~/.local/share/tt-web/deployments/codex-repair-20260921-f0903db`, originally at `e3074243`. An uncommitted Gateway schema v7 compatibility patch caused the exporter's dirty-source refusal. The owner authorized validating and committing that existing patch; commit `78b44d199a9101d54593bac9647167e3ee1db263` restored export without restarting the service. One four-machine round ran from `2026-09-28T03:09:56.992Z` to `03:11:06.331Z`, with advancing source times. MacMini still reported `blocked_source_count=41`; source identity protection was not relaxed. This is recovery evidence for that round, not deployment evidence for the freshness optimization.
+
+[ADR 4f72](https://github.com/lindong28/ai-agent-config/blob/3d61487d5386dfe9bb6ba7d26807005bbf0bd7f2/docs/adr/20260928-4f72-ttweb-progressive-freshness.md) is implemented and deployed to the production Hub: start-time throttling uses a 10-second scheduler check while retaining the 120-second Hub statistics interval and non-overlap. Active refresh rounds first publish statistics without querying Quota, then run the active Quota phase. Status distinguishes phases and per-machine progress; requested/completed accounting and the follow-up round for a click made after the current round began remain required. Statistics can become visible before completion; completion still includes Quota. Visible data pages reread admitted results every 30 seconds and on focus/visibility return, and check generation changes every 2 seconds during synchronization. These browser reads are not new remote export or provider-query schedules. Active rounds add a statistics export and may take longer to finish Quota and return the button to idle.
+
+Production deployment of ADR 4f72 was explicitly approved and completed as remote commit `287a6aa0ef632aad5be7f7a82b5b61165f4426e6`, derived from local `69deac92` after five target-file baseline SHA checks. The five deployed files match the local source, and the remote `tt-web` scope is clean. Only `com.ttweb.hub` was restarted with `launchctl kickstart -k`; PID `26791` runs from `~/.local/share/tt-web/deployments/codex-repair-20260921-f0903db/tt-web`. Runtime exporter version matches that remote commit, API instance is `5f97dc99dac443eebb93ca6415efce42`, and production HTTP serves three JavaScript files matching `69deac92`. The API showed `phase=statistics` with MacStudio finished while MacMini was still syncing. Bounded production verification completed one journey per data page, each with initial and subsequent reads. Overview showed new statistics at observer +38499 ms while busy and returned to idle at +197805 ms (the button entered busy at +230 ms). The manual round completed at `05:14:17.889671Z` with requested=completed=1 and four successful machine attempts; the next automatic statistics round started at `05:14:33.226237Z`. This confirms resumption after a long round, not a measured fixed 120-second SLA. Explore retained 7d/codex, Sessions retained 7d/codex/page 101–200, and LLM Calls retained 7d/machine=macbook across subsequent reads. Detailed timings and the full-snapshot parsing bottleneck remain documented in ADR 4f72; this does not claim all pages load quickly. Long-term stability and exhaustive failure combinations were outside this bounded verification. Before deployment, an agent-only verification proxy served the new frontend against the existing production Hub: one Overview refresh displayed a cost change from `77.70` to `81.60` after 27.460 seconds while the button was still refreshing; it subsequently reached its terminal state, without a precise total-duration measurement. This covers one page and one refresh, not the new backend or all four data pages, and is not a matched-input comparison with the earlier 117-second observation. Local tests were run; focused implementation re-review approved the fixes for failure propagation, Sessions/LLM Calls generation reads, and Sessions page clamping, with none of those three HIGH findings remaining. A separate Sessions browser resource sample took 38616.8 ms for one `/api/sessions` request before normal sync-status polling resumed; server-side full-list read latency remains a known boundary, not a claim of this optimization. No service, port, or LaunchAgent label is added. Per-machine failures and original observation times remain the failure surface; the existing scheduled network/provider push-alert TODO below remains owned by the ai-agent-config maintainer. This change does not implement or send alerts when no page is open.
+
+The dashboard machine pulls usage from machines that are enabled in `tt-web/machines.json` and also listed in `tt-web/hub.json`. The dashboard process is the single owner of this work: a page load pulls when its data is older than 10 minutes, the page Refresh control forces a pull, and `tt-web refresh` forces or joins the same synchronization path. Declaring, retiring and first-use acceptance are covered in [../../README.md](../../README.md#machines). The 2026-09-10 rollout added the `tencent-webserver-china` producer that hosts `sjtu.aiplanet.live`; its production checkout, CLI binding, identity admission, and Refresh validation are complete, so the live hub includes macbook, macmini, macstudio, and tencent-webserver-china. dgx0023 remains declared but disabled and outside the hub scope.
+
+Edit [../../machines.json](../../machines.json) on the dashboard machine to manage every pull target. Prefix a machine's whole line with `#` or `//` to stop future pulls and hide it from subsequent page requests and statistics; remove the prefix to restore its stored history. Trailing commas and indentation before the marker are allowed, but inline comments are not. Keep the single `self: true` entry enabled. The file is reloaded without a server restart or Git commit; a pull already in flight finishes internally. Commenting does not retire a name or delete its stored data. The separate permanent-retirement command preserves other machine comments when writing the configuration.
+
+| Operation | Command | Notes |
+| --- | --- | --- |
+| Produce a snapshot (runs on the remote, normally invoked over SSH) | `tt-web export --out <dir>` | Writes `snapshot.db` + `export.json`. Refuses when the snapshot-producing code differs from `HEAD` — `*.py`, `parsers/**`, `pricing.json`, `tt-web`, `install.sh`. Uncommitted docs, `web/` assets or `machines.json` do not block it. |
+| Report the exporter's commit | `tt-web export --version` | Same scoped refusal — it will not print a clean-looking SHA it cannot stand behind. |
+| Bind a newly declared machine to its SSH target | `tt-web machines accept <name> [--yes]` | Required once before that machine can be pulled. Prompts with the name and target; refuses to write a binding unless confirmed. |
+| Retire a machine name permanently | `tt-web machines retire <name>` | Written before `machines.json` is updated; the name can never be reused. |
+| Adopt a bucket-timezone marker on an unmarked database | `tt-web rollup adopt-timezone --db <path> --known-utc-offset +08:00 …` | For databases predating the marker. Requires explicit authorization flags and prints exactly what it did and did not verify. |
+| Refresh local and cross-machine data | `tt-web refresh` | With the dashboard running, requests or joins its current sync round. Without it, updates local rollup only, explains the missing cross-machine and Quota refresh, and exits non-zero. |
+
+Published snapshots live under `state/generations/<machine>/<generation-id>/`,
+with a `current` pointer per machine. Each machine keeps its current and previous
+generation; older ones are removed as new ones publish, and a generation a reader
+holds open is not removed under it.
+
+Failure of one machine never blocks the others: that machine keeps its previous
+snapshot, is reported as unreachable with a reason, and the sync still reaches a
+terminal state. A machine that has never been reached successfully is excluded
+from totals but still counts in the coverage denominator, so the page shows
+`N/M` rather than silently narrowing what `All` means.
+
+Each upgraded exporter actively queries the Claude and Codex quota for that machine's current signed-in account. Codex live quota requires the app-server `account/rateLimits/read` response to include an `accountId` matching the current account; a response without that identity is a refresh failure, even if it contains rate limits. The two providers fail independently. A failed provider keeps its prior reading and its original observation time, while the sync result and the Quota section identify the affected machine with a static, credential-free reason; a provider with no prior reading still reports the failure. When a generation still supplies `account_id` but has no newly parsed quota, the existing account memory supplies that active account's last successful reading and keeps the row `in_use`, without adding a memory field. A generation from an older exporter can contribute its existing usage and quota fields but does not count as confirmation that active quota refresh ran. Historical signed-out accounts remain historical and are never logged in or refreshed by this path.
+
+Deployment verified on 2026-09-09: local merge `835f6cb` enabled the hourly refresh and restarted the dashboard at port 39002. The remote producer commits are macmini `160b9a8`, macstudio `5ff5d14`, and dgx0023 `e951632`; each changes only `exporter.py` and `quota_refresh.py`. The first launchd round completed at 07:42:03 GMT+8 with successful usage sync from all four machines. The real Overview page showed the four update times and fresh current-account quota values. No Git push or global Codex upgrade was performed.
+
+At the 2026-09-09 deployment, quota refresh was partial by provider: macstudio and dgx0023 had no identifiable Claude current account, and dgx0023's Codex 0.147 response lacked the required `accountId`. Its independently obtained account ID was confirmed equal to macstudio's, whose active Codex reader succeeded, so the dashboard updated that shared account from macstudio while retaining the dgx0023 warning. The launchd job and joined CLI correctly exited 1 for this partial outcome. These conditions did not block machine admission or usage sync. A new Claude login requires the account holder's authentication and is not performed by this refresh service. The old-reader limitation remains owned by tt-web maintenance if an independent dgx0023 quota source becomes necessary; at that point, the shared-account path already supplied its account's fresh quota.
+
+Gateway audit v4 reader compatibility was deployed to MacStudio as local commit `29c5729` on 2026-09-10. After the Hub restart, a real Refresh admitted all three declared machines: MacBook, Macmini, and MacStudio were reachable, successful, and not stale. The LLM Calls API projected MacBook's schema v4 ledger together with the other two schema v3 sources. The final queued refresh round completed in 41.6 seconds; the page returned the Refresh button to its idle state. MacStudio's Claude quota initially remained a separate partial failure because its file-backed access token had expired and the collector could not match a usable credential. Starting Claude from the project directory through the operator's usual interactive SSH shell refreshed the existing file-backed credential without a new login or model turn. A subsequent real Refresh returned `refresh_errors=[]` and `unavailable_reason=null`; the Overview page removed the failure row and showed MacStudio's Claude reading updated in the current round.
+
+Current operational visibility for refresh failure is the LaunchAgent exit status and `state/rollup-daemon.log`, plus per-machine Quota warnings in the dashboard. **TODO (owner: ai-agent-config maintainer):** add a separate push-alert path for scheduled network/provider refresh failures. This rollout does not add or send IM alerts.
+
+Remote calls are non-interactive (`ssh -o BatchMode=yes -o ConnectTimeout=10`)
+with a hard timeout on the whole export, so an unreachable host cannot hang the
+page. Temporary export directories on the remote are reaped by the next sync.
+
+Usage snapshot schema v2 is intentionally consumer-first. Upgrade and restart
+the dashboard machine before upgrading a remote exporter; the new reader accepts
+both v1 and v2, while an old reader rejects v2. After the consumer is running the
+new code, upgrade each producer and refresh it. A v1 generation remains readable
+but its non-project totals use the explicit legacy project-derived fallback; v2
+requires `usage_rollup_schema=2` and `daily_usage_rollup` together.
+
+After migration, neither basis is shown on the page any more (owner decision,
+2026-09-15). Both still ship in the API: `/api/pivot.totals_provenance` is the
+authority for the current query — derived after applying the selected range and
+filters, and reporting any visible legacy fallback buckets with their dimensions
+— while `/api/sync-status.machines[].generation_totals_basis` (with
+`generation_legacy_fallback_bucket_count`) is the broader per-generation reading.
+Do not use the machine-level count to describe a narrower Explore window.
+
+Reader-visible copy on all five pages is Simplified Chinese as of 2026-09-15.
+`quota_refresh.py`, `hub.py` and `exporter.py` run on **each machine's own
+exporter**, so their wording only changes there after that machine is
+redeployed; until then a central page shows Chinese framing around an English
+reason from the remote.
+
+## Hub 部署副本（macstudio）
+
+### 2026-09-28 明细读取优化部署
+
+经用户明确裁决“部署并验证”，本地 `20b608ed` 的两个 runtime 文件 `tt-web/server.py`、`tt-web/statistics_snapshot.py` 部署为远端 `fa10201554184e314263cc56fb31b876a1972c3f`，两文件 SHA 一致，原 2918 个状态项保留。Hub 新 PID 为 `35667`、instance 为 `9afb66ecca3b4566a6168893bd8ed940`；`health?asset_watch=1` 为 `ok=true`、`stale=false`。部署决定独立审查 PASS；回退限定为这两个文件的补偿 commit，避免 dirty source 拒绝导出。未 push、未重启 Gateway、未调整 MacMini 来源归属。
+
+真实生产 Sessions `7d` 两次导航可读 6.1222／4.4283 秒（HTTP 3.5478／3.6758 秒，773 sessions），展开 macstudio 一个 session 的 24 条用量为 0.3884 秒。LLM 首屏可读 10.1106 秒，filters 3.2600 秒与 calls 3.8298 秒串行；有效 macbook 筛选 3.4364 秒（HTTP 3.3913 秒），请求 `machine=macbook` 与结果归属一致。不存在的 macstudio 选项尝试不是有效筛选证据。最终 sync-status 为 `syncing=false`、四来源尝试 success。剩余全历史 Gateway 读取与前端串行等待未消除，不能据本次部署宣称瞬时；完整身份、样本边界与证据位置见 [ADR 72ab](https://github.com/lindong28/ai-agent-config/blob/3d61487d5386dfe9bb6ba7d26807005bbf0bd7f2/docs/adr/20260928-72ab-ttweb-admitted-detail-reads.md)。
+
+### 既有部署方式与历史记录
+
+自 2026-09-13 起，MacStudio 的 `com.ttweb.hub` 不直接跑 `~/research/ai-agent-config` checkout，而是跑 `~/.local/share/tt-web/deployments/<name>/tt-web/`——一个由仓外流程生成的稀疏 git checkout（历史是自己 rebase 过的），其中 `tt-web/state` 与 `tt-web/web/vendor` 是指回 checkout 同名目录的 symlink，`hub.json` / `machines.json` 是拷贝，plist 的 `ProgramArguments` / `WorkingDirectory` / `PYTHONPATH` 三处都指向该目录。生成它的脚本不在本仓（跟踪见 `../issues/general.md` ISSUE-DEPLOY-20260915-0a4c）。2026-09-15 把 hub 从 `registry-v5-20260913-2d3c50e` 切到 `main-20260915-a15c8c2`（内容 = 本仓 `348cb5e`）时实际走通的步骤如下，下次再部署照此做：
+
+1. **只动源码，不动接线**：`cp -R <旧目录> <新目录>`（BSD `cp -R` 默认保留 symlink），本机 `git archive <commit> tt-web | ssh macstudio 'tar -x -C <新目录>'` 覆盖 `tt-web/`；`state` / `vendor` 不在 archive 里，symlink 原样保留。之后 `find <新目录>/tt-web -name __pycache__ -exec rm -rf {} +`。
+2. **HEAD 必须跟着动**：`exporter.exporter_version()` 用该目录的 `git rev-parse HEAD` 与 `git status -- <authority paths>` 当代码权威，只覆盖文件会让 macstudio 自导出报 `exporter runtime authority differs from HEAD`。做法：本机 `git bundle create x.bundle <该仓已有的祖先>..main`（range 尾端必须是 ref 名，裸 SHA 会得到 "empty bundle"）、传过去 `git fetch x.bundle main:refs/heads/deploy-<sha>`，然后 `git reset --soft <sha> && git checkout <sha> -- tt-web claude/statusline-usage.py`，并把 `<sha>` 写进目录根的 `source-commit`。验证：`cd <新目录>/tt-web && ./tt-web export --version` 打印该 sha、exit 0。
+3. **切 plist**：`sed "s#<旧目录>#<新目录>#g"` 生成新 plist 并 `plutil -lint`；`launchctl bootout gui/$UID/com.ttweb.hub`，拷贝新 plist（mode 600），`launchctl bootstrap gui/$UID <plist>`。**bootstrap 紧跟 bootout 会报 `Bootstrap failed: 5: Input/output error`**——等 2 秒再 `launchctl enable` + 重跑 bootstrap 即成功（2026-09-15 实测），期间 hub 停机约半分钟。旧目录与旧 plist（拷贝为新目录的 `previous-hub.plist`）保留作回滚。
+4. **验证**：`/api/health` 200；`/web/vendor/chart.umd.min.js` 200、`--path-as-is /web/../server.py` 404；`/api/overview?force=1` 后轮询 `/api/sync-status` 到 terminal，macstudio 卡片须为 `up to date`（自导出经过第 2 步的权威校验）。
+
+`hub.py install_web()` 对这份部署无能为力：它以所在 checkout 为 `ROOT`，并且会因 plist 属于"另一个 checkout"而拒绝接管——所以上面第 3 步是手工的。
+
+2026-09-15 第二次照此流程把 hub 从 `main-20260915-dbe1edc` 切到 `main-20260915-a0b53db`（内容 = 本仓 `a0b53db`），四步全部走通，另记两条上次没写下的：
+
+- **远程命令必须走 `zsh -ic` / `zsh -is`**，否则 macstudio 的非交互 shell 里 `git-crypt` 与 `SSH_AUTH_SOCK` 都不存在，`git status` 会以 `clean filter 'git-crypt' failed` 中止。上一版此处写的"该 checkout 的 git 已不可用"是这个环境差异的表象——实测交互 shell 下 `git-crypt` 在 `/opt/homebrew/bin/git-crypt`、agent socket 也在。判据与修法见 `~/.claude/references/remote-command-execution.md`。
+- **第 3 步的 2 秒等待照做就不会踩那个 I/O error**：`bootout` → `cp` plist → `sleep 2` → `enable` → `bootstrap`，本次 bootstrap 一次成功、无需重试。
+- `~/research/ai-agent-config` 这次没能跟着更新：`codex/config.toml` 有另一个写入者的未提交改动挡住 `merge --ff-only`，按并发隔离协议未 stash。hub 不受影响（它跑部署副本），但该 checkout 落后于 main，**其他机器经 SSH 拉取 macstudio 时用的是它**。
+
+2026-09-16 第三次照此流程把 hub 从 `main-20260915-a0b53db` 切到 `main-20260916-00225d3`（内容 = 本仓 `00225d3`，页面文案中文化）。四步走通，两条新的：
+
+- **`git` 在 macstudio 上已经不能用了**——`/usr/bin/git` 是 Xcode shim，该机未接受新版许可，任何 git 调用 exit 69。第 2 步改用 `/Library/Developer/CommandLineTools/usr/bin/git` 显式路径（实测 2.50.1、无许可门）走完 bundle / fetch / reset / checkout，HEAD 与 `source-commit` 都正确。**但第 2 步文档要求的 `./tt-web export --version` 验证做不了**：exporter 调的是 `git` 这个名字，解析到坏的那个。改用 CLT git 在同一目录取 `rev-parse HEAD` 作为等价读数（得到目标 sha），并单独核了授权路径干净。完整自查与修复（要 sudo，本人在该机终端跑）见仓根 `docs/references/known-risks.md` 第 4 条。
+- **第 3 步拆成两次 ssh 调用**（调用一：备份旧 plist 为 `previous-hub.plist` → sed 生成 → `plutil -lint` → `bootout` → 拷贝新 plist + `chmod 600`；调用二：`enable` → `bootstrap`），两次调用之间的 ssh 建连天然满足文档那 2 秒，`bootstrap` 一次成功、未遇 I/O error。
+- 部署后实测：`/api/health` 200、`/web/vendor/chart.umd.min.js` 200、`--path-as-is /web/../server.py` 404、页面 `<title>` 为 `tt-web 总览`；一轮 `force=1` 同步后覆盖由 **3/4 升到 4/4**（tencent-webserver-china 首次纳入），macbook / macmini / tencent 三台 `最新`，macstudio 卡片显示上面那条 Xcode 许可错误的原文。
+
+**同轮其余三台**（目标同为 `00225d3`）：macmini 走 bundle + `merge --ff-only`，HEAD 到位、`export --version` exit 0；tencent-webserver-china 走 `git archive` 覆盖 + 部署 commit `3d08069`，`export --version` exit 0；macbook 就是本 checkout 自身，`export --version` 直接 exit 0。
+
+**macstudio 自己那份 exporter checkout 是第五个落点，别漏**（`~/.local/bin/tt-web -> ~/research/ai-agent-config/tt-web/tt-web`——hub 拉取 macstudio 时跑的是**它**，不是部署副本）。2026-09-16 把它从 `54daa41` 推到 `6f74fa2` 后，四台才全部回到「最新」。这一步撞了两个坑：
+
+- **不走 `zsh -ic` 的 `git merge` 会把工作树留在半更新状态**。上面那条只说了"必须走 `zsh -ic`"，没说违反的后果：`merge --ff-only` 在 git-crypt smudge filter 上中止时，**HEAD 不动、工作树却已被写了一批文件**，并留下若干未跟踪文件（它们在目标 commit 里存在）。于是重试时报的是另一件事——`error: The following untracked working tree files would be overwritten by merge`——把人指向"清理未跟踪文件"，而真正的根因是上一次用错了 shell。**恢复**：`git checkout -- .` 收回已改文件，再删掉那些"在目标 tree 里存在"的未跟踪文件（只删这些，别 `clean -fd`——本机 `claude/downloads/` 是合并前就在的，不能删）：
+
+    ```sh
+    git ls-files --others --exclude-standard | while read -r f; do
+      git cat-file -e <目标ref>:"$f" 2>/dev/null && rm -f "$f"
+    done
+    ```
+
+    干跑版把 `&& rm -f` 换成 `&& echo DEL ||  echo KEEP` 先看一眼分布再动手。
+
+- **`codex/config.toml` 的未提交改动可能与待合入的 commit 改在同一行**（本次两边都是第 46 行，由 `37d417e` 带入）。别直接 stash/pop——pop 必冲突。先按行比哈希：两边取值相同（本次即如此，另一个写入者手改的正是上游同一个改动）时 `git checkout --` 丢弃本地改动是**无损**的，合并后该行取值不变；**不同**时才是真取舍，按并发隔离协议交用户。动手前先 `cp` 一份到 `~/.local/share/tt-web/backups/`（mode 600），该文件按仓库政策不得回显取值，比较一律走 `shasum`。
+
+- 修完后 macstudio 的 `export --version` 打印 commit、exit 0，`force=1` 一轮后四台卡片全部「最新」，覆盖 4/4。
+
+2026-09-19 第四次照此流程把 hub 从 `main-20260916-00225d3` 切到 `main-20260919-5f65f8e`（内容 = 本仓 `5f65f8e`）。四步走通，三条新的：
+
+- **第 2 步不必再走 bundle**：macstudio 自己的 `~/research/ai-agent-config` 已经 `git pull` 到目标 commit 时，在部署目录里直接 `git -C <新目录> fetch --no-tags ~/research/ai-agent-config main` 即可，省掉本机 `git bundle` + 传输，后面的 `reset --soft` / `checkout <sha> -- tt-web claude/statusline-usage.py` / 写 `source-commit` 不变。本轮 `git` 也不再需要 CLT 显式路径——macstudio 上 `git --version` 已是 2.54.0 (Apple Git-157)、无许可门，`known-risks.md` 第 4 条那个 exit 69 本机已不复现。
+- **远程执行只有 `zsh -ic '<命令>'` 可靠，`ssh macstudio "zsh -is" <<'EOF'` 不行**：后者会进交互式 shell、把 heredoc 当终端输入吞掉，只回显提示符、脚本一行不跑且 exit 0——看起来像"跑了但没输出"。本轮的做法是把脚本 `scp` 到 `/tmp/`，再 `ssh macstudio "zsh -ic 'zsh /tmp/<script>.sh'"`。
+- **`git pull` + `/api/restart` 不是部署**，这是本轮一开始踩的：hub 跑的是部署副本，`/api/restart` 的 `os.execv` 重新执行的也是**该副本**的 `server.py`，所以 `instance_id` 会变（确实重启了）、代码却一点没变。判据是 `/api/health` 的 `signature`：它是运行进程 import 时对**自己 `ROOT`** 算的摘要，拿它和本仓 checkout 里 `python3 -c 'import server; print(server._source_signature())'` 的读数比，不等就说明跑的不是这份源码。**`stale` 字段在这里帮不上忙**——它比的是运行进程自己的 `ROOT` 与自己的 `BOOT_SIGNATURE`，部署副本冻结着、两者恒等，所以它诚实地报 `false`。另外 `/api/restart` 的 re-exec 有 0.4s 定时器，紧跟着查 `instance_id` 会读到旧进程、误判成"没重启"，要轮询到它变为止。
+
+### Exporter 机器更新
+
+每台被 hub 拉取的机器都用自己 `~/.local/bin/tt-web -> ~/research/ai-agent-config/tt-web/tt-web` 导出，exporter 先核 `git status -- <authority paths>` 干净（2026-09-16 起不再核 Gateway 源码 pin）。2026-09-15 三台的更新方式（各机 git 状况不同，别套同一条）：
+
+| 机器 | checkout 状况 | 更新方式 |
+|---|---|---|
+| macmini | 正常 clone、历史与本地 main 同源 | `git bundle create x.bundle <它的HEAD>..main` → 该机 `git fetch x.bundle main:refs/heads/bundle-main && git merge --ff-only bundle-main` |
+| tencent-webserver-china | 单个孤儿 commit（9/10 部署时如此）、无 remote、无 git-crypt | `git archive <sha> tt-web claude/statusline-usage.py` 解压覆盖，删 `__pycache__`，`git add -A tt-web claude/statusline-usage.py && git commit`（部署 commit，只在该机存在；`export --version` 报的是这个 sha） |
+| macstudio | `~/research/ai-agent-config` 的 git 因缺 git-crypt 已不可用，且 hub 自导出走的是部署副本 | 只更新部署副本（上节） |
+
+更新后各机 `cd tt-web && ./tt-web export --version` 须打印 sha、exit 0；gateway 账本 schema 升级时"先升 reader 再升 writer"的顺序见 `docs/references/known-risks.md` 第 3 条末段（pin 那一步已随 2026-09-16 的移除作废）。
+
+## Codex 计量修复部署（2026-09-21）
+
+修复源码 `f0903dbd68973b2f7215248f21ac3b542214ce03` 已整合至 MacBook 本地 main；macmini/macstudio 使用独立 release `~/.local/share/tt-web/deployments/codex-repair-20260921-f0903db`。release 有独立 Git 元数据，`tt-web/state` 和 `web/vendor` 指向各机原 checkout；远端共享 checkout 的 HEAD/WIP 未改。两机 `~/.local/bin/tt-web` 与 `com.ttweb.rollup` plist 均指向 release，MacStudio 的 `com.ttweb.hub` 同样切换；只切 CLI 而不切定时任务，会由旧 parser 再次覆盖修正统计。
+
+三机 SQLite 备份在 `~/.local/share/tt-web/backups/codex-cost-20260921/`，含 `usage_archive.sqlite3`、`rollup.db`、`project_identity.db`；远端另存原 CLI 目标和原 plist。回退代码时需同时处理 CLI、定时采集与 hub 入口；不要仅恢复旧数据库后继续运行错误 parser。后续 installer 默认仍以其所在 checkout 为源，执行前确认不会把运行入口指回未包含此修复的旧源码。
+
+该轮 admitted generation 的三个 Mac `exporter_commit` 均为该提交，页面覆盖 4/4、source errors 为 0；Tencent 无 Codex 日志，保留原版本。9/20、Codex、ai-agent-config 启动目录口径的 API 金额由 $2821.133542 降至 $432.581084，浏览器显示 $432.5811；会话 API 包含全部 41 个核查 session。归档纠错未删除既有事件键，authority 自 9/10 起的日桶已重算；之前的 legacy 日桶未强行缩减。归属调查与后续裁决见根 `docs/issues/general.md` 的 `ISSUE-GENERAL-20260921-codex-cost`。
+
+同日后续部署 `098ff3193522b9f4a7ae3058383439c39f1900cd`：用户选择保留启动目录口径，总览、透视和会话列表统一使用“会话目录”，注明跨项目工作不拆分费用。MacBook 本地 main 已整合；macmini/macstudio 复用上述独立 release 路径，HEAD 已更新，MacStudio hub 已重启。
+
+此次同时修复 Mac mini 关闭后的 WAL 元数据库只读查询失败：仅在私有副本上允许 SQLite 初始化旁文件，失败时保留归档模型而不按默认模型覆写。重采后 9/20 配置仓目录的 1,568 个 Codex events 恢复为 `gpt-6-astra`；12:23:27 UTC 完成的中央同步四机均成功且 source errors 为 0，原透视 API 恢复 $432.581084、浏览器显示 $432.5811。该费用仍为模型费率估算。Mac mini 既有的 41 个目录身份 blocker 仍保留，未自动变更其归属；9/10 前 legacy 汇总边界同样不变。
+
+## MacMini 41 个来源路径阻断（2026-09-28）
+
+本次只读调查核对 MacMini 部署 `e3074243` 与 Hub `287a6aa0`；MacMini 的 `aggregators.py`、`usage_archive.py`、`rollup.py` 与本地 `00af0e34` 逐文件 SHA 一致。读数取于 2026-09-28 05:33–05:43 UTC，未恢复、改远端文件或重启。**41 的单位是不同 `source_path`，不是日志文件或会话。** 这批路径的 60,450 条去重事件在 MacMini 归档与 Hub 已 admitted 快照均保留，涉及 929 个 `(agent_id, session_id)`、2 种工具、9 个模型；41 条路径全部有记录。事件身份、时间、模型、来源路径、四类 token 与 message_count 的排序摘要两端一致，不含会话正文，也不证明归档之外没有未采集调用。核对 generation 为 `754e3adb6983e211964a6ecbdd9f0199e1cda31e19d4017eb7508a1eaada2657`，观察时间 `2026-09-28T05:35:12.504629+00:00`。
+
+影响是项目／“会话目录”归属聚合：事件进入 `unattributed_entries`，不进入本轮 `daily_rollup` 项目桶，仍保留在项目无关用量处理与 `statistics_usage`。一个实际消费端对照中，Sessions 的 `range=all&machine=macmini&project=/Users/lindong/research/ai-radar-worktrees/t4-content-align` 返回 347 个会话，同路径按项目 pivot 返回 `rows=[]`、`totals_provenance.basis=no_data`。这是一个路径的 API 对照，不是 41 条路径的逐一浏览器验收。Hub 同时报告 `scan_complete=true`、`source_error_count=0`，不能将归属阻断解释成当前扫描失败或整机导出失败。
+
+快照中这批事件的挂牌价派生估算为 USD 7,392.86661271，不是账单、损失金额或已证明的 Overview 总额缺口。原始归档 `cost_usd` 全为 NULL，表示尚未加价，不能当零；项目桶与项目无关桶不是同口径，不能直接相减算缺失金额。
+
+根因是旧项目身份无法唯一对齐，且 active blocker 持久化：`_identify_project()` 先拒绝已有 active 路径，不会因目录恢复或 Refresh 自动清除。58 个旧聚合项目中 40 个已认领，18 个未认领；41 条路径均无 `project_identity`、`pin_candidate` 全为 NULL，路径／记录候选与现有项目直接匹配数为 0。持久 reason 为 10 个 `source_unavailable`、31 个 `unreconciled_remote`；今天目录状态为 39 个不存在、2 个存在，不能混同首次原因。存在的两个目录虽可读 Git，也没有唯一旧项目匹配；`t4-content-align` 的 origin 是本地 `t3-eval-regression` 路径。旧聚合缺少 source-path lineage，不能靠目录名猜归属。
+
+事件跨度为 `2026-08-11T20:12:05.896Z` 至 `2026-09-13T03:44:06.214Z`，本次未读到这些路径之后新增的归档用量；首次 blocker 记录在 8 月 12 日至 9 月 9 日，`last_seen` 更新到今天不表示今天新丢了 41 项。相关缓存记录过 1,027 个日志文件路径，969 个仍在、58 个不在；文件缺失不否定上述已归档事件，完整文本恢复未检查，未追查谁删除了工作目录。
+
+**现有 `tt-web rollup recover --path … --pin-existing …` 不能直接修复这批路径。** 只读运行真实 `_derive_pin_candidate` 得到 39 条需恢复路径／Git、2 条没有恰好一个旧项目匹配；41 条持久 pin 均为 NULL，恢复目录本身仍不满足既有命令后续条件。不要删除数据库或 blocker，也不要将该命令当成现成修复。
+
+恢复归 ai-agent-config 维护者另行实施，并先取得相应数据处理授权：建立有证据的 `source_path → intended project` 映射；补支持无唯一历史 pin、但有逐事件归档的恢复能力；明确权威日 `2026-09-10`（+08:00）以前历史的重建／保留口径。60,436 条事件早于权威日，14 条在当日及之后，不能将新映射直接与缺 lineage 的旧项目桶相加。之后重算并导出同步，核对事件／token 保留、项目结果可见、blocker 处置真实、项目无关统计未重复增加。这不是 Hub 可用性的前置条件，也无需重启 Gateway；本轮未解除任何 blocker。
+
+报告位于 `/Users/lindong/.local/state/ttweb-freshness-20260928/macmini-blockers-followup.md`，关键事实已在本节保留。上述调查时尚未修改的旧 CLI 误导文案已随 `72491193` 修复，闭环记录见 [已关闭的 ISSUE-TTWEB-20260928-72ab](../issues/archive/closed.md)。
+
+## Account Memory
+
+`state/account_memory.json` stores the last admitted observation of each account that tt-web has seen while signed in. The web server manages this file; it persists across server restarts and the uninstall paths above, which intentionally keep `state/`. It is durable source state, not a regenerable cache: manually deleting it permanently loses remembered accounts that are no longer signed in on any machine, because no current snapshot can reproduce those observations.
+
+## Rollup Details
+
+`state/rollup.db` is a local SQLite WAL database with two daily tables. `daily_rollup` is keyed by `Asia/Shanghai` date, agent, project, and model for project-aware views. Schema v2 adds `daily_usage_rollup`, keyed by date, agent, and model. Views that neither display nor filter by project use its row for each available key, including usage whose project identity is blocked; only a missing usage key falls back to the corresponding aggregation of legacy project rows. Both tables are written in one transaction. The bucket boundary is fixed rather than following the host's timezone, so that snapshots from machines in different timezones can be summed by date; the database records which boundary its rows were built with and refuses to be read if that marker is absent or disagrees. Absolute timestamps in the UI still render in the viewer's local timezone — only the aggregation boundary is fixed. `tt-web rollup` normally recomputes an inclusive 28-day window. Missing keys and updates whose token/message/entry counters would shrink are preserved at their last trusted row; sibling keys continue updating. Within the 28-day recompute window, rows are recomputed from currently readable source. Logged costs remain the logged values; entries without exact cost use the pricing data currently available to tt-web. Rows with missing source or a protected-counter decrease keep their last trusted cost, and existing rows outside the window remain frozen.
+
+`tt-web rollup --check [--json]` takes a coordinated, read-only snapshot and compares it with a read-only source scan. The human form is for diagnosis; `--json` exposes the same fields to scripts. A successful command exit does not mean the result is clean, so automation must parse `status`:
+
+| Reading | Operational meaning |
+| --- | --- |
+| `status: safe` | Database and source scan were complete, with no protected-field shrink in either rollup table and no project-identity blocker. |
+| `status: attention` | The complete comparison found one or more project/usage skip buckets or blocked source paths. Investigate before treating the rollup as healthy. |
+| `status: indeterminate` | A complete, consistent comparison was unavailable because the database/snapshot was not ready or a source scan failed. This is not a clean result. |
+| `verdict` | Bucket shrink result only: `safe` for compared buckets, `attention` when a protected field would decrease, or `unknown` only when bucket comparison could not begin at all. It does not replace overall `status`. |
+| `db_state` | Whether the database snapshot was ready for comparison. Any value other than `ready` makes the result indeterminate; when present, `diagnostic_errors` describes the database or lock-snapshot failure. |
+| `scan_complete` / `source_errors` | Completeness of the read-only source scan and its per-source failures. `scan_complete: false` or any `source_errors` forces overall `status: indeterminate`, even if `verdict` is `safe` or `attention` for the subset that was compared. |
+| `diagnostic_errors` | Database or coordinated-snapshot failures that prevented comparison. These accompany an indeterminate result and `verdict: unknown`. |
+| `blocked_sources` | The source-path-deduplicated union of persisted and currently discovered identity blockers. On a complete scan, any item drives overall `status: attention`. |
+| `persisted_blockers` | Active blocker records that were already stored before this check. |
+| `current_blockers` | Blockers found by this read-only scan. `--check` does not persist them, so a current-only blocker can be absent when a subsequent `tt-web rollup blockers` lists stored blockers. |
+| `orphan_rows` | Stored keys absent from current source, evaluated across all persisted rows. Rollup preserves them. After expected retention, a non-zero count needs no rollup-database repair; if disappearance was unexpected, investigate or restore the source. |
+| `would_skip` | Keys whose protected token/message/entry fields are lower than stored values. Rollup would keep the whole old row, including its cost. This set is limited to the inclusive recompute window plus one-time backfills for source dates the database has never seen. |
+| `would_write` | New or changed keys that rollup would write, including cost-only changes and excluding exact no-ops. It has the same window/backfill scope as `would_skip`; frozen existing rows outside that scope appear in neither set. |
+| `usage_orphan_rows` / `usage_would_skip` / `usage_would_write` | The corresponding readings for the project-independent `(date, agent, model)` table. A shrink here drives `status` and `verdict` to `attention`. For a migrated v1 database, comparison and one-time backfill never cross the persisted `usage_rollup_authoritative_from` date. |
+| `usage_rollup_schema` / `usage_totals_basis` | `usage_rollup_schema=1` means the stored totals are legacy project-derived. Schema `2` uses the usage table and requires an authority floor. The self-describing `usage_totals_basis` says `legacy_project_derived`, `project_independent_usage`, `usage_with_legacy_project_fallback`, or `unknown`; it is validated by deriving it from the schema and fallback count in the same checker result. |
+| `legacy_fallback_bucket_count` | Number of distinct `(date, agent, model)` buckets still supplied by legacy project aggregation; `null` when the database could not be inspected. |
+| `legacy_fallback_bucket_dimensions` | Unit carried beside the generation/export fallback count; schema v2 requires `[date, agent, model]`. |
+| `db_span_scope` / `db_span` / `window` | `project_rollup` identifies the table whose persisted date span and row count are reported; `window` is the inclusive recompute window. |
+
+`usage_rollup_authoritative_from` is an internal, required `rollup_meta` boundary written atomically with the v2 marker. It records the first date whose current raw logs were selected as authoritative; on a v1 migration, earlier project rows remain legacy fallback, and later rollups do not expand the migration into them. Missing or invalid floor state is indeterminate rather than an unbounded default.
+
+For `attention`, inspect the `would_skip` old/new fields and all three blocker arrays. Run `tt-web rollup blockers` for persistent status and use only an explicitly offered recovery command after the current source path or remote again directly matches the recorded candidate. For `indeterminate`, resolve the reported database, lock snapshot, permission, or source-scan error and rerun the checker. On a genuinely fresh installation with no initialized database, one normal `tt-web rollup` creates it; on an existing installation, never use deletion or replacement as a repair shortcut. Do not delete the database, delete rows, or overwrite preserved history while investigating.
+
+`state/rollup.db.lock` (generally `<db_path>.lock`) is a persistent coordination inode and part of the service state. Every cleanup script, tmp-reaper, backup rotation, and manual cleanup touching `state/` must exclude `*.lock`: never unlink, replace, rotate, or recreate this file. `flock` is attached to the inode, so a same-name replacement can let a writer holding the old inode and a writer holding the new inode both enter what appear to be protected sections. The existing uninstall path intentionally keeps `state/`; future cleanup tooling must preserve this constraint.
+
+### If the lock file is already missing
+
+Do not run a normal rollup immediately: the web service, rollup daemon, or a manual rollup may still hold the unlinked inode, and creating the pathname again would split coordination into two lock domains. Stop the web service with `tt-web stop`, unload the daemon with `./tt-web/uninstall.sh rollup-daemon`, and confirm that `pgrep -fl '[t]t-web rollup'` prints no manual rollup process. Only after all possible holders are gone, run one normal `tt-web rollup` to initialize a new lock file, then run `tt-web rollup --check` before restarting the web service with `tt-web start` and reinstalling the daemon with `./tt-web/install.sh rollup-daemon`. Re-enable only the service layers that were active before the incident.
+
+The LaunchAgent plist uses:
+
+- Label: `com.ttweb.rollup`
+- Program: `tt-web refresh`
+- RunAtLoad: `true`
+- StartInterval: `3600`
+- Log: `tt-web/state/rollup-daemon.log`
+
+In standalone mode, starting the dashboard captures the machine configuration and begins serving requests without itself starting a rollup or cross-machine sync. Hub mode starts its background scheduler and can begin a startup synchronization round, as observed in the 2026-09-28 deployment above. Overview and Explore API requests may start the dashboard-owned sync when admitted data is due, while `tt-web refresh` uses the force path and waits for that round or the round already in progress. The LaunchAgent calls this refresh entry point; when the dashboard is absent, it preserves the former local-history update but advertises the partial result through its non-zero exit and log.

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>agent-monitor LLM 调用</title>
+    <link rel="stylesheet" href="/web/styles.css">
+    <script src="/web/vendor/chart.umd.min.js"></script>
+    <script src="/web/app.js"></script>
+    <script src="/web/pivot.js"></script>
+    <script src="/web/llm-calls.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" data-preserve-range href="/">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-title">agent-monitor</span>
+        </a>
+        <nav class="nav" aria-label="主导航">
+          <a data-nav href="/">总览</a>
+          <a data-nav href="/explore">透视</a>
+          <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/llm-calls">LLM 调用</a>
+          <a data-nav href="/network">网络</a>
+        </nav>
+      </aside>
+      <main class="main llm-main">
+        <div class="page-toolbar">
+          <h1 class="page-title">LLM 调用</h1>
+          <div class="toolbar">
+            <select id="range" aria-label="时间范围">
+              <option value="7d">7d</option>
+              <option value="30d" selected>30d</option>
+              <option value="90d">90d</option>
+              <option value="6m">6m</option>
+              <option value="1y">1y</option>
+              <option value="2y">2y</option>
+              <option value="all">全部</option>
+            </select>
+            <button id="refresh" class="icon-btn" type="button" title="刷新" aria-busy="false">⟳ 刷新</button>
+          </div>
+        </div>
+        <section class="panel sync-panel" aria-label="机器采集状态">
+          <div class="panel-head">
+            <span id="sync-coverage" class="status-line">已纳入 —/—</span>
+            <span id="sync-summary" class="status-line" aria-live="polite">检查中…</span>
+          </div>
+          <div id="sync-machines" class="sync-machines"></div>
+        </section>
+        <p class="scope-note"><span id="llm-scope" class="scope-badge">Gateway 调用</span> <span id="llm-scope-detail">正在确认数据范围。</span> Claude Code 与 Codex 的会话用量在总览和透视页。</p>
+
+        <section id="llm-state" class="llm-state loading" aria-live="polite">
+          <strong id="llm-state-title">加载中…</strong>
+          <span id="llm-state-detail">正在读取已纳入的请求与尝试快照。</span>
+        </section>
+
+        <section class="llm-kpis" aria-label="LLM 调用摘要">
+          <article class="kpi-card">
+            <div class="kpi-label">逻辑请求</div>
+            <div id="llm-request-count" class="kpi-value">—</div>
+            <div id="llm-request-context" class="kpi-sub">按请求时间</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">成功请求</div>
+            <div id="llm-success-count" class="kpi-value">—</div>
+            <div id="llm-outcome-context" class="kpi-sub">—</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">尝试</div>
+            <div id="llm-attempt-count" class="kpi-value">—</div>
+            <div id="llm-attempt-context" class="kpi-sub">按尝试时间</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">成本未知的尝试</div>
+            <div id="llm-unknown-cost-count" class="kpi-value">—</div>
+            <div id="llm-cost-context" class="kpi-sub">未知不写作 0</div>
+          </article>
+        </section>
+
+        <section class="panel llm-cost-panel" aria-labelledby="llm-cost-title">
+          <div class="panel-head">
+            <h2 id="llm-cost-title">成本小计</h2>
+            <span id="llm-no-charge" class="status-line">—</span>
+          </div>
+          <p class="scope-note">金额按币种、付费类别、计价依据与精确/推算分开，不合并。公司与个人订阅同属订阅类。</p>
+          <div class="table-wrap">
+            <table class="llm-cost-table">
+              <thead>
+                <tr>
+                  <th>币种</th>
+                  <th>付费类别</th>
+                  <th>计价依据</th>
+                  <th class="numeric">精确笔数</th>
+                  <th class="numeric">精确金额</th>
+                  <th class="numeric">推算笔数</th>
+                  <th class="numeric">推算金额</th>
+                </tr>
+              </thead>
+              <tbody id="llm-cost-body" aria-busy="true">
+                <tr><td class="empty-state" colspan="7">加载中…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel llm-filter-panel" aria-labelledby="llm-filter-title">
+          <div class="panel-head">
+            <h2 id="llm-filter-title">筛选</h2>
+            <button id="llm-clear-filters" type="button">清除筛选</button>
+          </div>
+          <div class="llm-controls">
+            <div class="field"><label for="llm-machine">机器</label><select id="llm-machine" data-filter="machine"><option value="">全部机器</option></select></div>
+            <div class="field"><label for="llm-project">项目</label><select id="llm-project" data-filter="project"><option value="">全部项目</option></select></div>
+            <div class="field"><label for="llm-session">会话</label><select id="llm-session" data-filter="session_ref"><option value="">全部会话</option></select></div>
+            <div class="field"><label for="llm-logical-model">逻辑模型</label><select id="llm-logical-model" data-filter="logical_model"><option value="">全部逻辑模型</option></select></div>
+            <div class="field"><label for="llm-request-outcome">请求结果</label><select id="llm-request-outcome" data-filter="request_outcome"><option value="">全部请求结果</option></select></div>
+            <div class="field"><label for="llm-provider">服务商</label><select id="llm-provider" data-filter="provider"><option value="">全部服务商</option></select></div>
+            <div class="field"><label for="llm-profile">账号配置</label><select id="llm-profile" data-filter="account_profile"><option value="">全部账号配置</option></select></div>
+            <div class="field"><label for="llm-route">路由</label><select id="llm-route" data-filter="route"><option value="">全部路由</option></select></div>
+            <div class="field"><label for="llm-actual-model">实际模型</label><select id="llm-actual-model" data-filter="actual_model"><option value="">全部实际模型</option></select></div>
+            <div class="field"><label for="llm-attempt-outcome">尝试结果</label><select id="llm-attempt-outcome" data-filter="attempt_outcome"><option value="">全部尝试结果</option></select></div>
+            <div class="field"><label for="llm-cost-basis">计价依据</label><select id="llm-cost-basis" data-filter="cost_basis"><option value="">全部计价依据</option></select></div>
+            <div class="field"><label for="llm-credential-source-kind">凭据来源类型</label><select id="llm-credential-source-kind" data-filter="credential_source_kind"><option value="">全部凭据来源类型</option></select></div>
+            <div class="field"><label for="llm-credential-source">凭据来源</label><select id="llm-credential-source" data-filter="credential_source_ref"><option value="">全部凭据来源</option></select></div>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="llm-requests-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="llm-requests-title">逻辑请求</h2>
+              <p id="llm-request-selection" class="scope-note">按请求时间排列。</p>
+            </div>
+            <span id="llm-requests-meta" class="status-line">—</span>
+          </div>
+          <div class="table-wrap sticky-head llm-table-wrap" tabindex="0" role="region" aria-label="逻辑请求">
+            <table class="llm-request-table">
+              <thead><tr><th>时间</th><th>机器</th><th>项目</th><th>会话</th><th>逻辑请求</th><th>逻辑模型</th><th>结果</th><th>路由意图</th><th class="numeric">匹配尝试</th><th class="numeric">全部尝试</th></tr></thead>
+              <tbody id="llm-requests-body" aria-busy="true"><tr><td class="empty-state" colspan="10">加载中…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="pager"><button id="llm-requests-prev" type="button" disabled>‹ 上一页</button><span id="llm-requests-page" class="status-line">第 1 页</span><button id="llm-requests-next" type="button" disabled>下一页 ›</button></div>
+        </section>
+
+        <section class="panel" aria-labelledby="llm-attempts-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="llm-attempts-title">服务商尝试</h2>
+              <p class="scope-note">按尝试时间排列；某一行的请求可能落在请求时间范围之外。</p>
+            </div>
+            <span id="llm-attempts-meta" class="status-line">—</span>
+          </div>
+          <div class="table-wrap sticky-head llm-table-wrap" tabindex="0" role="region" aria-label="服务商尝试">
+            <table class="llm-attempt-table">
+              <thead><tr><th>时间</th><th>机器</th><th>请求</th><th>尝试</th><th>服务商</th><th>账号配置</th><th>凭据来源</th><th>付费来源</th><th>路由</th><th>实际模型</th><th>结果</th><th class="numeric">延迟</th><th>用量</th><th>成本</th><th>定价</th></tr></thead>
+              <tbody id="llm-attempts-body" aria-busy="true"><tr><td class="empty-state" colspan="15">加载中…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="pager"><button id="llm-attempts-prev" type="button" disabled>‹ 上一页</button><span id="llm-attempts-page" class="status-line">第 1 页</span><button id="llm-attempts-next" type="button" disabled>下一页 ›</button></div>
+        </section>
+      </main>
+    </div>
+    <script>
+      AgentMonitor.initClientNavigation();
+      AgentMonitorLLMCalls.init().catch((error) => {
+        console.error(error);
+        document.querySelector("main").insertAdjacentHTML("beforeend",
+          '<p class="error">此页面加载失败，刷新重试。</p>');
+      });
+    </script>
+  </body>
+</html>

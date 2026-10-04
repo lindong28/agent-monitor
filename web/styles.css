@@ -1,0 +1,1701 @@
+/* Visual system: data-dense technical interface.
+   Parameters follow ~/.claude/skills/web-ui/workflows/web-ui-design/references/reference-instance.md —
+   spacing ladder, paired type steps, elevation levels, motion and state matrix all come
+   from there. Values below are that instance; substitute values, not structure.
+   Verify with that skill's validate-visual-system.js against the rendered page. */
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/web/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/web/vendor/fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/web/vendor/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+}
+
+/* The page emphasises one word with <em>; without a real italic the browser slants the
+   upright face, which is a different and worse shape than the designed one. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/web/vendor/fonts/ibm-plex-sans-latin-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/web/vendor/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: light;
+
+  /* Spacing ladder — 4px base. Nothing between the steps. */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 12px;
+  --sp-6: 16px;
+  --sp-7: 24px;
+  --sp-8: 32px;
+
+  --h-control: 28px;
+  --pad-cell: var(--sp-3) var(--sp-5);
+  --pad-card: var(--sp-5) var(--sp-6);
+
+  /* Navigation rail. Sized to the longest label ("LLM Calls") plus its padding,
+     rounded up so the width does not change if a label is added. */
+  --sidebar-w: 180px;
+  /* Measure for running text. Everything else on this page is a table or a
+     chart and takes the full column; this is the cap for the paragraphs that
+     explain them, applied per element rather than to their container. */
+  --measure: 68ch;
+
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 6px;
+  --r-pill: 999px;
+
+  /* Separation is carried by line and tint; shadow only for things that float. */
+  --e-raised: 0 0 0 1px rgba(28, 33, 40, 0.05), 0 1px 2px rgba(28, 33, 40, 0.06);
+  --e-overlay: 0 0 0 1px rgba(28, 33, 40, 0.08), 0 2px 4px rgba(28, 33, 40, 0.08),
+    0 8px 24px -8px rgba(28, 33, 40, 0.16);
+
+  --dur: 120ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --t-state: color var(--dur) var(--ease), background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+
+  --canvas: #f4f7f9;
+  --surface: #ffffff;
+  --surface-sunken: #eef2f6;
+  --ink: #1c2128;
+  --ink-muted: #57616c;
+  --ink-subtle: #7d8894;
+  --line: #d3dae1;
+  --line-soft: #e6ebf0;
+  --line-strong: #b4bec8;
+  --bg-hover: #f0f4f8;
+  --bg-active: #e5ecf3;
+  --accent: #0b66c3;
+  --accent-ink: #0a559f;
+  --accent-bg: #dcecfb;
+  /* Darkened from #1a7f4b, which rendered 4.33:1 on the .ok pill's own tint —
+     below AA at the 11px this system sets pills in, where the large-text 3:1
+     allowance does not apply. Its two uses are both on that tint or on white,
+     so the whole role moves rather than one of them drifting off. */
+  --ok: #177038;
+  --warn: #8a6300;
+  --danger: #c0362c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 400 13px/18px var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The UA's bold is 700, which is off this ramp — emphasis lands on the 600 step
+   like every other heading rather than introducing a weight nothing else uses. */
+strong,
+b {
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent-ink);
+  text-decoration: none;
+  transition: var(--t-state);
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Keyboard users get no location cue if the UA ring is the only one, and several
+   controls below repaint their background on focus, which hides it entirely. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Shell: a fixed rail of navigation, and everything else.
+
+   The rail replaces a full-width top bar. Navigation is the one thing on the
+   page that never changes between tabs, so it is also the one thing that should
+   not be rebuilt when they change — sitting outside <main>, it survives the
+   swap that client navigation performs, and the tab change stops looking like a
+   page load. Horizontally it costs 180px of a wide screen and gives back the
+   45px of height the bar used to take across the full width. */
+.app-shell {
+  display: flex;
+  align-items: flex-start;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex: 0 0 var(--sidebar-w);
+  width: var(--sidebar-w);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-6) var(--sp-5);
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+  padding: 0 var(--sp-3);
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-md);
+  background: var(--accent);
+}
+
+.brand-title {
+  margin: 0;
+  font: 600 16px/22px var(--font-sans);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.nav a,
+.preset-btn,
+.icon-btn,
+select,
+button {
+  min-height: var(--h-control);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--ink);
+  font: 500 13px/18px var(--font-sans);
+  transition: var(--t-state);
+}
+
+.nav a:hover,
+.preset-btn:hover,
+.icon-btn:hover,
+select:hover,
+button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+}
+
+.nav a:active,
+.preset-btn:active,
+.icon-btn:active,
+button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+/* In the rail these are a list, not five buttons. A border around each one
+   drew five competing boxes down the left edge and made the active item —
+   which differs from the rest only by tint — harder to pick out, not easier. */
+.nav a {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-5);
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+
+.nav a:hover {
+  border-color: transparent;
+  color: var(--ink);
+}
+
+.nav a[aria-current="page"] {
+  border-color: transparent;
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--sp-4);
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.query-builder {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  margin-bottom: var(--sp-5);
+}
+.query-clause {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: center;
+  padding: var(--sp-5) var(--sp-6);
+}
+.query-clause + .query-clause { border-top: 1px solid var(--line-soft); }
+.clause-label { display: grid; gap: var(--sp-2); }
+.clause-label strong { font: 600 12px/18px var(--font-mono); color: var(--accent-ink); }
+.clause-label span { color: var(--ink-muted); font-size: 12px; }
+.query-builder .field { min-width: 0; }
+.query-builder select { max-width: 100%; width: 100%; min-width: 0; }
+.query-builder #metric { width: 200px; }
+.query-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-5); }
+.group-options { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-5); }
+.group-option, .group-time { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.group-option { cursor: pointer; min-height: var(--h-control); color: var(--ink); }
+.group-option input { accent-color: var(--accent); }
+.query-builder #time-dim { width: auto; }
+.query-grouping p { margin: var(--sp-3) 0 0; }
+.custom-date[hidden] { display: none; }
+.custom-date input { width: 100%; min-width: 0; height: var(--h-control); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 var(--sp-3); font: inherit; color: var(--ink); background: var(--surface); }
+.group-ranking { list-style: none; padding: 0; margin: var(--sp-5) 0 0; max-height: 520px; overflow: auto; }
+.ranking-item { padding: var(--sp-4) var(--sp-2); }
+.ranking-item + .ranking-item { border-top: 1px solid var(--line-soft); }
+.ranking-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-5); }
+.ranking-heading > span { min-width: 0; overflow-wrap: anywhere; }
+.ranking-heading strong { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.ranking-track { height: 8px; margin-top: var(--sp-3); background: var(--line-soft); border-radius: 4px; overflow: hidden; }
+.ranking-track > span { display: block; height: 100%; background: var(--accent); }
+.ranking-periods { display: none; max-height: 200px; overflow-y: auto; margin-top: var(--sp-4); padding: var(--sp-3); background: var(--surface-sunken); font-variant-numeric: tabular-nums; }
+.ranking-periods > div { display: flex; justify-content: space-between; gap: var(--sp-5); }
+.ranking-item:hover .ranking-periods, .ranking-item:focus-within .ranking-periods { display: block; }
+@media (max-width: 1100px) {
+  .query-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .query-clause { grid-template-columns: 1fr; gap: var(--sp-4); }
+  .clause-label { display: flex; align-items: baseline; gap: var(--sp-4); }
+  .query-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+select {
+  padding: 0 var(--sp-4);
+}
+
+.icon-btn,
+.preset-btn,
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-5);
+  cursor: pointer;
+}
+
+.icon-btn[aria-busy="true"] {
+  color: var(--ink-muted);
+  opacity: 0.72;
+}
+
+.icon-btn[aria-busy="true"]::before,
+.network-error-actions button[aria-busy="true"]::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+button:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Full width, with the cap moved down to the things that need one.
+
+   A centred 1280px column left 640px of empty gutter on each side of a
+   2560px screen — half the window — while the quota table inside it scrolled
+   sideways to show its seventh column and the 30-day cost chart drew a month
+   of points into 1180px. Tables and charts are read by scanning across, so
+   width is what they are short of; running text is read by returning to the
+   next line, so width is what ruins it. Those want opposite things, and one
+   container cap cannot serve both. The cap now lives on the prose
+   (`.note-disclosure p`, `.scope-note`, `.quota-scope`), where the measure is
+   what is actually being limited. */
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-6) var(--sp-7) var(--sp-8);
+}
+
+/* Per-page controls, inside <main> because that is what they belong to: the
+   range selector means something different on Overview than on Sessions, and
+   Network has neither. Keeping them in the shell meant every page shipped a
+   toolbar describing some other page's controls. */
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-6);
+}
+
+.page-title {
+  margin: 0;
+  font: 600 20px/28px var(--font-sans);
+  letter-spacing: -0.01em;
+}
+
+/* Two labelled groups rather than one flat row: five equal cards left an orphan
+   in the fourth column, and "spend so far" and "quota left" are read for
+   different reasons. Widths stay even because each group gets track count to
+   match its card count. */
+/* Stacked, not two columns. The quota list is a table now and needs the page
+   width; pairing it with two small cost cards left the cost column 68% empty
+   for the height of the list, and squeezed the table into 730px. */
+.kpi-sections {
+  display: grid;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-6);
+}
+
+.kpi-group {
+  min-width: 0;
+}
+
+.kpi-group-title {
+  margin: 0 0 var(--sp-4);
+  color: var(--ink-muted);
+  font: 600 11px/16px var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Three figures share the row evenly. Two bounded cards left ~60% of a
+   page-wide row empty, which read as a layout fault rather than as restraint;
+   two stretched cards moved that emptiness inside the cards. A third figure —
+   the range the toolbar already controls — fills the row with a fact instead.
+   At the resulting card width the week card's window text wraps to two lines. */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-5);
+}
+
+/* Quota is one row per account, not a fixed set of cards: how many accounts
+   are in play is a fact about the fleet, not something the layout can assume. */
+.quota-scope {
+  max-width: var(--measure);
+  margin: 0 0 var(--sp-4);
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+}
+
+/* The quota list is tabular data: one account per row, one window per column.
+   A card per account left 65% of each card empty at page width, and made
+   cross-row alignment something CSS had to simulate with fixed slots — in a
+   table it is the definition of a column. */
+.quota-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--e-raised);
+  overflow: hidden;
+}
+
+.quota-table th {
+  padding: var(--pad-cell);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  font: 600 11px/16px var(--font-sans);
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.quota-table td {
+  padding: var(--pad-cell);
+  border-top: 1px solid var(--line-soft);
+  font: 400 13px/18px var(--font-sans);
+  vertical-align: top;
+}
+
+.quota-table tbody:first-of-type tr:first-child td {
+  border-top: 0;
+}
+
+.quota-table th.numeric,
+.quota-table td.numeric {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+
+
+.quota-provider-cell,
+.quota-account-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.quota-account-label {
+  min-width: 0;
+  font: 500 13px/18px var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+/* A row with no account behind it reads as set aside: tinted, with its figures
+   muted. Staleness deliberately does NOT get this treatment — it qualifies when
+   the reading was taken, not how much quota is gone, and the pill in the Updated
+   cell already says so with the right scope. Sharing one cue between the two
+   made it ambiguous: you knew something was off, not which. */
+.quota-row.unattributed td {
+  background: var(--surface-sunken);
+}
+
+.quota-row.unattributed .quota-window-value,
+.quota-row.unattributed .quota-account-label {
+  color: var(--ink-muted);
+}
+
+/* Remembered rows are valid historical references, not current unattributed
+   machines. Their independent selector keeps those two remedies distinct even
+   though both are visually quieter than live account rows. */
+.quota-row.remembered td {
+  background: var(--surface-sunken);
+}
+
+.quota-row.remembered .quota-account-label,
+.quota-row.remembered .quota-window-value {
+  color: var(--ink-muted);
+}
+
+.quota-history-marker {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+
+/* The credential-side plan, shown only when it contradicts the one above it.
+   Muted and secondary: it is context for the plan, not a second plan. */
+.quota-plan-mismatch {
+  display: block;
+  margin-top: var(--sp-2);
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+  border-bottom: 1px dashed var(--line-soft);
+}
+
+.quota-history-note,
+.quota-window-observed {
+  display: block;
+  margin-top: var(--sp-2);
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+}
+
+.quota-past-summary td {
+  background: var(--surface-sunken);
+}
+
+.quota-past-toggle {
+  width: 100%;
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+/* After .unattributed, not before: the two had equal specificity, so the tint
+   won and the one interactive row in the table — the collapse toggle — was the
+   one row with no hover feedback. */
+.quota-table tbody tr.quota-row:hover td {
+  background: var(--bg-hover);
+}
+
+.quota-window-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.quota-window-value {
+  font: 600 16px/22px var(--font-sans);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --ink-muted, not --ink-subtle: this cell's entire meaning is two characters,
+   and subtle measured 3.61:1 on the row — under AA for 13px text. */
+.quota-window-cell.not-applicable {
+  color: var(--ink-muted);
+}
+
+/* Usage, drawn. Two numbers are only comparable after reading both; two bars
+   are comparable at a glance, which is the whole reason the reader is here. */
+.quota-meter {
+  flex: 0 0 auto;
+  overflow: hidden;
+  width: 48px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--line);
+}
+
+/* Scaled, not width-animated: width is a layout property, so transitioning it
+   makes the browser re-lay-out every frame. `transform` composites instead.
+   --ink-muted, not --ink-subtle: this is a 4px graphic object carrying a
+   comparison, and subtle-on-line measured 2.56:1, under the 3:1 that graphics
+   need. This role measures 4.47:1 on the same track. */
+.quota-meter-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ink-muted);
+  transform: scaleX(var(--quota-fill, 0));
+  transform-origin: left center;
+  transition: transform var(--dur) var(--ease);
+}
+
+/* High usage is the one thing on this page that should interrupt a scan. The
+   colour is never alone: the cell also carries a "running low" / "almost out"
+   pill, so the state survives for a reader who cannot see the difference. */
+.quota-window-cell.low .quota-window-value {
+  color: var(--warn);
+}
+
+.quota-window-cell.low .quota-meter-fill {
+  background: var(--warn);
+}
+
+.quota-window-cell.critical .quota-window-value {
+  color: var(--danger);
+}
+
+.quota-window-cell.critical .quota-meter-fill {
+  background: var(--danger);
+}
+
+.quota-window-reset,
+.quota-updated-cell {
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+.quota-window-reset {
+  margin-top: var(--sp-2);
+}
+
+.quota-machine-self {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* Machines behind on agent-monitor collapse into one row: their count tracks the fleet,
+   not the account list, and every one of them carries the same instruction. */
+.quota-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.quota-toggle::before {
+  color: var(--ink-subtle);
+  content: "\25B8";
+  font-size: 11px;
+  transition: transform var(--dur) var(--ease);
+}
+
+.quota-unknown.open .quota-toggle::before,
+.quota-toggle[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
+.quota-unknown .quota-row:not(.quota-summary) {
+  display: none;
+}
+
+.quota-unknown.open .quota-row:not(.quota-summary) {
+  display: table-row;
+}
+
+.sync-panel {
+  margin-bottom: var(--sp-6);
+  padding: var(--pad-card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--e-raised);
+}
+
+/* Collapsed by default: when every machine is current this is 230px of
+   timestamps standing between the reader and the first dollar figure. The
+   script opens it when a machine actually needs attention. */
+.sync-panel > summary {
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--r-sm);
+  transition: var(--t-state);
+}
+
+.sync-panel > summary:hover {
+  color: var(--accent-ink);
+}
+
+.sync-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sync-panel > summary::after {
+  content: "▸";
+  margin-left: var(--sp-4);
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.sync-panel[open] > summary::after {
+  content: "▾";
+}
+
+.sync-panel-head,
+.sync-machine-title {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  align-items: center;
+}
+
+.sync-panel-head .status-line {
+  margin: 0 0 0 var(--sp-4);
+}
+
+/* Card count follows the width rather than being fixed at three. A fixed three
+   was right under a 1280px cap and wrong once the cap came off: at 2380px it
+   drew three 780px cards of 12px prose — a measure of roughly 150 characters,
+   which is where the eye starts losing the line it is returning to — and left
+   the fourth machine alone on its own row. */
+.sync-machines {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-4);
+  margin-top: var(--sp-5);
+}
+
+/* Inner radius steps down from the panel's 6px by its padding, so the child
+   does not read as pasted onto a corner it shares. */
+.sync-machine {
+  min-width: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.sync-machine.excluded {
+  border-color: #e8b4b0;
+  background: #fdf0ef;
+}
+
+.sync-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.sync-machine-time,
+.sync-machine-reason,
+.scope-note {
+  max-width: var(--measure);
+  margin: var(--sp-3) 0 0;
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+.sync-machine-reason {
+  color: var(--ink);
+}
+
+.scope-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: var(--sp-1) var(--sp-4);
+  border-radius: var(--r-pill);
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  font: 600 11px/16px var(--font-sans);
+  vertical-align: middle;
+}
+
+.kpi-card,
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--e-raised);
+  transition: var(--t-state);
+}
+
+.kpi-card {
+  min-height: 100px;
+  padding: var(--pad-card);
+}
+
+.kpi-label {
+  color: var(--ink-muted);
+  font: 500 12px/16px var(--font-sans);
+}
+
+/* Tabular figures, not the mono face: they equalise digit width, which is all
+   the alignment needs, whereas mono also gives the decimal point a full cell
+   and renders $1020.79 as "$1020 . 79". */
+.kpi-value {
+  margin-top: var(--sp-4);
+  font: 600 26px/32px var(--font-sans);
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-sub {
+  margin-top: var(--sp-2);
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-meta {
+  margin-top: var(--sp-2);
+  color: var(--ink-subtle);
+  font: 400 11px/16px var(--font-sans);
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-6);
+}
+
+.panel-grid .panel-wide {
+  grid-column: 1 / -1;
+}
+
+.panel {
+  padding: var(--pad-card);
+  min-width: 0;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  align-items: baseline;
+  margin-bottom: var(--sp-5);
+}
+
+.panel h2 {
+  margin: 0;
+  font: 600 14px/20px var(--font-sans);
+  letter-spacing: -0.005em;
+}
+
+.panel-link {
+  font: 500 12px/16px var(--font-sans);
+  white-space: nowrap;
+}
+
+.panel-head .status-line {
+  margin: 0;
+}
+
+.chart-box {
+  position: relative;
+  height: 320px;
+}
+
+.chart-box.short {
+  height: 260px;
+}
+
+.chart-empty-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.chart-empty-state[hidden] {
+  display: none;
+}
+
+/* `.estimate-note` is a sentence and takes the measure; `.status-line` is a
+   fragment that sits inline beside a heading and must not be wrapped early. */
+.estimate-note,
+.status-line {
+  margin: var(--sp-5) 0 0;
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+}
+
+.estimate-note {
+  max-width: var(--measure);
+}
+
+/* Methodology text is read when a figure looks wrong, not on every visit. Kept
+   beside the chart it qualifies, collapsed, and set to a readable measure —
+   as a permanent paragraph it ran the full 1200px panel width. */
+.note-disclosure {
+  margin: 0 0 var(--sp-4);
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+}
+
+.note-disclosure > summary {
+  cursor: pointer;
+  color: var(--ink-muted);
+  transition: var(--t-state);
+}
+
+.note-disclosure > summary:hover {
+  color: var(--ink);
+}
+
+.note-disclosure > summary::before {
+  content: "ⓘ ";
+}
+
+.note-disclosure p {
+  max-width: var(--measure);
+  margin: var(--sp-4) 0 0;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-6);
+}
+
+.field {
+  display: grid;
+  gap: var(--sp-2);
+  /* A select sizes itself to its widest option, and a grid item defaults to
+     min-width:auto, so one long project path stretched this field past the
+     window and scrolled the whole page sideways. The width the page can spare
+     is the column's, not the option list's. */
+  min-width: 0;
+}
+
+.field select,
+.field input {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.field label {
+  color: var(--ink-muted);
+  font: 600 11px/16px var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  margin: 0 0 var(--sp-6);
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+/* The table scrolls inside its own box so the header can stick to the top of
+   it. Sticking to the viewport instead would need the topbar's height as a
+   constant, and that height changes with the layout. */
+.table-wrap.sticky-head {
+  max-height: calc(100vh - 320px);
+  min-height: 320px;
+}
+
+/* Rows scroll underneath this, so it sits a level up rather than merely being
+   pinned — without it the header and the row passing behind it read as coplanar.
+   Level 1, per the reference instance's mapping: level 2 is for things that float
+   over the page, and applying it per-cell would stack that weight across the row. */
+.table-wrap.sticky-head thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-sunken);
+  box-shadow: var(--e-raised);
+  clip-path: inset(0 0 -8px 0);
+}
+
+.sessions-controls {
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+}
+
+/* Offset measured from the rendered header rather than assumed: a guessed
+   constant sat above the header's real height and let the date row ride up
+   over its bottom edge. The script sets --sessions-head-h after each render. */
+.date-group th {
+  position: sticky;
+  top: var(--sessions-head-h, 30px);
+  z-index: 1;
+  padding: var(--pad-cell);
+  background: var(--accent-bg);
+  color: var(--ink);
+  font: 600 12px/16px var(--font-sans);
+  letter-spacing: normal;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+td.nowrap,
+th.nowrap {
+  white-space: nowrap;
+}
+
+/* One line per row is what makes a hundred rows scannable. A td's own
+   max-width is ignored under auto table layout, so the clipping lives on an
+   inner box; the full value stays on its title. */
+.project-cell span {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pager {
+  display: flex;
+  gap: var(--sp-5);
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--sp-5);
+}
+
+.pager .status-line {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pager button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+th,
+td {
+  padding: var(--pad-cell);
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--surface-sunken);
+  border-bottom-color: var(--line);
+  color: var(--ink-muted);
+  font: 600 11px/16px var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+td {
+  font: 400 12px/16px var(--font-sans);
+}
+
+/* Numbers that share a column get tabular figures so the decimal position holds
+   still between refreshes. The face stays the text face — see .kpi-value. */
+td.numeric,
+th.numeric {
+  text-align: right;
+}
+
+td.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Every data row, not just the clickable ones on Sessions: on a table this wide the
+   hover tint is what keeps the eye on one row while reading across it. The expanded
+   turn detail is excluded — it is a panel that happens to live in a <tr>. */
+.table-wrap tbody tr:not(.turn-detail) {
+  transition: var(--t-state);
+}
+
+.table-wrap tbody tr:not(.turn-detail):hover {
+  background: var(--bg-hover);
+}
+
+.session-row {
+  cursor: pointer;
+}
+
+.turn-detail td {
+  background: var(--surface-sunken);
+  padding: 0;
+}
+
+.turn-list {
+  margin: 0;
+  padding: var(--sp-4) var(--sp-5);
+  list-style: none;
+}
+
+.turn-list li {
+  display: grid;
+  grid-template-columns: 170px 1fr 90px 90px 90px;
+  gap: var(--sp-5);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-list li:last-child {
+  border-bottom: 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  max-width: 280px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  font: 600 11px/16px var(--font-sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An agent keeps one colour everywhere. The pill used to be the same teal for
+   both agents while the charts drew them in different hues, so the mapping had
+   to be re-learned on each page. */
+.pill.agent-claude-code {
+  background: #e3edfa;
+  color: #1a5695;
+}
+
+.pill.agent-codex {
+  background: #fbe8dc;
+  color: #9c3f11;
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.network-main {
+  width: min(1800px, 100%);
+}
+
+/* Track counts divide the four evidence cards evenly — 4, then 2, then 1.
+   `auto-fit` picked whatever the width allowed, which meant three tracks
+   anywhere from roughly 1036px to 1371px and Timezone alone on a second row
+   with two thirds of it empty. Adding a fifth evidence card means revisiting
+   these counts. */
+.network-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-6);
+  /* Each card is as tall as its own contents. Stretching them to match the
+     tallest left Timezone with 250px of empty card below three rows of text. */
+  align-items: start;
+}
+
+@media (max-width: 1180px) {
+  .network-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The synthesised answer leads; the evidence cards support it. As the fifth
+   item in the grid it landed alone on a second row, a quarter as wide as the
+   space beside it, and its list ran past the card. */
+.network-card-conclusion {
+  grid-column: 1 / -1;
+}
+
+.network-error {
+  margin: 0 0 var(--sp-6);
+  padding: var(--pad-card);
+  border: 1px solid #e8b4b0;
+  border-radius: var(--r-lg);
+  background: #fdf0ef;
+  color: var(--ink);
+}
+
+.network-error[hidden] {
+  display: none;
+}
+
+.network-error h2 {
+  margin: 0 0 var(--sp-3);
+  font: 600 14px/20px var(--font-sans);
+  letter-spacing: -0.005em;
+}
+
+.network-error p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.network-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  margin-top: var(--sp-5);
+}
+
+.network-card {
+  min-width: 0;
+  padding: var(--pad-card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--e-raised);
+}
+
+.network-card h2 {
+  margin: 0 0 var(--sp-5);
+  font: 600 14px/20px var(--font-sans);
+  letter-spacing: -0.005em;
+}
+
+.network-card-body {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+/* The other cards hold key/value rows, which want the column. This one holds
+   the written verdict — the longest running text on any of the five pages —
+   and was the last thing still setting prose at the full width. */
+.network-card-conclusion .network-card-body {
+  max-width: var(--measure);
+}
+
+.kv-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: var(--sp-5);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.kv-row:first-child {
+  border-top: 0;
+}
+
+.kv-row .label {
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+}
+
+.kv-row .value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: var(--sp-1) var(--sp-4);
+  border-radius: var(--r-pill);
+  font: 600 11px/16px var(--font-sans);
+  vertical-align: middle;
+}
+
+.status-pill.ok {
+  background: #dff3e6;
+  color: var(--ok);
+}
+
+.status-pill.warn {
+  background: #fbf0d9;
+  color: var(--warn);
+}
+
+.status-pill.bad {
+  background: #fbe3e1;
+  color: var(--danger);
+}
+
+.status-pill.info {
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+}
+
+.verdict-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  align-items: center;
+  margin: 0 0 var(--sp-6);
+  padding: var(--pad-card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  font: 600 14px/20px var(--font-sans);
+  letter-spacing: -0.005em;
+}
+
+.verdict-banner.low {
+  border-color: #b3ddc4;
+  background: #dff3e6;
+  color: var(--ok);
+}
+
+.verdict-banner.high {
+  border-color: #e8b4b0;
+  background: #fbe3e1;
+  color: var(--danger);
+}
+
+.verdict-banner.proxy-in-use {
+  border-color: #e6d3a8;
+  background: #fbf0d9;
+  color: var(--warn);
+}
+
+.verdict-banner.unknown {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+
+.stale-banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-6);
+  background: #fbf0d9;
+  color: #7a5600;
+  border-bottom: 1px solid #e6d3a8;
+  font: 400 13px/18px var(--font-sans);
+}
+
+.stale-banner button {
+  cursor: pointer;
+  border: 1px solid #c08a1a;
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-4);
+  background: #f0b429;
+  color: #34290a;
+  font: 600 12px/16px var(--font-sans);
+}
+
+.stale-banner button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.stale-banner code {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  background: rgba(28, 33, 40, 0.08);
+  font: 400 11px/16px var(--font-mono);
+}
+
+.stale-hint {
+  opacity: 0.85;
+  font-size: 12px;
+}
+
+.network-updated {
+  color: inherit;
+  font: 500 12px/16px var(--font-sans);
+  opacity: 0.82;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dns-list,
+.conclusion-list {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.dns-row {
+  min-width: 0;
+}
+
+.conclusion-list {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conclusion-list li {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: flex-start;
+  padding: var(--sp-2) 0;
+}
+
+.section-failure,
+.empty-state {
+  color: var(--ink-muted);
+}
+
+.llm-main {
+  width: min(1800px, 100%);
+  display: grid;
+  gap: var(--sp-6);
+}
+
+.llm-main > .scope-note,
+.llm-panel .scope-note,
+.llm-cost-panel > .scope-note {
+  margin: 0;
+}
+
+.llm-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-4) var(--sp-6);
+  padding: var(--pad-card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+
+.llm-state strong {
+  color: var(--ink);
+  font: 600 14px/20px var(--font-sans);
+}
+
+.llm-state.data {
+  border-color: #b3ddc4;
+  background: #dff3e6;
+}
+
+.llm-state.empty {
+  border-color: #e6d3a8;
+  background: #fbf0d9;
+}
+
+.llm-state.error {
+  border-color: #e8b4b0;
+  background: #fdf0ef;
+}
+
+.llm-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-5);
+}
+
+.llm-controls {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  gap: var(--sp-5);
+}
+
+.llm-table-wrap {
+  max-height: min(560px, calc(100vh - 260px));
+}
+
+.llm-request-table {
+  min-width: 1420px;
+}
+
+.llm-attempt-table {
+  min-width: 2140px;
+}
+
+.llm-cost-table {
+  min-width: 900px;
+}
+
+.llm-cost-panel .table-wrap {
+  margin-top: var(--sp-4);
+}
+
+.llm-filter-panel .panel-head > button {
+  flex: 0 0 auto;
+}
+
+.llm-filter-panel .field select {
+  width: 100%;
+}
+
+.llm-main .panel-head > div {
+  min-width: 0;
+}
+
+.llm-main .panel-head > div .scope-note {
+  margin-top: var(--sp-2);
+}
+
+.mono-cell {
+  max-width: 280px;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-cell {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-label {
+  display: block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-cell .audit-label,
+.credential-cell .audit-label {
+  max-width: 280px;
+}
+
+.scope-funding-cell .audit-label,
+.attempt-cell .audit-label {
+  max-width: 200px;
+}
+
+.cost-unknown {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+@media (max-width: 1180px) {
+  .llm-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .llm-controls {
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
+  }
+}
+
+.conclusion-note {
+  max-width: var(--measure);
+  margin: var(--sp-5) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-muted);
+  font: 400 12px/16px var(--font-sans);
+}
+
+/* Side by side the two groups need ~250px per card; below that they stack
+   rather than squeezing "$11,857.68" into a card too narrow to hold it. */
+@media (max-width: 1080px) {
+  .kpi-sections {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Seven columns need about 1040px before they stop being readable, so the
+   region scrolls at every width rather than at a viewport breakpoint.
+
+   The breakpoint form was 1100px, derived from the old container being the
+   viewport minus 48px. With a 180px rail that arithmetic is 168px off, and the
+   result was not a near miss: at 1099px the table sat at its 1040px minimum
+   inside a scroller, and *widening* the window to 1152px dropped it to 924px
+   with no scroller at all. The whole band up to ~1267px rendered the table
+   below the width this rule itself asserts it needs, unreachably. Attaching
+   the condition to the element's own space instead of to the viewport removes
+   the class of bug rather than re-deriving a constant that will drift again. */
+.quota-table-wrap {
+  overflow-x: auto;
+}
+
+.quota-table {
+  min-width: 1040px;
+}
+
+/* Below this the rail costs more than it gives: 180px out of a phone's 390px
+   is half the reading width, for navigation that is used once per visit. It
+   becomes a bar across the top, scrollable sideways rather than wrapped, so
+   the five destinations stay on one predictable line. */
+@media (max-width: 900px) {
+  .app-shell {
+    display: block;
+  }
+
+  .sidebar {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-6);
+    width: auto;
+    height: auto;
+    padding: var(--sp-4) var(--sp-6);
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .nav {
+    flex-direction: row;
+    gap: var(--sp-2);
+  }
+
+  .nav a {
+    white-space: nowrap;
+  }
+
+  .toolbar {
+    justify-content: flex-start;
+  }
+
+  .kpi-grid,
+  .panel-grid,
+  .controls,
+  .sync-machines {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-panel-head,
+  .sync-machine-title {
+    align-items: flex-start;
+  }
+
+  .chart-box,
+  .chart-box.short {
+    height: 280px;
+  }
+
+  .main {
+    padding: var(--sp-6);
+  }
+
+  .verdict-banner {
+    display: grid;
+  }
+
+  .llm-kpis,
+  .llm-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .llm-state {
+    display: grid;
+  }
+}
+
+@media (max-width: 560px) {
+  .network-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kv-row {
+    grid-template-columns: 1fr;
+    gap: var(--sp-1);
+  }
+
+  .network-updated {
+    text-align: left;
+  }
+}

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>agent-monitor 网络</title>
+    <link rel="stylesheet" href="/web/styles.css">
+    <script src="/web/vendor/chart.umd.min.js"></script>
+    <script src="/web/app.js"></script>
+    <script src="/web/pivot.js"></script>
+    <script src="/web/llm-calls.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" data-preserve-range href="/">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-title">agent-monitor</span>
+        </a>
+        <nav class="nav" aria-label="主导航">
+          <a data-nav href="/">总览</a>
+          <a data-nav href="/explore">透视</a>
+          <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/llm-calls">LLM 调用</a>
+          <a data-nav href="/network">网络</a>
+        </nav>
+      </aside>
+      <main class="main network-main">
+        <div class="page-toolbar">
+          <h1 class="page-title">网络</h1>
+          <div class="toolbar">
+            <button id="refresh" class="icon-btn" type="button" title="刷新" aria-busy="false">⟳ 刷新</button>
+          </div>
+        </div>
+        <p class="scope-note"><span class="scope-badge">仅本机</span> 这些诊断只针对本机，不跨机合并。</p>
+        <section id="network-banner" class="verdict-banner unknown" aria-live="polite">
+          <span id="network-verdict">—</span>
+          <span id="network-updated" class="network-updated">—</span>
+        </section>
+        <section id="network-error" class="network-error" role="alert" aria-live="assertive" hidden></section>
+        <section class="network-grid" aria-label="网络诊断">
+          <article class="network-card network-card-conclusion">
+            <h2>结论</h2>
+            <div id="network-conclusion" class="network-card-body"></div>
+          </article>
+          <article class="network-card">
+            <h2>本机</h2>
+            <div id="network-local" class="network-card-body"></div>
+          </article>
+          <article class="network-card">
+            <h2>公网</h2>
+            <div id="network-public" class="network-card-body"></div>
+          </article>
+          <article class="network-card">
+            <h2>风险</h2>
+            <div id="network-risk" class="network-card-body"></div>
+          </article>
+          <article class="network-card">
+            <h2>时区</h2>
+            <div id="network-timezone" class="network-card-body"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script>
+      AgentMonitor.initClientNavigation();
+      AgentMonitor.initNetwork().catch((error) => {
+        console.error(error);
+        document.querySelector("main").insertAdjacentHTML("beforeend",
+          '<p class="error">此页面加载失败，刷新重试。</p>');
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>agent-monitor 透视</title>
+    <link rel="stylesheet" href="/web/styles.css">
+    <script src="/web/vendor/chart.umd.min.js"></script>
+    <script src="/web/app.js"></script>
+    <script src="/web/pivot.js"></script>
+    <script src="/web/llm-calls.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" data-preserve-range href="/">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-title">agent-monitor</span>
+        </a>
+        <nav class="nav" aria-label="主导航">
+          <a data-nav href="/">总览</a>
+          <a data-nav href="/explore">透视</a>
+          <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/llm-calls">LLM 调用</a>
+          <a data-nav href="/network">网络</a>
+        </nav>
+      </aside>
+      <main class="main">
+        <div class="page-toolbar">
+          <h1 class="page-title">透视</h1>
+          <div class="toolbar">
+            <span id="pivot-status" class="status-line" role="status">—</span>
+            <button id="refresh" class="icon-btn" type="button" title="刷新" aria-busy="false">⟳ 刷新</button>
+          </div>
+        </div>
+        <details id="sync-panel" class="sync-panel" aria-label="机器同步状态">
+          <summary class="sync-panel-head">
+            <div>
+              <strong>全部机器</strong>
+              <span id="sync-coverage" class="status-line">已纳入 —/—</span>
+            </div>
+            <span id="sync-summary" class="status-line" aria-live="polite">检查中…</span>
+          </summary>
+          <div id="sync-machines" class="sync-machines"></div>
+        </details>
+        <section class="query-builder" aria-label="透视控件">
+          <div class="query-clause">
+            <div class="clause-label"><strong>SELECT</strong><span>看什么</span></div>
+            <div class="field">
+            <label for="metric">统计指标</label>
+            <select id="metric">
+              <option value="cost">成本</option>
+              <option value="total">总 token</option>
+              <option value="input">输入 token</option>
+              <option value="output">输出 token</option>
+              <option value="cache_read">缓存读取</option>
+              <option value="cache_creation">缓存创建</option>
+              <option value="messages">用量条目</option>
+            </select>
+            </div>
+          </div>
+          <div class="query-clause">
+            <div class="clause-label"><strong>WHERE</strong><span>筛选哪些</span></div>
+            <div class="query-filters">
+          <div class="field">
+            <label for="range">时间范围</label>
+            <select id="range" aria-label="时间范围">
+              <option value="7d">近 7 天</option>
+              <option value="30d" selected>近 30 天</option>
+              <option value="90d">近 90 天</option>
+              <option value="6m">近半年</option>
+              <option value="1y">近 1 年</option>
+              <option value="2y">近 2 年</option>
+              <option value="all">全部历史</option>
+              <option value="custom">自定义日期</option>
+            </select>
+          </div>
+          <div class="field custom-date" hidden>
+            <label for="start-date">起始日期（含）</label>
+            <input id="start-date" type="date" required>
+          </div>
+          <div class="field custom-date" hidden>
+            <label for="end-date">终止日期（含）</label>
+            <input id="end-date" type="date" required>
+          </div>
+          <div class="field">
+            <label for="agent-filter">Agent 类型</label>
+            <select id="agent-filter" data-filter-control="agent" aria-label="Agent 类型">
+              <option value="">全部 Agent</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="project-filter">会话目录</label>
+            <select id="project-filter" data-filter-control="project" aria-label="会话目录">
+              <option value="">全部会话目录</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="model-filter">模型</label>
+            <select id="model-filter" data-filter-control="model" aria-label="模型">
+              <option value="">全部模型</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="machine-filter">机器</label>
+            <select id="machine-filter" data-filter-control="machine" aria-label="机器">
+              <option value="">全部机器</option>
+            </select>
+          </div>
+            </div>
+          </div>
+          <div class="query-clause">
+            <div class="clause-label"><strong>GROUP BY</strong><span>按什么拆分</span></div>
+            <div class="query-grouping">
+              <div class="group-options" role="group" aria-label="分组维度（可多选）">
+                <label class="group-option"><input type="checkbox" data-group-dim="agent">Agent 类型</label>
+                <label class="group-option"><input type="checkbox" data-group-dim="project">会话目录</label>
+                <label class="group-option"><input type="checkbox" data-group-dim="model">模型</label>
+                <label class="group-option"><input type="checkbox" data-group-dim="machine">机器</label>
+                <div class="group-time"><label for="time-dim">时间单位</label>
+                  <select id="time-dim">
+                    <option value="none">不按时间</option>
+                    <option value="day">天</option>
+                    <option value="week">周</option>
+                    <option value="month">月</option>
+                  </select>
+                </div>
+              </div>
+              <p id="group-summary" class="status-line">可组合多个维度；全部取消时查看总量。</p>
+            </div>
+          </div>
+        </section>
+        <p id="date-error" class="error" role="alert" hidden></p>
+        <div class="preset-row" aria-label="预设">
+          <button class="preset-btn" type="button" data-preset="daily-cost">每日成本</button>
+          <button class="preset-btn" type="button" data-preset="project-cost">会话目录成本</button>
+          <button class="preset-btn" type="button" data-preset="model-tokens">模型 token</button>
+          <button class="preset-btn" type="button" data-preset="agent-project">Agent × 会话目录</button>
+          <button class="preset-btn" type="button" data-preset="cache">缓存读取</button>
+        </div>
+        <p class="scope-note">会话目录按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
+          <details class="note-disclosure">
+            <summary>成本口径</summary>
+            <p>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按 bundled GLM-5 定价推算。模型定价未知时成本显示 —。</p>
+          </details>
+        <section id="pivot-panel" class="panel">
+          <div class="panel-head">
+            <h2>透视图</h2>
+          </div>
+          <div class="chart-box"><canvas id="pivot-chart"></canvas></div>
+          <p id="pivot-series-note" class="estimate-note" hidden></p>
+        </section>
+        <section id="ranking-panel" class="panel" hidden>
+          <div class="panel-head">
+            <h2 id="ranking-title">分组排名</h2>
+            <span id="ranking-count" class="status-line"></span>
+          </div>
+          <p id="ranking-description" class="status-line"></p>
+          <ol id="group-ranking" class="group-ranking" aria-label="分组排名"></ol>
+        </section>
+      </main>
+    </div>
+    <script>
+      AgentMonitor.initClientNavigation();
+      AgentMonitorPivot.init().catch((error) => {
+        console.error(error);
+        document.querySelector("main").insertAdjacentHTML("beforeend",
+          '<p class="error">此页面加载失败，刷新重试。</p>');
+      });
+    </script>
+  </body>
+</html>
