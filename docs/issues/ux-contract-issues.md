@@ -1,6 +1,6 @@
 # UX Contract Issues
 
-`docs/contracts/ux-contract.md` 的演化候选。契约本身基于真实端到端观察建立、不由 agent 静默改（见 `~/.claude/references/docs-organization-protocol.md` §4.6），自由 session 发现的候选先记在这里，由用户经 `/custom:create-ux-contract` 处理。
+`docs/contracts/ux-contract.md` 的演化候选。契约本身基于真实端到端观察建立、不由 agent 静默改（见 `~/.claude/skills/documentation-workflows/references/docs-organization-protocol.md` §4.6），自由 session 发现的候选先记在这里，由用户经 `/custom:create-ux-contract` 处理。
 
 ---
 
