@@ -40,7 +40,7 @@
 | 总览 | `/` | **机器状态条**（coverage N/M + 逐台卡片）；KPI 卡片（今日成本、本周成本、当前 range 的成本）与**逐账号配额列表**（Claude 5h/7d、Codex 7d）；「成本趋势」时间图；「本周会话目录成本」「本月模型构成」侧面板。**除配额外均为全机合计** |
 | 透视 | `/explore` | 机器状态条；SELECT 选择指标；WHERE 提供预设范围或起止日期与四类过滤；GROUP BY 组合 Agent 类型／会话目录／模型／机器及可选天／周／月；预设、时间趋势与组合排名，无分组时显示总量 |
 | 会话 | `/sessions` | **全机完整已采历史**：session 列表（列：agent/project/model/起始/cost/tokens/messages）；排序下拉（Time / Cost / Tokens / Duration）；行展开看 turn 级明细 |
-| LLM 调用 | `/llm-calls` | **全机、仅各机本地 LLM Gateway**：Machine 过滤；按 request 汇总调用结果，按 attempt 追踪实际 provider/model、fallback、credential source、usage、latency、成本与定价依据；request 与 attempt 各自独立分页；从请求进入右侧完整诊断并关闭返回列表（H9） |
+| LLM 调用 | `/llm-calls` | **全机、仅各机本地 LLM Gateway**：Machine 过滤；按 request 汇总调用结果，按 attempt 追踪实际 provider/model、fallback、credential source、usage、latency、成本与定价依据；request 与 attempt 各自独立分页；从请求或 attempt-parent 进入右侧完整诊断并关闭返回列表（H9）；按当前筛选导出全部匹配请求 JSON（H10） |
 | 网络 | `/network` | **仅本机**：五块诊断卡：本机（内网 IP / IPv6 泄漏 / DNS+地域）、公网（IP/位置/运营商/时区）、风险（proxycheck 风险分+type、ip-api hosting/marked-proxy、stopforumspam 垃圾评分+报告次数、本地 shell 代理环境变量）、时区（本机 vs 公网时区匹配）、结论（逐条结论 + verdict 规则说明）；总体 verdict banner + Refresh |
 
 **全局控件**：顶部 range 下拉 `7d / 30d / 90d / 6m / 1y / 2y / 全部`；Refresh 按钮；五页导航。切到另一页后顶部 range 仍是之前所选。Refresh 立即要求中心更新；若点击前已有一轮在跑，中心在其后补排一轮，不能只认旧轮为本次完成。首页按钮在受理后恢复，后台进度继续可见；需要等待完成的消费者只等本次请求，不等后来的队列。
@@ -165,7 +165,9 @@
 - **H6 成本口径不混算**：成本只按 attempt-time 口径统计，request 汇总仍按 request-time；成本按 `exact / estimated / unknown / subscription` 分开呈现，并继续按 currency、funding category、pricing basis 与 authority 区分；公司与个人 subscription 的行归属可区分，subtotal 仍同属 subscription 类别，不把不同币种相加。`unknown` 显示未知而非零；subscription 显示“未报告逐调用收费”而非 `$0`。已知 exact/estimated 项显示金额与依据；不生成 request-level 成本。
 - **H7 独立分页**：request 与 attempt 各自有 latest-first、默认 50 行的独立上一页/下一页控制；翻 request 页不改变 attempt 页，反之亦然。最后一页后 Next 禁用，返回上一页恢复前一页；过滤或 range 改变后两张表都回到第一页。
 - **H8 来源状态完整**：加载时显示 busy/loading；存在兼容 ledger 时显示 data；某机没有 ledger 时该来源显示明确 missing；ledger 不可读、schema 不兼容、数据无效或 ledger 路径是 dangling symlink 时显示明确 error，不把故障降级成“暂无调用”；旧 exporter 没有 source detail 时显示“未采集”。**判据**：三机分别构造 compatible、missing、旧 exporter/invalid 状态；兼容机数据继续可见，另外两机各自保留明确状态，页面停止 busy 且不把部分覆盖写成全量。
-- **H9 请求详情与返回**：点击逻辑请求打开右侧诊断，显示所选 machine/project/request 身份、结果、完整尝试链、usage/latency/cost 与详情自身快照及各来源时刻；成本未知仍显示未知。Escape 关闭详情并返回当前列表。**判据**：从真实多机入口选择一条请求，逐项核对详情身份与所选行，读取其完整尝试及来源时刻，再按 Escape 确认面板关闭、列表仍在。2026-10-06 `25697a3` 的生产样本为 `macstudio` / `aihot` 的一个成功请求、一个 `deepseek-v4.1-flash` attempt、1734ms/2309 token/unknown 成本；该读数不外推生产重试链、attempt-parent 入口或导出。
+- **H9 请求详情与返回**：点击逻辑请求或 attempt 表的父请求入口打开同一右侧诊断，显示所选 machine/project/request 身份、结果、完整尝试链、usage/latency/cost 与详情自身快照及各来源时刻；成本未知仍显示未知。Escape 关闭详情并返回当前列表。**判据**：从真实多机入口选择一条请求，逐项核对详情身份与所选行，读取其完整尝试及来源时刻，再从该请求的一条 attempt 父请求入口打开详情，核对同一 machine/project/request 与完整链；按 Escape 确认面板关闭、列表仍在。2026-10-06 `25697a3` 的生产样本为 `macstudio` / `aihot` 的一个成功请求、一个 `deepseek-v4.1-flash` attempt、1734ms/2309 token/unknown 成本；两种入口已观察到同一父请求及完整单次尝试；首次请求详情的 Escape 返回已核实，attempt 入口后的 Escape 命令虽已发出，但浏览器随后失联，未额外核实该次焦点返回。读数不外推生产重试链或导出。
+
+- **H10 全匹配请求 JSON 导出**：选择逻辑请求与 JSON 后，导出点击时筛选范围内的全部匹配请求，不截成当前 50 行页；下载文件为可解析的 JSON envelope，kind=requests、format=json，items 保留所选 project/machine 身份。**判据**：在真实入口选一个超过一页的请求集合，点击导出后实际读取下载文件，完整解析 items并核对数量与页面 matching 一致、所选维度一致且超过单页行数；不能仅凭 HTTP 200或成功文案判通过。2026-10-06 `0b85ade` 生产样本为 7d/project=aihot，369,757 requests、618,330,927 bytes、projects 仅 aihot、machines 仅 macstudio；`jq --stream` 完整解析成功。此生产验收仅覆盖 requests；attempts JSON 仅在隔离fixture验证，不外推生产。
 
 ---
 
