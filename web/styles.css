@@ -445,6 +445,35 @@ button:disabled {
   gap: var(--sp-5);
 }
 
+/* Values and history share one surface; each value keeps its own window. */
+.overview-cost .kpi-grid {
+  padding-bottom: var(--sp-6);
+  margin-bottom: var(--sp-6);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.overview-cost .kpi-card {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.overview-cost .panel-head {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .overview-cost .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-cost .kpi-card:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
 /* Quota is one row per account, not a fixed set of cards: how many accounts
    are in play is a fact about the fleet, not something the layout can assume. */
 .quota-scope {

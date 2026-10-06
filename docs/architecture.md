@@ -12,6 +12,8 @@ Claude Code and Codex logs enter through `parsers/`; `usage_archive.py` retains 
 
 `server.py` and `aggregators.py` answer the existing usage, session, pivot, quota, network and Gateway API routes. `web/` renders those APIs; the renamed `AgentMonitor` JavaScript namespace is internal to these pages. Network diagnostics share `ip_check/` with the secondary `ip-check` CLI.
 
+The overview borrows the value-and-trend panel relationship from Prompt Planet's `usage-observability-console` v1 while retaining the blue theme, independent account quotas and distinct cost windows. Its three summaries and trend share one surface; only the third summary and trend follow the range selector. This is a markup/style adaptation with no template runtime dependency or shared component package. See the [reuse decision](adr/20261006-91da-overview-template-reuse.md).
+
 ## Independent runtime boundary
 
 `agent-monitor`, lifecycle scripts and `install.sh` resolve this project's `.venv`; the installer creates it from `requirements.txt` and vendors browser assets under `web/vendor`. `lib/install-output.sh` is the small optional FD ledger emitter, not a loader for the former parent repository. Installers can stage with `--no-services` before service cutover.

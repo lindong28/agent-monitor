@@ -52,7 +52,7 @@
           <div id="sync-machines" class="sync-machines"></div>
         </details>
         <div class="kpi-sections">
-          <section class="kpi-group" aria-labelledby="kpi-spend-title">
+          <section class="kpi-group panel overview-cost" aria-labelledby="kpi-spend-title">
             <h2 id="kpi-spend-title" class="kpi-group-title">花费</h2>
             <p id="spend-coverage" class="quota-scope" hidden></p>
             <div class="kpi-grid">
@@ -75,6 +75,18 @@
                 <div id="range-context" class="kpi-sub" hidden></div>
               </article>
             </div>
+            <div class="panel-head">
+              <h2>成本趋势</h2>
+              <span id="cost-over-time-meta" class="status-line">—</span>
+              <a id="cost-over-time-link" class="panel-link" href="/explore?x=day&group=agent&metric=cost">→ 透视</a>
+            </div>
+            <details class="note-disclosure">
+              <summary>成本口径</summary>
+              <p>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按 bundled GLM-5 定价推算。</p>
+              <p>近 28 天的数据每次按当前可读的源重算：已有精确成本的保持原值，其余用 agent-monitor 当前的定价推算；源缺失或计数变小的保持上次可信值，其余照常更新——所以之前看到的合计仍可能变。28 天以外的不再变动。</p>
+            </details>
+            <div class="chart-box"><canvas id="daily-cost-chart"></canvas></div>
+            <p id="cost-over-time-coverage" class="estimate-note" hidden></p>
           </section>
           <section class="kpi-group" aria-labelledby="kpi-quota-title">
             <h2 id="kpi-quota-title" class="kpi-group-title">配额用量</h2>
@@ -106,20 +118,6 @@
           </div>
         </div>
         <section class="panel-grid" aria-label="总览图表">
-          <article class="panel panel-wide">
-            <div class="panel-head">
-              <h2>成本趋势</h2>
-              <span id="cost-over-time-meta" class="status-line">—</span>
-              <a id="cost-over-time-link" class="panel-link" href="/explore?x=day&group=agent&metric=cost">→ 透视</a>
-            </div>
-            <details class="note-disclosure">
-              <summary>成本口径</summary>
-              <p>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按 bundled GLM-5 定价推算。</p>
-              <p>近 28 天的数据每次按当前可读的源重算：已有精确成本的保持原值，其余用 agent-monitor 当前的定价推算；源缺失或计数变小的保持上次可信值，其余照常更新——所以之前看到的合计仍可能变。28 天以外的不再变动。</p>
-            </details>
-            <div class="chart-box"><canvas id="daily-cost-chart"></canvas></div>
-            <p id="cost-over-time-coverage" class="estimate-note" hidden></p>
-          </article>
           <article class="panel">
             <div class="panel-head">
               <h2>本周会话目录成本</h2>

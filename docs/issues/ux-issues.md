@@ -108,6 +108,14 @@
 - **Reproduce**: 在 Overview 的 Cost over time 下展开计算说明并阅读第二段。
 - **Recommended direction**: 保留估算、重算窗口、缺源与保护性保留旧值的事实边界，用读者能据此判断可信度和是否要处理的语言重写；实现术语只在诊断文档保留。
 
+## [open] ISSUE-UX-20261006-23be — 手机宽度下导航遮盖品牌文字
+
+- **Type**: responsive-usability
+- **Discovered**: 2026-10-06，第二产品模板适配期间
+- **Observed**: 在真实 `http://macstudio:39001/` 的 390×844 页面中，「总览」导航覆盖 `agent-monitor` 品牌中段；本次隔离预览同样出现。改动前后的共用导航 HTML/CSS 未变，属基线独立问题。
+- **Impact**: 手机顶部产品名称不完整；本次实际总览/透视导航仍可操作。
+- **Disposition**: 后续 Web UI 导航优化处理；本次仅整合成本摘要与趋势，不扩改全站导航。
+
 ## [open] ISSUE-UX-20260826-5453 — 768px 下 Quota 的机器归属与更新时间默认不可见
 
 - **Type**: responsive-usability
