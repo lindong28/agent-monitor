@@ -421,6 +421,26 @@ def llm_calls_endpoint(query):
     return llm_attempts.llm_calls(query)
 
 
+def llm_call_request_endpoint(query):
+    if hub.enabled():
+        with generation.generation_admission_snapshot() as admission:
+            sources = {g.db_path: g for g in admission.admitted}
+            return llm_attempts.llm_call_request(query,
+                sources=[(g.host, g.db_path) for g in admission.admitted],
+                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(sources[path]))
+    return llm_attempts.llm_call_request(query)
+
+
+def llm_calls_export_endpoint(query):
+    if hub.enabled():
+        with generation.generation_admission_snapshot() as admission:
+            sources = {g.db_path: g for g in admission.admitted}
+            return llm_attempts.llm_calls_export(query,
+                sources=[(g.host, g.db_path) for g in admission.admitted],
+                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(sources[path]))
+    return llm_attempts.llm_calls_export(query)
+
+
 def llm_call_filters_endpoint(query):
     if hub.enabled():
         with generation.generation_admission_snapshot() as admission:
@@ -458,6 +478,8 @@ ROUTES = {
     "/api/llm-calls": llm_calls_endpoint,
     "/api/llm-call-filters": llm_call_filters_endpoint,
     "/api/llm-calls-page": llm_calls_page_endpoint,
+    "/api/llm-call-request": llm_call_request_endpoint,
+    "/api/llm-calls-export": llm_calls_export_endpoint,
 }
 
 

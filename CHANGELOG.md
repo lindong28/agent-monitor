@@ -2,6 +2,7 @@
 
 ## 2026-10-06
 
+- Add machine-aware request diagnostics and complete filtered JSON exports to LLM Calls. Compact summaries and a filter rail keep requests prominent; cost and attempt audit details remain expandable. Unknown costs, source gaps and independent request/attempt time windows remain explicit.
 - Group overview cost summaries and their existing trend on one panel. Keep today's, this week's and the selected range's labels distinct, with the full-width account quota table below. The existing blue theme, machine warnings, accounting and drill-down behavior are preserved.
 
 ## 2026-10-04

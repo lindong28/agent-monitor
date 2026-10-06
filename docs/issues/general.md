@@ -163,3 +163,22 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 | `test_statistics_snapshot.StatisticsSnapshotTests.test_v3_archive_and_v5_source_preserve_funding_and_cost_partitions` | fixture 期望 schema 7，当前 Gateway 生成 schema 8 |
 
 首轮 Python 3.9.6 全套 784 项还有四个环境相关失败：两个 SQLite WAL 测试、`sys.stdlib_module_names` 不存在、GatewayApplication fixture 缺 `httpx`。同一四项在新旧源码的 Python 3.13.12 测试环境均通过；测试说明因此要求 Python 3.10+ 和 `requirements-dev.txt`，不据此提高生产代码的 Python 下限。本轮独立安装、helper、quota、exporter 和 Web 静态回归 107 项在该环境通过，不能替代上述七项，也不代表整套测试全绿。
+
+2026-10-06 调用页改造再次复现上表三项：`test_llm_attempts` 32 项中 30 通过，失败仍为旧 `loadFilters` 注入和缺少 `caller_route_constraint` 的 allowlist；`test_progressive_freshness` 9 项中 8 通过，失败仍为 mock 不接受 `progressive`。本次新增详情/导出 HTTP 4 项、交互 4 项和既有 Web/static 38 项均通过；它们不消解这三项既有失败。归属为用户指定的另一个后端优化/断言修复 session，本次 UI 单元不修改其行为或断言。复现命令为 `.venv/bin/python -m unittest discover -s tests -p test_llm_attempts.py` 及对应 `test_progressive_freshness.py`；本次 worktree 使用主 checkout 的同一 `.venv/bin/python`，详情见调用页 ADR `20261006-d83e`。
+
+## [open] ISSUE-CALLS-20261006-6d4a：调用页真实 Hub 的长等待与来源快照故障仍需后端处理
+
+- **Discovered**: 2026-10-06，调用页 UI 改造前的真实入口观察。
+- **Priority**: medium
+- **Owner**: 用户指定的另一个 agent-monitor 后端优化/断言修复 session；本单元记录、不修复。
+- **Attribution**: 基线独立、非边界。
+- **Evidence**: 四个已纳入来源、498,194 请求/469,818 尝试；一次 `/api/llm-calls-page` 浏览器资源耗时 45,390ms，后续一次 fetch 失败；macstudio 来源显示 unsupported gateway snapshot，观测时间仍旧。此单次读数不表示长期平均或由 UI 变更引起，来源故障与既有 `ISSUE-EXPORT-20260915-e3a1` 的版本兼容边界相关，尚未证明同一根因。
+- **Next**: 在真实 Hub 入口核对服务版本、admitted snapshot 身份及失败来源，分解读取等待后复测；新详情/导出使用既有完整 audit reader，本次不宣称获得 Gateway indexed UI 的性能保证。调用页布局和隔离 fixture 验证不能替代此项。
+
+## [open] ISSUE-UX-SYNC-20261006-b52c：调用页新增诊断与导出待部署后同步真实 UX 契约
+
+- **Discovered**: 2026-10-06，ADR `20261006-d83e` 的本地实现与定向验证完成。
+- **Priority**: medium
+- **Owner**: 本次主线程负责取得覆盖 monitor 的发布/部署许可；获准后的部署与真实 E2E 执行者提供读数，UX 契约现有 writer 按其归属同步。
+- **Pending**: 本条随本地实现提交，尚未发布或部署。隔离 fixture 为两台机器、三个项目、108 请求/110 尝试；详情、Escape 焦点返回、SPA 往返、全匹配导出、请求第二页及 390px 窄屏详情已观察，见 ADR `20261006-d83e`。重复延迟及对照因自动化超时未完成；不得据本地结果声称生产链路或性能已通过。
+- **Completion**: 获准部署后，从真实多机 `/llm-calls` 走请求入口及 attempt-parent 入口、完整诊断、关闭返回、保留筛选/分页和全匹配 JSON 导出，保留各来源时间与缺失/未知/零差异；据真实读数同步 `contracts/ux-contract.md` 及必要问题记录。本条不直接改动由另一 writer 持有的契约或 `ux-contract-issues.md`。

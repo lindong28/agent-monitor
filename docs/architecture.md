@@ -22,6 +22,8 @@ The overview borrows the value-and-trend panel relationship from Prompt Planet's
 
 The independent llm-gateway repository supplies its Python audit reader through `gateway_dependency.py`; the default checkout is `~/research/llm-gateway`, overridden by `LLM_GATEWAY_ROOT`. Gateway owns ledger schema fingerprints, pricing policy and inference credentials. This consumer retains versioned field mappings and unknown-field rejection. No Gateway service is started by this installer.
 
+The calls page, request diagnostics and JSON export use that reader through read-only HTTP adapters. Hub adapters hold an admitted-generation lease throughout each read. Detail lookup carries machine and project identity; its complete child chain is independent of the list window. Export returns one selected record kind across all matching rows. Different HTTP observations can see different generations; their envelopes retain their own source times. UI teardown and selection guards prevent a late detail response from replacing a newer page or request. No new collection, ledger or indexing mechanism is introduced by this UI integration.
+
 ## Preserved contracts
 
 Extraction changes names, installation ownership and source paths. It does not change bucket timezone, snapshot schemas, host/account identity, retention or arithmetic. `token_cost.py` is byte-identical to its extraction source. The source commit and historical docs are recorded in the [extraction ADR](adr/20261004-a902-standalone-project.md).

@@ -1728,3 +1728,67 @@ td.numeric {
     text-align: left;
   }
 }
+
+/* Calls explorer: the filter rail lives in main so SPA navigation owns it. */
+.llm-main { width: 100%; gap: 12px; min-width: 0; }
+.llm-main .llm-workbench { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
+.llm-main .llm-results { display: grid; gap: 12px; min-width: 0; }
+.llm-main .llm-filter-panel { padding: 12px; }
+.llm-main .llm-filter-panel .panel-head { align-items: center; gap: 8px; }
+.llm-main .llm-filter-panel .panel-head h2 { font-size: 13px; }
+.llm-main .llm-filter-panel .panel-head button { padding: 0 8px; font-size: 12px; }
+.llm-main .llm-controls { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.llm-main .llm-controls .field { min-width: 0; }
+.llm-main .llm-controls select { min-width: 0; max-width: 100%; }
+.llm-main .llm-kpis { gap: 0; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.llm-main .llm-kpis .kpi-card { padding: 12px 16px; border: 0; border-right: 1px solid var(--line); border-radius: 0; box-shadow: none; }
+.llm-main .llm-kpis .kpi-card:last-child { border-right: 0; }
+.llm-main .llm-kpis .kpi-value { font-size: 24px; line-height: 32px; }
+.llm-main .llm-kpis .kpi-sub { font-size: 12px; line-height: 16px; }
+.llm-main .llm-state { padding: 8px 12px; font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+.llm-main .llm-state.data { background: var(--surface); border-color: var(--line); }
+.llm-main .scope-note { font-size: 12px; line-height: 20px; }
+.llm-main .sync-panel { padding: 8px 12px; }
+.llm-main .llm-export-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--ink-muted); font-size: 12px; }
+.llm-main .llm-export-bar > span:first-child { margin-right: auto; }
+.llm-main .llm-export-bar select { max-width: 128px; }
+.llm-main .llm-request-table { min-width: 1080px; }
+.llm-main .llm-request-table td { padding: 8px; font-size: 12px; line-height: 20px; }
+.llm-main .llm-table-wrap { max-height: min(640px, 72vh); }
+.llm-main .llm-request-link { display: inline-block; color: var(--accent); border: 0; padding: 0; height: auto; min-height: 0; background: transparent; text-align: left; font: inherit; cursor: pointer; }
+.llm-main .llm-request-link:hover { text-decoration: underline; background: transparent; }
+.llm-main .llm-request-link:focus-visible, .llm-main summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.llm-main details > summary { cursor: pointer; list-style: none; }
+.llm-main details > summary::-webkit-details-marker { display: none; }
+.llm-main details > summary::before { content: '›'; flex: 0 0 auto; color: var(--ink-muted); font-size: 20px; }
+.llm-main details[open] > summary::before { content: '⌄'; }
+.llm-main details > summary h2 { font-size: 13px; line-height: 20px; }
+.llm-main details:not([open]) > summary { margin-bottom: 0; }
+.llm-main .llm-detail { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(600px, 100%); max-width: 100%; height: 100dvh; max-height: 100dvh; padding: 20px; border: 0; border-left: 1px solid var(--line); background: var(--surface); color: var(--ink); overflow: auto; box-sizing: border-box; box-shadow: var(--e-overlay); }
+.llm-main .llm-detail::backdrop { background: rgb(18 25 38 / 18%); }
+.llm-main .llm-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.llm-main .llm-detail h2 { font-size: 18px; line-height: 24px; margin: 0; }
+.llm-main .llm-detail h3 { font-size: 14px; line-height: 20px; margin: 16px 0 12px; }
+.llm-main .llm-detail-fields { display: grid; grid-template-columns: 112px minmax(0, 1fr); margin: 12px 0; gap: 8px 12px; font-size: 12px; line-height: 20px; }
+.llm-main .llm-detail-fields dt { color: var(--ink-muted); }
+.llm-main .llm-detail-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.llm-main .llm-detail-attempt { border-top: 1px solid var(--line); padding-top: 4px; }
+@media (max-width: 1000px) {
+  .llm-main .llm-workbench { grid-template-columns: minmax(0, 1fr); }
+  .llm-main .llm-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .llm-main .llm-controls, .llm-main .llm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .llm-main .llm-kpis .kpi-card { padding: 8px 12px; }
+  .llm-main .llm-kpis .kpi-card:nth-child(2) { border-right: 0; }
+  .llm-main .llm-kpis .kpi-card:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .llm-main .llm-detail { width: 100%; padding: 16px; }
+  .llm-main .llm-detail-fields { grid-template-columns: 88px minmax(0, 1fr); }
+}
+.llm-main #sync-panel > summary::before { content: none; }
+.llm-main #llm-filter-disclosure > summary { font-size: 12px; line-height: 20px; color: var(--ink-muted); margin: 8px 0 12px; }
+.llm-main #llm-filter-disclosure > summary::before { margin-right: 8px; }
+.llm-main #llm-active-filters { overflow-wrap: anywhere; margin: 8px 0; }
+.llm-main .llm-audit-disclosure { margin: 8px 0; }
+.llm-main .llm-audit-disclosure > summary { font-size: 12px; line-height: 20px; color: var(--accent-ink); }
+.llm-main .llm-audit-disclosure > summary::before { margin-right: 8px; }

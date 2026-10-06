@@ -46,7 +46,9 @@
   function formatAmount(value, currency) {
     if (value === null || value === undefined) return "—";
     try {
-      return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(Number(value));
+      const amount = Number(value);
+      if (amount !== 0 && Math.abs(amount) < 0.000001) return `${amount.toExponential(3)} ${currency || ""}`.trim();
+      return new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(amount);
     } catch (error) {
       return `${Number(value).toFixed(4)} ${currency || ""}`.trim();
     }
@@ -185,6 +187,184 @@
     return result;
   }
 
+  let detailSequence = 0;
+  let detailOrigin = null;
+  let exportSequence = 0;
+
+  function requestLink(label, identity) {
+    const result = node("td", undefined, "mono-cell");
+    const button = node("button", label, "llm-request-link audit-label");
+    button.type = "button";
+    button.title = `查看完整请求：${label}`;
+    button.setAttribute("data-request-identity", JSON.stringify(identity));
+    button.addEventListener("click", () => openDetail(identity, button));
+    result.appendChild(button);
+    return result;
+  }
+
+  function reported(value) {
+    if (value === null || value === undefined || value === "") return "未报告";
+    return typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+  }
+
+  function fields(container, entries) {
+    const list = node("dl", undefined, "llm-detail-fields");
+    entries.forEach(([label, value]) => {
+      list.appendChild(node("dt", label));
+      list.appendChild(node("dd", reported(value)));
+    });
+    container.appendChild(list);
+  }
+
+  function auditDisclosure(container, title, entries) {
+    const details = node("details", undefined, "llm-audit-disclosure");
+    details.appendChild(node("summary", title));
+    fields(details, entries);
+    container.appendChild(details);
+  }
+
+  function identityLabel(value) {
+    return value && typeof value === "object" ? `${value.machine} / ${value.id}` : value;
+  }
+
+  function renderDetail(payload, container) {
+    clear(container);
+    const request = payload.request;
+    container.appendChild(node("p", `详情快照截至：${formatTime(payload.as_of)}`, "scope-note"));
+    (payload.sources || []).forEach((source) => container.appendChild(node("p",
+      `${source.machine} · ${human(source.state)} · 观测于 ${formatTime(source.observed_at)}`, "scope-note")));
+    fields(container, [
+      ["机器", request.machine || "本机"], ["项目", request.canonical_project_id],
+      ["逻辑请求", request.logical_request_id],
+      ["请求时间", formatTime(request.request_timestamp)], ["逻辑模型", request.logical_model],
+      ["结果", request.request_outcome], ["拒绝原因", request.request_reject_reason],
+    ]);
+    auditDisclosure(container, "请求身份与路由证据", [
+      ["会话", request.session_ref], ["调用者", request.caller_username],
+      ["请求模式", request.requested_mode], ["路由选择来源", request.route_selection_source],
+      ["指定路由", request.requested_route_id], ["实际路由", request.resolved_route_id],
+      ["准入版本", request.admission_revision], ["调用方路由约束", request.caller_route_constraint],
+      ["候选路由", request.preselection_candidates],
+    ]);
+    const attempts = request.attempts || [];
+    container.appendChild(node("h3", `完整尝试链 · ${attempts.length} 次`));
+    if (!attempts.length) container.appendChild(node("p", "此请求没有已记录的服务商尝试。"));
+    attempts.forEach((item) => {
+      const section = node("section", undefined, "llm-detail-attempt");
+      const title = node("h3", `#${item.attempt_no} · ${reported(item.provider_id)} · `);
+      title.appendChild(outcomePill(item.outcome));
+      section.appendChild(title);
+      fields(section, [
+        ["实际模型", item.actual_model], ["路由", item.route_id],
+        ["错误类别", item.error_class], ["HTTP 状态", item.http_status],
+        ["延迟", item.latency_ms == null ? null : `${Math.round(item.latency_ms)} ms`],
+        ["用量", attemptUsage(item)], ["成本", attemptCost(item)],
+      ]);
+      auditDisclosure(section, "身份、路由与凭据来源", [
+        ["尝试 ID", identityLabel(item.attempt_id)], ["上游尝试", identityLabel(item.parent_attempt_id)],
+        ["时间", formatTime(item.attempt_timestamp)],
+        ["派发边界", item.dispatch_boundary], ["传输", item.transport],
+        ["路由来源", item.route_selection_source],
+        ["路由版本", item.routing_revision], ["运行 ID", item.run_id],
+        ["账号配置", item.credential_profile_id], ["账号标签", item.credential_profile_display_name],
+        ["标签来源", profileSourceLabel(item.credential_profile_display_name_source)],
+        ["凭据来源类型", item.credential_source_kind], ["凭据来源", item.credential_source_ref],
+        ["生成控制", item.generation_controls], ["已验证能力", item.route_verified_capabilities],
+      ]);
+      auditDisclosure(section, "用量、成本与定价证据", [
+        ["用量状态", item.usage_state], ["完整用量", item.usage],
+        ["付费来源", item.funding_source], ["成本状态", item.cost_state], ["成本来源", item.cost_provenance],
+        ["定价状态", item.pricing_state], ["定价依据", item.pricing_basis],
+        ["定价值", item.pricing_value == null ? null : formatAmount(item.pricing_value, item.pricing_currency)],
+        ["定价来源", item.pricing_source], ["定价检查时间", item.pricing_checked_at],
+        ["定价生效时间", item.pricing_effective_at], ["定价有效期", item.pricing_valid_until],
+      ]);
+      container.appendChild(section);
+    });
+  }
+
+  function closeDetail() {
+    detailSequence += 1;
+    const dialog = AgentMonitor.qs("#llm-detail");
+    if (dialog.open) dialog.close();
+    if (detailOrigin && detailOrigin.isConnected) detailOrigin.focus();
+    else {
+      const identity = detailOrigin?.getAttribute("data-request-identity");
+      const replacement = identity && Array.from(document.querySelectorAll(".llm-main [data-request-identity]"))
+        .find(button => button.getAttribute("data-request-identity") === identity);
+      (replacement || AgentMonitor.qs("#llm-requests-title"))?.focus();
+    }
+    detailOrigin = null;
+  }
+
+  async function openDetail(identity, origin) {
+    const current = AgentMonitor.pageScope();
+    const sequence = ++detailSequence;
+    detailOrigin = origin;
+    const dialog = AgentMonitor.qs("#llm-detail");
+    const content = AgentMonitor.qs("#llm-detail-content");
+    clear(content);
+    content.appendChild(node("p", "正在读取完整请求…"));
+    if (!dialog.open) dialog.showModal();
+    try {
+      const payload = await apiJSON("/api/llm-call-request", identity);
+      if (current() && sequence === detailSequence && dialog.open) renderDetail(payload, content);
+    } catch (error) {
+      if (current() && sequence === detailSequence && dialog.open) {
+        clear(content);
+        content.appendChild(node("p", `请求诊断不可用：${error.message}`, "error"));
+      }
+    }
+  }
+
+  async function exportRecords() {
+    const current = AgentMonitor.pageScope();
+    const sequence = ++exportSequence;
+    const values = query({ request: null, attempt: null });
+    delete values.page_size;
+    values.kind = AgentMonitor.qs("#llm-export-kind").value;
+    values.format = AgentMonitor.qs("#llm-export-format").value;
+    const selection = JSON.stringify(values);
+    const status = AgentMonitor.qs("#llm-export-status");
+    const button = AgentMonitor.qs("#llm-export");
+    const isSameSelection = () => {
+      const next = query({ request: null, attempt: null });
+      delete next.page_size;
+      next.kind = AgentMonitor.qs("#llm-export-kind").value;
+      next.format = AgentMonitor.qs("#llm-export-format").value;
+      return JSON.stringify(next) === selection;
+    };
+    button.disabled = true;
+    status.textContent = "正在导出全部匹配记录…";
+    try {
+      const payload = await apiJSON("/api/llm-calls-export", values);
+      if (!current() || sequence !== exportSequence) return;
+      const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+      const link = node("a");
+      link.href = url;
+      const filterName = filterRegistry.filter(f => values[f.query]).map(f => `${f.query}-${values[f.query]}`).join("_");
+      link.download = `llm-${values.kind}_${values.range}_${filterName || "all-filters"}_${new Date().toISOString().replaceAll(":", "-")}.json`.replace(/[\/\\]/g, "-");
+      link.click();
+      URL.revokeObjectURL(url);
+      if (isSameSelection()) status.textContent = "已导出全部匹配记录（JSON）。";
+      else status.textContent = "已导出点击时的筛选；当前筛选已变化。";
+    } catch (error) {
+      if (current() && sequence === exportSequence) status.textContent = isSameSelection() ? `导出失败：${error.message}` : "上一次筛选的导出失败；可导出当前筛选。";
+    } finally {
+      if (current() && sequence === exportSequence) button.disabled = false;
+    }
+  }
+
+  function bindDiagnostics() {
+    const dialog = AgentMonitor.qs("#llm-detail");
+    // All listeners belong to main's subtree; SPA removal also removes the
+    // modal. pageScope prevents pending responses from touching its successor.
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); closeDetail(); });
+    AgentMonitor.qs("#llm-detail-close").addEventListener("click", closeDetail);
+    AgentMonitor.qs("#llm-requests-title").setAttribute("tabindex", "-1");
+    AgentMonitor.qs("#llm-export").addEventListener("click", exportRecords);
+  }
+
   function renderRequests(payload) {
     const body = AgentMonitor.qs("#llm-requests-body");
     clear(body);
@@ -202,7 +382,7 @@
         row.appendChild(cell(item.machine || "本机"));
         row.appendChild(auditLabelCell(item.canonical_project_id, "project-cell"));
         row.appendChild(auditLabelCell(item.session_ref, "session-cell"));
-        row.appendChild(auditLabelCell(item.logical_request_id, "mono-cell"));
+        row.appendChild(requestLink(item.logical_request_id, { machine: item.machine, project: item.canonical_project_id, logical_request_id: item.logical_request_id }));
         row.appendChild(auditLabelCell(item.logical_model, "model-cell"));
         const outcome = node("td"); outcome.appendChild(outcomePill(item.request_outcome)); row.appendChild(outcome);
         row.appendChild(auditLabelCell(item.requested_route_id || human(item.route_selection_source), "route-cell"));
@@ -226,6 +406,7 @@
   }
 
   function attemptCost(item) {
+    if (!item.cost_state) return "未报告";
     if (item.cost_state === "unknown") return "未知";
     if (item.cost_state === "not_incurred") return ["company_subscription", "personal_subscription", "subscription_unassigned"].includes(item.funding_source) ? "未报告逐调用收费" : "未产生费用";
     return `${formatAmount(item.cost_value, item.cost_currency)} · ${human(item.cost_state)} · ${human(item.cost_basis)}`;
@@ -246,7 +427,10 @@
         const row = node("tr");
         row.appendChild(cell(formatTime(item.attempt_timestamp), "nowrap"));
         row.appendChild(cell(item.machine || "本机"));
-        row.appendChild(auditLabelCell(`${item.parent_request.canonical_project_id} · ${item.parent_request.logical_request_id}`, "mono-cell"));
+        row.appendChild(requestLink(`${item.parent_request.canonical_project_id} · ${item.parent_request.logical_request_id}`, {
+          machine: item.machine || item.parent_request.machine,
+          attempt_id: typeof item.attempt_id === "object" ? item.attempt_id.id : item.attempt_id,
+        }));
         const attemptLabel = `#${item.attempt_no} · ${human(item.route_selection_source)}`;
         const attemptTitle = item.parent_attempt_id ? `${attemptLabel} · 上游 ${typeof item.parent_attempt_id === "object" ? `${item.parent_attempt_id.machine}: ${item.parent_attempt_id.id}` : item.parent_attempt_id}` : attemptLabel;
         row.appendChild(auditLabelCell(attemptLabel, "attempt-cell", attemptTitle));
@@ -275,6 +459,7 @@
   }
 
   function render(payload) {
+    renderFilterSelection();
     state.payload = payload;
     setTerminal(payload);
     renderSummary(payload);
@@ -422,13 +607,24 @@
     state.requestPage = 1; state.attemptPage = 1;
   }
 
+  function renderFilterSelection() {
+    const selected = filterRegistry.map(filter => {
+      const control = document.querySelector(`[data-filter="${filter.query}"]`);
+      return control?.value ? `${document.querySelector(`label[for="${filter.selector.slice(1)}"]`)?.textContent || filter.query}: ${control.value}` : null;
+    }).filter(Boolean);
+    AgentMonitor.qs("#llm-active-filters").textContent = selected.length ? selected.join(" · ") : "未启用筛选";
+  }
+
   function bindFilters() {
+    AgentMonitor.qs("#llm-filter-disclosure").open = !window.matchMedia?.("(max-width: 1000px)").matches;
+    renderFilterSelection();
     filterRegistry.forEach((filter) => {
       const control = document.querySelector(`[data-filter="${filter.query}"]`);
       control.addEventListener("change", () => {
         state.reloadSequence += 1;
         AgentMonitor.setParam(filter.query, control.value);
         resetPages();
+        renderFilterSelection();
         loadSelection();
       });
     });
@@ -440,6 +636,7 @@
         AgentMonitor.setParam(filter.query, "");
       });
       resetPages();
+      renderFilterSelection();
       loadSelection();
     });
   }
@@ -510,6 +707,7 @@
   async function init() {
     AgentMonitor.bindShell(reloadRange);
     bindFilters();
+    bindDiagnostics();
     bindPager("requests");
     bindPager("attempts");
     await reloadRange();
