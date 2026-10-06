@@ -1,6 +1,6 @@
 # Overview template reuse
 
-Status: implemented locally, 2026-10-06. Remote publication and production deployment await separate authorization; neither is claimed here.
+Status: published and deployed to the personal MacStudio Hub with explicit owner authorization, 2026-10-06. Local and production observations are recorded separately below.
 
 The owner selected agent-monitor as the second product for the Web UI template reuse roadmap. Apply `preset:usage-observability-console` version 1 from Prompt Planet to `/`, retaining this project's blue visual system, statistics and account semantics. The published definition matches the local version archive byte for byte.
 
@@ -23,3 +23,9 @@ At 1440×900 the cost curve starts at y=318 and quota rows at y=715; values and 
 `interaction-latency` using an explicitly connected isolated browser measured the cost-explanation disclosure at 37.3 ms on its first measured opening and 38.2 ms on repeat; clicking the unchanged trend label returned no change in both 0.5s controls. These are warmed local page samples, not cold navigation or production response measurements. LCP and first meaningful data paint were not measured. `visual-budget` on the populated 1440×900 preview reports 13 repeated elements, 6 saturated colors, 4 hue buckets, 5 border styles, 4 radii and 1.4 page screens; these are descriptive counts, not aesthetic acceptance.
 
 Coverage: deep review of the cost panel and range/drill-down flow; adjacent regression of account quotas, disclosures, machine coverage and the two fixed-window charts. Other product routes, refresh/restart/account deletion, backend assertions, production latency and complete accessibility/UX-contract acceptance are excluded. The previously recorded range-scope and contract-layer drift remain in `docs/issues/ux-issues.md` and `docs/issues/ux-contract-issues.md`.
+
+## Authorized release
+
+The owner explicitly selected “发布并部署” after reviewing the commit and preview scope. `8036b9ce026e6e743ce61d958564702e0b9feba0` was pushed to origin/main (the repository's first publication, including the existing extraction baseline), then fast-forwarded into the MacStudio checkout. The served overview HTML and CSS match that commit byte for byte. Hub restart initially failed at launchd bootstrap; retrying bootstrap against the same plist restored the service. See the dated service-operations entry for the recovery and live validation.
+
+At `http://macstudio:39001/?range=7d`, the real browser read three summaries and a seven-bucket trend on the same panel, with four admitted machines. Following the trend link rendered Explore's day/agent/cost result, and returning retained range=7d. Desktop 1440×900 and phone-sized 390×844 screenshots were read; the latter retains the separately recorded navigation-brand overlap. The cost changed between observations while collection continued, so those observations are not a frozen arithmetic comparison. Health with the consumer's asset_watch=1 parameter returned ok=true/stale=false. No claim is made about backend performance or complete UX acceptance.

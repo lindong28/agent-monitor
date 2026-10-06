@@ -4,6 +4,14 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-06 overview UI release
+
+With explicit owner publication/deployment approval, MacStudio `/Users/lindong/research/agent-monitor` fast-forwarded from `1b3b8f1` to `8036b9c`. Only the Web layout and documentation changed. The existing `com.agent-monitor.hub` service, interpreter and state path remain in use; no collector configuration or stored account/statistics data was edited.
+
+`./agent-monitor restart` stopped the Hub but its immediate `launchctl bootstrap` returned error 5. The job was absent and port 39001 refused connections. A subsequent `launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.agent-monitor.hub.plist` succeeded against that same definition; the loaded Hub PID was 18133. This is a recovery observation, not a diagnosed root cause or lifecycle fix. If it recurs, inspect actual launchd state before retrying; the backend/lifecycle investigation remains outside this UI change.
+
+After recovery, `/` and `/web/styles.css` matched the deployed source byte for byte. `/api/health?asset_watch=1` returned ok=true/stale=false (omitting asset_watch=1 deliberately reports stale in the existing API). A real browser opened `/?range=7d`, read three cost summaries, seven trend buckets and 4/4 machine coverage, followed the trend link into Explore and returned with the same range. Desktop and phone-sized renderings were inspected. These checks establish this UI rollout; they do not establish backend performance, all machine refresh success, native mobile behavior or complete UX-contract acceptance.
+
 ## Existing-deployment migration
 
 1. Inspect each active process/service's actual source and state paths, role, service owner and outstanding collectors before changing it. Stage the new code, runtime and assets with `--no-services`; this changes CLI links but leaves services alone.
