@@ -175,10 +175,17 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 - **Evidence**: 四个已纳入来源、498,194 请求/469,818 尝试；一次 `/api/llm-calls-page` 浏览器资源耗时 45,390ms，后续一次 fetch 失败；macstudio 来源显示 unsupported gateway snapshot，观测时间仍旧。此单次读数不表示长期平均或由 UI 变更引起，来源故障与既有 `ISSUE-EXPORT-20260915-e3a1` 的版本兼容边界相关，尚未证明同一根因。
 - **Next**: 在真实 Hub 入口核对服务版本、admitted snapshot 身份及失败来源，分解读取等待后复测；新详情/导出使用既有完整 audit reader，本次不宣称获得 Gateway indexed UI 的性能保证。调用页布局和隔离 fixture 验证不能替代此项。
 
+2026-10-06 发布 `25697a3` 并重启既有 Hub 后，主线程从真实 7d 页面读到 50 行、409,355 匹配请求并打开一条完整详情；列表/详情资源各一次读数为 39.916s/36.493s。此处只追加生产等待证据，不作跨时提速比较，亦不据部署健康与单条详情宣称来源快照故障已修复。归属继续为用户另一个后端 session。
+
 ## [open] ISSUE-UX-SYNC-20261006-b52c：调用页新增诊断与导出待部署后同步真实 UX 契约
 
 - **Discovered**: 2026-10-06，ADR `20261006-d83e` 的本地实现与定向验证完成。
 - **Priority**: medium
-- **Owner**: 本次主线程负责取得覆盖 monitor 的发布/部署许可；获准后的部署与真实 E2E 执行者提供读数，UX 契约现有 writer 按其归属同步。
-- **Pending**: 本条随本地实现提交，尚未发布或部署。隔离 fixture 为两台机器、三个项目、108 请求/110 尝试；详情、Escape 焦点返回、SPA 往返、全匹配导出、请求第二页及 390px 窄屏详情已观察，见 ADR `20261006-d83e`。重复延迟及对照因自动化超时未完成；不得据本地结果声称生产链路或性能已通过。
-- **Completion**: 获准部署后，从真实多机 `/llm-calls` 走请求入口及 attempt-parent 入口、完整诊断、关闭返回、保留筛选/分页和全匹配 JSON 导出，保留各来源时间与缺失/未知/零差异；据真实读数同步 `contracts/ux-contract.md` 及必要问题记录。本条不直接改动由另一 writer 持有的契约或 `ux-contract-issues.md`。
+- **Owner**: 本次主线程已取得发布/部署许可并部署 `25697a3`；真实 E2E 执行者继续提供导出与 attempt-parent 读数，文档 writer 仅同步已获真实观察的行为。
+- **Pending**: 真实 7d 页面已显示 50 行/409,355 请求，`macstudio` / `aihot` 一条请求的完整单次尝试、未知成本、四来源时刻及 Escape 返回已观察；导出与 attempt-parent 仍在验证。隔离 fixture 的两台机器、三个项目、108 请求/110 尝试及窄屏/SPA 结果见 ADR `20261006-d83e`，不冒充生产全路径或性能验收。
+- **Progress**: 项目 `aihot` 筛选后为 369,757 匹配请求；当前 range 只有 macmini/macstudio 机器选项，macbook 失效值按 H5 清除。已核验原契约 writer 登记的工作树不存在、其进程当前 cwd 在 ai-agent-config，monitor 主树契约无 WIP；本次获授权 writer 因此已将真实请求入口行为同步到 H9，H1–H8 保留。
+- **Completion**: 从真实多机 `/llm-calls` 补齐 attempt-parent 与全匹配 JSON 导出的终态，保留各来源时间与缺失/未知/零差异，再按已验证范围同步 H10 及必要问题记录。当前不把在飞导出写成通过，也不修改 `ux-contract-issues.md`。
+
+2026-10-06 生产导出取得失败终态：HTTP 200、618,330,927 bytes、252,832ms，但实际下载文件只有 4 bytes 的 `null`。前端 `apiJSON` 吞掉 `response.json()` 失败后返回 null，导出再序列化该值并显示成功；解析失败的底层原因尚未证明，不将 V8 字符串限额写成已确认根因。这是本次新增 HIGH，导出验收与 H10 同步暂不完成。
+
+修复由本次 UI 单元负责：本地导出成功路径已改为直接下载 `response.blob()`，不解析或重新序列化整个 JSON；错误 HTTP、Blob 读取失败保留明确错误并恢复按钮。新增红测试在修复前实际读到 `null` 下载，修复后交互测试 7 项通过，覆盖响应 Blob 原样使用、HTTP/读取失败、旧查询及 SPA/新导出迟到响应。此刻补丁仍待主线程复核、发布部署与真实文件复验，不称生产故障已修复；后端大导出等待继续归另一个后端 session。

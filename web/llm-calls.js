@@ -337,9 +337,18 @@
     button.disabled = true;
     status.textContent = "正在导出全部匹配记录…";
     try {
-      const payload = await apiJSON("/api/llm-calls-export", values);
+      const endpoint = new URL("/api/llm-calls-export", window.location.origin);
+      Object.entries(values).forEach(([key, value]) => endpoint.searchParams.set(key, value));
+      const response = await fetch(endpoint, { cache: "no-store" });
+      if (!response.ok) {
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.error?.message || `LLM 导出接口返回 ${response.status}`);
+      }
+      // Keep large exports as bytes: parsing and re-stringifying the complete
+      // envelope can fail even after a successful HTTP response.
+      const blob = await response.blob();
       if (!current() || sequence !== exportSequence) return;
-      const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+      const url = URL.createObjectURL(blob);
       const link = node("a");
       link.href = url;
       const filterName = filterRegistry.filter(f => values[f.query]).map(f => `${f.query}-${values[f.query]}`).join("_");

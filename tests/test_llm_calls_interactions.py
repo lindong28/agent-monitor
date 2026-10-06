@@ -28,7 +28,7 @@ const qs = k => { if (!nodes.has(k)) nodes.set(k,node(k)); return nodes.get(k); 
 global.window = { location: { origin: 'http://fixture' } };
 global.document = { createElement: node, querySelector: qs };
 global.AgentMonitor = { qs, pageScope() {const g=generation;return ()=>g===generation;}, getRange:()=>range, integer:String };
-global.fetch = url => new Promise(resolve => requests.push({url, finish(payload, ok=true) {resolve({ok,status:404,json:async()=>payload});}}));
+global.fetch = url => new Promise(resolve => requests.push({url, finish(payload, ok=true) {resolve({ok,status:404,json:async()=>payload,blob:async()=>new Blob([JSON.stringify(payload)],{type:'application/json'})});}}));
 URL.createObjectURL = () => 'blob:fixture'; URL.revokeObjectURL = () => {};
 eval(fs.readFileSync('web/llm-calls.js','utf8').replace('window.AgentMonitorLLMCalls = { init };',
  'window.AgentMonitorLLMCalls = { init, state, openDetail, closeDetail, renderDetail, exportRecords, formatAmount, bindDiagnostics, renderAttempts };'));
@@ -107,4 +107,53 @@ assert.equal(requests[1].url.searchParams.get('attempt_id'),'child');
 assert.equal(requests[1].url.searchParams.get('machine'),'b');
 assert(!requests[1].url.searchParams.has('project'));
 requests[1].finish(payload('same'));
+''')
+
+    def test_export_does_not_turn_json_parse_failure_into_null_download(self):
+        self.run_js(r'''
+qs('#llm-export-kind').value='requests';qs('#llm-export-format').value='json';
+const raw = new Blob(['{"items":[{"logical_request_id":"preserved"}]}'], {type:'application/json'});
+let downloaded, jsonReads=0;
+URL.createObjectURL = blob => { downloaded=blob; return 'blob:raw-export'; };
+global.fetch = async () => ({ok:true,status:200,
+  json:async()=>{jsonReads++;throw Error('JSON parse failed');}, blob:async()=>raw});
+await api.exportRecords();
+assert.equal(await downloaded.text(), await raw.text(), 'must not download null after HTTP 200 parse failure');
+assert.strictEqual(downloaded,raw,'download the response blob without JSON serialization');
+assert.equal(jsonReads,0);assert.equal(downloads.length,1);
+assert.equal(qs('#llm-export').disabled,false);
+''')
+
+    def test_export_http_and_blob_failures_do_not_download_and_restore_button(self):
+        self.run_js(r'''
+qs('#llm-export-kind').value='requests';qs('#llm-export-format').value='json';
+global.fetch=async()=>({ok:false,status:500,json:async()=>({error:{message:'ledger unavailable'}}),blob:async()=>{throw Error('must not consume error as export');}});
+await api.exportRecords();
+assert.equal(downloads.length,0);assert(qs('#llm-export-status').textContent.includes('ledger unavailable'));
+assert.equal(qs('#llm-export').disabled,false);
+global.fetch=async()=>({ok:true,status:200,blob:async()=>{throw Error('response body interrupted');}});
+await api.exportRecords();
+assert.equal(downloads.length,0);assert(qs('#llm-export-status').textContent.includes('response body interrupted'));
+assert.equal(qs('#llm-export').disabled,false);
+global.fetch=async()=>({ok:false,status:502,json:async()=>{throw Error('not JSON');}});
+await api.exportRecords();
+assert.equal(downloads.length,0);assert(qs('#llm-export-status').textContent.includes('502'));
+assert.equal(qs('#llm-export').disabled,false);
+''')
+
+    def test_export_blob_finishing_after_navigation_or_new_export_is_ignored(self):
+        self.run_js(r'''
+qs('#llm-export-kind').value='requests';qs('#llm-export-format').value='json';
+const bodies=[];
+global.fetch=async()=>({ok:true,blob:()=>new Promise(resolve=>bodies.push(resolve))});
+let pending=api.exportRecords();await Promise.resolve();
+generation++;const before=qs('#llm-export-status').textContent;
+bodies[0](new Blob(['{"items":[]}']));await pending;
+assert.equal(downloads.length,0);assert.equal(qs('#llm-export-status').textContent,before);
+const old=api.exportRecords();await Promise.resolve();
+const latest=api.exportRecords();await Promise.resolve();
+bodies[1](new Blob(['{"items":["old"]}']));await old;
+assert.equal(downloads.length,0);assert.equal(qs('#llm-export').disabled,true);
+bodies[2](new Blob(['{"items":["new"]}']));await latest;
+assert.equal(downloads.length,1);assert.equal(qs('#llm-export').disabled,false);
 ''')
