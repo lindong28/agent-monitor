@@ -170,7 +170,7 @@
 
 ## domain 专属验收
 
-L1 判定为**功能型** data-viz dashboard，非 `~/.claude/references/domain-registry.md` 列出的特殊 domain（游戏等）→ **无 domain 专属验收段**。数据可视化的「能钻取到根因 / 跨视图数据一致」已并入 L2（C2/C3 钻取与一致性、A2/A4 跨视图）。
+L1 判定为**功能型** data-viz dashboard，非 `~/.claude/skills/product-ux-workflows/references/domain-registry.md` 列出的特殊 domain（游戏等）→ **无 domain 专属验收段**。数据可视化的「能钻取到根因 / 跨视图数据一致」已并入 L2（C2/C3 钻取与一致性、A2/A4 跨视图）。
 
 ---
 
