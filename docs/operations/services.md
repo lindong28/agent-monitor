@@ -4,6 +4,14 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-07 MacStudio session detail and account actions release
+
+The owner explicitly approved publishing and deploying `6367450`, `8c75d17` and `66a2ecf` together. `origin/main` and the MacStudio checkout reached `66a2ecf9ae0b1085e8b117c181b48877f8549f60`. The existing `com.agent-monitor.hub` job was restarted with `launchctl kickstart -k`; PID 91480 uses the same checkout and `.venv`. The state symlink still points to `/Users/lindong/.local/share/agent-monitor/state`.
+
+`/api/health?asset_watch=1` returned `ok: true, stale: false`, with Web signature `3a83398b7b027985`. HTTP-served app.js, styles.css, sessions.html and codex-accounts.js matched the committed source. The real browser opened a session with 6 retained records, 472,628 tokens and $0.9356 under existing pricing; the 2-minute span is not active duration. It opened source fields and returned to 100 list rows while preserving machine=macbook and sort=cost. Both 1440×900 and 390×844 were inspected; the latter had document width 390px. A single list-click-to-detail observation took 250ms (one session, one model, one machine); this is not broader performance acceptance.
+
+Account-action code is included in this rollout, but no real account was authorized, messaged or reset. Existing backend performance and assertion issues remain with the owner's separate session. The later documentation-only commit records this deployment locally; it is not part of the three-commit publication approval. Evidence: `~/.codex/artifacts/session-detail-phase44-20261007/`.
+
 ## 2026-10-07 local Codex account actions release
 
 The owner explicitly approved merging `6367450` and restarting only the MacBook service on port 39001. Local `main` fast-forwarded from `8182b64`; the existing process runs this checkout's `server.py` with its `.venv` interpreter. `POST /api/restart` re-executed that service. No Git push, remote deployment or MacStudio service change was performed.
