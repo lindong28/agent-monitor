@@ -67,3 +67,22 @@ class AccountHttpTests(unittest.TestCase):
             status, value = self.request()
         self.assertEqual(status, 500)
         self.assertNotIn("SECRET_FIXTURE_TOKEN", json.dumps(value))
+
+    def test_batch_routes_require_current_id_and_preserve_duplicate_requests(self):
+        self.assertEqual(self.request("/batch-start", {})[0], 400)
+        self.assertEqual(self.request("/batch-start", {"expected_batch_id": None})[0], 400)
+        for email in ("one@example.com", "two@example.com"):
+            self.request("/add", {"email": email})
+        with mock.patch.object(self.manager, "rpc_factory", side_effect=codex_accounts.ActionError("fixture: not signed in")):
+            status, data = self.request("/batch-start", {"expected_batch_id": None})
+            self.assertEqual(status, 200)
+            batch_id = data["batch"]["id"]
+            self.manager.close()
+            status, duplicate = self.request("/batch-start", {"expected_batch_id": None})
+            self.assertEqual(status, 200)
+            self.assertEqual(duplicate["batch"]["id"], batch_id)
+            self.assertEqual(len(duplicate["batch"]["items"]), 2)
+            self.assertEqual(self.request("/batch-retry", {"batch_id": "old"})[0], 409)
+            self.assertEqual(self.request("/batch-retry", {"batch_id": batch_id})[0], 200)
+            self.manager.close()
+        self.assertEqual(self.request("/batch-start", {"expected_batch_id": batch_id}, {"Origin": "https://other.example"})[0], 403)

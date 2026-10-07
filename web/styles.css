@@ -485,6 +485,9 @@ button:disabled {
 }
 .codex-account-actions > summary { cursor: pointer; font-weight: 600; }
 .codex-account-actions > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.codex-account-actions [hidden] { display: none; }
+.codex-account-actions .btn-primary { border-color: var(--accent); color: var(--accent); }
+.codex-batch-result { font-weight: 600; }
 .codex-account-actions p { margin-block: var(--sp-4); }
 .codex-account-form, .codex-account-controls, .codex-authorization, .codex-account-heading {
   display: flex;

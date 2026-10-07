@@ -92,13 +92,20 @@
             <h2 id="kpi-quota-title" class="kpi-group-title">配额用量</h2>
             <p class="quota-scope">配额按账号计量，不跨账号求和。</p>
             <p id="quota-signed-out" class="quota-scope" hidden></p>
-            <details id="codex-account-actions" class="codex-account-actions">
-              <summary>Codex 账号操作 · 登录与发送消息</summary>
-              <p class="quota-scope">逐个授权账号并发送一条短消息，随后读取服务端重置时间。已保存的登录态可复用，不会切换你平常 CLI 的账号。</p>
+            <details id="codex-account-actions" class="codex-account-actions" open>
+              <summary>Codex 账号操作 · 一键发送</summary>
+              <p class="quota-scope">给本页已添加的全部账号各发送一条短消息。有效登录态会复用，需要授权的账号不阻塞其他账号。</p>
+              <div class="codex-account-controls">
+                <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
+                <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
+                <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮</button>
+              </div>
+              <p id="codex-batch-status" role="status" aria-live="polite"></p>
+              <p id="codex-batch-help" class="quota-scope"></p>
               <form id="codex-account-form" class="codex-account-form">
                 <label for="codex-account-email">账号邮箱</label>
                 <input id="codex-account-email" type="email" autocomplete="off" required placeholder="name@example.com">
-                <button type="submit" class="btn">登录并发送一条消息</button>
+                <button type="submit" class="btn">添加账号</button>
               </form>
               <p class="quota-scope">发送内容：Please reply with OK. 会使用该账号额度。验证码在 OpenAI 官方页面填写；设备码登录需在账号安全设置中启用。</p>
               <p id="codex-account-notice" role="status" aria-live="polite"></p>

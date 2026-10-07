@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261007-b923: one-click Codex account batches](20261007-b923-codex-account-batches.md) | Accepted for local implementation; real account acceptance and deployment separate |
 | [20261007-e781: navigable session detail](20261007-e781-session-detail.md) | Accepted for local implementation; publication and deployment separate |
 | [20261007-c814: Codex account actions](20261007-c814-codex-account-actions.md) | Accepted for local implementation; real account acceptance and deployment separate |
 | [20261006-d83e: machine-aware call exploration](20261006-d83e-calls-explorer.md) | Accepted for local implementation; publication and deployment separate |

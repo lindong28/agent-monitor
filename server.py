@@ -545,6 +545,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
             if path == "/api/codex-accounts/add":
                 result = manager.add(payload.get("email"), payload.get("account_id"))
+            elif path == "/api/codex-accounts/batch-start":
+                if "expected_batch_id" not in payload:
+                    raise codex_accounts.ActionError("请先读取当前批次再操作。")
+                result = manager.start_batch(payload["expected_batch_id"])
+            elif path == "/api/codex-accounts/batch-retry":
+                result = manager.retry_batch(payload.get("batch_id"))
             elif path == "/api/codex-accounts/start":
                 result = manager.start(payload.get("id"))
             elif path == "/api/codex-accounts/refresh":

@@ -44,6 +44,16 @@ for line in sys.stdin:
         result = {"loginId": "fixture-login", "verificationUrl": "https://auth.openai.com/codex/device", "userCode": "TEST-CODE"}
         if scenario == "bad_url":
             result["verificationUrl"] = "https://evil.example/steal"
+        if scenario == "deferred_login":
+            emit({"id": message["id"], "result": result})
+            deadline = time.monotonic() + 15
+            while not (home.parent / "authorize").exists() and time.monotonic() < deadline:
+                time.sleep(.025)
+            if not (home.parent / "authorize").exists():
+                sys.exit(1)
+            authorize()
+            emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
+            continue
         if scenario not in ("wait_login", "bad_url"):
             authorize()
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
