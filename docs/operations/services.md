@@ -4,6 +4,14 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-07 local Codex account actions release
+
+The owner explicitly approved merging `6367450` and restarting only the MacBook service on port 39001. Local `main` fast-forwarded from `8182b64`; the existing process runs this checkout's `server.py` with its `.venv` interpreter. `POST /api/restart` re-executed that service. No Git push, remote deployment or MacStudio service change was performed.
+
+After restart, `/api/health?asset_watch=1` reported `ok: true, stale: false`; the new account list endpoint returned an empty list. Served index, app script, account script and CSS matched the committed files byte-for-byte. A separate headless browser opened the real account panel and displayed the empty state without an account-action error; two account-list requests took 5ms and 9ms in that browser. These are individual observations, not a latency guarantee. The original `state` symlink target and inode were unchanged.
+
+No real account was authorized or messaged in this release verification. The user must complete official authorization for the selected email before the actual send and reset behavior can be observed. Isolated synthetic coverage and the deferred multi-process limitation are recorded in the [account actions decision](../adr/20261007-c814-codex-account-actions.md).
+
 ## 2026-10-06 overview UI release
 
 With explicit owner publication/deployment approval, MacStudio `/Users/lindong/research/agent-monitor` fast-forwarded from `1b3b8f1` to `8036b9c`. Only the Web layout and documentation changed. The existing `com.agent-monitor.hub` service, interpreter and state path remain in use; no collector configuration or stored account/statistics data was edited.
