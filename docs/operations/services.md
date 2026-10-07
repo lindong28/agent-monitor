@@ -4,6 +4,12 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-07 local known-account discovery release
+
+The owner approved local rollout of `4e863af`. Local `main` fast-forwarded from `bc626fd`; `POST /api/restart` re-executed the existing port-39001 service. Health reported `ok: true, stale: false`, instance `037440e92f6142e09c942da4da08ff3a`, Web signature `5a135addcc4d608e`. Served index and account script matched source bytes. The original state symlink target and inode were retained. No push or remote rollout was performed.
+
+The actual account endpoint discovered six eligible identities, zero unavailable records, zero active operations and zero saved operations. One request took 10ms; this is a single local observation, not a performance guarantee. An isolated headless browser displayed six account cards and an enabled “给全部 6 个账号发送” button, with no add form or account notice error. No real authorization or message was initiated. This establishes live discovery and the page entry, not real provider message or reset acceptance.
+
 ## 2026-10-07 local Codex account batch release
 
 The owner approved local rollout of `517903c`. Local `main` fast-forwarded from `4221af9`, then `POST /api/restart` re-executed the existing service on port 39001. No push or remote deployment was performed. The state symlink retained target `/Users/lindong/.local/share/agent-monitor/state` and inode 102763913.
