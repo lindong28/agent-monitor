@@ -907,6 +907,16 @@
     name.textContent = quotaAccountName(account);
     wrap.appendChild(name);
 
+    if (provider.key === "codex" && account.account_state === "known" && account.account_label) {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "quota-toggle codex-account-select";
+      action.textContent = "登录 / 发消息";
+      action.dataset.codexEmail = account.account_label;
+      action.dataset.codexAccountId = account.account_id;
+      wrap.appendChild(action);
+    }
+
     if (quotaPresence(account) === "remembered") {
       const remove = document.createElement("button");
       remove.type = "button";
@@ -1974,6 +1984,15 @@
   }
 
   async function initOverview() {
+    if (qs("#codex-account-actions")) {
+      const currentAccountsPage = pageScope();
+      import("/web/codex-accounts.js").then((module) => {
+        if (currentAccountsPage()) module.init();
+      }).catch(() => {
+        const notice = qs("#codex-account-notice");
+        if (currentAccountsPage() && notice) notice.textContent = "账号操作未能加载，请刷新页面重试。";
+      });
+    }
     const retiredFiveHour = qs("#codex-five-hour");
     const legacyCard = retiredFiveHour && retiredFiveHour.closest(".kpi-card");
     const compatibilityNodes = qs("#codex-five-hour-compat");
@@ -2900,6 +2919,9 @@
   }
 
   window.AgentMonitor = {
+    ensureTimezone,
+    formatDate,
+    onPageCleanup: (cleanup) => pageCleanups.push(cleanup),
     initClientNavigation,
     pageInterval,
     pageScope,

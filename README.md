@@ -63,6 +63,16 @@ Run only the role for that host. The local marker is `state/hub-machine`; [hub.j
 
 Overview Refresh acknowledges promptly while machines update in the background. Each machine publishes statistics first, then refreshes quota without re-exporting statistics. The sync panel shows both stages and failures; a usable button does not mean all sources are current. Visible data pages refresh every 30 seconds and on focus/visibility return. Manual `agent-monitor refresh` waits for its requested round and reports incomplete results; if a round is already running, one additional round is queued. When the Web service is stopped, standalone refresh saves only local history and exits nonzero to report that cross-machine usage and quota were not refreshed.
 
+## Codex account actions
+
+Expand **Codex 账号操作** in the overview's quota section. Enter an email, or select **登录/发消息** on a collected Codex account row, then start the operation. Open the official OpenAI authorization page and enter the displayed device code. Any email verification code belongs on that official page. Device-code login must be enabled in the account or workspace security settings. The serving machine needs a Codex CLI supporting `chatgptDeviceCode` and experimental thread/turn `environments` (interface checked locally with 0.158.0).
+
+After checking the signed-in email and workspace, agent-monitor sends exactly one fixed message, `Please reply with OK.`, and reads the account's quota. This consumes subscription usage. The next seven-day reset is the server's reported timestamp; missing data is unknown, never computed as the local time plus seven days. **仅刷新配额** reads quota without sending another message. Cancellation, timeout or a lost connection do not undo usage; an uncertain send is never retried automatically.
+
+Each profile stores its managed login under `state/codex-accounts/<profile-id>/codex/auth.json`, separate from the ordinary CLI account. Later explicit operations reuse that login; **清除本页登录态** deletes only the selected profile's saved login. Profile directories have mode 0700 and credentials/records use 0600. Action readings are separate from the machine quota table and are not exported as machine snapshots. This remains a trusted personal-network service without application authentication: anyone who can access it can operate saved accounts. Same-origin browser checks do not authenticate LAN clients. Do not expose it to an untrusted network.
+
+Design and validation boundaries are recorded in the [account actions decision](docs/adr/20261007-c814-codex-account-actions.md). Local tests do not establish a real account's reset behavior or deployment readiness.
+
 ## Machines and retained data
 
 [machines.json](machines.json) declares SSH targets. Standalone mode requires exactly one enabled `self: true` machine; Hub mode selects self from the local role marker and restricts targets to `hub.json.machines`. The shipped fleet declares macbook, macmini, macstudio and tencent-webserver-china; dgx0023 is commented out. These are configuration defaults, not a reachability claim. Update them for another installation.

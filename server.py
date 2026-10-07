@@ -1,4 +1,6 @@
 import argparse
+import ipaddress
+import socket
 import hashlib
 import json
 import logging
@@ -16,6 +18,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import codex_accounts
 from urllib.parse import parse_qs, unquote, urlparse
 from zoneinfo import ZoneInfo
 
@@ -492,6 +495,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/codex-accounts/"):
+            self._handle_codex_accounts(parsed.path, post=True)
+            return
         if parsed.path == "/api/account-memory/remove":
             self._handle_account_memory_remove()
             return
@@ -499,6 +505,61 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_restart()
             return
         self.send_error(404)
+
+    def _handle_codex_accounts(self, path, post=False, send_body=True):
+        # This remains a trusted personal-network service. These checks stop
+        # browser cross-site requests; they do not authenticate LAN clients.
+        host = self.headers.get("Host", "")
+        hostname = urlparse("//" + host).hostname
+        allowed = {"localhost", socket.gethostname().lower(), socket.getfqdn().lower()}
+        allowed.update(name.split(".")[0] for name in tuple(allowed))
+        try:
+            ipaddress.ip_address(hostname or "")
+            valid_host = True
+        except ValueError:
+            valid_host = (hostname or "").lower() in allowed
+        origin = self.headers.get("Origin")
+        if (not valid_host or self.headers.get("X-Agent-Monitor") != "codex-accounts"
+                or self.headers.get("Sec-Fetch-Site") == "cross-site"
+                or (origin is not None and origin not in ("http://" + host, "https://" + host))
+                or (post and origin is None)):
+            self._send_json({"error": "请从本机地址或服务主机名打开页面操作账号。"}, status=403, send_body=send_body)
+            return
+        try:
+            manager = codex_accounts.manager
+            if not post and path == "/api/codex-accounts":
+                self._send_json(manager.list(), send_body=send_body)
+                return
+            if not post:
+                raise codex_accounts.ActionError("未找到此接口。", 404)
+            if self.headers.get_content_type() != "application/json":
+                raise codex_accounts.ActionError("请求必须使用 JSON。")
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+                if not 0 < length <= 4096:
+                    raise ValueError()
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError()
+            except (ValueError, UnicodeDecodeError):
+                raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
+            if path == "/api/codex-accounts/add":
+                result = manager.add(payload.get("email"), payload.get("account_id"))
+            elif path == "/api/codex-accounts/start":
+                result = manager.start(payload.get("id"))
+            elif path == "/api/codex-accounts/refresh":
+                result = manager.start(payload.get("id"), refresh_only=True)
+            elif path == "/api/codex-accounts/cancel":
+                result = manager.cancel(payload.get("id"))
+            elif path == "/api/codex-accounts/forget-login":
+                result = manager.forget_login(payload.get("id"))
+            else:
+                raise codex_accounts.ActionError("未找到此接口。", 404)
+            self._send_json(result)
+        except codex_accounts.ActionError as exc:
+            self._send_json({"error": str(exc)}, status=exc.status, send_body=send_body)
+        except Exception:
+            self._send_json({"error": "账号操作失败，请检查服务主机的状态目录。"}, status=500, send_body=send_body)
 
     def _handle_account_memory_remove(self):
         # This is input-format validation only. The endpoint deliberately has
@@ -575,6 +636,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_request(self, send_body=True):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/codex-accounts":
+            self._handle_codex_accounts(parsed.path, send_body=send_body)
+            return
         query = parse_qs(parsed.query)
         try:
             if parsed.path.startswith("/api/session/"):

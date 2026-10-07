@@ -26,4 +26,8 @@ The calls page, request diagnostics and JSON export use that reader through read
 
 ## Preserved contracts
 
+`codex_accounts.py` owns explicit, click-triggered Codex account actions through a dedicated app-server subprocess per active profile. `server.py` exposes same-origin account-action endpoints; `web/codex-accounts.js` renders state within the overview lifecycle. Private profile directories under `state/codex-accounts` contain managed credentials and the last operation, with a persistent per-profile file lock. Isolated HOME/config/work directories keep ordinary CLI credentials and project tools out of these operations. Only pending device authorization information and sanitized account/operation metadata reach the browser. No background weekly scheduler is installed.
+
+Message status and quota observation are separate: an interrupted transmission stays unknown, a successful message survives a quota-query failure, and quota-only refresh sends no message. The server timestamp remains authoritative; action results do not rewrite collected quotas, snapshots or account history. See the [design and acceptance boundary](adr/20261007-c814-codex-account-actions.md).
+
 Extraction changes names, installation ownership and source paths. It does not change bucket timezone, snapshot schemas, host/account identity, retention or arithmetic. `token_cost.py` is byte-identical to its extraction source. The source commit and historical docs are recorded in the [extraction ADR](adr/20261004-a902-standalone-project.md).

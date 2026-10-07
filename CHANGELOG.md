@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-07
+
+- Add explicit Codex account login and single-message actions to the overview. Official device authorization, isolated saved logins, account identity checks, cancellation and quota-only refresh avoid switching the regular CLI account. Display server-reported reset times and distinguish completed, failed and uncertain sends. No automatic weekly sending is introduced.
+
 ## 2026-10-06
 
 - Add machine-aware request diagnostics and complete filtered JSON exports to LLM Calls. Compact summaries and a filter rail keep requests prominent; cost and attempt audit details remain expandable. Unknown costs, source gaps and independent request/attempt time windows remain explicit.

@@ -166,6 +166,17 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 
 2026-10-06 调用页改造再次复现上表三项：`test_llm_attempts` 32 项中 30 通过，失败仍为旧 `loadFilters` 注入和缺少 `caller_route_constraint` 的 allowlist；`test_progressive_freshness` 9 项中 8 通过，失败仍为 mock 不接受 `progressive`。本次新增详情/导出 HTTP 4 项、交互 4 项和既有 Web/static 38 项均通过；它们不消解这三项既有失败。归属为用户指定的另一个后端优化/断言修复 session，本次 UI 单元不修改其行为或断言。复现命令为 `.venv/bin/python -m unittest discover -s tests -p test_llm_attempts.py` 及对应 `test_progressive_freshness.py`；本次 worktree 使用主 checkout 的同一 `.venv/bin/python`，详情见调用页 ADR `20261006-d83e`。
 
+2026-10-07 Codex 账号操作改动的全量回归收集 813 项，得到 4 failures / 10 errors（含 subtests，共 11 个测试方法）。在改动前 `8182b64` 的独立归档、同一 Python 3.13.12 / Node 26 / Gateway reader 和隔离 HOME 下重跑这 11 项，失败名称和数量完全相同。除上表既有问题外，`test_gateway_schema8` 的 round-trip / field-validation 与 `test_gateway_v5_reader` 的 session-UUID / forbidden-field 测试也被当前 Gateway schema 9 对旧 snapshot validator 的不兼容阻断。没有改 Gateway 或放宽 snapshot 契约；归属仍为 Gateway reader / 测试维护任务。最终账号、Web/static、overview 相关 85 项通过；这不表示全套测试通过。
+
+## [open] ISSUE-CODEX-20261007-8e41：双服务共享账号状态时可能覆盖刚完成的操作
+
+- **Priority**: medium
+- **Owner**: agent-monitor 账号操作维护；本轮登记，未修复。
+- **Attribution**: 本次改动增量。独立审查与主线程各自以内存锁交接复现，未观察真实部署双服务运行。
+- **Trigger**: 两个服务进程共用 `state/codex-accounts`。观察进程的 `Manager.view()` 读到旧 `sending/unknown`；执行进程保存 `succeeded` 和 quota 后释放锁；观察进程取得锁后未重读，随后以 `interrupted` 保存旧记录，丢失刚完成的状态及 quota。
+- **Disposition**: 普通单服务进程通过本地 `jobs` 避开此恢复分支，本轮按该运行包络交付，不扩为多服务部署。以后支持双进程共享状态前，应在取得恢复锁后重读记录，再判断是否需要标记中断。
+- **Acceptance gap**: 官方账号登录、真实消息与实际 reset 行为仍需真实账号验收；合成协议与浏览器读数不能证明「首次使用后加七天」。未取得该读数前，不将新流程记为已验收 UX 契约。
+
 ## [open] ISSUE-CALLS-20261006-6d4a：调用页真实 Hub 的长等待与来源快照故障仍需后端处理
 
 - **Discovered**: 2026-10-06，调用页 UI 改造前的真实入口观察。
