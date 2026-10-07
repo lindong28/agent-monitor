@@ -26,19 +26,17 @@ export function init() {
   const current = window.AgentMonitor.pageScope();
   const list = root.querySelector("#codex-account-list");
   const notice = root.querySelector("#codex-account-notice");
-  const form = root.querySelector("form");
-  const email = root.querySelector("input");
   const batchStart = root.querySelector("#codex-batch-start");
   const batchNext = root.querySelector("#codex-batch-next");
   const batchRetry = root.querySelector("#codex-batch-retry");
   const batchStatus = root.querySelector("#codex-batch-status");
   const batchHelp = root.querySelector("#codex-batch-help");
-  let expectedAccountId = null;
   let timer;
   let loading = false;
   let reloadPending = false;
   let accounts = [];
   let batch = null;
+  let unavailable = [];
   let submittingBatch = false;
   const controller = new AbortController();
 
@@ -69,6 +67,8 @@ export function init() {
       if (!current()) return;
       accounts = data.accounts;
       batch = data.batch;
+      unavailable = data.unavailable_accounts || [];
+      notice.textContent = "";
       render();
     } catch (error) {
       if (current() && error.name !== "AbortError") notice.textContent = error.message + " 可重新展开此面板刷新。";
@@ -120,16 +120,17 @@ export function init() {
 
   function renderBatch() {
     const busy = accounts.some((account) => account.busy);
+    const count = accounts.filter((account) => account.eligible !== false).length;
     batchStart.hidden = Boolean(batch);
-    batchStart.textContent = `给全部 ${accounts.length} 个账号发送`;
-    batchStart.disabled = submittingBatch || busy || !accounts.length;
+    batchStart.textContent = `给${unavailable.length ? "可确认身份的" : "全部"} ${count} 个账号发送`;
+    batchStart.disabled = submittingBatch || busy || !count;
     batchNext.hidden = !batch;
-    batchNext.textContent = `开始新一轮 · 全部 ${accounts.length} 个账号`;
-    batchNext.disabled = submittingBatch || busy || !accounts.length;
+    batchNext.textContent = `开始新一轮 · ${unavailable.length ? "可确认身份的" : "全部"} ${count} 个账号`;
+    batchNext.disabled = submittingBatch || busy || !count;
     batchRetry.hidden = true;
     if (!batch) {
-      batchStatus.textContent = accounts.length ? `已添加 ${accounts.length} 个账号。点击一次即可开始。` : "先添加账号；以后登录态有效时，每轮只需点击一次。";
-      batchHelp.textContent = "范围仅限本页添加的账号，不会自动操作历史配额表里的其他账号。";
+      batchStatus.textContent = count ? `已自动发现 ${count} 个登录账号。点击一次即可开始。` : "尚未发现可发送的 Codex 登录账号。";
+      batchHelp.textContent = "账号来自当前及历史登录记录，无需手动添加。历史记录不等于有效登录态；需要授权时会单独提示。";
       return;
     }
     const statuses = { succeeded: 0, unknown: 0, failed: 0, waiting: 0, running: 0, unsent: 0 };
@@ -142,7 +143,7 @@ export function init() {
       else if (account?.busy && account.operation?.batch_id === batch.id) statuses.running++;
       else if (op?.message_status === "unknown") statuses.unknown++;
       else if (op?.message_status === "failed") statuses.failed++;
-      else if (!op || op.message_status === "not_sent") statuses.unsent++;
+      else if (account?.eligible !== false && (!op || op.message_status === "not_sent")) statuses.unsent++;
       const refresh = account?.operation;
       const reading = refresh?.refresh_only && refresh.after && refresh.started_at >= batch.created_at ? refresh.after : op?.after;
       if (reading?.seven_day_resets_at != null) resetRead++;
@@ -151,7 +152,7 @@ export function init() {
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch;
     batchRetry.textContent = `继续 ${statuses.unsent} 个未发送账号`;
-    batchHelp.textContent = `本轮开始于 ${timestamp(batch.created_at)}。刷新不会重发；「继续」只处理确定未发送的账号。${statuses.unknown || statuses.failed ? "结果未知或发送失败的账号可能已消耗额度，不会自动重试。" : ""}下次 reset 后点「开始新一轮」，会再次给全部已添加账号发送，不自动判断重置周期。`;
+    batchHelp.textContent = `本轮开始于 ${timestamp(batch.created_at)}。刷新不会重发；「继续」只处理仍在登录记录中且确定未发送的账号。${statuses.unknown || statuses.failed ? "结果未知或发送失败的账号可能已消耗额度，不会自动重试。" : ""}下次 reset 后点「开始新一轮」，会给当前及历史登录记录中的账号发送，不自动判断重置周期。`;
   }
 
   batchStart.addEventListener("click", () => performBatch("batch-start"));
@@ -160,11 +161,15 @@ export function init() {
 
   function render() {
     renderBatch();
+    const warnings = root.querySelector("#codex-account-unavailable");
+    if (warnings) {
+      warnings.replaceChildren(...unavailable.map((account) => element("p", `未纳入发送：${account.account_id}。${account.detail}`)));
+    }
     // Keep existing cards and authorization links in place while polling:
     // rebuilding a focused link every second interrupts keyboard/copy use.
     const existing = new Map(Array.from(list.children).map((node) => [node.dataset.id, node]));
     if (!accounts.length) {
-      list.replaceChildren(element("p", "尚未添加账号。输入邮箱开始，或从配额表选择一个 Codex 账号。", "quota-scope"));
+      list.replaceChildren(element("p", "尚无可操作账号；来源机器登录 Codex 并同步账号记录后会自动出现。", "quota-scope"));
       return;
     }
     const priority = (account) => account.operation?.stage === "login" ? 0 : account.busy ? 1 : 2;
@@ -185,6 +190,7 @@ export function init() {
       const heading = element("div", undefined, "codex-account-heading");
       heading.append(element("strong", account.email), element("span", op ? STAGES[op.stage] || op.stage : "尚未操作", "status-pill"));
       card.append(heading);
+      if (account.eligible === false) card.append(element("p", "已不在当前登录记录中；保留本轮结果，不纳入下一轮或继续发送。", "quota-scope"));
       if (account.account_id) card.append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
       card.append(element("p", account.has_credentials ? "本页已保存登录态，将在操作时检查有效性。" : "需要官方授权。", "quota-scope"));
       if (batchItem) card.append(element("p", `本轮消息：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
@@ -212,7 +218,7 @@ export function init() {
         }
       }
       const controls = element("div", undefined, "codex-account-controls");
-      if (!batchItem) controls.append(button(account.has_credentials ? "发送一条消息" : "登录并发送一条消息", "start", account));
+      if (!batchItem && account.eligible !== false) controls.append(button(account.has_credentials ? "发送一条消息" : "登录并发送一条消息", "start", account));
       controls.append(button("仅刷新配额", "refresh", account));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials) controls.append(button("清除本页登录态", "forget-login", account));
@@ -223,35 +229,17 @@ export function init() {
     for (const node of existing.values()) node.remove();
   }
 
-  email.addEventListener("input", () => { expectedAccountId = null; });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const submit = form.querySelector("button");
-    if (submit.disabled) return;
-    submit.disabled = true;
-    notice.textContent = "正在准备账号…";
-    try {
-      const account = await request("add", { email: email.value.trim(), account_id: expectedAccountId });
-      if (!current()) return;
-      notice.textContent = `已添加 ${account.email}。${batch ? "将在下一轮纳入全部账号；也可使用账号下方的单独发送按钮。" : "添加完后，点击上方「给全部账号发送」。"}`;
-      email.value = "";
-      expectedAccountId = null;
-      await load();
-    } catch (error) {
-      if (current() && error.name !== "AbortError") notice.textContent = error.message;
-    } finally {
-      if (current()) submit.disabled = false;
-    }
-  });
-  function select(event) {
+  async function select(event) {
     const target = event.target.closest?.("[data-codex-email]");
     if (!target || !current()) return;
     root.open = true;
-    email.value = target.dataset.codexEmail;
-    expectedAccountId = target.dataset.codexAccountId || null;
-    notice.textContent = `已选择 ${email.value}，点击「添加账号」加入本页。`;
-    root.scrollIntoView({ block: "nearest" });
-    email.focus({ preventScroll: true });
+    await load();
+    if (!current()) return;
+    const account = accounts.find((value) => value.account_id === target.dataset.codexAccountId
+      && value.email.toLowerCase() === target.dataset.codexEmail.toLowerCase());
+    const card = account && Array.from(list.children).find((node) => node.dataset.id === account.id);
+    (card || root).scrollIntoView({ block: "nearest" });
+    if (card) { card.tabIndex = -1; card.focus({ preventScroll: true }); }
   }
   function visibility() { if (!document.hidden) load(); }
   document.addEventListener("click", select);

@@ -2,6 +2,8 @@
 
 Status: accepted for local implementation, 2026-10-07, after one independent decision review and clarification. Extends [c814](20261007-c814-codex-account-actions.md); deployment and real-account acceptance remain separate.
 
+Membership amendment: the manual-add requirement below is superseded by [d2af](20261007-d2af-codex-known-accounts.md), following the user's correction on 2026-10-07. Other batch semantics remain in force.
+
 The user approved one click to send the fixed message to every account already added to this page, persistent batch progress, credential reuse, independent reauthorization, and no blind resend after a lost response. The batch is an explicit user action, not an inferred reset cycle or a weekly scheduler. A distinct next-round button explicitly sends again to all currently saved accounts. Server reset observations remain separate from message completion.
 
 Publish a current batch manifest containing its ID, creation time and fixed profile IDs. Serialize creation, expected-current-ID comparison, retry and individual starts with the catalog file lock. Prepare every profile's queued operation before publishing the manifest, and dispatch only after publication. Stale creation requests return the current batch without dispatch. New rounds require all operations to be idle. Only explicit retry may resume terminal not-sent items; succeeded, failed-after-send and unknown items are never retried in that batch. Individual sends cannot bypass this rule for current batch members.

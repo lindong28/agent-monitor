@@ -16,6 +16,12 @@ class AccountHttpTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.manager = codex_accounts.Manager(Path(temporary.name) / "profiles")
+        self.real_catalog = server._codex_action_catalog
+        catalog = mock.patch.object(server, "_codex_action_catalog", side_effect=lambda: [
+            {"account_state": "known", "account_id": a["account_id"], "account_label": a["email"]}
+            for a in self.manager.list()["accounts"]])
+        catalog.start()
+        self.addCleanup(catalog.stop)
         patch = mock.patch.object(codex_accounts, "manager", self.manager)
         patch.start()
         self.addCleanup(patch.stop)
@@ -72,7 +78,7 @@ class AccountHttpTests(unittest.TestCase):
         self.assertEqual(self.request("/batch-start", {})[0], 400)
         self.assertEqual(self.request("/batch-start", {"expected_batch_id": None})[0], 400)
         for email in ("one@example.com", "two@example.com"):
-            self.request("/add", {"email": email})
+            self.request("/add", {"email": email, "account_id": "workspace-" + email})
         with mock.patch.object(self.manager, "rpc_factory", side_effect=codex_accounts.ActionError("fixture: not signed in")):
             status, data = self.request("/batch-start", {"expected_batch_id": None})
             self.assertEqual(status, 200)

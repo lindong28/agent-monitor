@@ -295,7 +295,27 @@ class Manager:
             result["operation"].update(job.get("authorization", {}))
         return result
 
-    def list(self):
+    def discover(self, entries):
+        """Materialize private profiles from metadata, without authorizing or sending."""
+        ids, unavailable = set(), []
+        for entry in entries:
+            if entry.get("account_state") != "known":
+                continue
+            email, account_id = entry.get("account_label"), entry.get("account_id")
+            if not account_id:
+                continue
+            try:
+                account = self.add(email, account_id)
+            except ActionError as exc:
+                if exc.status != 400:
+                    raise
+                unavailable.append({"account_id": account_id,
+                                    "detail": "登录记录缺少有效邮箱或工作区标识，请在来源机器登录并刷新账号记录。"})
+                continue
+            ids.add(account["id"])
+        return ids, unavailable
+
+    def list(self, eligible_ids=None):
         with self.guard:
             accounts = [self.view(path.parent) for path in sorted(self.root.glob("*/profile.json"))]
             batch = self.read_batch()
@@ -303,6 +323,12 @@ class Manager:
                 by_id = {account["id"]: account for account in accounts}
                 batch["items"] = [{"profile_id": pid, "operation": self.batch_operation(by_id[pid], batch["id"])}
                                   for pid in batch.pop("profile_ids")]
+            if eligible_ids is not None:
+                retained = {item["profile_id"] for item in batch["items"]} if batch else set()
+                accounts = [account for account in accounts
+                            if account["id"] in eligible_ids | retained or account["busy"]]
+                for account in accounts:
+                    account["eligible"] = account["id"] in eligible_ids
             return {"accounts": accounts, "message": MESSAGE, "batch": batch}
 
     def read_batch(self):
@@ -371,7 +397,7 @@ class Manager:
                 self.launch(self.prepare(profile_id, refresh_only=refresh_only, published_id=batch["id"] if batch else None))
                 return self.view(directory)
 
-    def start_batch(self, expected_batch_id):
+    def start_batch(self, expected_batch_id, eligible_ids=None):
         if expected_batch_id is not None and not isinstance(expected_batch_id, str):
             raise ActionError("批次标识无效。")
         with self.guard:
@@ -382,10 +408,12 @@ class Manager:
                 if expected_batch_id != published_id:
                     return self.list()
                 accounts = self.list()["accounts"]
-                if not accounts:
-                    raise ActionError("请先添加至少一个账号。")
                 if any(account["busy"] for account in accounts):
                     raise ActionError("还有账号正在操作，请等待完成或取消后再开始新一轮。", 409)
+                if eligible_ids is not None:
+                    accounts = [account for account in accounts if account["id"] in eligible_ids]
+                if not accounts:
+                    raise ActionError("尚未发现可发送的 Codex 登录账号，请刷新来源机器的账号记录。")
                 batch = {"id": str(uuid.uuid4()), "created_at": now(), "profile_ids": [a["id"] for a in accounts]}
                 prepared = []
                 try:
@@ -400,7 +428,7 @@ class Manager:
                     self.launch(item)
                 return self.list()
 
-    def retry_batch(self, batch_id):
+    def retry_batch(self, batch_id, eligible_ids=None):
         with self.guard:
             private_dir(self.root)
             with lock_file(self.root / ".catalog.lock"):
@@ -408,6 +436,8 @@ class Manager:
                 if not batch or batch["id"] != batch_id:
                     raise ActionError("批次已变化，请刷新后查看。", 409)
                 for pid in batch["profile_ids"]:
+                    if eligible_ids is not None and pid not in eligible_ids:
+                        continue
                     account = self.view(self.directory(pid))
                     operation = self.batch_operation(account, batch_id)
                     if account["busy"] or (operation and operation["message_status"] != "not_sent"):

@@ -528,7 +528,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             manager = codex_accounts.manager
             if not post and path == "/api/codex-accounts":
-                self._send_json(manager.list(), send_body=send_body)
+                ids, unavailable = manager.discover(_codex_action_catalog())
+                self._send_json({**manager.list(ids), "unavailable_accounts": unavailable}, send_body=send_body)
                 return
             if not post:
                 raise codex_accounts.ActionError("未找到此接口。", 404)
@@ -548,10 +549,18 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/codex-accounts/batch-start":
                 if "expected_batch_id" not in payload:
                     raise codex_accounts.ActionError("请先读取当前批次再操作。")
-                result = manager.start_batch(payload["expected_batch_id"])
+                ids, unavailable = manager.discover(_codex_action_catalog())
+                manager.start_batch(payload["expected_batch_id"], ids)
+                result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/batch-retry":
-                result = manager.retry_batch(payload.get("batch_id"))
+                ids, unavailable = manager.discover(_codex_action_catalog())
+                manager.retry_batch(payload.get("batch_id"), ids)
+                result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/start":
+                manager.directory(payload.get("id"))
+                ids, _ = manager.discover(_codex_action_catalog())
+                if payload.get("id") not in ids:
+                    raise codex_accounts.ActionError("这个账号已不在当前登录记录中，请刷新查看。", 409)
                 result = manager.start(payload.get("id"))
             elif path == "/api/codex-accounts/refresh":
                 result = manager.start(payload.get("id"), refresh_only=True)
@@ -1474,6 +1483,26 @@ def _session_sort_key(row, sort):
     if sort == "duration":
         return row["duration_seconds"]
     return row["started_at"]
+
+
+def _codex_action_catalog():
+    """Read the known identity directory, without refreshing or rewriting it."""
+    with generation.generation_admission_snapshot() as admission:
+        entries = []
+        for current in admission.admitted:
+            limits = current.meta.get("rate_limits")
+            block = limits.get("codex") if isinstance(limits, dict) else None
+            if isinstance(block, dict):
+                # Identity remains usable when no quota timestamp was observed.
+                entries.append(_account_entry(block, [current.host]))
+    with _ACCOUNT_MEMORY_LOCK:
+        state, payload = _load_account_memory()
+    if state == "unreadable_or_unsupported":
+        raise codex_accounts.ActionError("历史登录账号记录无法读取，暂不能确认完整账号列表。请检查服务主机的 account_memory.json。", 503)
+    if state == "valid":
+        entries.extend(_remembered_rate_limit_entry(record) for record in payload["accounts"].values()
+                       if record["provider"] == "codex")
+    return entries
 
 
 def _rate_limits(admission=None, sync_status=None, expected_delete_epoch=None):
