@@ -2,6 +2,18 @@
 
 基于真实产品入口观察、但不在发现当轮修复范围内的用户体验问题。条目只记录真实页面读数，不用源码推断冒充端到端证据。
 
+## [open] ISSUE-UX-20261007-31c8 — 采集错误缺少面向用户的处置摘要
+
+- **Observed**: 2026-10-07，macbook 本地 39001 的真实 `/sessions` 显示 `macmini` 刷新失败、保留四小时前数据，原因直接为 `sqlite3.OperationalError: database or disk is full`；`macstudio` 保留 28 天前数据，原因直接为 `ValueError: unsupported gateway snapshot`。页面已经说明旧数据仍在使用，但没有相应的可读处置摘要。这是中心记录的源侧错误，未独立诊断远端根因。
+- **Recommendation**: 先给“哪台机器的数据未更新、旧到何时、下一步检查什么”，原异常保留在技术详情。不能只美化错误而声称采集恢复；实际磁盘/快照问题另需服务维护与该环境授权。
+- **Owner / Scope**: agent-monitor 后续内容优化及运维任务；本轮修复 Codex 读数展示，不修改远端服务。
+
+## [open] ISSUE-UX-20261007-95bd — LLM 调用筛选直接显示内部状态名
+
+- **Observed**: 2026-10-07，macbook 本地 39001 的真实 `/llm-calls` 中，请求结果选项包括 `local_rejected`、`unknown`；尝试结果包含 `http_error`、`transport_error`。顶部摘要已有“拒绝、失败、中断或未知”等中文，筛选仍需读者自行映射。
+- **Recommendation**: 选项显示对应中文含义，保留原值用于筛选参数和技术详情，不改变请求/尝试的统计语义。
+- **Owner / Scope**: agent-monitor 后续内容优化；本轮仅观察，未改调用页。
+
 ---
 
 ## [open] 页面整体转中文后，自托管字体仍是 latin-only 子集，视觉系统校验器看不见这件事

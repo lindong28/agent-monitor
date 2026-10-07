@@ -2,6 +2,7 @@
 
 ## 2026-10-07
 
+- Use the newest matching Codex Web-action or machine observation in the quota table, with explicit source labels and unchanged historical deletion records. Show relative reset times, distinguish expired records from observed resets, simplify successful batch/card content, and preserve historical disclosure state during refresh.
 - Discover Codex batch accounts automatically from current and historical login records; remove the manual account-add step. Deduplicate identities, surface incomplete records, and exclude removed identities from subsequent sends while preserving batch results.
 - Add one-click Codex batches for all saved accounts, persistent progress, bounded parallel processing and independent authorization. Refreshing or repeating a request does not resend the batch; continue only definitely unsent accounts, or explicitly start a new round. Preserve message results when refreshing quota.
 - Add provider filters and account/plan/machine search to Overview quotas, with matched records, current/history account counts and separate unknown-machine counts. Preserve original windows, readings, history actions and collection notices; filtering does not change provider queries.

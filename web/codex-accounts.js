@@ -68,6 +68,7 @@ export function init() {
       accounts = data.accounts;
       batch = data.batch;
       unavailable = data.unavailable_accounts || [];
+      window.AgentMonitor.updateCodexQuotaReadings?.(accounts);
       notice.textContent = "";
       render();
     } catch (error) {
@@ -146,9 +147,14 @@ export function init() {
       else if (account?.eligible !== false && (!op || op.message_status === "not_sent")) statuses.unsent++;
       const refresh = account?.operation;
       const reading = refresh?.refresh_only && refresh.after && refresh.started_at >= batch.created_at ? refresh.after : op?.after;
-      if (reading?.seven_day_resets_at != null) resetRead++;
+      if (typeof reading?.seven_day_resets_at === "number" && reading.seven_day_resets_at * 1000 > Date.now()) resetRead++;
     }
-    batchStatus.textContent = `本轮发送成功 ${statuses.succeeded}/${batch.items.length} · 等待授权 ${statuses.waiting} · 处理中 ${statuses.running} · 未发送 ${statuses.unsent} · 结果未知 ${statuses.unknown} · 发送失败 ${statuses.failed}。已读取重置时间 ${resetRead}/${batch.items.length}。`;
+    const parts = [`本轮发送成功 ${statuses.succeeded}/${batch.items.length}`];
+    for (const [key, label] of Object.entries({ waiting: "等待授权", running: "处理中", unsent: "未发送", unknown: "结果未知", failed: "发送失败" })) {
+      if (statuses[key]) parts.push(`${label} ${statuses[key]}`);
+    }
+    parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`);
+    batchStatus.textContent = parts.join(" · ");
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch;
     batchRetry.textContent = `继续 ${statuses.unsent} 个未发送账号`;
@@ -176,7 +182,9 @@ export function init() {
     const ordered = [...accounts].sort((a, b) => priority(a) - priority(b));
     for (const [index, account] of ordered.entries()) {
       const batchItem = batch?.items.find((item) => item.profile_id === account.id);
-      const signature = JSON.stringify([account, batchItem]);
+      const latestReading = window.AgentMonitor.latestCodexQuotaReading?.(account) || account.operation?.after;
+      const resetLabel = window.AgentMonitor.formatQuotaReset?.(latestReading?.seven_day_resets_at);
+      const signature = JSON.stringify([account, batchItem, resetLabel]);
       const old = existing.get(account.id);
       existing.delete(account.id);
       if (old?.dataset.signature === signature) {
@@ -190,13 +198,16 @@ export function init() {
       const heading = element("div", undefined, "codex-account-heading");
       heading.append(element("strong", account.email), element("span", op ? STAGES[op.stage] || op.stage : "尚未操作", "status-pill"));
       card.append(heading);
+      const details = element("details", undefined, "note-disclosure");
+      details.append(element("summary", "账号与操作详情"));
       if (account.eligible === false) card.append(element("p", "已不在当前登录记录中；保留本轮结果，不纳入下一轮或继续发送。", "quota-scope"));
-      if (account.account_id) card.append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
-      card.append(element("p", account.has_credentials ? "本页已保存登录态，将在操作时检查有效性。" : "需要官方授权。", "quota-scope"));
+      const duplicateEmail = accounts.some((other) => other.id !== account.id && other.email.toLowerCase() === account.email.toLowerCase());
+      if (account.account_id) (duplicateEmail ? card : details).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
+      details.append(element("p", account.has_credentials ? "本页已保存登录态，将在操作时检查有效性。" : "需要官方授权。", "quota-scope"));
       if (batchItem) card.append(element("p", `本轮消息：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
       if (op) {
-        card.append(element("p", op.detail));
-        card.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
+        if (op.stage !== "succeeded") card.append(element("p", op.detail));
+        details.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
         if (op.stage === "login" && op.verification_url && op.user_code) {
           const box = element("div", undefined, "codex-authorization");
           const link = element("a", "打开 OpenAI 官方授权页", "btn");
@@ -206,15 +217,15 @@ export function init() {
           box.append(link, element("span", "设备码（不是邮箱验证码）："), element("code", op.user_code));
           card.append(box, element("p", `请确认官方页面登录的是 ${account.email}。授权成功后${op.refresh_only ? "查询配额" : "自动发送一条消息"}；最多等待 10 分钟。`, "quota-scope"));
         }
-        if (op.after) {
+        if (latestReading) {
           const reading = element("dl", undefined, "codex-account-reading");
-          reading.append(element("dt", "下次七天窗口重置"), element("dd", timestamp(op.after.seven_day_resets_at, true)));
-          const used = op.after.seven_day_used_pct;
-          reading.append(element("dt", "七天窗口已用"), element("dd", used === null ? "服务端未返回" : `${used}%`));
-          reading.append(element("dt", "查询时间"), element("dd", timestamp(op.after.observed_at)));
-          if (op.before?.seven_day_resets_at != null) reading.append(element("dt", "发送前的重置时间"), element("dd", timestamp(op.before.seven_day_resets_at, true)));
+          reading.append(element("dt", "七天窗口重置"), element("dd", `${resetLabel || "重置时间未知"} · ${timestamp(latestReading.seven_day_resets_at, true)}`));
+          const used = latestReading.seven_day_used_pct;
+          reading.append(element("dt", "七天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
+          reading.append(element("dt", "最近成功查询"), element("dd", timestamp(latestReading.observed_at)));
+          if (op.before?.seven_day_resets_at != null) details.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
           card.append(reading);
-          if (op.after.seven_day_resets_at != null && op.after.seven_day_resets_at * 1000 <= Date.now()) card.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
+          if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) card.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
         }
       }
       const controls = element("div", undefined, "codex-account-controls");
@@ -222,7 +233,8 @@ export function init() {
       controls.append(button("仅刷新配额", "refresh", account));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials) controls.append(button("清除本页登录态", "forget-login", account));
-      card.append(controls);
+      details.open = Boolean(old?.querySelector("details")?.open);
+      card.append(controls, details);
       if (old) old.replaceWith(card); else list.append(card);
       if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
     }
@@ -252,4 +264,5 @@ export function init() {
     document.removeEventListener("visibilitychange", visibility);
   });
   load();
+  window.AgentMonitor.pageInterval(load, 30000);
 }

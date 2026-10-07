@@ -32,8 +32,9 @@ const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quo
 const nodes = Object.fromEntries(ids.map(id=>['#'+id,node(id==='quota-accounts'?'table':'div')]));
 const buttons = ['all','claude','codex'].map(p=> {const b=node('button'); b.dataset.quotaProvider=p; return b;});
 nodes['#quota-explorer'].children=buttons;
+function descendants(n) {return [n,...n.children.flatMap(descendants)];}
 global.window={location:{origin:'http://fixture.test',pathname:'/fixture',search:''},history:{replaceState(){}}};
-global.document={readyState:'loading',body:node(),addEventListener(){},querySelector(s){return nodes[s]||null;},
+global.document={readyState:'loading',body:node(),addEventListener(){},querySelector(s){return nodes[s]||descendants(nodes['#quota-accounts']).find(n=>'#'+n.id===s)||null;},
   querySelectorAll(){return [];},createElement:node,createTextNode(t){const n=node();n.textContent=t;return n;}};
 eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { renderQuotaAccounts, removeRenderedAccount, snapshot: () => renderedQuotaRateLimits,'));
 const ui=window.AgentMonitor, table=nodes['#quota-accounts'];
@@ -49,6 +50,50 @@ const original=JSON.stringify(data);
 const rows=()=>table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId);
 const count=()=>nodes['#quota-match-count'].textContent;
 const search=(s)=>{nodes['#quota-search'].value=s;nodes['#quota-search'].listeners.input();};
+// A completed Web action must replace an older reading for this member only.
+const past=account('shared','known','remembered');
+past.account_label='one@example.test'; past.seven_day_used_pct=91; past.seven_day_resets_at=1;
+const other={...past,account_label:'two@example.test'};
+const otherWorkspace={...past,account_id:'other-workspace'};
+const projection={codex:{accounts:[past,other,otherWorkspace],refresh_errors:[{machine:'alpha',reason:'fixture collection failure'}]}};
+const frozen=JSON.stringify(projection);
+const observed=new Date().toISOString(), future=Math.floor(Date.now()/1000)+6*86400;
+const action={account_id:'shared',email:'ONE@example.test',operation:{after:{observed_at:observed,seven_day_used_pct:3,seven_day_resets_at:future}}};
+ui.renderQuotaAccounts(projection);
+ui.updateCodexQuotaReadings?.([action]);
+assert(rows()[0].cells[4].textContent.includes('6 天后重置'), 'fresh action reset must reach quota table');
+assert(rows()[0].cells[4].textContent.includes('3%'));
+const originalButton=descendants(rows()[0]).find(n=>n.className.includes('codex-account-select'));
+ui.updateCodexQuotaReadings([{...action,busy:true,operation:{...action.operation,stage:'login'}}]);
+assert(descendants(table).includes(originalButton),'unchanged readings must preserve table controls during progress polling');
+assert(rows()[0].cells[6].textContent.includes('本页查询'));
+assert(rows()[0].cells[1].textContent.includes('机器记录'));
+assert.equal(rows()[0].dataset.observedAt,past.updated_at,'deletion CAS stays on machine observation');
+assert(rows()[1].cells[4].textContent.includes('91%'),'same workspace different member stays separate');
+assert(rows()[2].cells[4].textContent.includes('91%'),'same email different workspace stays separate');
+assert(rows()[1].cells[4].textContent.includes('上次重置时间已过'));
+assert.equal(JSON.stringify(projection),frozen,'projection must not mutate machine input');
+assert(table.textContent.includes('fixture collection failure'));
+// A newer machine observation and an equal timestamp both beat Web observations.
+for (const newer of [observed,'2099-01-01T00:00:00Z']) {
+  ui.renderQuotaAccounts({codex:{accounts:[{...past,updated_at:newer,seven_day_used_pct:42}]}});
+  assert(rows()[0].cells[4].textContent.includes('42%'));
+  assert(!rows()[0].cells[6].textContent.includes('本页查询'));
+}
+ui.renderQuotaAccounts(projection);
+ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:'invalid',seven_day_used_pct:8}},batch_result:action.operation} ]);
+assert(rows()[0].cells[4].textContent.includes('3%'),'retained batch observation survives an unreadable current observation');
+ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:observed,seven_day_used_pct:null,seven_day_resets_at:null}}} ]);
+assert(rows()[0].cells[4].textContent.includes('重置时间未知'));
+assert(!rows()[0].cells[4].textContent.includes('91%'),'unknown new reading never borrows old percentage');
+ui.updateCodexQuotaReadings([]);
+assert(rows()[0].cells[4].textContent.includes('91%'),'page cleanup can clear observations');
+descendants(table).find(n=>n.className.includes('quota-past-toggle')).click();
+assert(!document.querySelector('#quota-past-accounts').hidden);
+ui.updateCodexQuotaReadings([action]);
+assert(!document.querySelector('#quota-past-accounts').hidden,'new action observation preserves historical disclosure');
+descendants(table).find(n=>n.className.includes('quota-past-toggle')).click();
+ui.updateCodexQuotaReadings([]);
 ui.renderQuotaAccounts(data);
 assert(count().includes('匹配 5 / 5')); assert(count().includes('在用账号 2')); assert(count().includes('历史账号 1')); assert(count().includes('机器记录 2'));
 assert(table.tBodies.some(b=>b.className==='quota-unknown'));

@@ -838,7 +838,7 @@ process.stdout.write(JSON.stringify({
         )
 
         self.assertEqual(past["warningTexts"], [])
-        self.assertEqual([reset["text"] for reset in past["resets"]], ["窗口已重置", "窗口已重置"])
+        self.assertEqual([reset["text"] for reset in past["resets"]], ["上次重置时间已过", "上次重置时间已过"])
         self.assertEqual(
             [reset["title"] for reset in past["resets"]],
             [payload["pastTitle"], payload["pastTitle"]],

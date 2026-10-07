@@ -603,8 +603,39 @@
     { key: "codex", label: "Codex", pill: "agent-codex", windows: [QUOTA_WINDOW_7D] },
   ];
   let renderedQuotaRateLimits = null;
+  let codexQuotaReadings = [];
   const quotaFilter = { provider: "all", search: "" };
   let boundQuotaExplorer = null;
+
+  function latestCodexQuotaReading(account) {
+    return [account.operation?.after, account.batch_result?.after]
+      .filter((reading) => Number.isFinite(Date.parse(reading?.observed_at)))
+      .sort((a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at))[0];
+  }
+
+  function updateCodexQuotaReadings(accounts) {
+    const signature = (profiles) => JSON.stringify(profiles.map((account) => [
+      account.account_id, account.email.toLowerCase(), latestCodexQuotaReading(account),
+    ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+    const changed = signature(accounts) !== signature(codexQuotaReadings);
+    codexQuotaReadings = accounts;
+    if (changed && renderedQuotaRateLimits) renderQuotaAccounts(renderedQuotaRateLimits);
+  }
+
+  function quotaDisplayReading(provider, account) {
+    if (provider.key !== "codex" || account.account_state !== "known" || !account.account_label) return account;
+    const profile = codexQuotaReadings.find((item) => item.account_id === account.account_id
+      && item.email.toLowerCase() === account.account_label.toLowerCase());
+    const reading = profile && latestCodexQuotaReading(profile);
+    if (!reading || Date.parse(reading.observed_at) <= Date.parse(account.updated_at)) return account;
+    const display = { ...account, updated_at: reading.observed_at, quota_source: "account_action" };
+    for (const spec of QUOTA_COLUMNS) {
+      for (const key of [spec.used, spec.reset]) {
+        display[key] = typeof reading[key] === "number" && Number.isFinite(reading[key]) ? reading[key] : null;
+      }
+    }
+    return display;
+  }
 
   function quotaMatches(provider, account) {
     if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return false;
@@ -660,6 +691,8 @@
     }
     renderedQuotaRateLimits = rateLimits;
     bindQuotaExplorer();
+    const rememberedExpanded = options.rememberedExpanded ?? Boolean(qs("#quota-past-accounts")
+      && !qs("#quota-past-accounts").hidden);
     // Only the bodies are ours; the header row is in the markup.
     Array.from(table.tBodies).forEach((body) => body.remove());
 
@@ -712,7 +745,7 @@
       }
     });
 
-    appendRememberedAccounts(table, remembered, Boolean(options.rememberedExpanded));
+    appendRememberedAccounts(table, remembered, rememberedExpanded);
     if (!matches.length && (quotaFilter.provider !== "all" || quotaFilter.search.trim())) {
       const body = document.createElement("tbody");
       body.className = "quota-filter-empty";
@@ -876,7 +909,8 @@
     if (account.account_state !== "known") {
       row.classList.add("unattributed");
     }
-    const stale = quotaIsStale(account.updated_at);
+    const display = quotaDisplayReading(provider, account);
+    const stale = quotaIsStale(display.updated_at);
     if (stale) {
       // Deliberately carries no styling — the pill in the Updated cell marks
       // staleness where it applies. This is the machine-readable half, which
@@ -884,12 +918,20 @@
       row.classList.add("stale");
     }
 
-    row.appendChild(quotaProviderCell(provider, account));
-    row.appendChild(quotaPlanCell(account));
+    row.appendChild(quotaProviderCell(provider, display));
+    const plan = quotaPlanCell(account);
+    if (display.quota_source === "account_action") {
+      const source = document.createElement("span");
+      source.className = "quota-history-note";
+      source.textContent = "机器记录";
+      plan.appendChild(source);
+    }
+    row.appendChild(plan);
     row.appendChild(quotaAccountCell(provider, account));
-    QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell(provider, spec, account)));
+    QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell(provider, spec, display)));
     row.appendChild(quotaMachinesCell(account));
-    row.appendChild(quotaUpdatedCell(account, stale, quotaRefreshNotice(provider, account)));
+    row.appendChild(quotaUpdatedCell(display, stale, display.quota_source === "account_action"
+      ? null : quotaRefreshNotice(provider, account)));
     return row;
   }
 
@@ -901,7 +943,7 @@
     if (quotaPresence(account) === "remembered") {
       const marker = document.createElement("span");
       marker.className = "status-pill quota-history-marker";
-      marker.textContent = "已登出";
+      marker.textContent = account.quota_source === "account_action" ? "机器历史账号" : "已登出";
       wrap.appendChild(marker);
     }
     cell.appendChild(wrap);
@@ -1243,10 +1285,10 @@
   // timestamp stays on the title attribute for anyone who wants the wall clock.
   function quotaResetText(epoch, resetState, nowMs) {
     if (resetState === "unknown") {
-      return "—";
+      return "重置时间未知";
     }
     if (resetState === "passed") {
-      return "窗口已重置";
+      return "上次重置时间已过";
     }
     const deltaMs = epoch * 1000 - nowMs;
     // Each unit is chosen from the value it will actually print, so rounding
@@ -1268,6 +1310,10 @@
       return "unknown";
     }
     return epoch * 1000 <= nowMs ? "passed" : "future";
+  }
+
+  function formatQuotaReset(epoch, nowMs = Date.now()) {
+    return quotaResetText(epoch, quotaResetState(epoch, nowMs), nowMs);
   }
 
   function quotaMachinesCell(account) {
@@ -1297,6 +1343,15 @@
   function quotaUpdatedCell(account, stale, refreshNotice) {
     const cell = document.createElement("td");
     cell.className = "quota-updated-cell";
+    if (account.quota_source === "account_action") {
+      cell.appendChild(document.createTextNode(`本页查询 · ${updatedText(account.updated_at)}`));
+      cell.title = formatDate(account.updated_at);
+      const note = document.createElement("span");
+      note.className = "quota-history-note";
+      note.textContent = stale ? "查询读数较旧，可在账号操作中仅刷新配额" : "机器归属与套餐仍按采集记录显示";
+      cell.appendChild(note);
+      return cell;
+    }
     if (quotaPresence(account) === "remembered") {
       cell.appendChild(document.createTextNode(`最后观测 ${formatDate(account.updated_at)}`));
       const note = document.createElement("span");
@@ -2049,6 +2104,9 @@
   }
 
   async function initOverview() {
+    codexQuotaReadings = [];
+    renderedQuotaRateLimits = null;
+    pageCleanups.push(() => { codexQuotaReadings = []; renderedQuotaRateLimits = null; });
     if (qs("#codex-account-actions")) {
       const currentAccountsPage = pageScope();
       import("/web/codex-accounts.js").then((module) => {
@@ -3093,6 +3151,9 @@
   }
 
   window.AgentMonitor = {
+    formatQuotaReset,
+    latestCodexQuotaReading,
+    updateCodexQuotaReadings,
     ensureTimezone,
     formatDate,
     onPageCleanup: (cleanup) => pageCleanups.push(cleanup),
