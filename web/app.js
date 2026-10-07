@@ -603,6 +603,48 @@
     { key: "codex", label: "Codex", pill: "agent-codex", windows: [QUOTA_WINDOW_7D] },
   ];
   let renderedQuotaRateLimits = null;
+  const quotaFilter = { provider: "all", search: "" };
+  let boundQuotaExplorer = null;
+
+  function quotaMatches(provider, account) {
+    if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return false;
+    const terms = quotaFilter.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const text = [account.account_label, account.account_id, quotaAccountName(account),
+      account.account_plan, quotaPlanLabel(account.account_plan),
+      account.reading_plan, account.credential_plan, ...(account.machines || [])]
+      .filter(Boolean).join(" ").toLowerCase();
+    return terms.every((term) => text.includes(term));
+  }
+
+  function bindQuotaExplorer() {
+    const explorer = qs("#quota-explorer");
+    if (!explorer || boundQuotaExplorer === explorer) return;
+    boundQuotaExplorer = explorer;
+    const search = qs("#quota-search");
+    const buttons = explorer.querySelectorAll("[data-quota-provider]");
+    search.value = quotaFilter.search;
+    buttons.forEach((button) => button.setAttribute("aria-pressed",
+      String(button.dataset.quotaProvider === quotaFilter.provider)));
+    const refresh = () => {
+      buttons.forEach((button) => button.setAttribute("aria-pressed",
+        String(button.dataset.quotaProvider === quotaFilter.provider)));
+      renderQuotaAccounts(renderedQuotaRateLimits);
+    };
+    buttons.forEach((button) => button.addEventListener("click", () => {
+      quotaFilter.provider = button.dataset.quotaProvider;
+      refresh();
+    }));
+    search.addEventListener("input", () => {
+      quotaFilter.search = search.value;
+      refresh();
+    });
+    qs("#quota-clear").addEventListener("click", () => {
+      quotaFilter.provider = "all";
+      quotaFilter.search = "";
+      search.value = "";
+      refresh();
+    });
+  }
 
   function quotaPresence(account) {
     // Older API payloads have no presence field and contain only live data, so
@@ -617,18 +659,31 @@
       return;
     }
     renderedQuotaRateLimits = rateLimits;
+    bindQuotaExplorer();
     // Only the bodies are ours; the header row is in the markup.
     Array.from(table.tBodies).forEach((body) => body.remove());
 
     const remembered = [];
+    const allEntries = QUOTA_PROVIDERS.flatMap((provider) =>
+      (rateLimits?.[provider.key]?.accounts || []).map((account) => ({ provider, account })));
+    const matches = allEntries.filter(({ provider, account }) => quotaMatches(provider, account));
+    const count = qs("#quota-match-count");
+    if (count) {
+      const known = matches.filter(({ account }) => account.account_state === "known");
+      const current = known.filter(({ account }) => quotaPresence(account) === "in_use").length;
+      const history = known.filter(({ account }) => quotaPresence(account) === "remembered").length;
+      count.textContent = `匹配 ${matches.length} / ${allEntries.length} 条记录 · 在用账号 ${current} · 历史账号 ${history} · 账号未知的机器记录 ${matches.length - known.length}`;
+    }
     QUOTA_PROVIDERS.forEach((provider) => {
       const block = rateLimits?.[provider.key];
-      const accounts = block?.accounts || [];
-      if (!accounts.length) {
+      const sourceAccounts = block?.accounts || [];
+      if (!sourceAccounts.length) {
         table.appendChild(quotaUnavailableBody(provider, block?.refresh_errors?.length
           ? "暂未取得配额读数，可点击刷新重试；原因见采集详情。" : block?.unavailable_reason));
         return;
       }
+      if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return;
+      const accounts = sourceAccounts.filter((account) => quotaMatches(provider, account));
       const live = accounts.filter((account) => quotaPresence(account) === "in_use");
       const named = live.filter((account) => account.account_state === "known");
       const unknown = live.filter((account) => account.account_state !== "known");
@@ -649,7 +704,8 @@
     QUOTA_PROVIDERS.forEach((provider) => {
       const accounts = rateLimits?.[provider.key]?.accounts || [];
       const unknown = accounts.filter(
-        (account) => quotaPresence(account) === "in_use" && account.account_state !== "known",
+        (account) => quotaMatches(provider, account)
+          && quotaPresence(account) === "in_use" && account.account_state !== "known",
       );
       if (unknown.length > 1) {
         table.appendChild(quotaUnknownBody(provider, unknown));
@@ -657,6 +713,17 @@
     });
 
     appendRememberedAccounts(table, remembered, Boolean(options.rememberedExpanded));
+    if (!matches.length && (quotaFilter.provider !== "all" || quotaFilter.search.trim())) {
+      const body = document.createElement("tbody");
+      body.className = "quota-filter-empty";
+      const cell = document.createElement("td");
+      cell.colSpan = 7;
+      cell.textContent = "没有匹配的配额记录。可清空筛选查看全部；这不表示配额可用或已用尽。";
+      const row = document.createElement("tr");
+      row.appendChild(cell);
+      body.appendChild(row);
+      table.appendChild(body);
+    }
     QUOTA_PROVIDERS.forEach((provider) => {
       const failures = rateLimits?.[provider.key]?.refresh_errors || [];
       if (failures.length) table.appendChild(quotaFailureDetails(provider, failures));
@@ -961,9 +1028,6 @@
         }
       });
     });
-    if (!matchingRows.length) {
-      return;
-    }
     const providerBlock = renderedQuotaRateLimits?.[providerKey];
     const accounts = providerBlock?.accounts;
     if (Array.isArray(accounts)) {
@@ -986,6 +1050,7 @@
         return;
       }
     }
+    if (!matchingRows.length) return;
     matchingRows.forEach((row) => row.remove());
     refreshRememberedAccountSummary(table);
   }

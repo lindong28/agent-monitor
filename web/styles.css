@@ -538,6 +538,49 @@ button:disabled {
    A card per account left 65% of each card empty at page width, and made
    cross-row alignment something CSS had to simulate with fixed slots — in a
    table it is the definition of a column. */
+.quota-explorer {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 8px;
+}
+
+.quota-provider-filter {
+  display: flex;
+  gap: 4px;
+}
+
+.quota-provider-filter [aria-pressed="true"] {
+  color: var(--accent);
+  border-color: currentColor;
+  background: var(--accent-bg);
+}
+
+.quota-search-label {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 220px;
+  font-size: 12px;
+}
+
+.quota-search-label input {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--h-control);
+  padding-inline: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.quota-search-label input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .quota-table {
   width: 100%;
   border-collapse: collapse;

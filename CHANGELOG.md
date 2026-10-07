@@ -4,6 +4,7 @@
 
 - Discover Codex batch accounts automatically from current and historical login records; remove the manual account-add step. Deduplicate identities, surface incomplete records, and exclude removed identities from subsequent sends while preserving batch results.
 - Add one-click Codex batches for all saved accounts, persistent progress, bounded parallel processing and independent authorization. Refreshing or repeating a request does not resend the batch; continue only definitely unsent accounts, or explicitly start a new round. Preserve message results when refreshing quota.
+- Add provider filters and account/plan/machine search to Overview quotas, with matched records, current/history account counts and separate unknown-machine counts. Preserve original windows, readings, history actions and collection notices; filtering does not change provider queries.
 - Replace inline session expansion with a navigable detail page: retained-session summaries, model filtering, paginated usage records and expandable source identifiers. Preserve list filters and page on return; keep unknown costs, estimates and observed time spans explicit.
 - Add explicit Codex account login and single-message actions to the overview. Official device authorization, isolated saved logins, account identity checks, cancellation and quota-only refresh avoid switching the regular CLI account. Display server-reported reset times and distinguish completed, failed and uncertain sends. No automatic weekly sending is introduced.
 
