@@ -4,6 +4,12 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-07 local Codex account batch release
+
+The owner approved local rollout of `517903c`. Local `main` fast-forwarded from `4221af9`, then `POST /api/restart` re-executed the existing service on port 39001. No push or remote deployment was performed. The state symlink retained target `/Users/lindong/.local/share/agent-monitor/state` and inode 102763913.
+
+After restart, `/api/health?asset_watch=1` returned `ok: true, stale: false`, instance `5d811fc66b4e4065941dde17836a1902`, and Web signature `cdad601ed5b14ad9`. Served index, account script and CSS matched the committed bytes. The account endpoint returned the new `batch` field with no saved accounts. An isolated headless browser read the open one-click panel and its empty state; the zero-account send button was disabled. This verifies one local empty-state deployment, not real account authorization, message delivery or reset behavior. Synthetic batch coverage is recorded in the [batch decision](../adr/20261007-b923-codex-account-batches.md).
+
 ## 2026-10-07 MacStudio session detail and account actions release
 
 The owner explicitly approved publishing and deploying `6367450`, `8c75d17` and `66a2ecf` together. `origin/main` and the MacStudio checkout reached `66a2ecf9ae0b1085e8b117c181b48877f8549f60`. The existing `com.agent-monitor.hub` job was restarted with `launchctl kickstart -k`; PID 91480 uses the same checkout and `.venv`. The state symlink still points to `/Users/lindong/.local/share/agent-monitor/state`.
