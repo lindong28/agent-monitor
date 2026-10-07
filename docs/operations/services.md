@@ -4,6 +4,12 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-07 MacStudio quota explorer release
+
+The owner approved publication and MacStudio rollout through `14b5944`, explicitly including the intervening batch-account and discovery commits. `origin/main` and the remote checkout reached `14b5944`. The existing `com.agent-monitor.hub` job restarted with `launchctl kickstart -k`; health then reported `ok: true, stale: false`, instance `aa2b51c2b7f34369aed8aef12c616ff7`, Web signature `67b55ac9a4a77ff8`. Served index, app.js, styles.css and codex-accounts.js matched this source revision byte-for-byte. The state symlink target and inode remained unchanged.
+
+An isolated browser reached the MacStudio service through an SSH loopback forward and read 11 quota records: 5 current and 6 historical. A no-match search produced 0/11 with the explicit empty-state explanation; clearing restored 11/11. At 390×844, document width was 390px. This is one live data snapshot, not broad performance acceptance. Direct browser navigation to `macstudio` encountered HTTP 502 while direct HTTP reads worked, so the successful consumer path was the SSH forward; the temporary forward and browser were closed afterward. No account login, provider message, deletion or quota reset was performed. This documentation commit is local and is not included in the product publication above.
+
 ## 2026-10-07 local known-account discovery release
 
 The owner approved local rollout of `4e863af`. Local `main` fast-forwarded from `bc626fd`; `POST /api/restart` re-executed the existing port-39001 service. Health reported `ok: true, stale: false`, instance `037440e92f6142e09c942da4da08ff3a`, Web signature `5a135addcc4d608e`. Served index and account script matched source bytes. The original state symlink target and inode were retained. No push or remote rollout was performed.
