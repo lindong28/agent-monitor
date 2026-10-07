@@ -2143,6 +2143,11 @@
   ];
 
   async function initSessions() {
+    if (params().has("session")) return initSessionDetail();
+    SESSION_FILTERS.forEach(({key}) => { sessionsView.filters[key] = params().get(key) || ""; });
+    sessionsView.page = Math.max(0, parseInt(params().get("page"), 10) || 0);
+    const initialSort = qs("#sort");
+    if (initialSort && params().has("sort")) initialSort.value = params().get("sort");
     const pageCurrent = pageScope();
     let activeLoads = 0;
     async function load(force, background = false) {
@@ -2210,7 +2215,7 @@
     watchPageData(() => load(false, true));
     const sort = qs("#sort");
     if (sort) {
-      sort.addEventListener("change", load);
+      sort.addEventListener("change", () => { sessionsView.page = 0; load(false); });
     }
     SESSION_FILTERS.forEach((filter) => {
       const select = qs(filter.select);
@@ -2233,7 +2238,7 @@
     if (next) {
       next.addEventListener("click", () => turnSessionPage(1));
     }
-    await load(false);
+    await load(false, true);
   }
 
   // One clause per machine, and the retention date pulled out to the end — but
@@ -2387,6 +2392,14 @@
     const matched = filteredSessions();
     const lastPage = Math.max(0, Math.ceil(matched.length / SESSIONS_PAGE_SIZE) - 1);
     sessionsView.page = Math.min(sessionsView.page, lastPage);
+    const listParams = params();
+    SESSION_FILTERS.forEach(({key}) => {
+      if (sessionsView.filters[key]) listParams.set(key, sessionsView.filters[key]);
+      else listParams.delete(key);
+    });
+    listParams.set("page", String(sessionsView.page));
+    listParams.set("sort", qs("#sort")?.value || "time");
+    replaceCurrentUrl("/sessions?" + listParams);
     const start = sessionsView.page * SESSIONS_PAGE_SIZE;
     const pageRows = matched.slice(start, start + SESSIONS_PAGE_SIZE);
     const filtering = matched.length !== sessionsView.rows.length;
@@ -2418,16 +2431,21 @@
       tr.className = "session-row";
       tr.dataset.sessionId = row.session_id;
       tr.dataset.machine = row.machine || "";
+      const detailParams = new URLSearchParams(listParams);
+      detailParams.set("session", row.session_id);
+      detailParams.set("session_machine", row.machine || "");
       tr.innerHTML = `
         <td><span class="pill agent-${escapeHtml(row.agent_id)}">${escapeHtml(row.agent_id)}</span><br><small>${escapeHtml(row.machine || "本机")}</small></td>
-        <td class="project-cell"><span title="${escapeHtml(row.project)}">${escapeHtml(projectLabel(row.project))}</span></td>
+        <td class="project-cell"><a href="/sessions?${escapeHtml(detailParams.toString())}" title="${escapeHtml(row.project)}">${escapeHtml(projectLabel(row.project))}</a></td>
         <td class="nowrap">${escapeHtml(row.model)}${row.estimated ? ' <span class="muted">推算</span>' : ""}</td>
         <td class="nowrap">${grouped ? escapeHtml(timeOfDay(row.started_at)) : formatDate(row.started_at)}</td>
         <td class="numeric">${moneyPrecise(row.cost_usd)}</td>
         <td class="numeric">${integer(row.tokens)}</td>
         <td class="numeric">${integer(row.usage_events)}</td>
       `;
-      tr.addEventListener("click", () => toggleSession(tr));
+      tr.addEventListener("click", (event) => {
+        if (!event.target.closest("a, button") && !window.getSelection()?.toString()) tr.querySelector("a").click();
+      });
       tbody.appendChild(tr);
     });
 
@@ -2514,33 +2532,124 @@
     }
   }
 
-  async function toggleSession(row) {
-    const next = row.nextElementSibling;
-    if (next && next.classList.contains("turn-detail")) {
-      next.remove();
-      return;
+  // Transcript identifiers are local/provider IDs, not Gateway request IDs.
+  async function initSessionDetail() {
+    const current = pageScope();
+    const selected = params();
+    const id = selected.get("session");
+    const machine = selected.get("session_machine") || "";
+    const back = new URLSearchParams(selected);
+    ["session", "session_machine", "usage_model", "usage_page"].forEach(key => back.delete(key));
+    qs("#session-list-panel").hidden = true;
+    qs("main h1").textContent = "会话详情";
+    ["#range", "#sort"].forEach(selector => { const el = qs(selector); if (el) el.hidden = true; });
+    const panel = document.createElement("section");
+    panel.className = "session-detail";
+    panel.innerHTML = `<a class="session-back" href="/sessions?${escapeHtml(back.toString())}">‹ 返回会话列表</a>
+      <div class="panel session-identity"><div><h2>会话</h2><code id="session-identity"></code><p>${escapeHtml(machine || "本机")} · 已留存的完整会话</p></div><button id="session-copy" type="button">复制 ID</button></div>
+      <div id="session-detail-content" aria-live="polite"></div>`;
+    qs("main").appendChild(panel);
+    qs("#session-identity").textContent = id;
+    qs("#session-copy").addEventListener("click", async (event) => {
+      try { await navigator.clipboard.writeText(id); event.target.textContent = "已复制"; }
+      catch { event.target.textContent = "复制失败，请选中 ID 复制"; }
+    });
+    let generation = 0;
+    let activeLoads = 0;
+    async function load(force = false, background = false) {
+      if (background && activeLoads) return;
+      activeLoads++;
+      const ticket = ++generation;
+      const content = qs("#session-detail-content");
+      if (!background) content.innerHTML = '<p class="panel status-line" role="status">正在读取会话…</p>';
+      try {
+        if (force === true) await refreshStatistics({isCurrent: () => current() && ticket === generation});
+        if (!current() || ticket !== generation) return;
+        const detail = await api("/api/session/" + encodeURIComponent(id), {machine});
+        if (!current() || ticket !== generation) return;
+        if (!Array.isArray(detail.entries)) throw new Error("会话数据格式无效");
+        renderSessionDetail(detail.entries, content);
+      } catch (error) {
+        if (!current() || ticket !== generation) return;
+        content.innerHTML = `<div class="panel"><p class="error">会话读取失败：${escapeHtml(error.message || error)}</p><button id="session-retry" type="button">重试</button></div>`;
+        qs("#session-retry").addEventListener("click", load);
+      } finally {
+        activeLoads--;
+      }
     }
-    qsa(".turn-detail").forEach((detail) => detail.remove());
-    const detail = await api("/api/session/" + encodeURIComponent(row.dataset.sessionId), { machine: row.dataset.machine || "" });
-    const tr = document.createElement("tr");
-    tr.className = "turn-detail";
-    tr.innerHTML = `<td colspan="7">${renderTurnList(detail.entries)}</td>`;
-    row.after(tr);
+    bindShell(load, {range: false});
+    watchPageData(() => load(false, true));
+    await load();
   }
 
-  function renderTurnList(entries) {
-    const items = entries
-      .map(
-        (entry) => `<li>
-          <span>${formatDate(entry.timestamp)}</span>
-          <span>${escapeHtml(entry.model)}</span>
-          <span>入 ${integer(entry.input_tokens)}</span>
-          <span>出 ${integer(entry.output_tokens)}</span>
-          <span>${moneyPrecise(entry.cost_usd)}</span>
-        </li>`
-      )
-      .join("");
-    return `<ul class="turn-list">${items}</ul>`;
+  function sessionEntryCost(value) {
+    if (value === null || value === undefined) return "未知";
+    if (value > 0 && value < 0.0001) return "$" + Number(value).toPrecision(3);
+    return moneyPrecise(value);
+  }
+
+  function renderSessionDetail(entries, content) {
+    if (!entries.length) {
+      content.innerHTML = '<div class="panel empty-state">未找到此机器上的已留存用量。会话可能未采集，或机器尚未纳入。</div>';
+      return;
+    }
+    const distinct = key => [...new Set(entries.map(entry => entry[key]).filter(Boolean))];
+    const models = distinct("model");
+    const tokens = entries.reduce((n, e) => n + ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens"].reduce((sum, key) => sum + (Number(e[key]) || 0), 0), 0);
+    const unknown = entries.filter(e => e.cost_usd == null).length;
+    const cost = unknown ? null : entries.reduce((n, e) => n + e.cost_usd, 0);
+    const events = entries.reduce((n, e) => n + (Number(e.usage_event_count) || 0), 0);
+    const dates = entries.map(e => new Date(e.timestamp).getTime()).filter(Number.isFinite);
+    const first = dates.length ? dates.reduce((a, b) => Math.min(a, b)) : null;
+    const last = dates.length ? dates.reduce((a, b) => Math.max(a, b)) : null;
+    const span = first === null ? "未知" : integer(Math.round((last - first) / 60000)) + " 分钟";
+    const field = (name, value) => `<div><dt>${name}</dt><dd>${escapeHtml(value || "—")}</dd></div>`;
+    content.innerHTML = `<div class="session-metrics">
+      <article><h3>记录成本</h3><strong>${sessionEntryCost(cost)}</strong><p>${unknown ? `${unknown} 条成本未知，未合计为总额` : "按现有定价口径 · 非账单"}</p></article>
+      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>输入、输出与缓存合计</p></article>
+      <article><h3>用量条目</h3><strong>${integer(events)}</strong><p>${integer(entries.length)} 条记录 · 非请求次数</p></article>
+      <article><h3>观测跨度</h3><strong>${span}</strong><p>首末记录之间 · 非活跃时长</p></article></div>
+      <details class="panel session-metadata"><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
+        ${field("Agent", distinct("agent_id").join("、"))}${field("会话目录", distinct("project").join("、"))}
+        ${field("模型", models.join("、"))}${field("首条记录", first === null ? "" : formatDate(first))}${field("末条记录", last === null ? "" : formatDate(last))}
+      </dl><p class="scope-note">范围为该会话已留存的全部记录，不受列表时间窗口限制。Codex 与部分模型采用推算定价；未知费用不归零。这里不包含对话正文，也未关联 Gateway 尝试链。</p></details>
+      <section class="panel"><div class="panel-head"><h2>用量明细</h2><span id="usage-count" class="status-line"></span></div>
+      <div class="controls"><div class="field"><label for="usage-model">模型</label><select id="usage-model"><option value="">全部模型</option>${models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select></div><button id="usage-clear" type="button">清除筛选</button></div>
+      <div class="table-wrap"><table><thead><tr><th>记录时间</th><th>模型</th><th class="numeric">输入</th><th class="numeric">输出</th><th class="numeric">缓存读取 / 写入</th><th class="numeric">成本</th><th>详情</th></tr></thead><tbody id="usage-body"></tbody></table></div>
+      <div class="pager"><button id="usage-prev" type="button">‹ 上一页</button><span id="usage-status" role="status"></span><button id="usage-next" type="button">下一页 ›</button></div></section>`;
+    let page = Math.max(0, parseInt(params().get("usage_page"), 10) || 0);
+    const select = qs("#usage-model");
+    select.value = models.includes(params().get("usage_model")) ? params().get("usage_model") : "";
+    function render() {
+      const rows = entries.filter(e => !select.value || e.model === select.value);
+      page = Math.min(page, Math.max(0, Math.ceil(rows.length / 50) - 1));
+      const next = params();
+      if (select.value) next.set("usage_model", select.value); else next.delete("usage_model");
+      next.set("usage_page", String(page));
+      replaceCurrentUrl("/sessions?" + next);
+      qs("#usage-count").textContent = `${rows.length} / ${entries.length} 条记录`;
+      qs("#usage-body").innerHTML = rows.slice(page * 50, (page + 1) * 50).map((e, index) => `<tr>
+        <td class="nowrap">${escapeHtml(formatDate(e.timestamp))}</td><td>${escapeHtml(e.model)}</td>
+        <td class="numeric">${integer(e.input_tokens)}</td><td class="numeric">${integer(e.output_tokens)}</td>
+        <td class="numeric">${integer(e.cache_read_tokens)} / ${integer(e.cache_creation_tokens)}</td><td class="numeric">${sessionEntryCost(e.cost_usd)}</td>
+        <td><button type="button" data-usage="${index}" aria-expanded="false">查看</button></td></tr>`).join("") || '<tr><td colspan="7">没有符合条件的记录。</td></tr>';
+      qsa("[data-usage]").forEach(button => button.addEventListener("click", () => {
+        if (button.getAttribute("aria-expanded") === "true") { button.closest("tr").nextElementSibling.remove(); button.setAttribute("aria-expanded", "false"); return; }
+        const e = rows[page * 50 + Number(button.dataset.usage)];
+        const row = document.createElement("tr");
+        row.className = "session-entry-detail";
+        row.innerHTML = `<td colspan="7"><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("用量条目", String(e.usage_event_count ?? "未知"))}</dl><p class="scope-note">ID 来自源日志，不能直接作为 Gateway 请求标识。</p></td>`;
+        button.closest("tr").after(row); button.setAttribute("aria-expanded", "true");
+      }));
+      qs("#usage-status").textContent = rows.length ? `第 ${page * 50 + 1}–${Math.min(rows.length, (page + 1) * 50)} 条，共 ${rows.length} 条` : "没有记录";
+      qs("#usage-prev").disabled = page === 0;
+      qs("#usage-next").disabled = (page + 1) * 50 >= rows.length;
+    }
+    select.addEventListener("change", () => { page = 0; render(); });
+    qs("#usage-clear").addEventListener("click", () => { select.value = ""; page = 0; render(); });
+    qs("#usage-prev").addEventListener("click", () => { page--; render(); });
+    qs("#usage-next").addEventListener("click", () => { page++; render(); });
+    render();
   }
 
   function escapeHtml(value) {

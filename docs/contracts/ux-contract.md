@@ -39,7 +39,7 @@
 |---|---|---|
 | 总览 | `/` | **机器状态条**（coverage N/M + 逐台卡片）；KPI 卡片（今日成本、本周成本、当前 range 的成本）与**逐账号配额列表**（Claude 5h/7d、Codex 7d）；「成本趋势」时间图；「本周会话目录成本」「本月模型构成」侧面板。**除配额外均为全机合计** |
 | 透视 | `/explore` | 机器状态条；SELECT 选择指标；WHERE 提供预设范围或起止日期与四类过滤；GROUP BY 组合 Agent 类型／会话目录／模型／机器及可选天／周／月；预设、时间趋势与组合排名，无分组时显示总量 |
-| 会话 | `/sessions` | **全机完整已采历史**：session 列表（列：agent/project/model/起始/cost/tokens/messages）；排序下拉（Time / Cost / Tokens / Duration）；行展开看 turn 级明细 |
+| 会话 | `/sessions` | **全机完整已采历史**：session 列表（列：agent/project/model/起始/cost/tokens/messages）；排序下拉（Time / Cost / Tokens / Duration）；进入按机器定位的独立会话详情 |
 | LLM 调用 | `/llm-calls` | **全机、仅各机本地 LLM Gateway**：Machine 过滤；按 request 汇总调用结果，按 attempt 追踪实际 provider/model、fallback、credential source、usage、latency、成本与定价依据；request 与 attempt 各自独立分页；从请求或 attempt-parent 进入右侧完整诊断并关闭返回列表（H9）；按当前筛选导出全部匹配请求 JSON（H10） |
 | 网络 | `/network` | **仅本机**：五块诊断卡：本机（内网 IP / IPv6 泄漏 / DNS+地域）、公网（IP/位置/运营商/时区）、风险（proxycheck 风险分+type、ip-api hosting/marked-proxy、stopforumspam 垃圾评分+报告次数、本地 shell 代理环境变量）、时区（本机 vs 公网时区匹配）、结论（逐条结论 + verdict 规则说明）；总体 verdict banner + Refresh |
 
@@ -113,7 +113,7 @@
 
 - **D1 保留说明准确**：standalone 读取本机已留存统计；hub 读取各台已准入机器的留存统计，并显示来源观察时间与尚未采集状态。源日志清理后，已采集 session 明细仍可见；早于首次采集的缺失日志不能恢复。日汇总的完整保留边界按各机 archive authority 显示，不把 legacy 历史改称完整。
 - **D2 列表与排序**：列出 session（列：agent/project/model/起始时间/cost/tokens/messages）；排序下拉提供 **Time / Cost / Tokens / Duration** 四项，选定后列表按该维排序且符合排序语义。注：Duration 可排序但**不作为可见列**展示（按起始/结束时间差计算）——验 Duration 排序时以相邻行的时间跨度推断顺序，或视为已知的「可排序但无对应列」观察点。
-- **D3 行展开**：点行展开 turn 级明细（每 turn 时间/模型/in/out/cost）。
+- **D3 会话详情**：点行或会话目录链接进入独立详情，URL 以 session ID + machine 定位；刷新、重开与返回列表保留列表 range、筛选、排序、页码。摘要及明细取该会话已留存的全部记录，不受列表时间窗口限制；成本有未知时不显示为已知总额，推算不冒充账单，观测跨度不冒充活跃时长，用量条目不冒充请求数。模型筛选、每页 50 条及展开条目提供输入、输出、缓存、成本和源日志 ID；日志 ID 不链接为 Gateway 请求。空、失败、重试可见，离开页面后的迟到响应不得覆盖当前页。详情沿用手动采集刷新及 30 秒／焦点恢复重读。
 - **D4 range 行为**：range 筛选已留存事件的真实时间，不因选 2y 就声称已有两年历史。删除已采集源并再次采集后，旧 session 仍在对应 range；hub 离线来源仍显示上次成功记录及原观察时间。
 
 ### E. Network `/network`

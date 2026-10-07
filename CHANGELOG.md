@@ -2,6 +2,7 @@
 
 ## 2026-10-07
 
+- Replace inline session expansion with a navigable detail page: retained-session summaries, model filtering, paginated usage records and expandable source identifiers. Preserve list filters and page on return; keep unknown costs, estimates and observed time spans explicit.
 - Add explicit Codex account login and single-message actions to the overview. Official device authorization, isolated saved logins, account identity checks, cancellation and quota-only refresh avoid switching the regular CLI account. Display server-reported reset times and distinguish completed, failed and uncertain sends. No automatic weekly sending is introduced.
 
 ## 2026-10-06

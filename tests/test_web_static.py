@@ -10,6 +10,54 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebStaticTests(unittest.TestCase):
+    def test_session_detail_preserves_refresh_collection_and_page_watch(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+const calls = [], timers = [], listeners = [];
+function node() {
+  return { hidden: false, textContent: "", innerHTML: "", value: "30d",
+    addEventListener(k, fn) { this[k] = fn; }, setAttribute() {}, appendChild() {} };
+}
+const nodes = Object.fromEntries([
+  "#session-list-panel", "main h1", "#range", "#sort", "main",
+  "#session-identity", "#session-copy", "#session-detail-content", "#refresh"
+].map(k => [k, node()]));
+global.window = {
+  location: { origin: "http://example.test", pathname: "/sessions",
+    search: "?session=s1&session_machine=macbook",
+    href: "http://example.test/sessions?session=s1&session_machine=macbook" },
+  history: { replaceState() {} },
+  setInterval(fn, ms) { timers.push({fn, ms}); },
+  addEventListener(k, fn) { listeners.push({k, fn}); }
+};
+global.document = {
+  readyState: "loading", addEventListener(k) { listeners.push({k}); },
+  querySelector(k) { return nodes[k] || null; }, querySelectorAll() { return []; },
+  createElement() { return node(); }
+};
+global.fetch = async u => {
+  calls.push(String(u));
+  return { ok: true, json: async () => String(u).includes("/api/timezone")
+    ? {timezone: "UTC"} : String(u).includes("/api/refresh")
+    ? {machines: [], refresh_requested: 1, refresh_completed: 1, syncing: false}
+    : {entries: []} };
+};
+eval(fs.readFileSync("web/app.js", "utf8"));
+(async () => {
+  await window.AgentMonitor.initSessions(); calls.length = 0;
+  await nodes["#refresh"].click();
+  assert.deepStrictEqual(calls, ["http://example.test/api/refresh",
+    "http://example.test/api/session/s1?machine=macbook"]);
+  assert.deepStrictEqual(timers.map(t => t.ms), [30000]);
+  assert(listeners.some(t => t.k === "focus"));
+  assert(listeners.some(t => t.k === "visibilitychange"));
+  calls.length = 0; await timers[0].fn();
+  assert.deepStrictEqual(calls, ["http://example.test/api/session/s1?machine=macbook"]);
+})().catch(e => { console.error(e); process.exitCode = 1; });
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_llm_scope_follows_the_actual_response(self):
         script = r'''
 const fs = require("fs");
