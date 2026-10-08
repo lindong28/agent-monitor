@@ -93,6 +93,21 @@ class AccountActionsTests(unittest.TestCase):
                 self.assertIn("不一致", result["operation"]["detail"])
                 self.assertNotIn("turn/start", [c.get("method") for c in self.calls(account)])
 
+    def test_login_rate_limits_are_visible_without_misdiagnosing_settings(self):
+        for scenario in ("login_start_rate_limit", "login_poll_rate_limit", "login_unknown_failure"):
+            with self.subTest(scenario=scenario):
+                result = self.run_case(scenario)
+                op = result["operation"]
+                self.assertEqual(op["stage"], "failed")
+                self.assertEqual(op["message_status"], "not_sent")
+                if scenario != "login_unknown_failure":
+                    self.assertIn("429", op["detail"])
+                    self.assertIn("限流", op["detail"])
+                self.assertNotIn("已启用设备码", op["detail"])
+                self.assertNotIn("SECRET_FIXTURE_TOKEN", json.dumps(result))
+                self.assertNotIn("user_code", op)
+                self.assertNotIn("turn/start", [c.get("method") for c in self.calls(result)])
+
     def test_send_success_is_not_lost_on_quota_failure(self):
         result = self.run_case("quota_failure")
         self.assertEqual(result["operation"]["stage"], "partial")

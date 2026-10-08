@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261008-f7c1: Codex authorization queue](20261008-f7c1-codex-authorization-queue.md) | Accepted; one manual authorization at a time, known rate limits stop pending code requests |
 | [20261008-e92b: retain successful Codex quota observations](20261008-e92b-retain-codex-quota.md) | Accepted; independent latest reading survives operation replacement, deployment separate |
 | [20261008-f43a: requests before optional analysis](20261008-f43a-request-first-loading.md) | Accepted by user; partially supersedes d83e/H2 loading order, deployment separate |
 | [20261008-d102: isolate full-history HTTP queries](20261008-d102-query-process.md) | Accepted; two concurrent query workers, deployment separate |

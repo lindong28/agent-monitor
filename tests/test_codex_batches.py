@@ -93,16 +93,72 @@ class BatchTests(unittest.TestCase):
         self.manager.slots = threading.BoundedSemaphore(2)
         pending = [self.add(i, "deferred_login") for i in range(3)]
         good = self.add(4)
+        self.manager.start(good)
+        self.wait()
         self.manager.start_batch(None)
-        self.wait(lambda data: sum(a["operation"]["stage"] == "login" for a in data["accounts"]) == 3
+        data = self.wait(lambda data: sum(a["operation"]["stage"] == "login" for a in data["accounts"]) == 1
+                  and sum(a["operation"]["stage"] == "login_queued" for a in data["accounts"]) == 2
                   and any(a["id"] == good and not a["busy"] for a in data["accounts"]))
-        self.assertEqual(self.calls(good), 1)
+        self.assertEqual(self.calls(good), 2)
         for pid in pending:
             self.assertEqual(self.calls(pid), 0)
-            (self.manager.directory(pid) / "authorize").touch()
+        for remaining in range(3, 0, -1):
+            data = self.wait(lambda data: sum(a["operation"]["stage"] == "login" for a in data["accounts"]) == 1)
+            active = next(a for a in data["accounts"] if a["operation"]["stage"] == "login")
+            for _ in range(3):
+                observed = next(a for a in self.manager.list()["accounts"] if a["id"] == active["id"])
+                self.assertEqual(observed["operation"]["user_code"], active["operation"]["user_code"])
+                self.assertEqual(observed["operation"]["id"], active["operation"]["id"])
+            self.assertEqual(sum(a["operation"]["stage"] == "login_queued" for a in data["accounts"]), remaining - 1)
+            (self.manager.directory(active["id"]) / "authorize").touch()
+            self.wait(lambda data: next(a for a in data["accounts"] if a["id"] == active["id"])["operation"]["message_status"] == "succeeded")
         self.wait()
         for pid in pending:
             self.assertEqual(self.calls(pid), 1)
+
+    def test_rate_limit_stops_pending_authorizations_until_explicit_retry(self):
+        for scenario in ("login_start_rate_limit", "login_poll_rate_limit"):
+            with self.subTest(scenario=scenario):
+                self.scenarios = {}
+                ids = [self.add(f"{scenario}-{i}", scenario) for i in range(3)]
+                good = self.add(f"{scenario}-saved")
+                self.manager.start(good)
+                self.wait()
+                current = self.manager.read_batch()
+                batch = self.manager.start_batch(current["id"] if current else None, set(ids + [good]))["batch"]["id"]
+                data = self.wait()
+                self.assertEqual(sum(self.calls(pid, "account/login/start") for pid in ids), 1)
+                for account in data["accounts"]:
+                    if account["id"] in ids:
+                        self.assertEqual(account["operation"]["stage"], "failed")
+                        self.assertEqual(account["operation"]["message_status"], "not_sent")
+                        self.assertIn("限流", account["operation"]["detail"])
+                        self.assertNotIn("user_code", account["operation"])
+                self.assertEqual(self.calls(good), 2)
+                self.scenarios.update({pid: "success" for pid in ids})
+                self.manager.retry_batch(batch)
+                self.wait()
+                self.assertEqual(self.calls(good), 2)
+                for pid in ids:
+                    self.assertEqual(self.calls(pid), 1)
+
+    def test_cancel_waiting_and_active_login_releases_the_queue(self):
+        ids = [self.add(i, "deferred_login") for i in range(3)]
+        self.manager.start_batch(None)
+        data = self.wait(lambda data: sum(a["operation"]["stage"] == "login_queued" for a in data["accounts"]) == 2
+                         and sum(a["operation"]["stage"] == "login" for a in data["accounts"]) == 1)
+        active = next(a["id"] for a in data["accounts"] if a["operation"]["stage"] == "login")
+        queued = next(a["id"] for a in data["accounts"] if a["operation"]["stage"] == "login_queued")
+        self.manager.cancel(queued)
+        self.wait(lambda data: next(a for a in data["accounts"] if a["id"] == queued)["operation"]["stage"] == "cancelled")
+        self.assertEqual(self.calls(queued, "account/login/start"), 0)
+        self.manager.cancel(active)
+        remaining = next(pid for pid in ids if pid not in (active, queued))
+        self.wait(lambda data: next(a for a in data["accounts"] if a["id"] == remaining)["operation"]["stage"] == "login")
+        (self.manager.directory(remaining) / "authorize").touch()
+        self.wait()
+        self.assertEqual(self.calls(remaining), 1)
+        self.assertEqual(self.calls(active), 0)
 
     def test_cancel_retry_only_definitely_unsent_accounts(self):
         good = self.add(1)
@@ -128,6 +184,21 @@ class BatchTests(unittest.TestCase):
         other.retry_batch(batch_id)
         self.assertEqual(self.calls(pid), 1)
         self.assertFalse(other.jobs)
+
+    def test_restart_marks_waiting_authorizations_interrupted_without_replay(self):
+        for index, stage in enumerate(("login_queued", "login")):
+            pid = self.add(index)
+            directory = self.manager.directory(pid)
+            record = self.manager.read(directory)
+            record["operation"] = {"stage": stage, "message_status": "not_sent"}
+            self.manager.save(directory, record)
+        other = ca.Manager(self.manager.root)
+        self.addCleanup(other.close)
+        for account in other.list()["accounts"]:
+            self.assertEqual(account["operation"]["stage"], "interrupted")
+            self.assertFalse(account["busy"])
+            self.assertNotIn("user_code", account["operation"])
+            self.assertEqual(self.calls(account["id"], "account/login/start"), 0)
 
     def test_concurrent_managers_create_one_batch(self):
         ids = [self.add(i) for i in range(2)]

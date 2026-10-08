@@ -38,12 +38,22 @@ for line in sys.stdin:
         result = {"account": {"type": "chatgpt", "email": "wrong@example.com" if scenario == "wrong_email" else email}
                   if (home / "auth.json").exists() else None}
     elif method == "account/login/start":
+        if scenario == "login_start_rate_limit":
+            emit({"id": message["id"], "error": {"code": -32603, "message":
+                  "failed to request device code: device code request failed with status 429 Too Many Requests"}})
+            continue
         if scenario == "login_error":
             emit({"id": message["id"], "error": {"message": "SECRET_FIXTURE_TOKEN upstream error"}})
             continue
         result = {"loginId": "fixture-login", "verificationUrl": "https://auth.openai.com/codex/device", "userCode": "TEST-CODE"}
         if scenario == "bad_url":
             result["verificationUrl"] = "https://evil.example/steal"
+        if scenario in ("login_poll_rate_limit", "login_unknown_failure"):
+            emit({"id": message["id"], "result": result})
+            emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": False,
+                  "error": "device auth failed with status 429 Too Many Requests" if scenario == "login_poll_rate_limit"
+                  else "SECRET_FIXTURE_TOKEN unknown upstream failure"}})
+            continue
         if scenario == "deferred_login":
             emit({"id": message["id"], "result": result})
             deadline = time.monotonic() + 15

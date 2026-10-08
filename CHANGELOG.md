@@ -2,6 +2,7 @@
 
 ## 2026-10-08
 
+- Queue Codex device authorization one account at a time while saved logins continue processing. Report known OpenAI login rate limits accurately and stop pending code requests until explicit retry; explain stopped codes without misdiagnosing every authorization failure as a disabled setting.
 - Preserve Codex quota readings obtained automatically after sending or by quota-only refresh, independently of replaceable operation records. Later failed queries and restarts retain the last successful reading and its original observation time in both the account card and quota table.
 - Batch request candidates before reading their child attempts, avoiding repeated full-table scans when Hub sources still use older exporters without lookup indexes.
 - Open LLM Calls with a request page first. Load full-range totals, costs, independent attempts and complete filter choices on explicit action; preserve filtering, detail, pagination and exports. Hub snapshots gain an optional request-time index during export.

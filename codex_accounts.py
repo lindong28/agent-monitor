@@ -21,7 +21,7 @@ from parsers.accounts import codex_account
 
 
 MESSAGE = "Please reply with OK."
-ACTIVE = {"queued", "checking", "login", "sending", "reading"}
+ACTIVE = {"queued", "checking", "login_queued", "login", "sending", "reading"}
 LOGIN_SECONDS = 600
 SEND_SECONDS = 120
 
@@ -34,6 +34,11 @@ class ActionError(Exception):
 
 class Cancelled(ActionError):
     pass
+
+
+class LoginRateLimited(ActionError):
+    def __init__(self):
+        super().__init__("OpenAI 登录服务限流（429），本次授权已停止，设备码不可再用于此操作。请稍后重试；本次未发送消息。", 429)
 
 
 def now():
@@ -162,6 +167,9 @@ class Rpc:
             if value.get("id") == request_id:
                 if "error" in value:
                     # Upstream messages can contain tokens, URLs or configuration.
+                    if (method == "account/login/start" and value["error"].get("message") ==
+                            "failed to request device code: device code request failed with status 429 Too Many Requests"):
+                        raise LoginRateLimited()
                     raise ActionError("Codex 拒绝了操作（%s），请检查账号设置和 CLI 版本。" % method, 502)
                 result = value.get("result")
                 if not isinstance(result, dict):
@@ -232,6 +240,8 @@ class Manager:
         self.guard = threading.RLock()
         self.jobs = {}
         self.slots = threading.BoundedSemaphore(8)
+        self.login_slot = threading.BoundedSemaphore(1)
+        self.login_generation = 0
 
     def directory(self, profile_id):
         try:
@@ -377,7 +387,8 @@ class Manager:
                 if (record.get("batch_result") or {}).get("batch_id") == batch_id:
                     record.pop("batch_result")
             self.save(directory, record)
-            return directory, record, {"cancelled": threading.Event(), "authorization": {}}, lock
+            return directory, record, {"cancelled": threading.Event(), "authorization": {},
+                                       "login_generation": self.login_generation}, lock
         except Exception:
             lock.close()
             raise
@@ -494,11 +505,18 @@ class Manager:
     def run(self, directory, record, job, lock):
         rpc = None
         slot = False
+        login_slot = False
         def acquire_slot():
             while not job["cancelled"].is_set():
                 if self.slots.acquire(timeout=.25):
                     return
             raise Cancelled("操作已取消。")
+        def check_login_queue():
+            if job["cancelled"].is_set():
+                raise Cancelled("操作已取消。")
+            with self.guard:
+                if job["login_generation"] != self.login_generation:
+                    raise ActionError("OpenAI 登录服务刚刚限流，本账号尚未申请设备码。请稍后点击继续未发送账号，或重试单账号操作。", 429)
         try:
             acquire_slot()
             slot = True
@@ -506,6 +524,14 @@ class Manager:
             rpc = self.rpc_factory(directory, job["cancelled"])
             rpc.initialize()
             if not self.identity(rpc, directory, record):
+                self.slots.release()
+                slot = False
+                self.update(directory, record, stage="login_queued", detail="等待逐个授权；轮到此账号后显示设备码，已有登录态的账号会继续处理。")
+                while not login_slot:
+                    check_login_queue()
+                    login_slot = self.login_slot.acquire(timeout=.25)
+                # A preceding login may have hit its rate limit while we waited.
+                check_login_queue()
                 login = rpc.request("account/login/start", {"type": "chatgptDeviceCode"}, time.monotonic() + 30)
                 url = login.get("verificationUrl", "")
                 parsed = urlparse(url)
@@ -513,12 +539,14 @@ class Manager:
                     raise ActionError("Codex 未返回有效的官方设备授权信息。请更新 CLI。", 502)
                 job["authorization"] = {"verification_url": url, "user_code": login["userCode"]}
                 self.update(directory, record, stage="login", detail="请在 OpenAI 官方页面登录所选邮箱，再输入下方设备码。邮箱验证码也在官方页面填写。")
-                self.slots.release()
-                slot = False
                 completed = rpc.event("account/login/completed", lambda p: p.get("loginId") == login["loginId"], time.monotonic() + LOGIN_SECONDS)
                 job["authorization"] = {}
                 if not completed.get("success"):
-                    raise ActionError("官方授权未完成。请确认已启用设备码登录，再重试。", 502)
+                    if completed.get("error") == "device auth failed with status 429 Too Many Requests":
+                        raise LoginRateLimited()
+                    raise ActionError("官方授权未完成，本次设备码已停止使用。请重新发起操作获取新码；本次未发送消息。", 502)
+                self.login_slot.release()
+                login_slot = False
                 self.update(directory, record, stage="queued", detail="授权已完成，等待发送名额。")
                 acquire_slot()
                 slot = True
@@ -562,6 +590,9 @@ class Manager:
         except Cancelled:
             self.update(directory, record, stage="cancelled", detail="操作已取消。若消息已发出，额度消耗不会撤回；发送结果见下方。")
         except Exception as exc:
+            if isinstance(exc, LoginRateLimited):
+                with self.guard:
+                    self.login_generation += 1
             detail = str(exc) if isinstance(exc, ActionError) else "操作未完成，请检查 Codex CLI 或服务状态目录。"
             if record["operation"]["message_status"] == "unknown":
                 detail += " 发送结果未知，可能已消耗额度，不会自动重发。可以仅刷新配额查看服务端读数。"
@@ -571,6 +602,8 @@ class Manager:
                 if rpc:
                     rpc.close()
             finally:
+                if login_slot:
+                    self.login_slot.release()
                 if slot:
                     self.slots.release()
                 with self.guard:

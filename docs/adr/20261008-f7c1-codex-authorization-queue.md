@@ -1,0 +1,13 @@
+# Codex authorization queue and rate-limit handling
+
+Accepted 2026-10-08 after one independent decision review. Scope: the single Hub account-action manager.
+
+The owner reported that retrying seven unsent accounts briefly showed device codes and then removed them. Live records showed failed login completion, not successful sends. A separate disposable app-server probe on MacStudio issued a code at 1.22 seconds and returned `success=false` at 2.07 seconds with `device auth failed with status 429 Too Many Requests`; no message was sent. Codex 0.158.0's device-code polling exits on this response. The monitor previously discarded the error and incorrectly suggested enabling device-code login for every failure.
+
+Use one independent lane for interactive authorization. Accounts needing login release their check/send slot and enter `login_queued`; only the lane holder requests a device code and starts the existing authorization timeout. Completion or cancellation releases the lane. Saved valid credentials bypass this lane. This preserves the eight check/send slots, identity checks and persistent credentials.
+
+Recognize the two exact 429 error forms emitted by the inspected official CLI version, at code creation and polling. A rate limit fails the current authorization and stops older queued authorizations before they request codes. An in-memory generation captured at operation preparation distinguishes those queued operations from later explicit retries. New retries require a user click; there is no automatic code replacement, message replay, guessed cooldown or claim that serial authorization eliminates provider rate limits. Unknown errors remain neutral and never expose upstream strings or credentials. Failed operations explain that their codes can no longer complete the operation.
+
+The alternative of only changing text leaves simultaneous polling unchanged. Automatic new-code retries would invalidate codes during manual entry; implementing OAuth independently adds unnecessary credential-handling responsibility. These changes retain the earlier account-action and batch decisions, including never replaying successful or uncertain sends. Cross-process authorization coordination is outside the existing single-Hub runtime boundary.
+
+Failure remains visible on the initiating page; no unattended retry or push-alert service is added. Validation must cover queue exclusivity, saved-login progress, cancellation, restart recovery, both 429 phases, neutral unknown errors and explicit recovery without duplicate sends. Live external authorization and provider availability are separate from fixture validation.
