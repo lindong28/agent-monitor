@@ -513,3 +513,9 @@ The LaunchAgent plist uses:
 - Log: `tt-web/state/rollup-daemon.log`
 
 In standalone mode, starting the dashboard captures the machine configuration and begins serving requests without itself starting a rollup or cross-machine sync. Hub mode starts its background scheduler and can begin a startup synchronization round, as observed in the 2026-09-28 deployment above. Overview and Explore API requests may start the dashboard-owned sync when admitted data is due, while `tt-web refresh` uses the force path and waits for that round or the round already in progress. The LaunchAgent calls this refresh entry point; when the dashboard is absent, it preserves the former local-history update but advertises the partial result through its non-zero exit and log.
+
+## 2026-10-09: Vercel-style component v2 deployment
+
+Source `9b6d87f337adb164eddfcae1772e90617eaec4ef` was integrated locally and deployed to the existing MacStudio checkout by Git bundle, fast-forwarding `6ce606b`; no Git push. Only the Hub was kickstarted. State symlink target and inode 5804813 were preserved. Four changed Web resources matched the committed files. Browser-origin health returned `ok=true`, `stale=false`, instance `133de56c84724660bdb49c7c644eb28c`, Web signature `6a52d8ad1a17dc19`.
+
+Live Overview search/clear/provider filtering, nine-account panel, three-field account detail and keyboard history expansion completed. At 390px Overview and the navigated Explore view had no document overflow; Explore retained `range=30d` and showed its chart plus two ranking rows. This is read-only UI acceptance, not account-write or backend-performance validation. Asset and browser evidence is `/Users/lindong/.codex/artifacts/webui-component-v2-20261008/`; precise source/local/live boundaries and component mapping are in [the product design](../design.md#v2-production-delivery-2026-10-09).
