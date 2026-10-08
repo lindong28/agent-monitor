@@ -4,6 +4,12 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-08 whole-product visual style
+
+Commit `6ce606be5e2aa9a57ca01940b790c150ebfd1cc7` was integrated locally and deployed by Git bundle to MacStudio, fast-forwarding the service checkout from `a79a3c0`. No Git push was performed. Only `com.agent-monitor.hub` restarted; the existing `state` link to `~/.local/share/agent-monitor/state` and inode 5804813 stayed unchanged. The served CSS and two changed HTML assets matched the commit. Browser-origin health returned ok=true/stale=false, instance `a7e640a04ba648eaada1371da07b1021` and Web signature `15bc45a4d5a9abab`.
+
+The shared style applies to all five routes and their details. Live native navigation, cost sorting, a session detail/return and a request detail/Escape were exercised at 390px. Existing local Web tests passed (40 cases); the isolated preview covered five routes at seven widths, with additional samples at affected breakpoints. Exact coverage and retained exceptions are in [design.md](../design.md). This is frontend delivery; backend performance, collection assertions and account operations were outside scope.
+
 ## 2026-10-08 template-directed console UI
 
 Commit `a79a3c0e1cf1edf63e297952c3acac130eb0a08d` was integrated into local main and deployed by a Git bundle to the existing MacStudio checkout, fast-forwarding from `4a56a00`. No Git push was performed. Only the Hub restarted; the state symlink target and inode 5804813 were preserved. No backend files changed. Browser-origin health reported ok=true/stale=false, instance `db19ea9df29646a0aa28d65ae915de03`, source signature `8e1b0f7758086ee6`, and Web signature `df6144f038cf099f`.
