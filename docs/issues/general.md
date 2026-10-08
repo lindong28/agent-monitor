@@ -206,6 +206,10 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 
 第三轮已在隔离分支实现 Hub 同步进程隔离，保留原有校验、历史、身份与刷新状态。相同生产副本、2 条详情、每种方式 80 次 HTTP 读取覆盖完整保留检查：线程模式中位/最大 0.00799s/1.17950s，进程模式 0.00530s/0.01040s；保留检查分别 26.550s/26.500s。受影响 5 模块的 77 个测试方法通过；测试断言吞异常的缺口已修并以反向对照验证。独立审查遗留项是新 generation 的父进程冷 admission 校验（缓存不跨进程），本轮不取消此校验，归本性能 issue 后续真实入口验收。线上效果仍未核实，下一动作是用户批准本轮具体提交的 push / MacStudio 部署后，由本 session 更新并复验；30d 列表及另外两台来源故障仍未结案。测试期间旧 mock 错位曾误触发真实导出，终止情况、未核实副作用与修复边界已记入 [第三轮本地验证](../operations/services.md#2026-10-08-sync-process-isolation-local-validation)。
 
+第三轮已获明确许可并将 `e155aec` 推送、部署到 MacStudio。新 generation 已发布并由浏览器读到；真实详情前 3 次为 0.612s/0.131s/0.070s，新 generation 后为 8.132s/0.044s。等待已改善但尚不稳定，30d 列表仍为 37.773s；独立诊断确认四个全量 HTTP 入口仍在父进程解码并投影全量历史，现有 Gateway 缓存/索引不能直接用于这条多来源快照路径。下一阶段可隔离这四个入口及其 JSON 编码，须明确新增进程的内存/并发取舍；本 session 已完成定位，待用户裁决该取舍后实施，不把热详情结果充当冷读结案。
+
+MacMini 旧快照原因已进一步定位：数据卷仅剩 261MiB，12 个遗留 export 临时目录共 6.17GiB；现有 `find /tmp` 在 macOS 不遍历入口符号链接。修复为只跟随入口链接的 `find -H /tmp`，原有 owner/name/age/depth 限制不变；合成目录红绿对照及 14 项同步测试完成。修复尚未发布，MacMini 未手动清理，归用户的新 push / 部署与清理许可；原始快照和锁不在清理范围。MacBook 本轮已恢复成功刷新。现场身份、读数与验证事故边界见 [第三轮部署记录](../operations/services.md#2026-10-08-sync-process-isolation-release-and-remaining-bottlenecks)。
+
 ## [open] ISSUE-CALLS-20261008-9a72：定向详情读取仅支持 HTTP query 的列表值形态
 
 - **Discovered**: 2026-10-08，本次性能改动的独立审查。

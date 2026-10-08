@@ -1,8 +1,11 @@
 import json
+import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path
@@ -14,6 +17,39 @@ from machine_config import load_machine_config
 
 
 class SyncTests(unittest.TestCase):
+    def test_remote_reaper_handles_tmp_symlink_without_following_children(self):
+        import sync
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            physical = root / "private-tmp"
+            physical.mkdir()
+            linked = root / "tmp"
+            linked.symlink_to(physical, target_is_directory=True)
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "keep").write_text("kept")
+            for directory in (physical, linked):
+                with self.subTest(root=directory.name):
+                    old = directory / "agent-monitor-export.old"
+                    old.mkdir()
+                    old_time = time.time() - 7200
+                    os.utime(old, (old_time, old_time))
+                    fresh = directory / "agent-monitor-export.fresh"
+                    fresh.mkdir(exist_ok=True)
+                    unrelated = directory / "unrelated"
+                    unrelated.mkdir(exist_ok=True)
+                    child_link = directory / "agent-monitor-export.link"
+                    if not child_link.is_symlink():
+                        child_link.symlink_to(outside, target_is_directory=True)
+                    command = sync._REMOTE_REAPER.replace("/tmp", shlex.quote(str(directory)), 1)
+                    subprocess.run(["/bin/sh", "-c", command], check=True, timeout=5)
+                    self.assertFalse(old.exists())
+                    self.assertTrue(fresh.is_dir())
+                    self.assertTrue(unrelated.is_dir())
+                    self.assertTrue(child_link.is_symlink())
+                    self.assertEqual((outside / "keep").read_text(), "kept")
+
     def test_sync_reloads_commentable_machine_list_each_round(self):
         import sync
 
@@ -42,7 +78,7 @@ class SyncTests(unittest.TestCase):
 
             def runner(args, **kwargs):
                 calls.append((args, kwargs))
-                if args[0] == "ssh" and "find /tmp" in args[-1]:
+                if args[0] == "ssh" and args[-1] == sync._REMOTE_REAPER:
                     return subprocess.CompletedProcess(args, 0, "", "")
                 if args[0] == "ssh" and args[-1].startswith("mktemp"):
                     return subprocess.CompletedProcess(args, 0, "/tmp/agent-monitor-export.A1b2C3d4\n", "")
@@ -70,7 +106,7 @@ class SyncTests(unittest.TestCase):
                 "project_independent_usage",
             )
             self.assertTrue(all(call[1]["timeout"] <= 30 for call in calls))
-            self.assertIn("find /tmp", calls[0][0][-1])
+            self.assertEqual(sync._REMOTE_REAPER, calls[0][0][-1])
             self.assertEqual(
                 calls[1][0][:7],
                 ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "builder"],
@@ -103,7 +139,7 @@ class SyncTests(unittest.TestCase):
 
             def runner(args, **kwargs):
                 calls.append((args, kwargs))
-                if args[0] == "ssh" and "find /tmp" in args[-1]:
+                if args[0] == "ssh" and args[-1] == sync._REMOTE_REAPER:
                     return subprocess.CompletedProcess(args, 0, "", "")
                 if args[0] == "ssh" and args[-1].startswith("mktemp"):
                     return subprocess.CompletedProcess(

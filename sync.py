@@ -21,7 +21,7 @@ _REMOTE_TEMP = re.compile(r"^/tmp/agent-monitor-export\.[A-Za-z0-9]+$")
 _SSH_PREFIX = ("ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
 _RSYNC_PREFIX = ("rsync", "-rzc", "-e", "ssh -T -o BatchMode=yes -o ConnectTimeout=10")
 _REMOTE_REAPER = (
-    "find /tmp -maxdepth 1 -type d -user \"$(id -u)\" "
+    "find -H /tmp -maxdepth 1 -type d -user \"$(id -u)\" "
     "-name 'agent-monitor-export.*' -mmin +60 -exec rm -rf -- {} +"
 )
 REMOTE_CLEANUP_TIMEOUT = 10
