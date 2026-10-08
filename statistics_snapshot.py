@@ -133,7 +133,20 @@ def write_snapshot(snapshot_path, loaded_entries, *, ledger_path=None, observed_
             conn.executemany(f"INSERT INTO {name} VALUES (?, ?)",
                              [(index, json.dumps(row, allow_nan=False, sort_keys=True))
                               for index, row in enumerate(rows)])
+        _create_detail_indexes(conn)
     return read_snapshot(snapshot_path)
+
+
+def _create_detail_indexes(conn):
+    """Build lookup indexes once at export, before the snapshot digest is bound.
+
+    The versioned tables/payloads stay unchanged; older readers ignore these
+    optional indexes and older snapshots still support scan-based lookup.
+    """
+    for table, field in (("requests", "logical_request_id"), ("requests", "id"),
+                         ("attempts", "logical_request_fk"), ("attempts", "attempt_id")):
+        conn.execute("CREATE INDEX IF NOT EXISTS am_detail_%s_%s ON statistics_%s "
+                     "(json_extract(payload, '$.%s'))" % (table, field, table, field))
 
 
 def _validate_meta(meta):

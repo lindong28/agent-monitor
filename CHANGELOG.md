@@ -2,6 +2,7 @@
 
 ## 2026-10-08
 
+- Keep Hub readers available during snapshot history validation; recheck competing publications before switching generations. Build detail lookup indexes at export and avoid duplicate validation of identical transfer manifests.
 - Accept exact Gateway schema 9/10 statistics snapshots, including schema 10's missing-usage reason. Read only the selected Hub request and its complete attempt chain for details, preserving source metadata, ambiguity checks and time-window semantics.
 - Add historical routing diagnostics to LLM request details: distinguish explicit-pin resolution, first attempts, same-route retries and route switches; explain candidate eligibility separately from recorded attempts. Preserve machine identity, raw evidence and unknown values without changing Gateway execution or collection.
 

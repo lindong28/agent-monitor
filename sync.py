@@ -313,7 +313,8 @@ def install_export_bundle(
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         exporter.validate_export_manifest(expected_manifest, snapshot_path)
-        exporter.validate_export_manifest(manifest, snapshot_path)
+        if manifest != expected_manifest:
+            exporter.validate_export_manifest(manifest, snapshot_path)
     except (OSError, ValueError, exporter.ExportError) as exc:
         raise TransferValidationError(str(exc)) from exc
     if manifest != expected_manifest:

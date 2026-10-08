@@ -260,15 +260,33 @@ def publish_generation(
     machine_dir.mkdir(exist_ok=True)
     if machine_created:
         _fsync_directory(root)
-    with _machine_gc_lock(machine_dir, exclusive=True):
-        return _publish_generation_locked(
-            name,
-            snapshot_path,
-            meta,
-            machine_dir=machine_dir,
-            now=now,
-            phase_hook=phase_hook,
-        )
+    # Keep the history being checked alive without excluding new readers. A
+    # competing publication invalidates the check, so retry against its result.
+    from statistics_snapshot import ensure_retained, StatisticsSnapshotError
+    while True:
+        previous = read_current_generation(name, root=root)
+        try:
+            previous_id = previous.meta["generation_id"] if previous else None
+            if previous:
+                try:
+                    ensure_retained(previous.db_path, snapshot_path)
+                except StatisticsSnapshotError as exc:
+                    raise GenerationValidationError(str(exc)) from exc
+            with _machine_gc_lock(machine_dir, exclusive=True):
+                _recover_pending_locked(machine_dir)
+                if _read_pointer(machine_dir / "current") != previous_id:
+                    continue
+                return _publish_generation_locked(
+                    name,
+                    snapshot_path,
+                    meta,
+                    machine_dir=machine_dir,
+                    now=now,
+                    phase_hook=phase_hook,
+                )
+        finally:
+            if previous:
+                previous.close()
 
 
 def bind_source_identity(
@@ -331,13 +349,6 @@ def _publish_generation_locked(
     _gc_generations_locked(machine_dir, extra_retained={meta["generation_id"]})
     old_current = _read_pointer(machine_dir / "current")
     old_previous = _read_pointer(machine_dir / "previous")
-    if old_current:
-        from statistics_snapshot import ensure_retained, StatisticsSnapshotError
-        try:
-            # The current generation cannot change while this machine lock is held.
-            ensure_retained(machine_dir / old_current / "snapshot.db", snapshot_path)
-        except StatisticsSnapshotError as exc:
-            raise GenerationValidationError(str(exc)) from exc
     published_meta = dict(meta)
     published_meta["published_at"] = _timestamp(now)
     _validate_meta_shape(published_meta)
@@ -605,8 +616,11 @@ def read_current_generation(name, *, root=DEFAULT_GENERATIONS_ROOT):
         generation_id = _read_pointer(machine_dir / "current")
         if generation_id is None:
             return None
-        loaded = _load_generation(name, machine_dir / generation_id)
         lease = _acquire_generation_lease(machine_dir, generation_id)
+    try:
+        # The lease protects both validation and subsequent use from GC; hashing
+        # a cold generation need not serialize admissions for the whole machine.
+        loaded = _load_generation(name, machine_dir / generation_id)
         return CurrentGeneration(
             host=loaded.host,
             db_path=loaded.db_path,
@@ -614,6 +628,9 @@ def read_current_generation(name, *, root=DEFAULT_GENERATIONS_ROOT):
             meta=loaded.meta,
             _lease=lease,
         )
+    except BaseException:
+        lease.close()
+        raise
 
 
 def admitted_generations(
