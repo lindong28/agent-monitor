@@ -96,6 +96,38 @@ let second=api.exportRecords();generation++;requests[1].finish({items:[]});await
 assert.equal(downloads.length,1);
 ''')
 
+    def test_routing_summary_separates_pin_attempts_and_candidate_eligibility(self):
+        self.run_js(r'''
+const content=node('div');
+const attempt=(route_id,attempt_no)=>({route_id,attempt_no,outcome:'timeout',route_selection_source:'fallback',dispatch_boundary:'not_crossed'});
+const data=payload('routing',[attempt('r1',1),attempt('r1',2),attempt('r2',3),attempt(null,4),attempt('r2',5)]);
+Object.assign(data.request,{route_selection_source:'explicit_pin',requested_route_id:'alias',resolved_route_id:'r1',caller_route_constraint:{allowed_routes:['r1','r2']},
+  preselection_candidates:[
+    {route_id:'r1',effectively_eligible:true,priority:9,eligibility_reasons:[]},
+    {route_id:'r2',effectively_eligible:false,priority:1,eligibility_reasons:['request_incompatible','future_reason']},
+    {route_id:'r3',eligibility_reasons:[]},
+    {effectively_eligible:null}
+  ]});
+api.renderDetail(data,content);
+const text=content.textContent;
+for (const value of ['路由诊断','调用方指定路由','指定路由解析','首次尝试路由','首次尝试','同路由重试','切换路由','路由关系未知','符合资格','不符合资格','未知','有对应尝试','无法确认（路由标识缺失）','与本次请求配置不兼容','request_incompatible','future_reason','不是执行排名','不代表路由当前可用','not_crossed','fallback']) assert(text.includes(value),value);
+assert(!text.includes('实际路由'));
+// First observed attempt is independent of the pin resolution.
+data.request.resolved_route_id='canonical-pin';api.renderDetail(data,content);
+const summary=content.children.find(n=>n.className==='llm-routing-summary');
+const summaryFields=summary.children.find(n=>n.tag==='dl').children;
+assert.equal(summaryFields[7].textContent,'canonical-pin');
+assert.equal(summaryFields[9].textContent,'r1');
+assert.equal(summaryFields[11].textContent,'r1、r2');
+// Policy rejection has no pin and no attempt; empty is distinct from absent snapshots.
+const rejected=payload('reject');rejected.request.route_selection_source='policy';
+rejected.request.preselection_candidates=[{route_id:'excluded',effectively_eligible:false,eligibility_reasons:['caller_route_not_allowed']}];
+api.renderDetail(rejected,content);
+for(const value of ['按策略选择','不适用（未指定路由）','无已记录尝试','无对应尝试','不在调用方允许的路由内','此请求没有已记录的服务商尝试']) assert(content.textContent.includes(value),value);
+rejected.request.preselection_candidates=[];api.renderDetail(rejected,content);assert(content.textContent.includes('历史候选快照为空'));
+delete rejected.request.preselection_candidates;api.renderDetail(rejected,content);assert(content.textContent.includes('未记录候选快照'));
+''')
+
     def test_detail_error_keeps_panel_and_attempt_parent_uses_composite_id(self):
         self.run_js(r'''
 const pending=api.openDetail({machine:'b',attempt_id:'missing'},node('button'));

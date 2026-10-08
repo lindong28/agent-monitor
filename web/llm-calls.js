@@ -227,6 +227,93 @@
     return value && typeof value === "object" ? `${value.machine} / ${value.id}` : value;
   }
 
+  function attemptRouteLabel(attempts, index) {
+    if (index === 0) return "首次尝试";
+    const previous = attempts[index - 1].route_id;
+    const current = attempts[index].route_id;
+    if (!previous || !current) return "路由关系未知";
+    return previous === current ? "同路由重试" : "切换路由";
+  }
+
+  function routingSummary(container, request, attempts) {
+    const section = node("section", undefined, "llm-routing-summary");
+    section.appendChild(node("h3", "路由诊断"));
+    section.appendChild(node("p", "本次请求的历史记录，不代表路由当前可用；尝试记录不证明服务商已收到请求，派发边界见下方证据。", "scope-note"));
+    const sourceLabels = { policy: "按策略选择", explicit_pin: "调用方指定路由" };
+    const allowedRoutes = request.caller_route_constraint?.allowed_routes;
+    fields(section, [
+      ["选择方式", sourceLabels[request.route_selection_source] || "未报告或未知"],
+      ["请求模式", request.requested_mode],
+      ["指定路由", request.requested_route_id || "未指定"],
+      ["指定路由解析", request.requested_route_id ? request.resolved_route_id : "不适用（未指定路由）"],
+      ["首次尝试路由", attempts.length ? attempts[0].route_id : "无已记录尝试"],
+      ["调用方允许路由", Array.isArray(allowedRoutes)
+        ? (allowedRoutes.length ? allowedRoutes.join("、") : "允许列表为空")
+        : "未报告允许列表"],
+    ]);
+    const candidates = request.preselection_candidates;
+    if (!Array.isArray(candidates) || !candidates.length) {
+      section.appendChild(node("p", Array.isArray(candidates)
+        ? "历史候选快照为空；不能据此推断其他路由的状态。"
+        : "未记录候选快照，无法解释各候选的资格。", "scope-note"));
+    } else {
+      const details = node("details", undefined, "llm-routing-candidates");
+      details.appendChild(node("summary", `历史候选 · ${candidates.length} 条`));
+      details.appendChild(node("p", "资格与实际尝试分别记录；优先级是记录值，不是执行排名，也不能据此证明最低价或完整选择原因。", "scope-note"));
+      const reasonLabels = {
+        caller_route_not_allowed: "不在调用方允许的路由内",
+        request_incompatible: "与本次请求配置不兼容",
+        route_not_effectively_eligible: "未满足路由有效资格",
+        inventory_only: "仅列入库存，未参与派发",
+        availability_cooldown: "当时处于可用性冷却期",
+        deployment_unknown: "当时部署状态未知",
+        self_hosted_not_deployed: "自托管服务当时未部署",
+        inventory_only_not_callable: "仅列入库存，不可调用",
+        policy_disabled: "策略未启用",
+        route_policy_disabled: "路由策略未启用",
+        unassigned_billing_scope: "未分配计费范围",
+        billing_scope_mismatch: "计费范围不匹配",
+        not_allowed_for_project: "项目未获准使用",
+        route_not_allowed_for_project: "项目未获准使用此路由",
+        credential_missing: "缺少凭据",
+        credential_unavailable_on_this_machine: "当时所在机器没有可用凭据",
+        runtime_ineligible: "运行时不符合资格",
+        provider_endpoint_missing: "缺少服务商端点",
+        vertex_flex_requires_global_endpoint: "Vertex Flex 需要全球端点",
+        registry_revision_mismatch: "注册配置版本不匹配",
+        runtime_profile_mismatch: "运行时账号配置不匹配",
+        runtime_model_mismatch: "运行时模型不匹配",
+        runtime_adapter_mismatch: "运行时适配器不匹配",
+        actual_model_unverified: "实际模型尚未验证",
+      };
+      candidates.forEach((candidate) => {
+        const card = node("article", undefined, "llm-routing-candidate");
+        card.appendChild(node("h4", reported(candidate.route_id)));
+        const eligible = candidate.effectively_eligible;
+        const matched = candidate.route_id && attempts.some((attempt) => attempt.route_id === candidate.route_id);
+        const hasUnknownRoute = attempts.some((attempt) => !attempt.route_id);
+        fields(card, [
+          ["当时资格", eligible === true ? "符合资格" : eligible === false ? "不符合资格" : "未知"],
+          ["尝试记录", matched ? "有对应尝试" : !candidate.route_id || hasUnknownRoute ? "无法确认（路由标识缺失）" : "无对应尝试"],
+          ["服务商 / 模型", `${reported(candidate.provider_id)} / ${reported(candidate.actual_model)}`],
+          ["优先级记录值", candidate.priority],
+        ]);
+        const reasons = candidate.eligibility_reasons;
+        if (Array.isArray(reasons) && reasons.length) {
+          const list = node("ul", undefined, "llm-routing-reasons");
+          reasons.forEach((reason) => list.appendChild(node("li",
+            `${reasonLabels[reason] || "未解释的记录原因"} · ${reported(reason)}`)));
+          card.appendChild(list);
+        } else {
+          card.appendChild(node("p", "未记录具体资格原因。", "scope-note"));
+        }
+        details.appendChild(card);
+      });
+      section.appendChild(details);
+    }
+    container.appendChild(section);
+  }
+
   function renderDetail(payload, container) {
     clear(container);
     const request = payload.request;
@@ -239,19 +326,20 @@
       ["请求时间", formatTime(request.request_timestamp)], ["逻辑模型", request.logical_model],
       ["结果", request.request_outcome], ["拒绝原因", request.request_reject_reason],
     ]);
+    const attempts = request.attempts || [];
+    routingSummary(container, request, attempts);
     auditDisclosure(container, "请求身份与路由证据", [
       ["会话", request.session_ref], ["调用者", request.caller_username],
       ["请求模式", request.requested_mode], ["路由选择来源", request.route_selection_source],
-      ["指定路由", request.requested_route_id], ["实际路由", request.resolved_route_id],
+      ["指定路由", request.requested_route_id], ["指定路由解析", request.resolved_route_id],
       ["准入版本", request.admission_revision], ["调用方路由约束", request.caller_route_constraint],
       ["候选路由", request.preselection_candidates],
     ]);
-    const attempts = request.attempts || [];
     container.appendChild(node("h3", `完整尝试链 · ${attempts.length} 次`));
     if (!attempts.length) container.appendChild(node("p", "此请求没有已记录的服务商尝试。"));
-    attempts.forEach((item) => {
+    attempts.forEach((item, index) => {
       const section = node("section", undefined, "llm-detail-attempt");
-      const title = node("h3", `#${item.attempt_no} · ${reported(item.provider_id)} · `);
+      const title = node("h3", `#${item.attempt_no} · ${attemptRouteLabel(attempts, index)} · ${reported(item.provider_id)} · `);
       title.appendChild(outcomePill(item.outcome));
       section.appendChild(title);
       fields(section, [

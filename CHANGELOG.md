@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-08
+
+- Add historical routing diagnostics to LLM request details: distinguish explicit-pin resolution, first attempts, same-route retries and route switches; explain candidate eligibility separately from recorded attempts. Preserve machine identity, raw evidence and unknown values without changing Gateway execution or collection.
+
 ## 2026-10-07
 
 - Use the newest matching Codex Web-action or machine observation in the quota table, with explicit source labels and unchanged historical deletion records. Show relative reset times, distinguish expired records from observed resets, simplify successful batch/card content, and preserve historical disclosure state during refresh.

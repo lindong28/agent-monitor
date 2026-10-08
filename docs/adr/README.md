@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261008-a61f: historical routing diagnostics](20261008-a61f-routing-diagnostics.md) | Accepted for local implementation; read-only evidence, publication and deployment separate |
 | [20261007-a62e: Codex quota display observations](20261007-a62e-codex-quota-display.md) | Accepted; combines observations for display while preserving machine storage and deletion semantics |
 | [20261007-d2af: known Codex account directory](20261007-d2af-codex-known-accounts.md) | Accepted; replaces manual-add membership in b923 |
 | [20261007-b923: one-click Codex account batches](20261007-b923-codex-account-batches.md) | Accepted for local implementation; real account acceptance and deployment separate |

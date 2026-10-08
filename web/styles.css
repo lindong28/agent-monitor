@@ -1916,6 +1916,13 @@ td.numeric {
 .llm-main .llm-detail-fields dt { color: var(--ink-muted); }
 .llm-main .llm-detail-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .llm-main .llm-detail-attempt { border-top: 1px solid var(--line); padding-top: 4px; }
+.llm-main .llm-routing-summary { border-block: 1px solid var(--line); padding-block: var(--sp-4); margin-block: var(--sp-6); }
+.llm-main .llm-routing-summary h3 { margin-top: var(--sp-4); }
+.llm-main .llm-routing-candidates > summary { font-size: 12px; line-height: 20px; color: var(--ink); }
+.llm-main .llm-routing-candidates > summary::before { margin-right: var(--sp-4); }
+.llm-main .llm-routing-candidate { border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--sp-5); margin-top: var(--sp-4); background: var(--surface-sunken); }
+.llm-main .llm-routing-candidate h4 { margin: 0; font-size: 12px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.llm-main .llm-routing-reasons { padding-left: var(--sp-6); margin: var(--sp-4) 0 0; font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
 @media (max-width: 1000px) {
   .llm-main .llm-workbench { grid-template-columns: minmax(0, 1fr); }
   .llm-main .llm-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
