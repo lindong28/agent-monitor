@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261008-e92b: retain successful Codex quota observations](20261008-e92b-retain-codex-quota.md) | Accepted; independent latest reading survives operation replacement, deployment separate |
 | [20261008-f43a: requests before optional analysis](20261008-f43a-request-first-loading.md) | Accepted by user; partially supersedes d83e/H2 loading order, deployment separate |
 | [20261008-d102: isolate full-history HTTP queries](20261008-d102-query-process.md) | Accepted; two concurrent query workers, deployment separate |
 | [20261008-c4e2: isolate snapshot synchronization](20261008-c4e2-sync-process.md) | Accepted for local implementation; live performance and deployment separate |

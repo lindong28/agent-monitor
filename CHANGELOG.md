@@ -2,6 +2,7 @@
 
 ## 2026-10-08
 
+- Preserve Codex quota readings obtained automatically after sending or by quota-only refresh, independently of replaceable operation records. Later failed queries and restarts retain the last successful reading and its original observation time in both the account card and quota table.
 - Batch request candidates before reading their child attempts, avoiding repeated full-table scans when Hub sources still use older exporters without lookup indexes.
 - Open LLM Calls with a request page first. Load full-range totals, costs, independent attempts and complete filter choices on explicit action; preserve filtering, detail, pagination and exports. Hub snapshots gain an optional request-time index during export.
 - Isolate Hub full-history calls queries and JSON encoding from detail requests, with at most two concurrent query workers. Preserve complete exports and existing response semantics.

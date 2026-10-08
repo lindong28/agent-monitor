@@ -110,6 +110,50 @@ class AccountActionsTests(unittest.TestCase):
         self.assertEqual(result["operation"]["stage"], "partial")
         self.assertIsNone(result["operation"]["after"]["seven_day_resets_at"])
 
+    def test_post_send_quota_survives_failed_refresh_and_restart(self):
+        account = self.run_case("success")
+        reading = account["operation"]["after"]
+        methods = [call.get("method") for call in self.calls(account)]
+        self.assertLess(methods.index("turn/start"), len(methods) - 1)
+        self.assertEqual(methods[-1], "account/rateLimits/read")
+        with mock.patch.object(self.manager, "rpc_factory", side_effect=ca.ActionError("fixture authorization failed")):
+            self.manager.start(account["id"], refresh_only=True)
+            failed = self.wait(account["id"])
+        self.assertEqual(failed["operation"]["quota_status"], "not_read")
+        self.assertEqual(failed.get("last_quota"), reading)
+        restarted = ca.Manager(self.manager.root)
+        self.addCleanup(restarted.close)
+        self.assertEqual(restarted.list()["accounts"][0].get("last_quota"), reading)
+        self.assertEqual([c.get("method") for c in self.calls(account)].count("turn/start"), 1)
+
+    def test_legacy_reading_is_retained_before_replacing_operation(self):
+        for source in ("operation", "batch_result"):
+            with self.subTest(source=source):
+                account = self.account(email=source + "@example.com")
+                directory = self.manager.directory(account["id"])
+                record = self.manager.read(directory)
+                reading = {"observed_at": "2026-10-08T01:00:00+00:00",
+                           "seven_day_used_pct": 8, "seven_day_resets_at": 1900000000}
+                record[source] = {"stage": "succeeded", "after": reading}
+                ca.write_record(directory / "profile.json", record)
+                self.assertNotIn("last_quota", self.manager.read(directory))
+                with mock.patch.object(self.manager, "rpc_factory", side_effect=ca.ActionError("fixture query failed")):
+                    self.manager.start(account["id"], refresh_only=True)
+                    failed = self.wait(account["id"])
+                self.assertEqual(failed.get("last_quota"), reading)
+
+    def test_new_successful_query_replaces_whole_retained_reading(self):
+        account = self.run_case("success")
+        previous = account["operation"]["after"]
+        self.scenario = "no_reset"
+        self.manager.start(account["id"], refresh_only=True)
+        refreshed = self.wait(account["id"])
+        reading = refreshed["operation"]["after"]
+        self.assertGreater(reading["observed_at"], previous["observed_at"])
+        self.assertEqual(refreshed.get("last_quota"), reading)
+        self.assertIsNone(reading["seven_day_resets_at"])
+        self.assertEqual([c.get("method") for c in self.calls(account)].count("turn/start"), 1)
+
     def test_disconnect_keeps_unknown_and_does_not_retry(self):
         result = self.run_case("disconnect")
         self.assertEqual(result["operation"]["message_status"], "unknown")

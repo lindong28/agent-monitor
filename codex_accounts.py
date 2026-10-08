@@ -217,6 +217,14 @@ def quota_reading(result, account_id):
     return reading
 
 
+def retain_quota(record):
+    readings = [(record.get(key) or {}).get("after") for key in ("operation", "batch_result")]
+    readings.append(record.get("last_quota"))
+    readings = [reading for reading in readings if reading is not None]
+    if readings:
+        record["last_quota"] = max(readings, key=lambda reading: datetime.fromisoformat(reading["observed_at"]))
+
+
 class Manager:
     def __init__(self, root, rpc_factory=Rpc):
         self.root = Path(root)
@@ -243,6 +251,7 @@ class Manager:
             raise ActionError("账号记录无法读取，请检查服务主机的状态目录。", 500)
 
     def save(self, directory, record):
+        retain_quota(record)
         write_record(directory / "profile.json", record)
 
     def add(self, email, account_id=None):
@@ -355,6 +364,7 @@ class Manager:
         lock = lock_file(directory / ".lock")
         try:
             record = self.read(directory)
+            retain_quota(record)
             previous = record.get("operation")
             if previous and published_id and previous.get("batch_id") == published_id:
                 record["batch_result"] = previous
