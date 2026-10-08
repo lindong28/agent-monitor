@@ -2,6 +2,8 @@
 
 ## 2026-10-08
 
+- Apply one shared visual style across Overview, Explore, Sessions, LLM Calls and Network, including details and disclosures. Unify typography, controls and neutral surfaces while retaining the blue brand and business states; reflow large metrics on narrow screens.
+
 - Apply a shared console layout to Overview and LLM Calls: move attribution charts before account operations, collapse low-frequency account actions and advanced filters, keep removable selections visible, and lead request details with results and attempt data before source evidence. Preserve cost windows, collection warnings and explicit full-analysis loading.
 - Queue Codex device authorization one account at a time while saved logins continue processing. Report known OpenAI login rate limits accurately and stop pending code requests until explicit retry; explain stopped codes without misdiagnosing every authorization failure as a disabled setting.
 - Preserve Codex quota readings obtained automatically after sending or by quota-only refresh, independently of replaceable operation records. Later failed queries and restarts retain the last successful reading and its original observation time in both the account card and quota table.

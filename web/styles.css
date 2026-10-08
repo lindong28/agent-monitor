@@ -1,50 +1,5 @@
-/* Visual system: data-dense technical interface.
-   Parameters follow ~/.claude/skills/web-ui/workflows/web-ui-design/references/reference-instance.md —
-   spacing ladder, paired type steps, elevation levels, motion and state matrix all come
-   from there. Values below are that instance; substitute values, not structure.
-   Verify with that skill's validate-visual-system.js against the rendered page. */
-
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/web/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("/web/vendor/fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("/web/vendor/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
-}
-
-/* The page emphasises one word with <em>; without a real italic the browser slants the
-   upright face, which is a different and worse shape than the designed one. */
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: italic;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/web/vendor/fonts/ibm-plex-sans-latin-400-italic.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "IBM Plex Mono";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/web/vendor/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
-}
+/* Product visual design: style:vercel-gateway-console v1.
+   Shared by every route; scope and project overrides: docs/design.md. */
 
 :root {
   color-scheme: light;
@@ -59,8 +14,8 @@
   --sp-7: 24px;
   --sp-8: 32px;
 
-  --h-control: 28px;
-  --pad-cell: var(--sp-3) var(--sp-5);
+  --h-control: 36px;
+  --pad-cell: 12px 16px;
   --pad-card: var(--sp-5) var(--sp-6);
 
   /* Navigation rail. Sized to the longest label ("LLM Calls") plus its padding,
@@ -71,16 +26,16 @@
      explain them, applied per element rather than to their container. */
   --measure: 68ch;
 
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --r-sm: 3px;
-  --r-md: 5px;
-  --r-lg: 6px;
+  --r-sm: 8px;
+  --r-md: 8px;
+  --r-lg: 8px;
   --r-pill: 999px;
 
   /* Separation is carried by line and tint; shadow only for things that float. */
-  --e-raised: 0 0 0 1px rgba(28, 33, 40, 0.05), 0 1px 2px rgba(28, 33, 40, 0.06);
+  --e-raised: none;
   --e-overlay: 0 0 0 1px rgba(28, 33, 40, 0.08), 0 2px 4px rgba(28, 33, 40, 0.08),
     0 8px 24px -8px rgba(28, 33, 40, 0.16);
 
@@ -90,27 +45,23 @@
     border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
     opacity var(--dur) var(--ease);
 
-  --canvas: #f4f7f9;
+  --canvas: #fafafa;
   --surface: #ffffff;
-  --surface-sunken: #eef2f6;
-  --ink: #1c2128;
-  --ink-muted: #57616c;
-  --ink-subtle: #7d8894;
-  --line: #d3dae1;
-  --line-soft: #e6ebf0;
-  --line-strong: #b4bec8;
-  --bg-hover: #f0f4f8;
-  --bg-active: #e5ecf3;
+  --surface-sunken: #f5f5f5;
+  --ink: #171717;
+  --ink-muted: #616161;
+  --ink-subtle: #616161;
+  --line: #e5e5e5;
+  --line-soft: #eeeeee;
+  --line-strong: #b3b3b3;
+  --bg-hover: #f5f5f5;
+  --bg-active: #ebebeb;
   --accent: #0b66c3;
   --accent-ink: #0a559f;
   --accent-bg: #dcecfb;
-  /* Darkened from #1a7f4b, which rendered 4.33:1 on the .ok pill's own tint —
-     below AA at the 11px this system sets pills in, where the large-text 3:1
-     allowance does not apply. Its two uses are both on that tint or on white,
-     so the whole role moves rather than one of them drifting off. */
-  --ok: #177038;
-  --warn: #8a6300;
-  --danger: #c0362c;
+  --ok: #18794e;
+  --warn: #946800;
+  --danger: #c42b2b;
 }
 
 * {
@@ -122,7 +73,7 @@ body {
   min-width: 320px;
   background: var(--canvas);
   color: var(--ink);
-  font: 400 13px/18px var(--font-sans);
+  font: 400 14px/22px var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -230,7 +181,7 @@ button {
   border-radius: var(--r-md);
   background: var(--surface);
   color: var(--ink);
-  font: 500 13px/18px var(--font-sans);
+  font: 500 14px/22px var(--font-sans);
   transition: var(--t-state);
 }
 
@@ -405,7 +356,7 @@ button:disabled {
 
 .page-title {
   margin: 0;
-  font: 600 20px/28px var(--font-sans);
+  font: 600 24px/32px var(--font-sans);
   letter-spacing: -0.01em;
 }
 
@@ -605,7 +556,7 @@ button:disabled {
 .quota-table td {
   padding: var(--pad-cell);
   border-top: 1px solid var(--line-soft);
-  font: 400 13px/18px var(--font-sans);
+  font: 400 14px/22px var(--font-sans);
   vertical-align: top;
 }
 
@@ -631,7 +582,7 @@ button:disabled {
 
 .quota-account-label {
   min-width: 0;
-  font: 500 13px/18px var(--font-sans);
+  font: 500 14px/22px var(--font-sans);
   overflow-wrap: anywhere;
 }
 
@@ -881,8 +832,7 @@ button:disabled {
   margin-top: var(--sp-5);
 }
 
-/* Inner radius steps down from the panel's 6px by its padding, so the child
-   does not read as pasted onto a corner it shares. */
+/* Machine status cards share the product surface and corner treatment. */
 .sync-machine {
   min-width: 0;
   padding: var(--sp-4);
@@ -1279,7 +1229,7 @@ td.numeric {
 
 .session-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
@@ -1293,6 +1243,7 @@ td.numeric {
 .session-metrics article:last-child { border-right: 0; }
 .session-metrics h3 { margin: 0 0 var(--sp-4); font-size: 12px; font-weight: 500; color: var(--ink-muted); }
 .session-metrics strong {
+  overflow-wrap: anywhere;
   font-size: 24px;
   line-height: 32px;
   font-weight: 600;
@@ -1308,7 +1259,6 @@ td.numeric {
 .session-detail [hidden], #session-list-panel[hidden] { display: none; }
 
 @media (max-width: 760px) {
-  .session-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .session-metrics article:nth-child(2) { border-right: 0; }
   .session-metrics article:nth-child(-n+2) { border-bottom: 1px solid var(--line-soft); }
   .session-fields { grid-template-columns: 1fr; }
@@ -1541,7 +1491,7 @@ td.numeric {
   background: #fbf0d9;
   color: #7a5600;
   border-bottom: 1px solid #e6d3a8;
-  font: 400 13px/18px var(--font-sans);
+  font: 400 14px/22px var(--font-sans);
 }
 
 .stale-banner button {
@@ -1590,7 +1540,7 @@ td.numeric {
 }
 
 .conclusion-list {
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1944,34 +1894,27 @@ td.numeric {
 .llm-main .llm-audit-disclosure > summary { font-size: 12px; line-height: 20px; color: var(--accent-ink); }
 .llm-main .llm-audit-disclosure > summary::before { margin-right: 8px; }
 
-/* Prompt Planet console v1: shared by the overview and request workflow.
-   Brand blue and the existing cost windows remain project overrides. */
-.console-main {
-  --h-control: 36px;
-  --r-md: 6px;
-  --r-lg: 8px;
-  --line: #e0e4e8;
-  --line-soft: #eceff2;
-  --pad-cell: 12px 16px;
-  background: #fafafa;
-  min-height: 100vh;
-  font-size: 14px;
-  line-height: 22px;
+/* Shared product typography: new pages inherit without a page-specific class. */
+.main { min-height: 100vh; }
+.page-title { font-size: 24px; line-height: 32px; }
+.panel-head h2, .kpi-group-title, .network-card h2 {
+  font-size: 16px; line-height: 24px; color: var(--ink);
+  letter-spacing: 0; text-transform: none;
 }
-.console-main .page-title { font-size: 24px; line-height: 32px; }
-.console-main .panel-head h2,
-.console-main .kpi-group-title { font-size: 16px; line-height: 24px; color: var(--ink); letter-spacing: 0; text-transform: none; }
-.console-main button,
-.console-main select,
-.console-main .field label { font-size: 14px; line-height: 22px; }
-.console-main .scope-note,
-.console-main .quota-scope,
-.console-main .status-line,
-.console-main .kpi-sub { font-size: 12px; line-height: 20px; }
-.console-main .kpi-label { font-size: 14px; line-height: 22px; }
-.console-main .kpi-value { font-size: 28px; line-height: 36px; }
-.console-main table th { font-size: 12px; line-height: 20px; }
-.console-main table td { font-size: 14px; line-height: 22px; }
+button, select, input, .field label { font-size: 14px; line-height: 22px; }
+.scope-note, .quota-scope, .status-line, .kpi-sub { font-size: 12px; line-height: 20px; }
+.kpi-label { font-size: 14px; line-height: 22px; }
+.kpi-value, .session-metrics strong { font-size: 28px; line-height: 36px; }
+table th { font-size: 12px; line-height: 20px; letter-spacing: 0; text-transform: none; }
+table td { font-size: 14px; line-height: 22px; }
+.nav a[aria-current="page"] { background: var(--surface-sunken); color: var(--ink); }
+.toolbar { flex-wrap: wrap; }
+.session-identity, .panel-head { overflow-wrap: anywhere; }
+/* Refresh is the common primary action; account and destructive actions retain
+   their explicit labels and existing semantic states. */
+#refresh { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+#refresh:hover:not(:disabled) { background: #333; }
+#refresh:disabled { opacity: .45; }
 .overview-main .kpi-sections { gap: 24px; }
 .overview-main .panel-grid { margin: 0; }
 .overview-main .overview-cost { padding: 20px 24px; }
@@ -1999,6 +1942,7 @@ td.numeric {
   .overview-main .overview-cost { padding: 16px; }
 }
 @media (max-width: 480px) {
+  .overview-cost .kpi-grid { grid-template-columns: 1fr; }
   .llm-main .llm-filter-actions { gap: 4px; }
   .llm-main .llm-detail-attempt .llm-detail-fields { grid-template-columns: 88px minmax(0, 1fr); }
 }
