@@ -30,6 +30,7 @@ import statistics_snapshot
 import hub
 import sync
 import sync_process
+import query_process
 from aggregators import extract_metric, load_all_entries
 from parsers import claude_status, codex
 from parsers.accounts import quota_identity
@@ -666,7 +667,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             route = ROUTES.get(parsed.path)
             if route:
-                self._send_json(route(parse_qs(parsed.query)), send_body=send_body)
+                if parsed.path in query_process.PATHS and hub.enabled():
+                    status, data = query_process.response(parsed.path, query)
+                    self._send_json_bytes(data, status=status, send_body=send_body)
+                else:
+                    self._send_json(route(query), send_body=send_body)
                 return
             if parsed.path in ("/", "/explore", "/sessions", "/network", "/llm-calls", "/ip-check-docs") or parsed.path.startswith("/web/"):
                 self._serve_static(parsed.path, send_body=send_body)
@@ -683,6 +688,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_json(self, payload, status=200, send_body=True):
         data = json.dumps(payload, default=_json_default).encode("utf-8")
+        self._send_json_bytes(data, status=status, send_body=send_body)
+
+    def _send_json_bytes(self, data, status=200, send_body=True):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))

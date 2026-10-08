@@ -210,6 +210,10 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 
 MacMini 旧快照原因已进一步定位：数据卷仅剩 261MiB，12 个遗留 export 临时目录共 6.17GiB；现有 `find /tmp` 在 macOS 不遍历入口符号链接。修复为只跟随入口链接的 `find -H /tmp`，原有 owner/name/age/depth 限制不变；合成目录红绿对照及 14 项同步测试完成。修复尚未发布，MacMini 未手动清理，归用户的新 push / 部署与清理许可；原始快照和锁不在清理范围。MacBook 本轮已恢复成功刷新。现场身份、读数与验证事故边界见 [第三轮部署记录](../operations/services.md#2026-10-08-sync-process-isolation-release-and-remaining-bottlenecks)。
 
+2026-10-08 随后获批推送并部署 `a18f5ea`，现有 reaper 清除过期导出后，MacMini 可用空间恢复到 6.1GiB，成功发布 `04:29:47Z` 的新 generation，Hub 于 `04:30:54Z` 报成功、`stale=false`。快照恢复已由实际同步 API 核实；统计元数据仍显示 1 个 blocked source，不外推为全部来源完整。用户另外批准了四个全量 HTTP 入口进程隔离与最多 2 个并发任务，归本 session 实现和本地验证；具体提交的 push / 部署仍须单独授权。
+
+第四轮本地实现已完成：四个全量 HTTP 入口及 JSON 编码在独立 worker 执行，上限 2，详情绕过其排队。相同真实副本、2 条交替详情的 HTTP 对照：列表期间最大等待 1.393s→0.00806s，完整导出期间 4.223s→0.01479s；列表与 618,351,695-byte 导出均逐字节一致。35 个受影响测试方法通过，输入维度和采样内存见 [本地验证](../operations/services.md#2026-10-08-full-history-http-isolation-local-validation)。这些读数不证明线上冷详情或列表算法已解决；下一项为具体提交的 push / MacStudio 部署许可，执行与真实浏览器复验仍由本 session 承担。
+
 ## [open] ISSUE-CALLS-20261008-9a72：定向详情读取仅支持 HTTP query 的列表值形态
 
 - **Discovered**: 2026-10-08，本次性能改动的独立审查。

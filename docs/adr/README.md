@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261008-d102: isolate full-history HTTP queries](20261008-d102-query-process.md) | Accepted; two concurrent query workers, deployment separate |
 | [20261008-c4e2: isolate snapshot synchronization](20261008-c4e2-sync-process.md) | Accepted for local implementation; live performance and deployment separate |
 | [20261008-a61f: historical routing diagnostics](20261008-a61f-routing-diagnostics.md) | Accepted for local implementation; read-only evidence, publication and deployment separate |
 | [20261007-a62e: Codex quota display observations](20261007-a62e-codex-quota-display.md) | Accepted; combines observations for display while preserving machine storage and deletion semantics |

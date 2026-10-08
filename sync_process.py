@@ -1,7 +1,7 @@
 """Isolate sync export/publication work from the Hub's HTTP process."""
 
 import atexit
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 import json
 import os
@@ -56,6 +56,37 @@ def shutdown():
 atexit.register(shutdown)
 
 
+@contextmanager
+def supervised_worker(path, *, text=True):
+    """Share the shutdown gate and process-group ownership across workers."""
+    with _lock:
+        if _stopping:
+            raise RuntimeError("worker supervisor is shutting down")
+        process = subprocess.Popen(
+            [sys.executable, str(Path(path).resolve()), "--worker"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=text,
+            start_new_session=True,
+        )
+        _active.add(process)
+    try:
+        yield process
+    finally:
+        if process.poll() is None:
+            _stop(process)
+        process.stdin.close()
+        process.stdout.close()
+        with _lock:
+            _active.discard(process)
+
+
+def watch_parent():
+    # EOF identifies the parent execution instance, unlike a PID across exec.
+    def watch():
+        sys.stdin.read()
+        os.killpg(os.getpgrp(), signal.SIGTERM)
+    threading.Thread(target=watch, daemon=True).start()
+
+
 def _outcome(value):
     if (not isinstance(value, dict) or set(value) != {"success", "error"}
             or type(value["success"]) is not bool
@@ -67,18 +98,9 @@ def _outcome(value):
 
 def sync_all(*, on_complete=None, on_statistics=None, **kwargs):
     # stdin is a lifetime channel: close-on-exec and parent exit both yield EOF.
-    with _lock:
-        if _stopping:
-            raise RuntimeError("sync worker is shutting down")
-        process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--worker"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
-            start_new_session=True,
-        )
-        _active.add(process)
     completed = {}
     result = None
-    try:
+    with supervised_worker(__file__) as process:
         process.stdin.write(json.dumps(kwargs) + "\n")
         process.stdin.flush()
         for line in process.stdout:
@@ -107,13 +129,6 @@ def sync_all(*, on_complete=None, on_statistics=None, **kwargs):
         if code != 0 or result is None:
             raise RuntimeError("sync worker exited without a complete result (exit %s)" % code)
         return result
-    finally:
-        if process.poll() is None:
-            _stop(process)
-        process.stdin.close()
-        process.stdout.close()
-        with _lock:
-            _active.discard(process)
 
 
 def _worker():
@@ -123,13 +138,7 @@ def _worker():
     output = sys.stdout
     output_lock = threading.Lock()
 
-    def watch_parent():
-        # No commands follow configuration. EOF identifies the parent execution
-        # instance, unlike getppid(), which is unchanged by server reexec.
-        sys.stdin.read()
-        os.killpg(os.getpgrp(), signal.SIGTERM)
-
-    threading.Thread(target=watch_parent, daemon=True).start()
+    watch_parent()
 
     def outcome(result):
         has_generation = result.generation is not None

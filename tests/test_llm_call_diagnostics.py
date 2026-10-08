@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 import http.client
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import threading
 from types import SimpleNamespace
@@ -79,6 +81,34 @@ class CallDiagnosticsTests(unittest.TestCase):
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
+        # Child interpreters must read this test's admitted copies, never the
+        # checkout's real state or provider stores. Keep the actual worker/HTTP
+        # transport so export assertions also cover process isolation.
+        popen = subprocess.Popen
+        child = '''
+import sys
+sys.path.insert(0, %r)
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+import generation, server, query_process
+@contextmanager
+def admission():
+    values = []
+    try:
+        for machine in ('alpha', 'beta'):
+            values.append(generation.read_current_generation(machine, root=Path(%r)))
+        yield SimpleNamespace(admitted=values)
+    finally:
+        for value in values: value.close()
+generation.generation_admission_snapshot = admission
+server.hub.enabled = lambda: True
+query_process._worker()
+''' % (str(Path(__file__).resolve().parents[1]), str(self.root / "generations"))
+        worker = mock.patch("sync_process.subprocess.Popen",
+            side_effect=lambda *args, **kwargs: popen([sys.executable, "-c", child], **kwargs))
+        worker.start()
+        self.addCleanup(worker.stop)
         self.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
