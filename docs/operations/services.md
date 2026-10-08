@@ -4,6 +4,14 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-08 historical routing diagnostics release
+
+The owner approved publishing `bff56cd`, `d85514f`, `be404e9` and `e91b400` together and updating MacStudio only. Remote main and the deployment checkout reached `e91b400`; the existing Hub restarted through `launchctl kickstart -k gui/501/com.agent-monitor.hub`. Health returned ok=true/stale=false, instance `81397e06cad140f1812404095718f032`, Web signature `70184018a3cd4bfb`. Served llm-calls.js, styles.css and app.js matched source bytes. The state symlink retained target `/Users/lindong/.local/share/agent-monitor/state` and inode 5804813. No account action or backend optimization was performed.
+
+A real isolated browser used an SSH loopback forward after direct hostname navigation failed while direct HTTP reads worked. From the 7d list it opened one macstudio/aihot request: policy selection, pin-not-applicable, first route `company_tencent_vod/deepseek-v4.1-flash/stream`, one successful attempt, 1734ms, 2309 tokens and unknown cost. Expanding three candidates showed one eligible route with an attempt and two ineligible routes with raw reason `caller_route_not_allowed`. Desktop 1440×900 and narrow 390×844 were inspected; document width remained 390px. Escape restored the same list/range. Live pin/retry/unknown cases were not exercised; those have isolated fixture coverage.
+
+The list resource took 27074.5ms and detail 35417.2ms, one observation each. The selected MacStudio source/detail snapshot remained dated 2026-10-06 14:32:59 while other sources were dated 2026-10-08. UI rendering therefore does not establish data freshness or backend performance; those concerns remain with the owner's separate backend session. Evidence: `~/.codex/artifacts/routing-phase46-20261008/`. This subsequent documentation commit is local, separate from the approved product publication.
+
 ## 2026-10-08 local Codex quota display release
 
 The owner approved applying `d85514f` to the MacBook service on port 39001. Local `main` fast-forwarded from `bff56cd`; the served `app.js` and `codex-accounts.js` matched the committed files byte-for-byte with `Cache-Control: no-store`. No backend restart, provider message, push or remote rollout was performed. The state symlink retained its target and inode 102763913.
