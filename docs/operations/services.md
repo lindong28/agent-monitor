@@ -4,6 +4,14 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-08 local Codex quota display release
+
+The owner approved applying `d85514f` to the MacBook service on port 39001. Local `main` fast-forwarded from `bff56cd`; the served `app.js` and `codex-accounts.js` matched the committed files byte-for-byte with `Cache-Control: no-store`. No backend restart, provider message, push or remote rollout was performed. The state symlink retained its target and inode 102763913.
+
+An isolated browser displayed future reset countdowns for all six existing Codex identities (three current machine records and three historical records): four rows used the newer page query, and two retained newer machine observations. All six account cards displayed countdowns and absolute reset times; the batch summary read “本轮发送成功 6/6 · 下次重置时间已知 6/6”. The historical rows remained expanded across subsequent polling. This verifies one live local snapshot and existing results, not a new message or a claim that sending establishes a seven-day cycle.
+
+Health reported `ok: true`, instance `037440e92f6142e09c942da4da08ff3a`, Web signature `5e21c56d74a16ac6`, and `stale: true`; the page also showed the backend-version warning. The stale flag concerns the loaded Python source signature, while this release changes only Web assets and documentation/tests. Its underlying source drift was not diagnosed or reloaded as part of this release; the frontend result above does not establish backend freshness.
+
 ## 2026-10-07 MacStudio quota explorer release
 
 The owner approved publication and MacStudio rollout through `14b5944`, explicitly including the intervening batch-account and discovery commits. `origin/main` and the remote checkout reached `14b5944`. The existing `com.agent-monitor.hub` job restarted with `launchctl kickstart -k`; health then reported `ok: true, stale: false`, instance `aa2b51c2b7f34369aed8aef12c616ff7`, Web signature `67b55ac9a4a77ff8`. Served index, app.js, styles.css and codex-accounts.js matched this source revision byte-for-byte. The state symlink target and inode remained unchanged.
