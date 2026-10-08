@@ -96,7 +96,8 @@ export function init() {
   }
 
   function button(label, action, account) {
-    const node = element("button", label, "btn");
+    const variant = action === "start" ? " btn-primary" : action === "forget-login" ? " btn-danger" : "";
+    const node = element("button", label, "btn" + variant);
     node.type = "button";
     node.disabled = account.busy && action !== "cancel";
     node.addEventListener("click", () => perform(action, account.id, node));
@@ -197,7 +198,11 @@ export function init() {
       card.dataset.signature = signature;
       const op = account.operation;
       const heading = element("div", undefined, "codex-account-heading");
-      heading.append(element("strong", account.email), element("span", op ? STAGES[op.stage] || op.stage : "尚未操作", "status-pill"));
+      const tone = op?.stage === "succeeded" ? "ok"
+        : ["failed", "interrupted"].includes(op?.stage) ? "bad"
+        : ["partial", "login", "login_queued"].includes(op?.stage) ? "warn"
+        : account.busy ? "info" : "identity";
+      heading.append(element("strong", account.email), element("span", op ? STAGES[op.stage] || op.stage : "尚未操作", "status-pill " + tone));
       card.append(heading);
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "账号与操作详情"));
@@ -225,7 +230,8 @@ export function init() {
           reading.append(element("dt", "七天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
           reading.append(element("dt", "最近成功查询"), element("dd", timestamp(latestReading.observed_at)));
           if (op.before?.seven_day_resets_at != null) details.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
-          card.append(reading);
+          card.append(element("p", `七天窗口已用 ${used == null ? "未知" : used + "%"} · ${resetLabel || "重置时间未知"}`, "codex-account-summary"));
+          details.append(reading);
           if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) card.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
         }
       }
@@ -233,7 +239,11 @@ export function init() {
       if (!batchItem && account.eligible !== false) controls.append(button(account.has_credentials ? "发送一条消息" : "登录并发送一条消息", "start", account));
       controls.append(button("仅刷新配额", "refresh", account));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
-      else if (account.has_credentials) controls.append(button("清除本页登录态", "forget-login", account));
+      else if (account.has_credentials) {
+        const maintenance = element("div", undefined, "codex-account-controls");
+        maintenance.append(button("清除本页登录态", "forget-login", account));
+        details.append(maintenance);
+      }
       details.open = Boolean(old?.querySelector("details")?.open);
       card.append(controls, details);
       if (old) old.replaceWith(card); else list.append(card);

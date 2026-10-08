@@ -320,6 +320,8 @@
         borderColor: seriesColor(index),
         backgroundColor: seriesColor(index),
         borderWidth: 2,
+        // A single observation has no segment; keep its value visible.
+        pointRadius: data.filter((value) => value != null && Number.isFinite(Number(value))).length === 1 ? 3 : 0,
         // Straight segments: smoothing a cost series draws intermediate values
         // between samples that were never spent.
         tension: 0,
@@ -330,23 +332,35 @@
 
   const SERIES_LIMIT = palette.length;
 
-  function chartOptions(extra) {
-    return Object.assign(
-      {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: {
-          legend: { position: "bottom" },
-          tooltip: { enabled: true },
-        },
-        scales: {
-          x: { ticks: { maxRotation: 0, autoSkip: true } },
-          y: { beginAtZero: true },
-        },
+  function chartOptions(extra = {}) {
+    const tooltip = {
+      enabled: true, backgroundColor: "#fff", titleColor: "#171717", bodyColor: "#525252",
+      borderColor: "#e5e5e5", borderWidth: 1, cornerRadius: 8, padding: 12,
+      boxWidth: 8, boxHeight: 8, titleFont: { size: 12 }, bodyFont: { size: 12 },
+    };
+    const axis = { border: { display: false }, grid: { color: "#ededed", drawTicks: false },
+      ticks: { color: "#737373", padding: 8, font: { size: 12 } } };
+    const scales = {};
+    for (const key of ["x", "y"]) {
+      const specific = extra.scales?.[key] || {};
+      scales[key] = { ...axis, ...specific,
+        grid: { ...axis.grid, display: key === "y" && extra.indexAxis !== "y", ...specific.grid },
+        ticks: { ...axis.ticks, maxRotation: 0, autoSkip: true, ...specific.ticks },
+      };
+    }
+    scales[extra.indexAxis === "y" ? "x" : "y"].beginAtZero = true;
+    return {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      elements: { point: { radius: 0, hoverRadius: 3, hitRadius: 8 }, bar: { borderRadius: 2 } },
+      ...extra,
+      plugins: { ...extra.plugins,
+        legend: { position: "bottom", ...extra.plugins?.legend,
+          labels: { boxWidth: 8, boxHeight: 8, padding: 16, color: "#525252", font: { size: 12 }, ...extra.plugins?.legend?.labels } },
+        tooltip: { ...tooltip, ...extra.plugins?.tooltip },
       },
-      extra || {}
-    );
+      scales,
+    };
   }
 
   function renderOverview(data, selectedRange) {
@@ -378,7 +392,14 @@
           })
         ),
       },
-      options: chartOptions(),
+      options: chartOptions({ scales: { x: { ticks: { maxTicksLimit: 7,
+        callback(value) {
+          const label = String(this.getLabelForValue(value));
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(label)) return label;
+          const years = new Set(this.chart.data.labels.map((date) => String(date).slice(0, 4)));
+          return years.size > 1 ? label.replaceAll("-", "/") : label.slice(5).replace("-", "/");
+        },
+      } } } }),
     });
     const costMeta = qs("#cost-over-time-meta");
     if (costMeta) {
@@ -957,7 +978,7 @@
       return cell;
     }
     const plan = document.createElement("span");
-    plan.className = "status-pill info";
+    plan.className = "status-pill identity";
     plan.textContent = quotaPlanLabel(account.account_plan);
     cell.appendChild(plan);
     if (quotaPlanSourcesDisagree(account)) {
@@ -1015,6 +1036,8 @@
     name.className = "quota-account-label";
     name.textContent = quotaAccountName(account);
     wrap.appendChild(name);
+    const actions = document.createElement("div");
+    actions.className = "quota-account-links";
 
     if (provider.key === "codex" && account.account_state === "known" && account.account_label) {
       const action = document.createElement("button");
@@ -1023,7 +1046,7 @@
       action.textContent = "登录 / 发消息";
       action.dataset.codexEmail = account.account_label;
       action.dataset.codexAccountId = account.account_id;
-      wrap.appendChild(action);
+      actions.appendChild(action);
     }
 
     if (quotaPresence(account) === "remembered") {
@@ -1033,8 +1056,9 @@
       remove.textContent = "移除";
       remove.setAttribute("aria-label", `移除 ${quotaAccountName(account)} 的记录`);
       remove.addEventListener("click", () => removeRememberedAccount(remove, provider, account));
-      wrap.appendChild(remove);
+      actions.appendChild(remove);
     }
+    if (actions.children.length) wrap.appendChild(actions);
     cell.appendChild(wrap);
     return cell;
   }
@@ -1659,7 +1683,7 @@
     if (!chips.length) {
       chips.push(statusChip("ok", "可用"));
     }
-    const marker = machine.this_machine ? ' <span class="scope-badge">本机</span>' : "";
+    const marker = machine.this_machine ? ' <span class="status-pill identity">本机</span>' : "";
     const facts = [];
     const observedAt = machine.statistics?.observed_at || machine.generated_at;
     facts.push(observedAt ? `数据更新于 ${formatDate(observedAt)} · ${updatedText(observedAt)}` : "尚无数据");

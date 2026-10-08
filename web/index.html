@@ -123,16 +123,21 @@
             <p id="quota-signed-out" class="quota-scope" hidden></p>
             <details id="codex-account-actions" class="codex-account-actions">
               <summary>Codex 账号操作 · 一键发送</summary>
-              <p class="quota-scope">自动列出当前及历史登录过的 Codex 账号，无需额外添加。点击一次给这些账号各发送一条短消息；可用的本页登录态会复用，需要授权的账号不阻塞其他账号。</p>
-              <div class="codex-account-controls">
-                <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
-                <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
-                <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮</button>
+              <div class="codex-batch-summary">
+                <p id="codex-batch-status" role="status" aria-live="polite"></p>
+                <p class="quota-scope">向当前及历史登录账号各发送一条 “Please reply with OK.”，会使用账号额度；需要授权的账号不阻塞其他账号。</p>
+                <div class="codex-account-controls">
+                  <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
+                  <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
+                  <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮</button>
+                </div>
+                <details class="note-disclosure">
+                  <summary>批次说明与授权帮助</summary>
+                  <p id="codex-batch-help" class="quota-scope"></p>
+                  <p class="quota-scope">账号自动来自登录记录，无需额外添加。验证码在 OpenAI 官方页面填写；设备码登录需在账号安全设置中启用。</p>
+                </details>
               </div>
-              <p id="codex-batch-status" role="status" aria-live="polite"></p>
-              <p id="codex-batch-help" class="quota-scope"></p>
               <div id="codex-account-unavailable" role="status" aria-live="polite"></div>
-              <p class="quota-scope">发送内容：Please reply with OK. 会使用该账号额度。验证码在 OpenAI 官方页面填写；设备码登录需在账号安全设置中启用。</p>
               <p id="codex-account-notice" role="status" aria-live="polite"></p>
               <div id="codex-account-list"></div>
               <p class="quota-scope">配额表采用同一账号最新的查询或采集读数，并标明「本页查询」来源；机器归属与套餐仍按机器记录显示。仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>

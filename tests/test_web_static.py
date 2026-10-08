@@ -10,6 +10,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebStaticTests(unittest.TestCase):
+    def test_chart_style_preserves_single_observation_and_caller_options(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+global.window = { location: { origin: "http://example.test", pathname: "/", search: "" }, history: { replaceState() {} } };
+global.document = { readyState: "loading", addEventListener() {} };
+eval(fs.readFileSync("web/app.js", "utf8"));
+const ui = window.AgentMonitor;
+for (const values of [[0], [null, 8, null], [undefined, 4]]) {
+  assert(ui.dataset("sample", values, 0).pointRadius > 0, "one valid observation must remain visible");
+}
+for (const values of [[], [null, undefined], [0, 8]]) {
+  assert.strictEqual(ui.dataset("sample", values, 0).pointRadius, 0);
+}
+const title = () => "full project path", tick = x => `${x} tokens`;
+const config = ui.chartOptions({indexAxis: "y", plugins: {legend: {display: false}, tooltip: {callbacks: {title}}}, scales: {x: {ticks: {callback: tick}}, y: {ticks: {autoSkip: false}}}});
+assert.strictEqual(config.plugins.tooltip.callbacks.title, title);
+assert.strictEqual(config.plugins.tooltip.enabled, true);
+assert.strictEqual(config.scales.x.ticks.callback, tick);
+assert.strictEqual(config.scales.y.ticks.autoSkip, false);
+assert.strictEqual(config.plugins.legend.display, false);
+assert.strictEqual(config.scales.x.beginAtZero, true);
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_session_detail_preserves_refresh_collection_and_page_watch(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");
