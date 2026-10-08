@@ -2,6 +2,7 @@
 
 ## 2026-10-08
 
+- Batch request candidates before reading their child attempts, avoiding repeated full-table scans when Hub sources still use older exporters without lookup indexes.
 - Open LLM Calls with a request page first. Load full-range totals, costs, independent attempts and complete filter choices on explicit action; preserve filtering, detail, pagination and exports. Hub snapshots gain an optional request-time index during export.
 - Isolate Hub full-history calls queries and JSON encoding from detail requests, with at most two concurrent query workers. Preserve complete exports and existing response semantics.
 - Fix stale export cleanup when macOS `/tmp` is a symlink, retaining the existing age, owner and filename restrictions without following child symlinks.

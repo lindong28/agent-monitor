@@ -122,14 +122,22 @@ def _source_page(current, conn, gateway, values, observation, now):
     unusual = [json.loads(row[0]) for row in conn.execute(
         "SELECT payload FROM statistics_requests WHERE " + REQUEST_TIME + " IS NULL")]
     chosen = select(unusual) if unusual else []
-    normal = []
+    normal, pending = [], []
     cursor = conn.execute("SELECT " + REQUEST_TIME + ", payload FROM statistics_requests WHERE "
                           + " AND ".join(clauses) + " ORDER BY " + REQUEST_TIME + " DESC", args)
     # Consume the complete last bucket before sorting at Python precision.
     for _, bucket in groupby(cursor, key=lambda row: row[0]):
-        normal.extend(select([json.loads(row[1]) for row in bucket]))
+        pending.extend(json.loads(row[1]) for row in bucket)
+        # Older exporters lack child lookup indexes. Batch complete buckets so
+        # they do not scan the attempt table separately for each request.
+        if len(pending) < limit:
+            continue
+        normal.extend(select(pending))
+        pending = []
         if len(normal) >= limit:
             break
+    if pending:
+        normal.extend(select(pending))
     chosen.extend(normal)
     chosen.sort(key=lambda row: (audit._parse_timestamp(row["request_timestamp"]), row["id"]), reverse=True)
     chosen = chosen[:limit]
