@@ -1,7 +1,7 @@
 """Versioned statistics carried inside the admitted, digest-bound snapshot.db.
 
 Gateway rows are captured in one read transaction, never copied from the live
-SQLite file. Only exact v3-v8 gateway audit schemas are accepted (no call content).
+SQLite file. Only exact v3-v10 gateway audit schemas are accepted (no call content).
 """
 
 from contextlib import closing, contextmanager
@@ -29,9 +29,12 @@ REQUEST_FIELDS_V6 = REQUEST_FIELDS_V5 | {"caller_username"}
 # Schema 7 adds resource tables; its request/attempt projections remain v6.
 REQUEST_FIELDS_V8 = REQUEST_FIELDS_V6 | {"caller_route_constraint_json"}
 REQUEST_FIELDS_BY_SCHEMA = {5: REQUEST_FIELDS_V5, 6: REQUEST_FIELDS_V6,
-                            7: REQUEST_FIELDS_V6, 8: REQUEST_FIELDS_V8}
+                            7: REQUEST_FIELDS_V6, 8: REQUEST_FIELDS_V8,
+                            9: REQUEST_FIELDS_V8, 10: REQUEST_FIELDS_V8}
 ATTEMPT_FIELDS = frozenset("id attempt_id logical_request_fk attempt_no parent_attempt_id run_id attempt_timestamp routing_revision route_selection_source route_id actual_model provider_id credential_profile_id credential_source_json transport route_verified_capabilities_json generation_controls_json dispatch_boundary outcome latency_ms usage_state usage_json cost_state cost_value cost_basis cost_currency cost_provenance pricing_state pricing_value pricing_currency pricing_basis pricing_source pricing_checked_at pricing_effective_at pricing_valid_until error_class http_status".split())
 USAGE_FIELDS = {field.name for field in fields(UsageEntry)}
+ATTEMPT_FIELDS_BY_SCHEMA = {10: ATTEMPT_FIELDS | {"usage_missing_reason"}}
+SUPPORTED_GATEWAY_SCHEMAS = frozenset(range(3, 11))
 
 
 class StatisticsSnapshotError(ValueError):
@@ -177,10 +180,11 @@ def _validate_gateway(meta, requests, attempts):
             raise ValueError("missing gateway carries rows")
         return
     if (meta["state"] != "available" or type(meta["schema_version"]) is not int
-            or meta["schema_version"] not in llm_attempts.LEDGER_SCHEMA_FINGERPRINTS):
+            or meta["schema_version"] not in SUPPORTED_GATEWAY_SCHEMAS):
         raise ValueError("unsupported gateway snapshot")
     request_fields = REQUEST_FIELDS_BY_SCHEMA.get(meta["schema_version"], REQUEST_FIELDS)
-    for rows, expected, high in ((requests, request_fields, "request_high"), (attempts, ATTEMPT_FIELDS, "attempt_high")):
+    attempt_fields = ATTEMPT_FIELDS_BY_SCHEMA.get(meta["schema_version"], ATTEMPT_FIELDS)
+    for rows, expected, high in ((requests, request_fields, "request_high"), (attempts, attempt_fields, "attempt_high")):
         if meta[high] is not None and (type(meta[high]) is not int or meta[high] < 1):
             raise ValueError("invalid gateway high watermark")
         if any(not isinstance(row, dict) or set(row) != expected for row in rows):
@@ -286,14 +290,45 @@ def read_admitted_usage(current, *, time_range=None, query=None, session_id=None
             "SELECT payload FROM statistics_usage" + where + " ORDER BY position", parameters)]
 
 
-def read_admitted_gateway(current):
-    """Keep all Gateway history for cross-window parents and total child counts."""
+def read_admitted_gateway(current, *, request_query=None):
+    """Read history, or one detail's complete chain from a leased generation.
+
+    The audit reader validates the detail query before invoking this callback.
+    Metadata for every source is retained even when its rows are not selected.
+    """
     with _admitted_connection(current) as conn:
         meta = _admitted_meta(conn)
         if meta is None:
             return {"gateway": {"state": "not_collected", "observed_at": None}}
         gateway = dict(meta["gateway"])
+        if request_query is not None:
+            requests, attempts = _gateway_detail_rows(conn, current.host, request_query)
+            return {"gateway": {**gateway, "requests": requests, "attempts": attempts}}
         for domain in ("requests", "attempts"):
             gateway[domain] = [json.loads(row[0]) for row in conn.execute(
                 f"SELECT payload FROM statistics_{domain} ORDER BY position")]
         return {"gateway": gateway}
+
+
+def _gateway_detail_rows(conn, machine, query):
+    if query.get("machine") != [machine]:
+        return [], []
+    if "attempt_id" in query:
+        where = "json_extract(payload, '$.id') IN (SELECT json_extract(payload, '$.logical_request_fk') FROM statistics_attempts WHERE json_extract(payload, '$.attempt_id') = ?)"
+        parameters = [query["attempt_id"][0]]
+    else:
+        where = "json_extract(payload, '$.logical_request_id') = ?"
+        parameters = [query["logical_request_id"][0]]
+        if "project" in query:
+            where += " AND json_extract(payload, '$.canonical_project_id') = ?"
+            parameters.append(query["project"][0])
+    requests = [json.loads(row[0]) for row in conn.execute(
+        "SELECT payload FROM statistics_requests WHERE " + where + " ORDER BY position", parameters)]
+    if len(requests) != 1:
+        # The shared reader reports absent/ambiguous identity before using children.
+        return requests, []
+    ids = [row["id"] for row in requests]
+    attempts = [json.loads(row[0]) for row in conn.execute(
+        "SELECT payload FROM statistics_attempts WHERE json_extract(payload, '$.logical_request_fk') IN ("
+        + ",".join("?" for _ in ids) + ") ORDER BY position", ids)]
+    return requests, attempts

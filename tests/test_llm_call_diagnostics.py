@@ -68,9 +68,9 @@ class CallDiagnosticsTests(unittest.TestCase):
 
         original_reader = statistics_snapshot.read_admitted_gateway
 
-        def admitted_reader(current):
+        def admitted_reader(current, **kwargs):
             self.assertTrue(self.admission_active, "reader escaped admitted snapshot lifetime")
-            return original_reader(current)
+            return original_reader(current, **kwargs)
 
         for patcher in (
             mock.patch.object(server.hub, "enabled", return_value=True),
@@ -135,6 +135,33 @@ class CallDiagnosticsTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["request"]["canonical_project_id"], "one")
         self.assertEqual(payload["request"]["machine"], "beta")
+
+    def test_detail_decodes_only_selected_request_and_complete_chain(self):
+        for identity in ({"logical_request_id": "shared-id", "project": "one"},
+                         {"attempt_id": "retry"}):
+            with self.subTest(identity=identity), \
+                 mock.patch.object(llm_attempts, "_request_row", wraps=llm_attempts._request_row) as requests, \
+                 mock.patch.object(llm_attempts, "_attempt_row", wraps=llm_attempts._attempt_row) as attempts:
+                status, payload = self.get("/api/llm-call-request", machine="alpha", **identity)
+                self.assertEqual(status, 200)
+                self.assertEqual(len(payload["request"]["attempts"]), 2)
+                self.assertEqual(requests.call_count, 1)
+                self.assertEqual(attempts.call_count, 2)
+
+    def test_detail_matches_full_reader_projection(self):
+        for identity in ({"logical_request_id": "shared-id", "project": "one"},
+                         {"attempt_id": "other-project"}):
+            query = {k: [v] for k, v in {"machine": "beta", **identity}.items()}
+            sources = {g.db_path: g for g in self.generations}
+            self.admission_active = True
+            expected = llm_attempts.llm_call_request(query,
+                sources=[(g.host, g.db_path) for g in self.generations],
+                snapshot_reader=lambda p: statistics_snapshot.read_admitted_gateway(sources[p]))
+            status, actual = self.get("/api/llm-call-request", machine="beta", **identity)
+            self.assertEqual(status, 200)
+            for payload in (expected, actual):
+                payload["range"].pop("end_at")
+            self.assertEqual(actual, expected)
 
     def test_export_is_complete_filtered_and_preserves_identity(self):
         for kind, expected in (("requests", 108), ("attempts", 110)):

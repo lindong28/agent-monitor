@@ -22,7 +22,11 @@ The overview borrows the value-and-trend panel relationship from Prompt Planet's
 
 The independent llm-gateway repository supplies its Python audit reader through `gateway_dependency.py`; the default checkout is `~/research/llm-gateway`, overridden by `LLM_GATEWAY_ROOT`. Gateway owns ledger schema fingerprints, pricing policy and inference credentials. This consumer retains versioned field mappings and unknown-field rejection. No Gateway service is started by this installer.
 
+Statistics projections accept exact Gateway schema versions 3–10. Versions 9/10 use Gateway's schema validator rather than membership in its historical fingerprint dictionary; schema 10 also carries `usage_missing_reason` on attempts. Unknown versions and missing or extra projection fields remain rejected.
+
 The calls page, request diagnostics and JSON export use that reader through read-only HTTP adapters. Hub adapters hold an admitted-generation lease throughout each read. Detail lookup carries machine and project identity; its complete child chain is independent of the list window. Export returns one selected record kind across all matching rows. Different HTTP observations can see different generations; their envelopes retain their own source times. UI teardown and selection guards prevent a late detail response from replacing a newer page or request. No new collection, ledger or indexing mechanism is introduced by this UI integration.
+
+For Hub request details, the snapshot reader selects the matching request (or the parent of the selected attempt) in SQLite before decoding rows, then reads every child of that request. Metadata from all admitted sources is retained. Missing or ambiguous requests still reach the shared reader's existing checks. Lists and exports retain the full-history reader; no snapshot format, index or retention change is required.
 
 ## Preserved contracts
 

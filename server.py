@@ -430,7 +430,8 @@ def llm_call_request_endpoint(query):
             sources = {g.db_path: g for g in admission.admitted}
             return llm_attempts.llm_call_request(query,
                 sources=[(g.host, g.db_path) for g in admission.admitted],
-                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(sources[path]))
+                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(
+                    sources[path], request_query=query))
     return llm_attempts.llm_call_request(query)
 
 

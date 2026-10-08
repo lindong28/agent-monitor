@@ -191,3 +191,13 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 - **Next**: 在真实 Hub 入口核对服务版本、admitted snapshot 身份及失败来源，分解读取等待后复测；新详情/导出使用既有完整 audit reader，本次不宣称获得 Gateway indexed UI 的性能保证。调用页布局和隔离 fixture 验证不能替代此项。
 
 2026-10-06 发布 `25697a3` 并重启既有 Hub 后，主线程从真实 7d 页面读到 50 行、409,355 匹配请求并打开一条完整详情；列表/详情资源各一次读数为 39.916s/36.493s。此处只追加生产等待证据，不作跨时提速比较，亦不据部署健康与单条详情宣称来源快照故障已修复。归属继续为用户另一个后端 session。
+
+2026-10-08 用户授权本性能 session 实施优化。现场确认 MacStudio 的 Gateway 已是 schema 10，而 monitor 仍通过只列出 3–8 的旧 fingerprint 字典拒绝快照；其余三个来源已更新到 10 月 8 日。已在本地补齐 9/10 精确字段校验，并将详情改为在 SQLite 中选定请求后再解码完整尝试链；同一生产快照副本的详情 profile 从 23.783s 到 1.220s/1.001s，隔离浏览器两条请求三次打开为 0.930s/0.947s/0.925s。此 issue 保持 open：真实 Hub 的部署、快照恢复和部署后响应验收尚待用户许可；执行归本 session。列表仍用完整读取，其后续优化留在本 issue，不以详情优化代表列表已改善。完整读数与测试边界见 [运维记录](../operations/services.md#2026-10-08-snapshot-compatibility-and-detail-performance-local-validation)。
+
+## [open] ISSUE-CALLS-20261008-9a72：定向详情读取仅支持 HTTP query 的列表值形态
+
+- **Discovered**: 2026-10-08，本次性能改动的独立审查。
+- **Priority**: medium；改动依附，非阻断。
+- **Owner**: agent-monitor 后端维护者；本轮记录，采纳扩展由用户裁决。
+- **Evidence**: Gateway reader 接受 query 值为字符串、tuple 或 list；新增定向读取按 HTTP `parse_qs` 的 list 形态取值，内部直接调用传字符串或 tuple 时返回 404，旧完整读取可返回同一请求的两个 attempts。现有 HTTP 入口始终传 list，不受该差异影响。
+- **Disposition**: 本次按网页 HTTP 运行包络交付，未扩展内部调用形态；以后支持此类直接调用前，应复用一致的单值归一化并验证三种形态。
