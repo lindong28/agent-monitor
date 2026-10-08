@@ -4,6 +4,14 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-08 template-directed console UI
+
+Commit `a79a3c0e1cf1edf63e297952c3acac130eb0a08d` was integrated into local main and deployed by a Git bundle to the existing MacStudio checkout, fast-forwarding from `4a56a00`. No Git push was performed. Only the Hub restarted; the state symlink target and inode 5804813 were preserved. No backend files changed. Browser-origin health reported ok=true/stale=false, instance `db19ea9df29646a0aa28d65ae915de03`, source signature `8e1b0f7758086ee6`, and Web signature `df6144f038cf099f`.
+
+The real 1440×1000 overview kept distinct today/week/range amounts, placed attribution before quota/account management, and kept account actions collapsed. Calls showed four primary filters with advanced filters collapsed. The 30d list returned 50 rows in a 2596ms resource observation. A 7d/project=aihot/provider=deepseek narrow-screen query returned 50 rows in 20599ms; this remaining backend latency is outside this frontend task and belongs to the owner's separate optimization session. Removing the provider chip preserved the project and range. At 390px, document width was 390px. One live success request showed the matching result, one attempt, 560 tokens, 988ms and unknown cost; Escape closed the panel and returned focus to the original request button. Snapshot/source details remained collapsed.
+
+The local isolated regression run covered 51 interaction/quota/static tests plus 6 field regressions. One independent implementation review and a targeted filter-layout follow-up found no blockers. A nonblocking wording mismatch remains: the unloaded analysis placeholder uses the old button name while the button says “查看统计与尝试”. No account actions or full-analysis load were executed; these observations do not establish all retry/error states or performance improvement. Evidence: `/Users/lindong/.local/state/agent-monitor-ui-review-20261008/` on the validation MacBook.
+
 ## 2026-10-08 Codex quota retention delivery
 
 The owner authorized push and deployment. MacStudio reached `1bd1239c86cb7e7ad42e8cbbcf43374a74a2aba9`; `./install.sh --no-services` preserved the state symlink (inode 5804813), then only the Hub restarted. Browser-origin `/api/health?asset_watch=1` reported ok=true/stale=false, instance `f2d813ffc75b4538ab817f348079b307`, source signature `b7d264936387eee3` and Web signature `7a5103c5f6d902d5`. The legacy health URL without `asset_watch=1` deliberately reports stale=true and is not the current frontend's health check.
