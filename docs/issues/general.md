@@ -214,6 +214,8 @@ MacMini 旧快照原因已进一步定位：数据卷仅剩 261MiB，12 个遗�
 
 第四轮本地实现已完成：四个全量 HTTP 入口及 JSON 编码在独立 worker 执行，上限 2，详情绕过其排队。相同真实副本、2 条交替详情的 HTTP 对照：列表期间最大等待 1.393s→0.00806s，完整导出期间 4.223s→0.01479s；列表与 618,351,695-byte 导出均逐字节一致。35 个受影响测试方法通过，输入维度和采样内存见 [本地验证](../operations/services.md#2026-10-08-full-history-http-isolation-local-validation)。这些读数不证明线上冷详情或列表算法已解决；下一项为具体提交的 push / MacStudio 部署许可，执行与真实浏览器复验仍由本 session 承担。
 
+第四轮已获明确许可将 `04d90cb` 推送并部署 MacStudio。真实浏览器在 4 个请求上打开详情 7 次，分别为 83.9/27.9/46.4/80.0/27.9/527.8/39.5ms，覆盖全量查询并发、重复/切换、1/2 attempts 及 generation 换代；新快照由 `04d90cb` 导出并已显示推进的观测时间。四台来源最后一次同步均成功，MacMini 已恢复更新但元数据仍含 1 个 blocked source。本轮详情等待与快照恢复交付完成；本 issue 因全量列表仍慢而保留 open：首次列表 38.195s，并发显式页面查询 75.504s（含可能的排队）。列表算法、持续资源成本及更广冷读刻画归 agent-monitor 后端维护者后续处理，本轮不扩展到 Gateway 重写。现场身份、全部读数与边界见 [第四轮部署记录](../operations/services.md#2026-10-08-full-history-http-isolation-release)。
+
 ## [open] ISSUE-CALLS-20261008-9a72：定向详情读取仅支持 HTTP query 的列表值形态
 
 - **Discovered**: 2026-10-08，本次性能改动的独立审查。
