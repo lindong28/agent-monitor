@@ -4,6 +4,14 @@ Current source layout is this repository's root. Install runtime and assets with
 
 State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
 
+## 2026-10-08 Codex quota retention delivery
+
+The owner authorized push and deployment. MacStudio reached `1bd1239c86cb7e7ad42e8cbbcf43374a74a2aba9`; `./install.sh --no-services` preserved the state symlink (inode 5804813), then only the Hub restarted. Browser-origin `/api/health?asset_watch=1` reported ok=true/stale=false, instance `f2d813ffc75b4538ab817f348079b307`, source signature `b7d264936387eee3` and Web signature `7a5103c5f6d902d5`. The legacy health URL without `asset_watch=1` deliberately reports stale=true and is not the current frontend's health check.
+
+One real browser quota-only refresh for `lindong4@philoai.xyz` succeeded at `2026-10-08T06:32:45.931155+00:00`: seven-day usage 0%, reset `2026-10-14T21:47:53+08:00`, with five-hour values unknown. The API returned the same reading in `operation.after` and `last_quota`; the card and historical-account row displayed the new observation, including after page reload. This operation sent no message. Local isolated fixtures separately covered post-send refresh for two email identities and retention after a failed refresh; the live check covers one authenticated account and quota-only refresh, not a live post-send run. `lindong2@philoai.xyz` still had no saved login and no new successful reading, so its October 1 machine observation cannot establish current quota.
+
+The owner also granted standing authorization for agent-monitor deployments and their required service changes/restarts, recorded in the repository's `AGENTS.md`. Push and other remote publication continue to require explicit authorization.
+
 ## 2026-10-08 request-list performance delivery
 
 The owner explicitly approved publishing 218bf2f, a MacStudio-only update/restart and the subsequent verification-note commit. The service checkout reached 218bf2f68024f4670e2b9b9af5b4b5f6a56dc78b. Health reported ok=true/stale=false, instance 06b402e2af234f96beff7a5179f6bf32, source signature cda03b7e949b44a0 and Web signature ef5346f6a4f4e522; state inode 5804813 and its target were unchanged.
