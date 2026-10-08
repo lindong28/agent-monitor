@@ -194,6 +194,8 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 
 2026-10-08 用户授权本性能 session 实施优化。现场确认 MacStudio 的 Gateway 已是 schema 10，而 monitor 仍通过只列出 3–8 的旧 fingerprint 字典拒绝快照；其余三个来源已更新到 10 月 8 日。已在本地补齐 9/10 精确字段校验，并将详情改为在 SQLite 中选定请求后再解码完整尝试链；同一生产快照副本的详情 profile 从 23.783s 到 1.220s/1.001s，隔离浏览器两条请求三次打开为 0.930s/0.947s/0.925s。此 issue 保持 open：真实 Hub 的部署、快照恢复和部署后响应验收尚待用户许可；执行归本 session。列表仍用完整读取，其后续优化留在本 issue，不以详情优化代表列表已改善。完整读数与测试边界见 [运维记录](../operations/services.md#2026-10-08-snapshot-compatibility-and-detail-performance-local-validation)。
 
+2026-10-08 用户明确批准后，`a94dfa9` 已推送并部署 MacStudio。schema 10 新快照已纳入，真实调用页显示 10 月 8 日 10:46:19 的观测时间及当日请求，旧快照拒绝问题在该来源恢复。性能只完成部分改善：旧请求重复 HTTP 读取 1.961s；新快照两条请求的三次详情渲染为 14.569s/4.094s/16.586s，列表一次 29.149s。另一个只读 probe 取得 MacStudio generation 用时 16.044s，其他三来源 0.019–0.214s；此耗时含获取与校验，尚未将锁等待单独计时。发布期锁内保留检查/复制/校验仍是剩余等待的候选，后续应先分解此段再决定是否缩短临界区，保留租约、身份与历史保留语义。该残余项及列表优化归 agent-monitor 后端维护者，已记本 issue，本轮不改发布协议；不以本地副本约 1s 宣称线上等待完全消除。后续自动轮次还读到 MacBook rollup-lock timeout，保留旧快照，根因未诊断；本次仅获 MacStudio 部署许可。详见 [部署记录](../operations/services.md#2026-10-08-snapshot-compatibility-and-targeted-details-release)。
+
 ## [open] ISSUE-CALLS-20261008-9a72：定向详情读取仅支持 HTTP query 的列表值形态
 
 - **Discovered**: 2026-10-08，本次性能改动的独立审查。
