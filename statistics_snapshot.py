@@ -147,6 +147,8 @@ def _create_detail_indexes(conn):
                          ("attempts", "logical_request_fk"), ("attempts", "attempt_id")):
         conn.execute("CREATE INDEX IF NOT EXISTS am_detail_%s_%s ON statistics_%s "
                      "(json_extract(payload, '$.%s'))" % (table, field, table, field))
+    conn.execute("CREATE INDEX IF NOT EXISTS am_list_request_time ON statistics_requests "
+                 "(julianday(json_extract(payload, '$.request_timestamp')))")
 
 
 def _validate_meta(meta):

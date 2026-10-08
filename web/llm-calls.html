@@ -55,7 +55,8 @@
           <span id="llm-state-detail">正在读取已纳入的请求与尝试快照。</span>
         </section>
 
-        <section class="llm-kpis" aria-label="LLM 调用摘要">
+        <p class="scope-note"><button id="llm-load-analysis" type="button">加载全范围统计与尝试</button> <span id="llm-analysis-status">首屏仅加载请求；全范围统计尚未加载。</span></p>
+        <section class="llm-kpis" aria-label="LLM 调用摘要" hidden>
           <article class="kpi-card">
             <div class="kpi-label">逻辑请求</div>
             <div id="llm-request-count" class="kpi-value">—</div>
@@ -85,6 +86,7 @@
             <button id="llm-clear-filters" type="button">清除筛选</button>
           </div>
           <p id="llm-active-filters" class="scope-note">未启用筛选</p>
+          <p class="scope-note"><button id="llm-load-options" type="button">加载完整筛选选项</button> <span id="llm-options-status">当前仅显示已选条件。</span></p>
           <details id="llm-filter-disclosure" open>
           <summary>筛选条件 · 13 项</summary>
           <div class="llm-controls">

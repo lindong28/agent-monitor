@@ -418,6 +418,15 @@ def network(query):
         }
 
 
+def llm_call_list_endpoint(query):
+    import call_list
+    if hub.enabled():
+        with generation.generation_admission_snapshot() as admission:
+            return call_list.page(query, admission.admitted)
+    result = llm_attempts.llm_calls_page(query, normalize_filters=call_list.SELECTORS)
+    return {"selection_options": result["filters"], "calls": call_list.without_analysis(result["calls"])}
+
+
 def llm_calls_endpoint(query):
     if hub.enabled():
         with generation.generation_admission_snapshot() as admission:
@@ -473,6 +482,7 @@ def llm_calls_page_endpoint(query):
 
 
 ROUTES = {
+    "/api/llm-call-list": llm_call_list_endpoint,
     "/api/health": health,
     "/api/timezone": timezone_endpoint,
     "/api/overview": overview,

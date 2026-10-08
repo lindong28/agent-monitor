@@ -483,8 +483,8 @@ global.fetch = async url => {
     request_summary: {}, attempt_summary: {}, range: { value: "all" },
     cost_summary: { monetary_subtotals: [] }, request_selection: {},
   };
-  const payload = url.pathname === "/api/llm-calls-page" ? {
-    calls, filters: {request_dimensions: {}, attempt_dimensions: {}}
+  const payload = url.pathname === "/api/llm-call-list" ? {
+    calls, selection_options: {request_dimensions: {}, attempt_dimensions: {}}
   } : {};
   return { ok: true, json: async () => payload };
 };
@@ -504,7 +504,7 @@ eval(fs.readFileSync("web/llm-calls.js", "utf8").replace("window.AgentMonitorLLM
         result = json.loads(result.stdout)
         self.assertEqual(result["before"], ["refresh"])
         self.assertEqual(result["after"][0], "refresh")
-        self.assertEqual(result["after"].count("/api/llm-calls-page"), 1)
+        self.assertEqual(result["after"].count("/api/llm-call-list"), 1)
         self.assertNotIn("/api/llm-call-filters", result["after"])
         self.assertNotIn("/api/llm-calls", result["after"])
         self.assertIn("sync-render", result["after"])

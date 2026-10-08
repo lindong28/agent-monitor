@@ -2,6 +2,7 @@
 
 ## 2026-10-08
 
+- Open LLM Calls with a request page first. Load full-range totals, costs, independent attempts and complete filter choices on explicit action; preserve filtering, detail, pagination and exports. Hub snapshots gain an optional request-time index during export.
 - Isolate Hub full-history calls queries and JSON encoding from detail requests, with at most two concurrent query workers. Preserve complete exports and existing response semantics.
 - Fix stale export cleanup when macOS `/tmp` is a symlink, retaining the existing age, owner and filename restrictions without following child symlinks.
 - Isolate Hub snapshot synchronization in a supervised process so its full-history export and publication checks do not share Python execution with HTTP requests. Preserve progressive refresh status and account-memory coordination; first admission of each new snapshot still validates in the HTTP process.

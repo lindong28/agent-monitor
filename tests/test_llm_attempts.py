@@ -1509,6 +1509,7 @@ const fs = require("fs");
 
 const nodes = {};
 [
+  ".llm-kpis", "#llm-analysis-status",
   "#llm-request-count", "#llm-success-count", "#llm-attempt-count",
   "#llm-unknown-cost-count", "#llm-outcome-context", "#llm-request-context",
   "#llm-attempt-context", "#llm-cost-context",
@@ -1729,6 +1730,7 @@ expected.forEach((item) => {
   byFilter[item.query] = control;
 });
 [
+  "#llm-filter-disclosure", "#llm-active-filters", "#llm-load-analysis",
   "#llm-clear-filters", "#llm-state", "#llm-state-title", "#llm-state-detail", "#llm-scope", "#llm-scope-detail",
   "#llm-cost-body", "#llm-requests-body", "#llm-attempts-body",
   "#llm-request-count", "#llm-success-count", "#llm-attempt-count",
@@ -1755,6 +1757,7 @@ global.AgentMonitor = {
   qs(selector) { return nodes[selector]; },
   getRange() { return "30d"; },
   params() { return new URLSearchParams(Object.entries(initial)); },
+  pageScope() { return () => false; },
   setParam(name, value) { writes.push([name, value]); },
   bindShell() {},
   integer(value) { return String(value); },
@@ -1782,19 +1785,19 @@ global.fetch = async () => ({ ok: true, json: async () => filterPayload });
 
 const source = fs.readFileSync("web/llm-calls.js", "utf8").replace(
   "window.AgentMonitorLLMCalls = { init };",
-  "window.AgentMonitorLLMCalls = { init, query, loadFilters, bindFilters, filterRegistry };",
+  "window.AgentMonitorLLMCalls = { init, query, populateFilters, bindFilters, filterRegistry };",
 );
 eval(source);
 
 (async () => {
-  await window.AgentMonitorLLMCalls.loadFilters();
+  window.AgentMonitorLLMCalls.populateFilters(filterPayload);
   const restored = Object.fromEntries(expected.map((item) => [item.query, nodes[item.selector].value]));
   const queryBefore = window.AgentMonitorLLMCalls.query();
   const profileText = nodes["#llm-profile"].options[1].textContent;
   const validLoadWrites = writes.slice();
   initial.project = "stale-project";
   initial.account_profile = "stale-profile";
-  await window.AgentMonitorLLMCalls.loadFilters();
+  window.AgentMonitorLLMCalls.populateFilters(filterPayload);
   const invalidRestored = {
     project: nodes["#llm-project"].value,
     account_profile: nodes["#llm-profile"].value,
@@ -1846,7 +1849,7 @@ eval(source);
             now=NOW,
         )
         self.assertEqual(
-            {item["source"] for item in expected if item["scope"] == "request"},
+            {item["source"] for item in expected if item["scope"] == "request"} | {"caller_usernames"},
             set(backend_filters["request_dimensions"]),
         )
         self.assertEqual(

@@ -181,7 +181,7 @@ function calls(count) {
     request_summary: {}, attempt_summary: {}, range: {value: range},
     cost_summary: {monetary_subtotals: []}, request_selection: {}};
 }
-function page(project, count) {return {filters: {request_dimensions: {projects: [project]},
+function page(project, count) {return {selection_options: {request_dimensions: {projects: [project]},
   attempt_dimensions: {}}, calls: calls(count)};}
 global.AgentMonitor = {qs, pageScope: () => () => true, getRange: () => range,
   params: () => params, setParam: (k,v) => v ? params.set(k,v) : params.delete(k),
@@ -192,7 +192,7 @@ global.AgentMonitor = {qs, pageScope: () => () => true, getRange: () => range,
 global.fetch = async url => {
   let payload;
   if (url.pathname === "/api/sync-status") payload={syncing};
-  else if (url.pathname === "/api/llm-calls-page") {
+  else if (url.pathname === "/api/llm-call-list") {
     payload = range === "all" ? page("old",1) : await new Promise(resolve => {finishPage=resolve;});
   } else payload = calls(range === "all" ? 1 : 0);
   return {ok:true,json:async()=>payload};
@@ -224,7 +224,7 @@ const pending=[], params=new URLSearchParams("project=old");
 const tick=()=>new Promise(r=>setImmediate(r));
 function page(project) {
   const rows={items:[],matching_count:1,next_cursor:"old-cursor"};
-  return {filters:{request_dimensions:{projects:[project]},attempt_dimensions:{}},
+  return {selection_options:{request_dimensions:{projects:[project]},attempt_dimensions:{}},
     calls:{ledger:{state:"available"},requests:rows,attempts:rows,
       request_summary:{},attempt_summary:{},range:{value:range},
       cost_summary:{monetary_subtotals:[]},request_selection:{}}};
@@ -234,7 +234,7 @@ global.AgentMonitor={qs,pageScope:()=>()=>true,getRange:()=>range,params:()=>par
   bindShell(fn){reload=fn;},renderSyncStatus(){},watchPageData(fn){watcher=fn;}};
 global.fetch=async url=>{
   let payload={syncing:false};
-  if(url.pathname==="/api/llm-calls-page") payload=range==="all"?page("old"):
+  if(url.pathname==="/api/llm-call-list") payload=range==="all"?page("old"):
     await new Promise(resolve=>pending.push({resolve,query:url.search}));
   else if(url.pathname==="/api/llm-calls") throw Error("lost options via calls-only load");
   return {ok:true,json:async()=>payload};
@@ -268,6 +268,53 @@ eval(fs.readFileSync("web/llm-calls.js","utf8"));
                 self.assertEqual(result["project"], "new" if action == "filter" else None)
                 self.assertEqual("project=new" in result["query"], action == "filter")
 
+    def test_calls_analysis_is_explicit_and_poll_cannot_cancel_or_mix_it(self):
+        result = self.run_browser(BROWSER_NODES + r'''
+let watcher, generation=1, finishAnalysis, finishList;
+const reads=[], params=new URLSearchParams('project=one'), tick=()=>new Promise(r=>setImmediate(r));
+document.querySelector=selector=>selector==='[data-filter="project"]'?qs('#llm-project'):qs(selector);
+function calls(full) {
+  const rows={items:[],matching_count:full?3:null,next_cursor:null};
+  return {ledger:{state:'available'},requests:rows,attempts:full?rows:null,
+    request_summary:full?{}:null,attempt_summary:full?{}:null,
+    range:{value:'30d',start_at:'start'},sources:[{machine:'a',state:'available',observed_at:String(generation)}],
+    as_of:'same-minimum-source',high_watermark:{a:3},request_selection:{},
+    cost_summary:full?{monetary_subtotals:[]}:null};
+}
+global.AgentMonitor={qs,pageScope:()=>()=>true,getRange:()=> '30d',params:()=>params,
+  setParam:(k,v)=>v?params.set(k,v):params.delete(k),integer:String,bindShell(){},
+  renderSyncStatus(){},watchPageData(fn){watcher=fn;}};
+global.fetch=async url=>{
+  reads.push(url.pathname);
+  if (url.pathname==='/api/llm-calls' && url.searchParams.get('project')!=='one') throw Error('lost selection');
+  let payload={syncing:false};
+  if(url.pathname==='/api/llm-call-list') {
+    if (!finishList) await new Promise(resolve=>{finishList=resolve;});
+    payload={selection_options:{request_dimensions:{projects:['one']},attempt_dimensions:{}},calls:calls(false)};
+  }
+  if(url.pathname==='/api/llm-calls') payload=await new Promise(resolve=>{finishAnalysis=()=>resolve(calls(true));});
+  return {ok:true,json:async()=>payload};
+};
+eval(fs.readFileSync('web/llm-calls.js','utf8'));
+(async()=>{
+  const pendingInit=window.AgentMonitorLLMCalls.init();
+  nodes['#llm-load-analysis'].listeners.click();await tick();
+  const initialClickIgnored=reads.length===1 && nodes['#llm-load-analysis'].disabled;
+  finishList();await pendingInit;
+  const initial=[...reads], hiddenInitially=nodes['.llm-kpis'].hidden;
+  nodes['#llm-load-analysis'].listeners.click();await tick();
+  const before=reads.length;await watcher();const pendingPollSuppressed=reads.length===before;
+  finishAnalysis();await tick();const shownAfter=nodes['.llm-kpis'].hidden===false;
+  await watcher();const keptSameGeneration=nodes['.llm-kpis'].hidden===false;
+  generation++;await watcher();const clearedNewGeneration=nodes['.llm-kpis'].hidden===true;
+  process.stdout.write(JSON.stringify({initial,initialClickIgnored,hiddenInitially,pendingPollSuppressed,shownAfter,
+    keptSameGeneration,clearedNewGeneration,analysisReads:reads.filter(x=>x==='/api/llm-calls').length}));
+})().catch(e=>{console.error(e);process.exit(1);});
+''')
+        self.assertEqual(result, {'initial': ['/api/llm-call-list', '/api/sync-status'],
+            'initialClickIgnored': True, 'hiddenInitially': True, 'pendingPollSuppressed': True, 'shownAfter': True,
+            'keptSameGeneration': True, 'clearedNewGeneration': True, 'analysisReads': 1})
+
     def test_llm_initial_and_background_reads_follow_progress(self):
         result = self.run_browser(BROWSER_NODES + r'''
 let watcher, polls = 0, running = true;
@@ -281,14 +328,14 @@ global.AgentMonitor = {qs, pageScope: () => () => true, getRange: () => "30d",
 global.fetch = async url => {
   let payload = {request_dimensions: {}, attempt_dimensions: {}};
   if (url.pathname === "/api/sync-status") payload = {syncing: running};
-  if (["/api/llm-calls", "/api/llm-calls-page"].includes(url.pathname)) {
+  if (url.pathname === "/api/llm-call-list") {
     calls.push(running);
     const empty = {items: [], matching_count: 0, next_cursor: null};
     payload = {ledger: {state: "not_collected"}, requests: empty, attempts: empty,
       request_summary: {}, attempt_summary: {}, range: {value: "30d"},
       cost_summary: {monetary_subtotals: []}, request_selection: {}};
-    if (url.pathname === "/api/llm-calls-page") payload = {
-      filters: {request_dimensions: {}, attempt_dimensions: {}}, calls: payload};
+    payload = {
+      selection_options: {request_dimensions: {}, attempt_dimensions: {}}, calls: payload};
   }
   return {ok: true, json: async () => payload};
 };

@@ -25,6 +25,9 @@
     loadSequence: 0,
     reloadSequence: 0,
     pageLoadSequence: null,
+    optionsLoaded: false,
+    optionsSequence: 0,
+    analysisSequence: null,
   };
 
   function node(tag, text, className) {
@@ -112,7 +115,8 @@
       return `${source.machine}: ${stateLabel} · ${formatTime(source.observed_at)}`;
     }).join("; ");
     const incomplete = sources.some((source) => source.state !== "available");
-    const empty = payload.requests.matching_count === 0 && payload.attempts.matching_count === 0;
+    const empty = payload.requests.matching_count === null ? payload.requests.items.length === 0
+      : payload.requests.matching_count === 0 && payload.attempts.matching_count === 0;
     status.className = `llm-state ${incomplete || empty ? "empty" : "data"}`;
     AgentMonitor.qs("#llm-state-title").textContent = incomplete ? "Gateway 覆盖不完整"
       : payload.ledger.state === "not_collected" ? "尚未采集 Gateway 明细"
@@ -124,6 +128,12 @@
   }
 
   function renderSummary(payload) {
+    AgentMonitor.qs(".llm-kpis").hidden = !payload.request_summary;
+    if (!payload.request_summary) {
+      ["#llm-request-count", "#llm-success-count", "#llm-attempt-count", "#llm-unknown-cost-count"].forEach(selector => { AgentMonitor.qs(selector).textContent = "—"; });
+      ["#llm-request-context", "#llm-outcome-context", "#llm-attempt-context", "#llm-cost-context"].forEach(selector => { AgentMonitor.qs(selector).textContent = "全范围统计未加载"; });
+      return;
+    }
     const requests = payload.request_summary;
     const attempts = payload.attempt_summary;
     AgentMonitor.qs("#llm-request-count").textContent = AgentMonitor.integer(payload.requests.matching_count);
@@ -489,7 +499,9 @@
       });
     }
     body.setAttribute("aria-busy", "false");
-    AgentMonitor.qs("#llm-requests-meta").textContent = `匹配 ${AgentMonitor.integer(payload.requests.matching_count)} 条请求`;
+    AgentMonitor.qs("#llm-requests-meta").textContent = payload.requests.matching_count === null
+      ? `本页 ${items.length} 条请求 · 全范围总数未加载`
+      : `匹配 ${AgentMonitor.integer(payload.requests.matching_count)} 条请求`;
     const filtered = payload.request_selection.attempt_filter_relation === "matching_child_in_attempt_time_range";
     AgentMonitor.qs("#llm-request-selection").textContent = filtered ? "按请求时间排列，并关联尝试时间范围内的匹配尝试。" : "按请求时间排列；未启用尝试级筛选。";
     AgentMonitor.qs("#llm-requests-prev").disabled = state.requestHistory.length === 0;
@@ -560,9 +572,23 @@
     state.payload = payload;
     setTerminal(payload);
     renderSummary(payload);
-    renderCosts(payload);
     renderRequests(payload);
-    renderAttempts(payload);
+    if (payload.request_summary) {
+      renderCosts(payload);
+      renderAttempts(payload);
+      AgentMonitor.qs("#llm-analysis-status").textContent = "统计、请求与尝试来自同一次读取。";
+    } else {
+      ["#llm-cost-body", "#llm-attempts-body"].forEach(selector => {
+        const body = AgentMonitor.qs(selector); clear(body);
+        const row = node("tr"), cell = node("td", "尚未加载；点击“加载全范围统计与尝试”。", "empty-state");
+        cell.colSpan = selector === "#llm-cost-body" ? 7 : 15; row.appendChild(cell); body.appendChild(row);
+        body.setAttribute("aria-busy", "false");
+      });
+      AgentMonitor.qs("#llm-no-charge").textContent = "—";
+      AgentMonitor.qs("#llm-attempts-meta").textContent = "尚未加载";
+      ["#llm-attempts-prev", "#llm-attempts-next"].forEach(selector => { AgentMonitor.qs(selector).disabled = true; });
+      AgentMonitor.qs("#llm-analysis-status").textContent = "当前仅加载请求；全范围统计尚未加载。";
+    }
   }
 
   function clearAuditData() {
@@ -595,15 +621,29 @@
     AgentMonitor.qs("#llm-state-detail").textContent = error.message || "刷新重试。";
   }
 
-  async function load() {
+  async function load(full = false, background = false) {
+    if (state.pageLoadSequence !== null) return;
     const current = AgentMonitor.pageScope();
     const sequence = ++state.loadSequence;
+    if (full) state.analysisSequence = sequence;
     setLoading();
     try {
-      const payload = await apiJSON("/api/llm-calls", query());
-      if (current() && sequence === state.loadSequence) render(payload);
+      const values = query();
+      if (!full) delete values.attempt_cursor;
+      const response = await apiJSON(full ? "/api/llm-calls" : "/api/llm-call-list", values);
+      if (!current() || sequence !== state.loadSequence) return;
+      const payload = full ? response : response.calls;
+      if (background && state.payload?.request_summary && JSON.stringify(payload.sources) === JSON.stringify(state.payload.sources) && JSON.stringify(payload.high_watermark) === JSON.stringify(state.payload.high_watermark) && payload.as_of === state.payload.as_of && payload.range.start_at === state.payload.range.start_at) {
+        setTerminal(state.payload);
+        ["#llm-cost-body", "#llm-requests-body", "#llm-attempts-body"].forEach(selector => AgentMonitor.qs(selector).setAttribute("aria-busy", "false"));
+        return;
+      }
+      if (!full) populateFilters(response.selection_options, state.optionsLoaded);
+      render(payload);
     } catch (error) {
       if (current() && sequence === state.loadSequence) setError(error);
+    } finally {
+      if (state.analysisSequence === sequence) state.analysisSequence = null;
     }
   }
 
@@ -646,7 +686,7 @@
     if (selected && values.some((item) => item.id === selected)) select.value = selected;
   }
 
-  function populateFilters(data) {
+  function populateFilters(data, preserveOptions = false) {
     const request = data.request_dimensions || {};
     const attempt = data.attempt_dimensions || {};
     const current = AgentMonitor.params();
@@ -654,19 +694,26 @@
       const dimensions = filter.scope === "request" ? request : attempt;
       const values = dimensions[filter.source] || [];
       const selected = current.get(filter.query);
-      if (filter.kind === "profile") populateProfiles(filter.selector, values, selected);
-      else populate(filter.selector, values, selected);
+      if (!preserveOptions) {
+        if (filter.kind === "profile") populateProfiles(filter.selector, values, selected);
+        else populate(filter.selector, values, selected);
+      }
       const selectedAvailable = filter.kind === "profile"
         ? values.some((item) => item.id === selected)
         : values.includes(selected);
-      if (selected && !selectedAvailable) AgentMonitor.setParam(filter.query, "");
+      if (selected && !selectedAvailable) {
+        AgentMonitor.setParam(filter.query, "");
+        AgentMonitor.qs(filter.selector).value = "";
+      }
     });
   }
 
   async function loadPage() {
     const pageCurrent = AgentMonitor.pageScope();
     const sequence = ++state.loadSequence;
+    state.analysisSequence = null;
     state.pageLoadSequence = sequence;
+    AgentMonitor.qs("#llm-load-analysis").disabled = true;
     const range = AgentMonitor.getRange();
     const values = { range, page_size: 50 };
     const params = AgentMonitor.params();
@@ -681,21 +728,40 @@
       AgentMonitor.qs(`#llm-${kind}-prev`).disabled = true;
     });
     try {
-      const payload = await apiJSON("/api/llm-calls-page", values);
+      const payload = await apiJSON("/api/llm-call-list", values);
       if (!current()) return;
-      populateFilters(payload.filters);
+      populateFilters(payload.selection_options, state.optionsLoaded);
       render(payload.calls);
     } catch (error) {
       if (current()) setError(error);
     } finally {
-      if (state.pageLoadSequence === sequence) state.pageLoadSequence = null;
+      if (state.pageLoadSequence === sequence) {
+        state.pageLoadSequence = null;
+        if (pageCurrent()) AgentMonitor.qs("#llm-load-analysis").disabled = false;
+      }
     }
   }
 
   function loadSelection() {
     // A selection may supersede calls, but must also finish loading the
     // current range's options when its combined page is still in flight.
-    return state.pageLoadSequence === null ? load() : loadPage();
+    return loadPage();
+  }
+
+  async function loadOptions() {
+    const current = AgentMonitor.pageScope(), range = AgentMonitor.getRange();
+    const sequence = ++state.optionsSequence, reload = state.reloadSequence;
+    const status = AgentMonitor.qs("#llm-options-status");
+    status.textContent = "正在加载完整选项…";
+    try {
+      const data = await apiJSON("/api/llm-call-filters", { range });
+      if (!current() || sequence !== state.optionsSequence || range !== AgentMonitor.getRange() || reload !== state.reloadSequence) return;
+      populateFilters(data); state.optionsLoaded = true;
+      status.textContent = "完整筛选选项已加载。";
+      resetPages(); await loadPage();
+    } catch (error) {
+      if (current() && sequence === state.optionsSequence && reload === state.reloadSequence) status.textContent = `筛选选项加载失败：${error.message}；可重试。`;
+    }
   }
 
   function resetPages() {
@@ -751,7 +817,7 @@
       state[historyKey].push(state[cursorKey]);
       state[cursorKey] = section.next_cursor;
       state[pageKey] += 1;
-      load();
+      load(Boolean(state.payload?.request_summary));
     });
     AgentMonitor.qs(`#llm-${lower}-prev`).addEventListener("click", () => {
       if (state.pageLoadSequence !== null) return;
@@ -762,7 +828,7 @@
       state.reloadSequence += 1;
       state[cursorKey] = state[historyKey].pop();
       state[pageKey] -= 1;
-      load();
+      load(Boolean(state.payload?.request_summary));
     });
   }
 
@@ -772,9 +838,9 @@
     if (!current()) return;
     AgentMonitor.renderSyncStatus(sync);
     if (sync.syncing || sync.queued_refresh) {
-      const terminal = await AgentMonitor.waitForSyncTerminal(sync, { onProgress: load, isCurrent: current });
+      const terminal = await AgentMonitor.waitForSyncTerminal(sync, { onProgress: () => load(false, true), isCurrent: current });
       if (terminal.polling_error) throw new Error(terminal.polling_error);
-      if (current()) await load();
+      if (current()) await load(false, true);
     }
   }
 
@@ -784,11 +850,14 @@
     const current = () => pageCurrent() && reload === state.reloadSequence;
     // Invalidate any old page/list response before refresh awaits network I/O.
     state.loadSequence += 1;
+    state.optionsSequence += 1;
+    state.optionsLoaded = false;
+    AgentMonitor.qs("#llm-options-status").textContent = "当前仅显示已选条件。";
     resetPages();
     activeRefreshes += 1;
     try {
       if (force === true) {
-        await AgentMonitor.refreshStatistics({ onProgress: load, isCurrent: current });
+        await AgentMonitor.refreshStatistics({ onProgress: () => load(false, true), isCurrent: current });
       }
       if (!current()) return;
       await loadPage();
@@ -807,19 +876,35 @@
     bindDiagnostics();
     bindPager("requests");
     bindPager("attempts");
+    AgentMonitor.qs("#llm-load-analysis").addEventListener("click", () => {
+      if (state.pageLoadSequence !== null) return;
+      state.reloadSequence += 1;
+      AgentMonitor.qs("#llm-analysis-status").textContent = "正在加载全范围统计与尝试…";
+      load(true);
+    });
+    AgentMonitor.qs("#llm-load-options").addEventListener("click", loadOptions);
+    [".llm-cost-panel", ".llm-attempt-panel"].forEach(selector => {
+      const section = AgentMonitor.qs(selector);
+      section.addEventListener("toggle", () => {
+        if (section.open && state.payload && !state.payload.request_summary && state.analysisSequence === null) {
+          state.reloadSequence += 1;
+          load(true);
+        }
+      });
+    });
     await reloadRange();
     // Page-scoped, so leaving this tab stops it. Registered through AgentMonitor
     // rather than window: with client navigation the document outlives the
     // page, and a raw setInterval here would accumulate one live poller per
     // visit, each still writing into a <main> that has been replaced.
     AgentMonitor.watchPageData(async () => {
-      if (activeRefreshes || state.pageLoadSequence !== null) return;
+      if (activeRefreshes || state.pageLoadSequence !== null || state.analysisSequence !== null) return;
       const pageCurrent = AgentMonitor.pageScope();
       const reload = state.reloadSequence;
       const current = () => pageCurrent() && reload === state.reloadSequence;
       activeRefreshes += 1;
       try {
-        await load();
+        await load(false, true);
         if (current()) await observeSync(current);
       } catch (error) {
         if (current()) setError(error);
