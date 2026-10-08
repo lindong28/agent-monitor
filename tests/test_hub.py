@@ -164,7 +164,8 @@ class HubTests(unittest.TestCase):
         with mock.patch("server.generation.generation_admission_snapshot", side_effect=lambda: contextlib.nullcontext(admission)), \
                 mock.patch("server.threading.Thread", Thread), \
                 mock.patch("server._automatic_sync_due", return_value=True), \
-                mock.patch("server.sync.sync_all", return_value={}), \
+                mock.patch("server.hub.enabled", return_value=True), \
+                mock.patch("server.sync_process.sync_all", return_value={}), \
                 mock.patch("server._remember_accounts_after_sync_publish"):
             server._maybe_sync_remotes({})
             server._maybe_sync_remotes({"force": ["1"]})

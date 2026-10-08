@@ -29,6 +29,7 @@ import gateway_dependency
 import statistics_snapshot
 import hub
 import sync
+import sync_process
 from aggregators import extract_metric, load_all_entries
 from parsers import claude_status, codex
 from parsers.accounts import quota_identity
@@ -339,6 +340,7 @@ def _compile_check():
 
 def _schedule_reexec():
     def _reexec():
+        sync_process.shutdown()
         os.execv(
             sys.executable,
             [sys.executable, str(ROOT / "server.py"), "--host", _BIND_HOST, "--port", str(_BIND_PORT)],
@@ -917,7 +919,8 @@ def _run_sync_round(round_machines=()):
         with _SYNC_LOCK:
             quota = _SYNC_STATE["round_quota_refresh"]
         # Each machine publishes statistics, then quota, independently of peers.
-        results = sync.sync_all(
+        collect = sync_process.sync_all if hub.enabled() else sync.sync_all
+        results = collect(
             quota_refresh=quota, progressive=quota and hub.enabled(),
             on_statistics=lambda name, result: _sync_machine_completed(name, result, statistics_only=True),
             on_complete=_sync_machine_completed,
@@ -1012,6 +1015,13 @@ def _normalize_sync_outcomes(results, round_machines):
     outcomes = {}
     for name in sorted(set(round_machines) | set(results)):
         result = results.get(name)
+        if isinstance(result, sync_process.Outcome):
+            outcomes[name] = {
+                "kind": "success" if result.success else "failure",
+                "generation": None,
+                "reason": result.error,
+            }
+            continue
         if not isinstance(result, sync.SyncResult):
             outcomes[name] = {
                 "kind": "malformed",
@@ -2333,6 +2343,7 @@ def main():
         server.serve_forever()
     finally:
         stop.set()
+        sync_process.shutdown()
         server.server_close()
 
 

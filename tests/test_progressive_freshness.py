@@ -56,24 +56,33 @@ class ProgressiveFreshnessTests(unittest.TestCase):
     def test_statistics_are_published_before_quota_and_request_stays_pending(self):
         events = []
         server._SYNC_STATE.update(running=True, round_quota_refresh=True, round_refresh=1,
-                                  refresh_requested=1, pending_machines=("fast", "slow"), phase="statistics")
-        def collect(*, quota_refresh, on_complete):
+                                  refresh_requested=1, pending_machines=("fast", "slow"),
+                                  statistics_pending=("fast", "slow"), phase="statistics")
+        def collect(*, quota_refresh, progressive, on_complete, on_statistics):
             events.append(quota_refresh)
+            self.assertTrue(progressive)
             self.assertEqual(server._SYNC_STATE["refresh_completed"], 0)
-            self.assertEqual(server._SYNC_STATE["phase"], "quota" if quota_refresh else "statistics")
-            result = sync.SyncResult(generation=mock.Mock())
+            self.assertEqual(server._SYNC_STATE["phase"], "statistics")
+            result = server.sync_process.Outcome(True)
+            on_statistics("fast", result)
+            self.assertIn("fast", server._SYNC_STATE["pending_machines"])
+            self.assertNotIn("fast", server._SYNC_STATE["statistics_pending"])
             on_complete("fast", result)
             self.assertNotIn("fast", server._SYNC_STATE["pending_machines"])
             self.assertIn("slow", server._SYNC_STATE["pending_machines"])
-            failed = sync.SyncResult(error="offline")
+            failed = server.sync_process.Outcome(False, "offline")
             on_complete("slow", failed)
+            self.assertEqual(server._SYNC_STATE["phase"], "quota")
+            self.assertEqual(server._SYNC_STATE["refresh_completed"], 0)
             return {"fast": result, "slow": failed}
-        with mock.patch("server.sync.sync_all", side_effect=collect), mock.patch("server._remember_accounts_after_sync_publish"), mock.patch("server.hub.enabled", return_value=True):
+        with mock.patch("server.sync_process.sync_all", side_effect=collect), mock.patch("server._remember_accounts_after_sync_publish"), mock.patch("server.hub.enabled", return_value=True):
             server._run_sync_round(("fast", "slow"))
-        self.assertEqual(events, [False, True])
+        self.assertEqual(events, [True])
         self.assertEqual(server._SYNC_STATE["refresh_completed"], 1)
         self.assertFalse(server._SYNC_STATE["running"])
+        self.assertEqual(server._SYNC_STATE["observations"]["fast"]["last_attempt_outcome"], "success")
         self.assertEqual(server._SYNC_STATE["observations"]["slow"]["last_attempt_outcome"], "failure")
+        self.assertEqual(server._SYNC_STATE["observations"]["slow"]["reason"], "offline")
 
     def test_browser_rereads_each_new_generation_before_terminal_and_stops_on_navigation(self):
         script = r'''
