@@ -327,24 +327,19 @@
   function renderDetail(payload, container) {
     clear(container);
     const request = payload.request;
-    container.appendChild(node("p", `详情快照截至：${formatTime(payload.as_of)}`, "scope-note"));
-    (payload.sources || []).forEach((source) => container.appendChild(node("p",
-      `${source.machine} · ${human(source.state)} · 观测于 ${formatTime(source.observed_at)}`, "scope-note")));
-    fields(container, [
-      ["机器", request.machine || "本机"], ["项目", request.canonical_project_id],
-      ["逻辑请求", request.logical_request_id],
-      ["请求时间", formatTime(request.request_timestamp)], ["逻辑模型", request.logical_model],
-      ["结果", request.request_outcome], ["拒绝原因", request.request_reject_reason],
+    const summary = node("section", undefined, "llm-request-summary");
+    const heading = node("h3", request.logical_model || "模型未记录");
+    heading.appendChild(outcomePill(request.request_outcome));
+    summary.appendChild(heading);
+    fields(summary, [
+      ["请求时间", formatTime(request.request_timestamp)],
+      ["项目", request.canonical_project_id], ["机器", request.machine || "本机"],
     ]);
+    if (request.request_reject_reason) summary.appendChild(node("p", `拒绝原因：${request.request_reject_reason}`, "error"));
+    container.appendChild(summary);
+    const incomplete = (payload.sources || []).filter(source => source.state !== "available");
+    if (incomplete.length) container.appendChild(node("p", `详情来源不完整：${incomplete.map(source => `${source.machine} · ${human(source.state)}`).join("；")}`, "error"));
     const attempts = request.attempts || [];
-    routingSummary(container, request, attempts);
-    auditDisclosure(container, "请求身份与路由证据", [
-      ["会话", request.session_ref], ["调用者", request.caller_username],
-      ["请求模式", request.requested_mode], ["路由选择来源", request.route_selection_source],
-      ["指定路由", request.requested_route_id], ["指定路由解析", request.resolved_route_id],
-      ["准入版本", request.admission_revision], ["调用方路由约束", request.caller_route_constraint],
-      ["候选路由", request.preselection_candidates],
-    ]);
     container.appendChild(node("h3", `完整尝试链 · ${attempts.length} 次`));
     if (!attempts.length) container.appendChild(node("p", "此请求没有已记录的服务商尝试。"));
     attempts.forEach((item, index) => {
@@ -379,6 +374,22 @@
       ]);
       container.appendChild(section);
     });
+    routingSummary(container, request, attempts);
+    auditDisclosure(container, "请求身份与路由证据", [
+      ["逻辑请求", request.logical_request_id],
+      ["会话", request.session_ref], ["调用者", request.caller_username],
+      ["请求模式", request.requested_mode], ["路由选择来源", request.route_selection_source],
+      ["指定路由", request.requested_route_id], ["指定路由解析", request.resolved_route_id],
+      ["准入版本", request.admission_revision], ["调用方路由约束", request.caller_route_constraint],
+      ["候选路由", request.preselection_candidates],
+    ]);
+    const sources = node("details", undefined, "llm-audit-disclosure");
+    sources.appendChild(node("summary", "快照与采集来源"));
+    sources.appendChild(node("p", "完整尝试链不受列表时间范围或筛选限制。此面板按打开时的独立快照读取，不自动刷新。", "scope-note"));
+    sources.appendChild(node("p", `详情快照截至：${formatTime(payload.as_of)}`, "scope-note"));
+    (payload.sources || []).forEach(source => sources.appendChild(node("p",
+      `${source.machine} · ${human(source.state)} · 观测于 ${formatTime(source.observed_at)}`, "scope-note")));
+    container.appendChild(sources);
   }
 
   function closeDetail() {
@@ -771,15 +782,32 @@
   }
 
   function renderFilterSelection() {
-    const selected = filterRegistry.map(filter => {
+    const container = AgentMonitor.qs("#llm-active-filters");
+    clear(container);
+    filterRegistry.forEach(filter => {
       const control = document.querySelector(`[data-filter="${filter.query}"]`);
-      return control?.value ? `${document.querySelector(`label[for="${filter.selector.slice(1)}"]`)?.textContent || filter.query}: ${control.value}` : null;
-    }).filter(Boolean);
-    AgentMonitor.qs("#llm-active-filters").textContent = selected.length ? selected.join(" · ") : "未启用筛选";
+      if (!control?.value) return;
+      const label = document.querySelector(`label[for="${filter.selector.slice(1)}"]`)?.textContent || filter.query;
+      const button = node("button", `${label}: ${control.value} ×`, "llm-filter-chip");
+      button.type = "button";
+      button.setAttribute("aria-label", `清除${label}筛选：${control.value}`);
+      button.addEventListener("click", () => {
+        state.reloadSequence += 1;
+        control.value = "";
+        AgentMonitor.setParam(filter.query, "");
+        resetPages();
+        renderFilterSelection();
+        AgentMonitor.qs("#llm-clear-filters").focus();
+        loadSelection();
+      });
+      container.appendChild(button);
+    });
+    container.hidden = !container.firstChild;
+    if (!container.firstChild) container.textContent = "未启用筛选";
   }
 
   function bindFilters() {
-    AgentMonitor.qs("#llm-filter-disclosure").open = !window.matchMedia?.("(max-width: 1000px)").matches;
+    AgentMonitor.qs("#llm-filter-disclosure").open = false;
     renderFilterSelection();
     filterRegistry.forEach((filter) => {
       const control = document.querySelector(`[data-filter="${filter.query}"]`);

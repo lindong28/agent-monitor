@@ -25,7 +25,7 @@
           <a data-nav href="/network">网络</a>
         </nav>
       </aside>
-      <main class="main llm-main">
+      <main class="main llm-main console-main">
         <div class="page-toolbar">
           <h1 class="page-title">LLM 调用</h1>
           <div class="toolbar">
@@ -55,7 +55,7 @@
           <span id="llm-state-detail">正在读取已纳入的请求与尝试快照。</span>
         </section>
 
-        <p class="scope-note"><button id="llm-load-analysis" type="button">加载全范围统计与尝试</button> <span id="llm-analysis-status">首屏仅加载请求；全范围统计尚未加载。</span></p>
+        <p class="scope-note"><button id="llm-load-analysis" type="button">查看统计与尝试</button> <span id="llm-analysis-status">全范围统计尚未加载。</span></p>
         <section class="llm-kpis" aria-label="LLM 调用摘要" hidden>
           <article class="kpi-card">
             <div class="kpi-label">逻辑请求</div>
@@ -83,18 +83,20 @@
         <section class="panel llm-filter-panel" aria-labelledby="llm-filter-title">
           <div class="panel-head">
             <h2 id="llm-filter-title">筛选</h2>
-            <button id="llm-clear-filters" type="button">清除筛选</button>
+            <div class="llm-filter-actions"><button id="llm-load-options" type="button">获取可选条件</button><button id="llm-clear-filters" type="button">清除筛选</button></div>
           </div>
-          <p id="llm-active-filters" class="scope-note">未启用筛选</p>
-          <p class="scope-note"><button id="llm-load-options" type="button">加载完整筛选选项</button> <span id="llm-options-status">当前仅显示已选条件。</span></p>
-          <details id="llm-filter-disclosure" open>
-          <summary>筛选条件 · 13 项</summary>
-          <div class="llm-controls">
+          <div id="llm-active-filters" class="scope-note" aria-label="已选筛选">未启用筛选</div>
+          <p id="llm-options-status" class="scope-note">尚未获取全部可选值；已有筛选仍生效。</p>
+          <div class="llm-controls llm-primary-filters">
             <div class="field"><label for="llm-machine">机器</label><select id="llm-machine" data-filter="machine"><option value="">全部机器</option></select></div>
             <div class="field"><label for="llm-project">项目</label><select id="llm-project" data-filter="project"><option value="">全部项目</option></select></div>
-            <div class="field"><label for="llm-session">会话</label><select id="llm-session" data-filter="session_ref"><option value="">全部会话</option></select></div>
             <div class="field"><label for="llm-logical-model">逻辑模型</label><select id="llm-logical-model" data-filter="logical_model"><option value="">全部逻辑模型</option></select></div>
             <div class="field"><label for="llm-request-outcome">请求结果</label><select id="llm-request-outcome" data-filter="request_outcome"><option value="">全部请求结果</option></select></div>
+          </div>
+          <details id="llm-filter-disclosure">
+          <summary>高级筛选 · 会话、路由与尝试</summary>
+          <div class="llm-controls">
+            <div class="field"><label for="llm-session">会话</label><select id="llm-session" data-filter="session_ref"><option value="">全部会话</option></select></div>
             <div class="field"><label for="llm-provider">服务商</label><select id="llm-provider" data-filter="provider"><option value="">全部服务商</option></select></div>
             <div class="field"><label for="llm-profile">账号配置</label><select id="llm-profile" data-filter="account_profile"><option value="">全部账号配置</option></select></div>
             <div class="field"><label for="llm-route">路由</label><select id="llm-route" data-filter="route"><option value="">全部路由</option></select></div>
@@ -176,7 +178,6 @@
         </div>
         <dialog id="llm-detail" class="llm-detail" aria-labelledby="llm-detail-title">
           <div class="llm-detail-head"><h2 id="llm-detail-title">请求诊断</h2><button id="llm-detail-close" type="button" aria-label="关闭请求诊断" autofocus>关闭 ×</button></div>
-          <p class="scope-note">完整尝试链不受列表时间范围或筛选限制。此面板按打开时的独立快照读取，不自动刷新。</p>
           <div id="llm-detail-content" aria-live="polite"></div>
         </dialog>
       </main>

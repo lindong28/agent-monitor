@@ -1468,6 +1468,33 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn('qs("#codex-five-hour")', js)
         self.assertIn('closest(".kpi-card")', js)
 
+    def test_console_primary_content_precedes_low_frequency_operations(self):
+        from html.parser import HTMLParser
+        class Controls(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.advanced = False
+                self.primary = []
+                self.collapsed = []
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == "details" and attrs.get("id") in {"codex-account-actions", "llm-filter-disclosure"}:
+                    self.collapsed.append("open" not in attrs)
+                    self.advanced = attrs.get("id") == "llm-filter-disclosure"
+                if "data-filter" in attrs and not self.advanced:
+                    self.primary.append(attrs["data-filter"])
+            def handle_endtag(self, tag):
+                if tag == "details":
+                    self.advanced = False
+        overview = (ROOT / "web/index.html").read_text()
+        self.assertLess(overview.index('id="top-projects-chart"'), overview.index('id="codex-account-actions"'))
+        self.assertLess(overview.index('id="model-mix-chart"'), overview.index('id="codex-account-actions"'))
+        parser = Controls()
+        parser.feed(overview)
+        parser.feed((ROOT / "web/llm-calls.html").read_text())
+        self.assertEqual(parser.collapsed, [True, True])
+        self.assertEqual(parser.primary, ["machine", "project", "logical_model", "request_outcome"])
+
     def test_overview_side_panel_links_preserve_selected_range(self):
         html = (ROOT / "web" / "index.html").read_text()
 

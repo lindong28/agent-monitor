@@ -31,7 +31,7 @@ global.AgentMonitor = { qs, pageScope() {const g=generation;return ()=>g===gener
 global.fetch = url => new Promise(resolve => requests.push({url, finish(payload, ok=true) {resolve({ok,status:404,json:async()=>payload,blob:async()=>new Blob([JSON.stringify(payload)],{type:'application/json'})});}}));
 URL.createObjectURL = () => 'blob:fixture'; URL.revokeObjectURL = () => {};
 eval(fs.readFileSync('web/llm-calls.js','utf8').replace('window.AgentMonitorLLMCalls = { init };',
- 'window.AgentMonitorLLMCalls = { init, state, openDetail, closeDetail, renderDetail, exportRecords, formatAmount, bindDiagnostics, renderAttempts };'));
+ 'window.AgentMonitorLLMCalls = { init, state, openDetail, closeDetail, renderDetail, exportRecords, formatAmount, bindDiagnostics, renderAttempts, renderFilterSelection };'));
 const api = window.AgentMonitorLLMCalls;
 function payload(id, attempts=[]) { return {as_of:'2026-10-06T01:00:00Z',sources:[{machine:'b',state:'available',observed_at:'2026-10-06T00:00:00Z'}],request:{logical_request_id:id,canonical_project_id:'p',machine:'b',request_outcome:'local_rejected',request_reject_reason:'no_route',attempts}}; }
 '''
@@ -77,6 +77,45 @@ assert(api.formatAmount(0,'USD').includes('0.00'));
 api.bindDiagnostics();let prevented=false;qs('#llm-detail').open=true;
 qs('#llm-detail').listeners.cancel({preventDefault(){prevented=true;}});
 assert(prevented);assert.equal(qs('#llm-detail').open,false);
+''')
+
+    def test_detail_prioritizes_result_and_attempts_without_hiding_missing_sources(self):
+        self.run_js(r'''
+const content=node('div');
+const data=payload('request-id',[{attempt_no:1,outcome:'timeout',latency_ms:120,usage_state:'not_reported',cost_state:'unknown'}]);
+data.sources.push({machine:'missing-machine',state:'missing'});
+api.renderDetail(data,content);
+assert.equal(content.children[0].className,'llm-request-summary');
+const attempt=content.children.findIndex(n=>n.className==='llm-detail-attempt');
+const source=content.children.findIndex(n=>n.tag==='details' && n.textContent.includes('详情快照截至'));
+assert(attempt>0 && source>attempt);
+assert(content.children.some(n=>n.className==='error' && n.textContent.includes('missing-machine')));
+assert(content.children[0].textContent.includes('no_route'));
+assert(!content.children[source].open);
+assert(content.children[source].textContent.includes('2026'));
+''')
+
+    def test_active_advanced_filter_is_visible_and_individually_clearable(self):
+        self.run_js(r'''
+const writes=[];AgentMonitor.setParam=(key,value)=>writes.push([key,value]);
+AgentMonitor.params=()=>new URLSearchParams();
+qs('[data-filter="route"]').value='route-one';
+qs('[data-filter="machine"]').value='machine-one';
+qs('#llm-filter-disclosure').open=false;
+api.state.requestCursor='old';api.state.requestPage=3;
+api.renderFilterSelection();
+const selected=qs('#llm-active-filters');
+assert.equal(selected.children.length,2);
+const route=selected.children.find(n=>n.textContent.includes('route-one'));
+assert(route);route.listeners.click();
+assert.equal(qs('[data-filter="route"]').value,'');
+assert.equal(qs('[data-filter="machine"]').value,'machine-one');
+assert.deepEqual(writes,[['route','']]);
+assert.equal(api.state.requestCursor,null);assert.equal(api.state.requestPage,1);
+assert.equal(qs('#llm-filter-disclosure').open,false);
+assert.equal(focused,qs('#llm-clear-filters'));
+assert(!selected.textContent.includes('route-one'));
+assert(selected.textContent.includes('machine-one'));
 ''')
 
     def test_export_all_matches_original_selection_and_navigation(self):

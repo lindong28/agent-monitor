@@ -25,7 +25,7 @@
           <a data-nav href="/network">网络</a>
         </nav>
       </aside>
-      <main class="main">
+      <main class="main console-main overview-main">
         <div class="page-toolbar">
           <h1 class="page-title">总览</h1>
           <div class="toolbar">
@@ -88,6 +88,23 @@
             <div class="chart-box"><canvas id="daily-cost-chart"></canvas></div>
             <p id="cost-over-time-coverage" class="estimate-note" hidden></p>
           </section>
+          <section class="panel-grid" aria-label="总览图表">
+            <article class="panel">
+              <div class="panel-head">
+                <h2>本周会话目录成本</h2>
+                <a class="panel-link" data-preserve-range href="/explore?x=project&group=none&metric=cost">→ 透视</a>
+              </div>
+              <p class="scope-note">按会话启动目录归类，可能显示其 Git 仓库标识；跨项目工作不拆分费用。</p>
+              <div class="chart-box short"><canvas id="top-projects-chart"></canvas></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h2>本月模型构成</h2>
+                <a class="panel-link" data-preserve-range href="/explore?x=model&group=agent&metric=total">→ 透视</a>
+              </div>
+              <div class="chart-box short"><canvas id="model-mix-chart"></canvas></div>
+            </article>
+          </section>
           <section class="kpi-group" aria-labelledby="kpi-quota-title">
             <h2 id="kpi-quota-title" class="kpi-group-title">配额用量</h2>
             <p class="quota-scope">配额按账号计量，不跨账号求和。页面日期范围不改变服务商的 5h / 7d 配额窗口。</p>
@@ -104,7 +121,7 @@
             </div>
             <p id="quota-match-count" class="quota-scope" role="status" aria-live="polite"></p>
             <p id="quota-signed-out" class="quota-scope" hidden></p>
-            <details id="codex-account-actions" class="codex-account-actions" open>
+            <details id="codex-account-actions" class="codex-account-actions">
               <summary>Codex 账号操作 · 一键发送</summary>
               <p class="quota-scope">自动列出当前及历史登录过的 Codex 账号，无需额外添加。点击一次给这些账号各发送一条短消息；可用的本页登录态会复用，需要授权的账号不阻塞其他账号。</p>
               <div class="codex-account-controls">
@@ -145,23 +162,6 @@
             <span id="codex-five-updated"></span>
           </div>
         </div>
-        <section class="panel-grid" aria-label="总览图表">
-          <article class="panel">
-            <div class="panel-head">
-              <h2>本周会话目录成本</h2>
-              <a class="panel-link" data-preserve-range href="/explore?x=project&group=none&metric=cost">→ 透视</a>
-            </div>
-            <p class="scope-note">按会话启动目录归类，可能显示其 Git 仓库标识；跨项目工作不拆分费用。</p>
-            <div class="chart-box short"><canvas id="top-projects-chart"></canvas></div>
-          </article>
-          <article class="panel">
-            <div class="panel-head">
-              <h2>本月模型构成</h2>
-              <a class="panel-link" data-preserve-range href="/explore?x=model&group=agent&metric=total">→ 透视</a>
-            </div>
-            <div class="chart-box short"><canvas id="model-mix-chart"></canvas></div>
-          </article>
-        </section>
       </main>
     </div>
     <script>
