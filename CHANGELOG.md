@@ -2,6 +2,8 @@
 
 ## 2026-10-09
 
+- Compact account operation rows, keep snapshot observation times visible, consolidate login help and preserve account identity while scrolling narrow quota tables. Use shared linear icons and role-based monetary formatting without changing account actions or cost calculations.
+
 - Add `session-quota FULL_SESSION_UUID [--json]` for a session's stored weekly quota, preserving its observation and reset times without querying providers or substituting another session.
 - Retry explicit Hub bootstrap failures at most three times; stop on timeout and disclose an unloaded previous job when replacement was not confirmed.
 

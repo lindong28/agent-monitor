@@ -38,7 +38,7 @@
               <option value="2y">2y</option>
               <option value="all">全部</option>
             </select>
-            <button id="refresh" class="icon-btn" type="button" title="刷新" aria-busy="false">⟳ 刷新</button>
+            <button id="refresh" class="icon-btn" type="button" title="刷新" aria-busy="false">刷新</button>
           </div>
         </div>
         <details id="sync-panel" class="sync-panel" aria-label="机器同步状态">
@@ -78,7 +78,7 @@
             <div class="panel-head">
               <h2>成本趋势</h2>
               <span id="cost-over-time-meta" class="status-line">—</span>
-              <a id="cost-over-time-link" class="panel-link" href="/explore?x=day&group=agent&metric=cost">→ 透视</a>
+              <a id="cost-over-time-link" class="panel-link" href="/explore?x=day&group=agent&metric=cost">透视</a>
             </div>
             <details class="note-disclosure">
               <summary>成本口径</summary>
@@ -96,7 +96,7 @@
             <article class="panel">
               <div class="panel-head">
                 <h2>本周会话目录成本</h2>
-                <a class="panel-link" data-preserve-range href="/explore?x=project&group=none&metric=cost">→ 透视</a>
+                <a class="panel-link" data-preserve-range href="/explore?x=project&group=none&metric=cost">透视</a>
               </div>
               <p class="scope-note">按会话启动目录归类，可能显示其 Git 仓库标识；跨项目工作不拆分费用。</p>
               <div class="chart-box short"><canvas id="top-projects-chart" role="img" aria-label="本周会话目录成本；完整读数见下方数据表"></canvas></div>
@@ -108,7 +108,7 @@
             <article class="panel">
               <div class="panel-head">
                 <h2>本月模型构成</h2>
-                <a class="panel-link" data-preserve-range href="/explore?x=model&group=agent&metric=total">→ 透视</a>
+                <a class="panel-link" data-preserve-range href="/explore?x=model&group=agent&metric=total">透视</a>
               </div>
               <div class="chart-box short"><canvas id="model-mix-chart" role="img" aria-label="本月模型构成；完整读数见下方数据表"></canvas></div>
             <details id="model-mix-data" class="chart-data-disclosure">
@@ -145,7 +145,7 @@
                 <details class="note-disclosure">
                   <summary>批次说明与授权帮助</summary>
                   <p id="codex-batch-help" class="quota-scope"></p>
-                  <p class="quota-scope">账号自动来自登录记录，无需额外添加。验证码在 OpenAI 官方页面填写；设备码登录需在账号安全设置中启用。</p>
+                  <p class="quota-scope">已保存的登录态会在操作时检查有效性；未保存时需要官方授权。验证码在 OpenAI 官方页面填写；设备码登录需在账号安全设置中启用。</p>
                 </details>
               </div>
               <div id="codex-account-unavailable" role="status" aria-live="polite"></div>

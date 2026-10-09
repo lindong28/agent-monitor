@@ -788,7 +788,7 @@
       const control = document.querySelector(`[data-filter="${filter.query}"]`);
       if (!control?.value) return;
       const label = document.querySelector(`label[for="${filter.selector.slice(1)}"]`)?.textContent || filter.query;
-      const button = node("button", `${label}: ${control.value} ×`, "llm-filter-chip");
+      const button = node("button", `${label}: ${control.value}`, "llm-filter-chip");
       button.type = "button";
       button.setAttribute("aria-label", `清除${label}筛选：${control.value}`);
       button.addEventListener("click", () => {

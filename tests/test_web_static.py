@@ -51,8 +51,12 @@ const ui = window.AgentMonitor;
 assert.strictEqual(ui.chartReading(null, "USD"), "未知");
 assert.strictEqual(ui.chartReading(undefined, "tokens"), "未知");
 assert.strictEqual(ui.chartReading(NaN, "tokens"), "未知");
-assert.strictEqual(ui.chartReading(0, "USD"), "$0.0000 USD");
+assert.strictEqual(ui.chartReading(0, "USD"), "$0.0000");
 assert.strictEqual(ui.chartReading(12003, "tokens"), "12,003 tokens");
+assert.strictEqual(ui.chartReading(1195.4737, "USD"), "$1,195.4737");
+assert.strictEqual(ui.money(.001), "<$0.01");
+assert.strictEqual(ui.money(0), "$0.00");
+assert.strictEqual(ui.moneyPrecise(1e-9), "$1.00e-9");
 const full = "host/owner/a-long-project-that-must-not-be-truncated-in-the-data-table";
 ui.renderChartTable("sample", ["会话目录", "成本 · USD"], [[full, ui.chartReading(0, "USD")], ["missing", ui.chartReading(null, "USD")]]);
 assert.strictEqual(table.children[0].children[0].children[0].scope, "col");
@@ -97,7 +101,7 @@ for (const value of [1e-5, 1e-9, Number.MIN_VALUE]) {
   const label = ui.chartReading(value, "USD");
   assert(Number(label.replace(/^\$/, "").replace(/ USD$/, "")) > 0, `positive value rendered as zero: ${label}`);
 }
-assert.strictEqual(ui.chartReading(0, "USD"), "$0.0000 USD");
+assert.strictEqual(ui.chartReading(0, "USD"), "$0.0000");
 assert.strictEqual(ui.chartReading(null, "USD"), "未知");
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
@@ -139,6 +143,51 @@ eval(source); init();
   assert.strictEqual(nodes["#codex-batch-status"].textContent, good);
   assert.strictEqual(nodes["#codex-account-notice"].textContent, "");
 })().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_account_rows_keep_snapshot_time_errors_and_disclosure_state(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+class Node {
+  constructor(tag = "div") {this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; this.open = false;}
+  append(...nodes) {for (const n of nodes) {n.parent = this; this.children.push(n);}}
+  replaceChildren(...nodes) {this.children = []; this.append(...nodes);}
+  addEventListener() {}
+  querySelector(tag) {for (const n of this.children) {if (n.tag === tag) return n; const nested = n.querySelector(tag); if (nested) return nested;} return null;}
+  replaceWith(n) {const p = this.parent, index = p.children.indexOf(this); p.children[index] = n; n.parent = p;}
+  remove() {this.parent.children.splice(this.parent.children.indexOf(this), 1);}
+  insertBefore(n, ref) {if (n.parent) n.remove(); const index = ref ? this.children.indexOf(ref) : this.children.length; this.children.splice(index, 0, n); n.parent = this;}
+}
+const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable"].map(id => [id, new Node()]));
+const root = new Node(); root.querySelector = id => nodes[id];
+global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag)};
+global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x}};
+let source = fs.readFileSync("web/codex-accounts.js", "utf8").replace("export function init()", "function init()");
+source = source.replace("  load();\n  window.AgentMonitor.pageInterval(load, 30000);", "  window.testRender = values => {accounts = values; render();};");
+eval(source); init();
+const oldTime = "2026-10-08T02:00:00.000Z";
+const values = [
+  {id: "a", email: "a@example.test", has_credentials: true, operation: {stage: "succeeded", message_status: "succeeded", started_at: oldTime, after: {seven_day_used_pct: 8, observed_at: oldTime}}},
+  {id: "b", email: "b@example.test", has_credentials: true, operation: {stage: "failed", message_status: "unknown", detail: "失败；结果未知", started_at: oldTime, after: {seven_day_used_pct: null, observed_at: oldTime}}},
+];
+const text = n => n.textContent + n.children.map(text).join(" ");
+const visible = n => n.tag === "details" && !n.open ? text(n.children[0]) : n.textContent + n.children.map(visible).join(" ");
+window.testRender(values);
+const list = nodes["#codex-account-list"], card = list.children[0];
+assert(visible(card).includes("上次查询 · 七天已用 8%"));
+assert(visible(card).includes(oldTime), "snapshot observation time is visible without opening details");
+assert(visible(list.children[1]).includes("失败；结果未知"));
+assert(visible(list.children[1]).includes("七天已用 未知"));
+assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
+card.querySelector("details").open = true;
+window.testRender(values);
+assert.strictEqual(list.children[0], card, "unchanged poll must preserve the focused card");
+values[0].operation.after.seven_day_used_pct = 9;
+window.testRender(values);
+assert(list.children[0].querySelector("details").open, "changed result must preserve detail expansion");
+assert(visible(list.children[0]).includes("七天已用 9%"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

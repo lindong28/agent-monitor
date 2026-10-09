@@ -163,7 +163,7 @@
     const wasDisabled = button.disabled;
     button.setAttribute("aria-busy", "true");
     button.disabled = true;
-    button.textContent = "⟳ 刷新中";
+    button.textContent = "刷新中";
     try {
       await load();
     } finally {
@@ -179,6 +179,8 @@
     if (value === null || value === undefined) {
       return "—";
     }
+    if (Number(value) > 0 && Number(value) < 0.01) return "<$0.01";
+    if (Number(value) < 0 && Number(value) > -0.01) return "−<$0.01";
     return "$" + Number(value).toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -189,7 +191,9 @@
     if (value === null || value === undefined) {
       return "—";
     }
-    return "$" + Number(value).toFixed(4);
+    const amount = Number(value);
+    if (amount !== 0 && Math.abs(amount) < 0.0001) return "$" + amount.toPrecision(3);
+    return "$" + amount.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
   }
 
   function integer(value) {
@@ -394,9 +398,7 @@
   function chartReading(value, unit) {
     if (value === null || value === undefined || !Number.isFinite(Number(value))) return "未知";
     if (unit === "USD") {
-      const amount = Number(value);
-      const formatted = amount !== 0 && Math.abs(amount) < 0.0001 ? "$" + amount.toPrecision(3) : moneyPrecise(amount);
-      return `${formatted} USD`;
+      return moneyPrecise(value);
     }
     return `${integer(value)} tokens`;
   }
@@ -2777,7 +2779,7 @@
     ["#range", "#sort"].forEach(selector => { const el = qs(selector); if (el) el.hidden = true; });
     const panel = document.createElement("section");
     panel.className = "session-detail";
-    panel.innerHTML = `<a class="session-back" href="/sessions?${escapeHtml(back.toString())}">‹ 返回会话列表</a>
+    panel.innerHTML = `<a class="session-back" href="/sessions?${escapeHtml(back.toString())}">返回会话列表</a>
       <div class="panel session-identity"><div><h2>会话</h2><code id="session-identity"></code><p>${escapeHtml(machine || "本机")} · 已留存的完整会话</p></div><button id="session-copy" type="button">复制 ID</button></div>
       <div id="session-detail-content" aria-live="polite"></div>`;
     qs("main").appendChild(panel);
@@ -2848,7 +2850,7 @@
       <section class="panel"><div class="panel-head"><h2>用量明细</h2><span id="usage-count" class="status-line"></span></div>
       <div class="controls"><div class="field"><label for="usage-model">模型</label><select id="usage-model"><option value="">全部模型</option>${models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select></div><button id="usage-clear" type="button">清除筛选</button></div>
       <div class="table-wrap"><table><thead><tr><th>记录时间</th><th>模型</th><th class="numeric">输入</th><th class="numeric">输出</th><th class="numeric">缓存读取 / 写入</th><th class="numeric">成本</th><th>详情</th></tr></thead><tbody id="usage-body"></tbody></table></div>
-      <div class="pager"><button id="usage-prev" type="button">‹ 上一页</button><span id="usage-status" role="status"></span><button id="usage-next" type="button">下一页 ›</button></div></section>`;
+      <div class="pager"><button id="usage-prev" type="button">上一页</button><span id="usage-status" role="status"></span><button id="usage-next" type="button">下一页</button></div></section>`;
     let page = Math.max(0, parseInt(params().get("usage_page"), 10) || 0);
     const select = qs("#usage-model");
     select.value = models.includes(params().get("usage_model")) ? params().get("usage_model") : "";

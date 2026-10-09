@@ -216,8 +216,8 @@ export function init() {
       if (account.eligible === false) card.append(element("p", "已不在当前登录记录中；保留本轮结果，不纳入下一轮或继续发送。", "quota-scope"));
       const duplicateEmail = accounts.some((other) => other.id !== account.id && other.email.toLowerCase() === account.email.toLowerCase());
       if (account.account_id) (duplicateEmail ? card : details).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
-      details.append(element("p", account.has_credentials ? "本页已保存登录态，将在操作时检查有效性。" : "需要官方授权。", "quota-scope"));
-      if (batchItem) card.append(element("p", `本轮消息：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
+      details.append(element("p", account.has_credentials ? "登录态：已保存" : "登录态：需要官方授权", "quota-scope"));
+      if (batchItem) heading.append(element("span", `本轮：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
       if (op) {
         if (op.stage !== "succeeded") card.append(element("p", op.detail));
         details.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
@@ -237,7 +237,9 @@ export function init() {
           reading.append(element("dt", "七天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
           reading.append(element("dt", "最近成功查询"), element("dd", timestamp(latestReading.observed_at)));
           if (op.before?.seven_day_resets_at != null) details.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
-          card.append(element("p", `七天窗口已用 ${used == null ? "未知" : used + "%"} · ${resetLabel || "重置时间未知"}`, "codex-account-summary"));
+          const summary = element("p", undefined, "codex-account-summary");
+          summary.append(element("span", `上次查询 · 七天已用 ${used == null ? "未知" : used + "%"} · ${resetLabel || "重置时间未知"}`), element("span", `查询于 ${timestamp(latestReading.observed_at)}`, "codex-reading-time"));
+          card.append(summary);
           details.append(reading);
           if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) card.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
         }
@@ -252,7 +254,9 @@ export function init() {
         details.append(maintenance);
       }
       details.open = Boolean(old?.querySelector("details")?.open);
-      card.append(controls, details);
+      const footer = element("div", undefined, "codex-account-footer");
+      footer.append(controls, details);
+      card.append(footer);
       if (old) old.replaceWith(card); else list.append(card);
       if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
     }
