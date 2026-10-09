@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "agent-monitor-vercel-current-20261009",
+  "objective": "Apply current Vercel Gateway visual style across the product and related details/disclosures, preserving business semantics and operations; excludes backend performance and baseline assertion fixes.",
+  "application": "style",
+  "design": {
+    "path": "effective-design.json",
+    "sha256": "651faa74349b2ce4a323c03ca3223e88a23cf80524aac9241c85520ad8053fd6"
+  },
+  "project": {
+    "path": "project.json",
+    "sha256": "c22a1a72ce28c83726ff14ebc9f361d7f5e69b46cb404020daf229b43deaf9e1"
+  }
+}

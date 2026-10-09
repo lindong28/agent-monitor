@@ -523,7 +523,7 @@
           } },
         },
         scales: { x: { beginAtZero: true, ticks: { callback: (value) => "$" + compactNumber(value) } }, y: { ticks: { autoSkip: false, callback: categoryTick } } },
-        layout: { padding: { right: 64 } },
+        layout: { padding: { right: 96 } },
       }),
       plugins: [barValueLabels(money)],
     });

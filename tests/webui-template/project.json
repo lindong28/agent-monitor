@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "project": "Agent Monitor · Vercel Gateway console v3 · product routes and states",
+  "project": "Agent Monitor — current Vercel Gateway visual style",
   "base_url": "http://macstudio:39001",
   "viewports": [
     {
@@ -37,10 +37,10 @@
       "selector": "table thead th"
     },
     "detail-label": {
-      "selector": ".codex-account-reading dt, .session-fields dt, .llm-detail-fields dt"
+      "selector": ".codex-account-reading dt, .session-fields dt, .llm-detail-fields dt, .kv-row .label"
     },
     "detail-value": {
-      "selector": ".codex-account-reading dd, .session-fields dd, .llm-detail-fields dd"
+      "selector": ".codex-account-reading dd, .session-fields dd, .llm-detail-fields dd, .kv-row .value"
     },
     "badges": {
       "selector": ".pill, .status-pill"
@@ -53,6 +53,15 @@
     },
     "quota-reason": {
       "expression": "(() => {const cells=[...document.querySelectorAll('.quota-table td')].filter(e=>e.checkVisibility() && e.textContent.includes('不适用'));const bad=cells.filter(e=>!e.querySelector('.quota-window-reason')?.checkVisibility());return {pass:cells.length>0 && bad.length===0,samples:cells.length,detail:'not-applicable='+cells.length+' hidden/missing reasons='+bad.length};})()"
+    },
+    "visual-page": {
+      "selector": "main"
+    },
+    "session-metric": {
+      "selector": ".session-metrics strong"
+    },
+    "numeric-detail-value": {
+      "selector": ".codex-account-reading dd, .session-fields dd, .llm-detail-fields dd"
     }
   },
   "cases": [
@@ -63,7 +72,9 @@
       "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
       "exclude": {
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       }
     },
     {
@@ -71,7 +82,9 @@
       "path": "/?range=30d",
       "state": "账号区域与首个账号详情键盘展开",
       "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
-      "exclude": {},
+      "exclude": {
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case."
+      },
       "steps": [
         {
           "action": "focus",
@@ -112,7 +125,9 @@
       "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
       "exclude": {
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       },
       "steps": [
         {
@@ -144,7 +159,9 @@
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "table-heading": "透视使用排名列表及键盘可读时间值，不使用表格",
-        "badge-font": "默认透视没有身份徽章；分组名为普通文本"
+        "badge-font": "默认透视没有身份徽章；分组名为普通文本",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       }
     },
     {
@@ -159,7 +176,9 @@
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "table-heading": "排名列表无表头",
-        "badge-font": "排名条目无身份徽章"
+        "badge-font": "排名条目无身份徽章",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       }
     },
     {
@@ -172,7 +191,9 @@
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
-        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       }
     },
     {
@@ -187,7 +208,9 @@
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "table-heading": "无留存详情不绘制虚假表格",
-        "badge-font": "空详情只有说明，无身份徽章"
+        "badge-font": "空详情只有说明，无身份徽章",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       }
     },
     {
@@ -200,7 +223,9 @@
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
-        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       }
     },
     {
@@ -211,7 +236,8 @@
       "exclude": {
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
-        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case."
       },
       "steps": [
         {
@@ -237,12 +263,12 @@
       "state": "当前缓存网络诊断，不强制重测",
       "ready": "document.querySelector('#network-local')?.children.length > 0 && document.querySelector('#network-verdict')?.textContent !== '—'",
       "exclude": {
-        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
-        "table-heading": "网络采用键值列表，无数据表"
+        "table-heading": "网络采用键值列表，无数据表",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "Network identifiers/IP addresses are not measured numeric quantities; preserve proportional text to avoid introducing extra line breaks."
       }
     },
     {
@@ -252,7 +278,9 @@
       "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
       "exclude": {
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       },
       "steps": [
         {
@@ -281,7 +309,9 @@
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "quota-reason": "无匹配状态无配额窗口；原因在默认和历史状态验证",
-        "badge-font": "搜索空态无账号徽章；其他状态验证"
+        "badge-font": "搜索空态无账号徽章；其他状态验证",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       },
       "steps": [
         {
@@ -298,12 +328,13 @@
     {
       "id": "llm-request-audit",
       "path": "/llm-calls?range=30d",
-      "state": "请求诊断中的首条证据展开",
+      "state": "首条尝试的身份与定价证据、请求证据、快照及历史候选展开",
       "ready": "document.querySelector('[data-request-identity]') && document.querySelector('#llm-state:not(.loading)')",
       "exclude": {
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
-        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case."
       },
       "steps": [
         {
@@ -335,6 +366,62 @@
           ],
           "reason": "展开历史证据，不产生请求",
           "ready": "document.querySelector('#llm-detail .llm-audit-disclosure').open"
+        },
+        {
+          "action": "focus",
+          "args": [
+            "#llm-detail .llm-detail-attempt:nth-child(1 of .llm-detail-attempt) details:last-of-type > summary"
+          ],
+          "reason": "Focus existing historical evidence disclosure"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand read-only historical evidence"
+        },
+        {
+          "action": "focus",
+          "args": [
+            "#llm-detail-content > details:first-of-type > summary"
+          ],
+          "reason": "Focus existing historical evidence disclosure"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand read-only historical evidence"
+        },
+        {
+          "action": "focus",
+          "args": [
+            "#llm-detail-content > details:last-of-type > summary"
+          ],
+          "reason": "Focus existing historical evidence disclosure"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand read-only historical evidence"
+        },
+        {
+          "action": "focus",
+          "args": [
+            "#llm-detail .llm-routing-candidates > summary"
+          ],
+          "reason": "Focus existing historical evidence disclosure"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand read-only historical evidence"
         }
       ]
     },
@@ -348,7 +435,9 @@
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
-        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
       },
       "steps": [
         {
@@ -380,6 +469,233 @@
           ],
           "reason": "查看已有尝试记录，不发起模型调用",
           "ready": "document.querySelector('.llm-attempt-panel').open && document.querySelector('#llm-attempts-body')?.getAttribute('aria-busy') === 'false'"
+        }
+      ]
+    },
+    {
+      "id": "overview-sync",
+      "path": "/?range=30d",
+      "state": "机器采集状态及已有说明展开",
+      "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            "#sync-panel > summary"
+          ],
+          "reason": "Focus the existing read-only control"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand current machine collection status"
+        },
+        {
+          "action": "focus",
+          "args": [
+            ".overview-cost .note-disclosure > summary"
+          ],
+          "reason": "Focus the existing read-only control"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand existing cost explanation"
+        }
+      ]
+    },
+    {
+      "id": "overview-all-chart-data",
+      "path": "/?range=30d",
+      "state": "三张图表等价数据表展开",
+      "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            "#daily-cost-data > summary"
+          ],
+          "reason": "聚焦图表等价表格入口"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "查看图表完整时间和值",
+          "ready": "document.querySelector('#daily-cost-data').open"
+        },
+        {
+          "action": "focus",
+          "args": [
+            "#top-projects-data > summary"
+          ],
+          "reason": "Focus the existing read-only control"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand project chart data"
+        },
+        {
+          "action": "focus",
+          "args": [
+            "#model-mix-data > summary"
+          ],
+          "reason": "Focus the existing read-only control"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand model chart data"
+        }
+      ]
+    },
+    {
+      "id": "overview-account-help",
+      "path": "/?range=30d",
+      "state": "账号详情与批次帮助展开",
+      "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
+      "exclude": {
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case."
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            "#codex-account-actions > summary"
+          ],
+          "reason": "仅聚焦展开控件"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "键盘展开账号区，不发送消息",
+          "ready": "document.querySelector('#codex-account-actions').open"
+        },
+        {
+          "action": "focus",
+          "args": [
+            ".codex-account-card:first-child details > summary"
+          ],
+          "reason": "仅聚焦账号详情"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "键盘展开已有详情",
+          "ready": "document.querySelector('.codex-account-card:first-child details').open"
+        },
+        {
+          "action": "focus",
+          "args": [
+            ".codex-batch-summary > details > summary"
+          ],
+          "reason": "Focus the existing read-only control"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand existing authorization help without login"
+        }
+      ]
+    },
+    {
+      "id": "llm-filters",
+      "path": "/llm-calls?range=30d",
+      "state": "高级筛选展开",
+      "ready": "document.querySelector('[data-request-identity]') && document.querySelector('#llm-state:not(.loading)')",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            "#llm-filter-disclosure > summary"
+          ],
+          "reason": "Focus the existing read-only control"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand advanced request filters"
+        }
+      ]
+    },
+    {
+      "id": "session-detail",
+      "path": "/sessions?range=30d&page=0&sort=time&session=01a12057-b488-7e12-a1d8-4e919073645e&session_machine=macbook&usage_page=0",
+      "state": "真实会话、元数据及首条用量明细展开",
+      "ready": "document.querySelector(\".session-metrics\") && document.querySelector(\"#usage-body [data-usage]\")",
+      "exclude": {
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "badge-font": "Session detail renders plain identity text and metrics, not a status badge."
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            ".session-metadata > summary"
+          ],
+          "reason": "Focus the existing read-only control"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand retained session metadata"
+        },
+        {
+          "action": "focus",
+          "args": [
+            "#usage-body [data-usage=\"0\"]"
+          ],
+          "reason": "Focus the existing read-only control"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "Expand existing usage entry"
         }
       ]
     }

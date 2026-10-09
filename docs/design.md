@@ -4,7 +4,7 @@ This mutable record describes the shared visual layer and its observed applicati
 
 ## Effective design
 
-The selected style for this source is Prompt Planet `style:vercel-gateway-console` v3, frozen at `/api/webui/v1/templates/vercel-gateway-console/3.json` with SHA256 `9266483926cecefd8ba41f19b818f6d730249c4987f034c7c40692e4c95ded3d`. The definition was read from the template task's versioned JSON before application. The dated v2 records below describe the previously deployed application; this v3 application is integrated locally and deployed on MacStudio, with the separate bounded acceptance recorded below. Commercial-site access is not required for template application. Overview and LLM Calls retain their existing scenario structures; the product style overrides visual defaults. Explore, Sessions and Network need no additional scenario template.
+The effective style is the current Prompt Planet `style:vercel-gateway-console` definition at https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json, read on 2026-10-09 with SHA256 `94fea8412c94f50411fa3e5c4a90afe95f0eccc6725060414b688809b9844c7b`. This application uses its theme, ten components and acceptance IDs VG-V01–VG-V09. `tests/webui-template/effective-design.json` and `project.json`, pinned by `scope.json`, are the common implementation/review inputs. Versioned records below retain their historical identities. The associated exemplar supplies visual reference only; its tasks, business concepts and demo values impose no product requirements. All five routes preserve their existing task structure and information priority.
 
 `web/styles.css` is the shared entry point for all five routes, including dynamically rendered details. New pages use the existing `.main`, `.page-title`, `.panel`, form, table and disclosure classes. There is no page opt-in class or template runtime dependency. Shared defaults are system sans-serif 14/22px text, 24/32px page titles, 16/24px section titles, 28/36px primary metrics, 12px supporting text, 36px controls, 8px corners, white surfaces, neutral canvas and light dividers. Normal panels have no elevation shadow. Navigation uses a neutral selected surface; the common Refresh action uses a dark fill. Tables use 12×16px cell padding and local scrolling.
 
@@ -161,3 +161,79 @@ Live health with asset watch returned `ok=true`, `stale=false`, instance `1d5b76
 Nine live account rows measured 71-73px at 1440 and 139-189px at 390. The retained 8% reading is visibly labeled last query with 2026/10/8 23:08:32 GMT+8, while the current quota table independently showed 83% and its update age. Both widths completed native Enter expansion of batch and account detail, with focus retained on SUMMARY. Navigation-to-content-ready took 0.599/0.674 seconds in these two observed loads; this is browser orchestration elapsed time, not a calibrated frontend latency benchmark. An earlier unsupported `>> nth=0` focus selector returned without focus; the final CSS `:first-child` path verified actual open state. No backend performance claim is made.
 
 Evidence: `/Users/lindong/.codex/artifacts/webui-delivery-20261009/monitor-live-delivery/`, raw machine report, observations, `monitor-live-keyboard.json`, `monitor-live-reading.json` and `monitor-live-assets-final.json`. The current HTML, app.js and styles.css return Cache-Control: no-store; this UI-only deployment did not change their server cache policy. New browser loads and matching asset bytes are verified separately; no claim is made for an already-open document updating without reload.
+
+
+## Current style application, 2026-10-09
+
+This bounded update changes shared CSS and chart spacing: neutral session date groups; account/request/network field baseline alignment; compact session labels; tabular account/session/request values; safe long-value wrapping; and request label/value pairs stacked below 481px. `web/styles.css` is the shared entry for all routes and dynamic details. New pages inherit the tokens and existing `.main`, `.panel`, form, table and disclosure classes. Reuse `.codex-account-reading`, `.session-fields`, `.llm-detail-fields` and `.kv-row` for their existing detail structures. Component/interaction ownership remains in `web/app.js`, `web/codex-accounts.js`, `web/llm-calls.js` and `web/pivot.js`; only the Overview cost chart padding changes in JavaScript; data and handlers are unchanged.
+
+### Current acceptance mapping
+
+| ID | Actual objects and states | Shared entry / reading question |
+| --- | --- | --- |
+| VG-V01 | Five page titles, panel/chart headings, session metrics, account/request/session/network details | Typography tokens and detail selectors; role hierarchy and readable values |
+| VG-V02 | Canvas/panels/date groups, selected navigation, semantic status, links/focus | Color tokens; neutral structure with retained status/brand roles |
+| VG-V03 | Five layouts, controls, tables, account/help, chart data, audit/usage expansion | Spacing tokens and responsive/local-scroll layouts; complete wrapped content |
+| VG-V04 | Panels, account rows, request dialog and nested disclosures | Border/radius rules; dialog-only elevation |
+| VG-V05 | Refresh, navigation, disclosure arrows, pagination and close | Shared 16px linear icons, direction/state and action labels |
+| VG-V06 | Cost periods, quota/reset/observation, session metadata/usage, attempt/routing/pricing/source fields, network cards | Shared field selectors; labels remain attached to values across widths |
+| VG-V07 | Navigation, no-match/clear/history, keyboard expansion, advanced filters, request open/close, session open/return | Existing event handlers and focus-visible treatment; actual read-only operations |
+| VG-V08 | Cost windows/unknowns, snapshot time, history, empty/missing state, network verdict | Preserve rendered meaning; record baseline issues separately |
+| VG-V09 | `/`, `/explore`, `/sessions`, `/llm-calls`, `/network` and declared detail/query states | One pinned design/binding set; actual per-state evidence |
+
+### Preserved regression checks
+
+`collapsed-summary`, `chart-data-access` and `quota-reason` retain existing product behavior; they are not new requirements from the style template. General reading principles belong to product-ux-workflows, explicit scenario requirements to the selected scenario, and history/expiration/filter definitions to the product. This task neither rewrites the UX contract nor repairs backend performance or baseline assertions.
+
+### Current named exceptions and applicability
+
+- **Brand and status:** retain the blue mark/link/focus color, agent chart series and existing textual success/warning/error meaning; structure and selected navigation remain neutral.
+- **Wide tables:** quota/session/usage/audit data scroll inside their existing containers. This does not permit document overflow or detached label/value pairs.
+- **Network identifiers:** IP/DNS values keep proportional text. Applying tabular numerals introduced an extra DNS line at 1440px (94px versus 72px field height); this regression was corrected in this task.
+- **Light-only product:** no dark/system theme selector exists; those variants are not applicable to the current implementation.
+- **Raw documentation:** `/ip-check-docs` serves raw Markdown, not a styled application DOM; no component exists there to inherit CSS.
+- **Native picker chrome:** OS date-picker internals are not owned by product CSS; the date inputs themselves remain in scope.
+- **Write-triggered states:** real sending, device authorization, credential removal and forced refresh are not invoked for this style task. Their resulting states remain unverified, not NA or fixture-proven.
+
+### Current evidence and baseline findings
+
+Evidence root: `/Users/lindong/.codex/artifacts/agent-monitor-vercel-20261009/`. It preserves template bytes, baseline/candidate images, deployment receipts, raw machine reports and associated reading evidence. Shared stylesheet loading is not used as visual acceptance.
+
+| Baseline phenomenon | Owner | Follow-up and current disposition |
+| --- | --- | --- |
+| Network displays “IPv6 已关闭，无泄漏” from a binary local-address probe | Network product/backend; existing `ISSUE-NETWORK-20260909-43b8` in `docs/issues/general.md` | Distinguish local address, verified public reachability and unavailable evidence; preserve meaning in this style task, without endorsing the detector |
+| Missing session shows “已留存的完整会话” in identity while its body says no retained usage was found | Session product semantics; recorded here from `session-missing` live cases | Review identity wording against missing/retained states in a separate product task; unchanged CSS does not silently fix or block it |
+| Existing backend/assertion failures | Backend/test owner; `ISSUE-TEST-20261004-6b2a` | Explicitly outside this task; no full backend-suite pass or repair claimed |
+| Historical quota readings include expired reset/old observation times | Product history/freshness definitions | Preserve original labels and times; no reinterpretation as current measurements |
+
+The Overview cost chart reserves 96px on the right (previously 64px) so its painted monetary labels fit. This corrects the observed clipped final digit without changing values, formatter, chart order or data-table/tooltip content. Chart.js `options.layout.padding` is the documented inside-canvas spacing control (https://github.com/chartjs/Chart.js/blob/master/docs/general/padding.md).
+
+### Current acceptance outcome and evidence boundaries
+
+The effective design pins the current template bytes (SHA256 `94fea8412c94f50411fa3e5c4a90afe95f0eccc6725060414b688809b9844c7b`), its theme, ten component definitions and all nine stable acceptance IDs. The linked exemplar supplies visual reference only; its task structure, business meaning and demonstration values are not requirements. Application and review use the same `effective-design.json`, `project.json` and hash-bound `scope.json`.
+
+The following outcomes combine the full real-entry run with the subsequent chart-spacing recheck. “Conforms” is limited to the declared rendered samples and actual read-only operations, with the named exceptions above; it is not an assertion about every production data variant. All paths below are relative to the evidence root named above.
+
+| Stable ID | Outcome | Concrete evidence / limit |
+| --- | --- | --- |
+| VG-V01 | Conforms | Five route titles and actual detail/expanded text at 1440×1000 and 390×844; `final-live-reading/delivery.json`, per-case screenshots and typography readings |
+| VG-V02 | Conforms with named exceptions | Neutral surfaces/date groups/selected navigation; existing brand, chart series and semantic statuses retained; the same per-case reading report |
+| VG-V03 | Conforms after repair | Full run exposed clipped cost-chart digits in eight Overview states × two widths; original 16 FAIL entries remain. `chart-final-reading/delivery.json` supplies 16 replacement VG-V03 observations, with `chart-control.json` and `chart-geometry.json` proving old 64px fails and new 96px fits five labels at each of two widths |
+| VG-V04 | Conforms | Light panel/account/disclosure borders and dialog elevation observed across the declared cases; no added card elevation |
+| VG-V05 | Conforms | Shared linear refresh/navigation/disclosure/pagination/close icons read with their text and visible open/closed direction; no new icon-only action |
+| VG-V06 | Conforms with named exceptions | Account/session/request values and network identifier groups read at both primary widths; request dialog also inspected at 320, 390, 480, 481, 1152, 1440 and 1800px. `request-width-*.png`, `interaction.json`, six `audit-identity/pricing/source-{1440,390}.png` and `audit-details.json` cover wrapped routing/identity, unknown cost and timestamp association; local wide tables and proportional IP/DNS are retained |
+| VG-V07 | Conforms for observed operations; write-triggered variants unverified | `interaction.json`: quota search 11→0→11; Explore navigation; actual session entry, metadata/usage expansion and return to 100 rows; request open and Escape close. Batch runs cover the declared help/history/table/filter/audit disclosures. Sending, authorization, deletion and forced refresh are not executed |
+| VG-V08 | Conforms for preservation; baseline semantics separately owned | Source diff changes CSS and one chart-padding value. Unknown/zero/history/snapshot labels remain. The baseline findings table above retains each phenomenon, owner and follow-up; preserving their text does not validate their business interpretation |
+| VG-V09 | Conforms within declared inventory; unavailable variants unverified | Five styled routes, 19 cases × two widths, including the single request-dialog implementation and related detail/expanded states. Shared entry and inheritance are documented above; raw Markdown/native picker/dark-theme applicability is explicit. Natural loading/error/authorization variants not present in these samples remain unverified |
+
+No applicable visual rule is knowingly left unimplemented. No unresolved regression introduced by this update remains in the observed scope. Unverified items are the write-triggered/naturally unavailable states above, other browser engines and actual browser/OS zoom; a future authorized product regression run owns those actions. The 1152/1440/1800px layouts are width-based approximations of 125/100/80% available space, not evidence of actual zoom behavior. The historical/expired/filter definitions remain product-owned.
+
+The full real-entry run (`final-live/results.json`) executed 19 cases × two viewports × 31 rules: 634 machine PASS, 202 object-conditioned NA, no machine FAIL and no execution/cleanup errors. Its separate reading report records 326 PASS and 16 chart-spacing FAIL. The repair-only run executed eight Overview cases × two viewports, returning 296 machine PASS, 56 NA and no machine FAIL; its reading report resolves those 16 VG-V03 observations as PASS. It deliberately leaves unselected cases and unrelated reading rules UNCHECKED rather than importing old votes. Thus the original full report remains FAIL and the partial report remains UNCHECKED; this table explains their revision-aware combined conclusion instead of claiming either raw report independently closes the complete scope. Supporting machine rules do not substitute for visual inspection.
+
+Additional real interaction evidence covers seven dialog widths with 0px document overflow, two network widths after removing the tabular-numeral regression, and six request-audit expansion observations (three sections × two widths). Fixed navigation can appear midway down a full-page screenshot taken after scrolling; it was not interpreted as a document-layout change. The live samples are naturally populated service data, not an isolated demonstration.
+
+The 46 existing `tests/test_web_static.py` tests passed with isolated HOME, the repository interpreter and Node; the test/source root is this task worktree (`tests.log`). Backend performance and known assertion failures were neither modified nor claimed tested. Review gate selected no additional external reviewer: the implementation changes only shared presentation and chart padding, introduces no event/data/permission/timing behavior, and its concrete visual defects have direct failure/success observations. Findings were checked against the change baseline; baseline-independent product semantics are listed separately above. No unhandled review finding remains in this change's scope.
+
+### Current live deployment identity
+
+MacStudio's deployment main is `0e888917beb85d8bcf6daef80580ce23d83f8389`. Only this task's Web styling and chart spacing were applied on its existing deployment baseline; unrelated local backend commits were not deployed. The live `/web/styles.css` SHA256 is `ba4ae8e179b6e96a97340089711f7b319a92a0e2432a211063ee3e689ecc0722`; `/web/app.js` is `c2d18e15c5731a9f8754bfb5661f6f8ffe3a406b87fa3e2ecd6aa74e3fd2350d`. Both HTTP bodies match the final task source (`final-assets.json`). The running service reads these static resources directly; no restart was needed. The pre-existing state symlink and target were preserved. Actual UI evidence was collected from `http://macstudio:39001/`; source matching alone is not the interaction evidence. No Git push was performed.
