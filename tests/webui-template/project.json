@@ -1,0 +1,387 @@
+{
+  "schema_version": 1,
+  "project": "Agent Monitor · Vercel Gateway console v2 · product routes and states",
+  "base_url": "http://macstudio:39001",
+  "viewports": [
+    {
+      "id": "wide",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "id": "narrow",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "roles": {
+    "body": {
+      "selector": "body"
+    },
+    "document": {
+      "selector": "html"
+    },
+    "page-title": {
+      "selector": ".page-title"
+    },
+    "section-title": {
+      "selector": "main h2, .llm-detail h3"
+    },
+    "controls": {
+      "selector": "#refresh, main select, main input:not([type=checkbox]):not([type=radio])"
+    },
+    "panels": {
+      "selector": ".panel, .network-card"
+    },
+    "table-heading": {
+      "selector": "table thead th"
+    },
+    "detail-label": {
+      "selector": ".codex-account-reading dt, .session-fields dt, .llm-detail-fields dt"
+    },
+    "detail-value": {
+      "selector": ".codex-account-reading dd, .session-fields dd, .llm-detail-fields dd"
+    },
+    "badges": {
+      "selector": ".pill, .status-pill"
+    },
+    "batch-summary": {
+      "selector": "#codex-account-actions > summary #codex-batch-status"
+    },
+    "chart-access": {
+      "expression": "(() => { const charts = [...document.querySelectorAll('.overview-main canvas')]; const bad = charts.filter(c => {const d = document.getElementById(c.id.replace('-chart','-data')); return !d || !d.querySelector('summary') || !d.querySelector('tbody tr');}); return {pass: charts.length === 3 && bad.length === 0, samples:charts.length,detail:'charts='+charts.length+' missing equivalent tables='+bad.length};})()"
+    },
+    "quota-reason": {
+      "expression": "(() => {const cells=[...document.querySelectorAll('.quota-table td')].filter(e=>e.checkVisibility() && e.textContent.includes('不适用'));const bad=cells.filter(e=>!e.querySelector('.quota-window-reason')?.checkVisibility());return {pass:cells.length>0 && bad.length===0,samples:cells.length,detail:'not-applicable='+cells.length+' hidden/missing reasons='+bad.length};})()"
+    }
+  },
+  "cases": [
+    {
+      "id": "overview",
+      "path": "/?range=30d",
+      "state": "默认折叠账号区、图表与配额实际加载",
+      "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+      }
+    },
+    {
+      "id": "overview-account",
+      "path": "/?range=30d",
+      "state": "账号区域与首个账号详情键盘展开",
+      "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
+      "exclude": {},
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            "#codex-account-actions > summary"
+          ],
+          "reason": "仅聚焦展开控件"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "键盘展开账号区，不发送消息",
+          "ready": "document.querySelector('#codex-account-actions').open"
+        },
+        {
+          "action": "focus",
+          "args": [
+            ".codex-account-card:first-child details > summary"
+          ],
+          "reason": "仅聚焦账号详情"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "键盘展开已有详情",
+          "ready": "document.querySelector('.codex-account-card:first-child details').open"
+        }
+      ]
+    },
+    {
+      "id": "overview-chart-data",
+      "path": "/?range=30d",
+      "state": "成本趋势完整数据表键盘展开",
+      "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            "#daily-cost-data > summary"
+          ],
+          "reason": "聚焦图表等价表格入口"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "查看图表完整时间和值",
+          "ready": "document.querySelector('#daily-cost-data').open"
+        }
+      ]
+    },
+    {
+      "id": "explore",
+      "path": "/explore?range=30d",
+      "state": "默认透视及分组排名加载",
+      "ready": "document.querySelector('#pivot-status')?.textContent === '就绪' && document.querySelector('#group-ranking li')",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "table-heading": "透视使用排名列表及键盘可读时间值，不使用表格",
+        "badge-font": "默认透视没有身份徽章；分组名为普通文本"
+      }
+    },
+    {
+      "id": "explore-projects",
+      "path": "/explore?range=30d&group_by=project&metric=cost",
+      "state": "会话目录组合排名，非时间分组",
+      "ready": "document.querySelector('#pivot-status')?.textContent === '就绪' && document.querySelector('#group-ranking li')",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "table-heading": "排名列表无表头",
+        "badge-font": "排名条目无身份徽章"
+      }
+    },
+    {
+      "id": "sessions",
+      "path": "/sessions?range=30d&page=0&sort=time",
+      "state": "会话列表第一页",
+      "ready": "document.querySelector('#sessions-body')?.getAttribute('aria-busy') === 'false' && document.querySelector('#sessions-body tr:not([data-session-state])')",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+      }
+    },
+    {
+      "id": "session-missing",
+      "path": "/sessions?range=30d&session=webui-contract-missing&session_machine=macstudio",
+      "state": "无留存会话详情空态；有效会话另经实际列表进入核验",
+      "ready": "document.querySelector('#session-detail-content .empty-state')",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "table-heading": "无留存详情不绘制虚假表格",
+        "badge-font": "空详情只有说明，无身份徽章"
+      }
+    },
+    {
+      "id": "llm-calls",
+      "path": "/llm-calls?range=30d",
+      "state": "请求列表，成本分析尚未按需加载",
+      "ready": "document.querySelector('[data-request-identity]') && document.querySelector('#llm-state:not(.loading)')",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+      }
+    },
+    {
+      "id": "llm-request",
+      "path": "/llm-calls?range=30d",
+      "state": "首个真实请求诊断浮层",
+      "ready": "document.querySelector('[data-request-identity]') && document.querySelector('#llm-state:not(.loading)')",
+      "exclude": {
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            "#llm-requests-body tr:first-child [data-request-identity]"
+          ],
+          "reason": "聚焦请求详情只读入口"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "打开已记录请求诊断",
+          "ready": "document.querySelector('#llm-detail[open] .llm-request-summary')"
+        }
+      ]
+    },
+    {
+      "id": "network",
+      "path": "/network?range=30d",
+      "state": "当前缓存网络诊断，不强制重测",
+      "ready": "document.querySelector('#network-local')?.children.length > 0 && document.querySelector('#network-verdict')?.textContent !== '—'",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "table-heading": "网络采用键值列表，无数据表"
+      }
+    },
+    {
+      "id": "overview-history",
+      "path": "/?range=30d",
+      "state": "历史账号展开，读取未知/历史配额及常显不适用原因",
+      "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            ".quota-past-toggle"
+          ],
+          "reason": "聚焦本地只读入口"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "展开本地历史列表，不移除记录",
+          "ready": "!document.querySelector('#quota-past-accounts').hidden"
+        }
+      ]
+    },
+    {
+      "id": "overview-empty",
+      "path": "/?range=30d",
+      "state": "配额搜索无匹配；保留清空入口",
+      "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "quota-reason": "无匹配状态无配额窗口；原因在默认和历史状态验证",
+        "badge-font": "搜索空态无账号徽章；其他状态验证"
+      },
+      "steps": [
+        {
+          "action": "fill",
+          "args": [
+            "#quota-search",
+            "webui-no-match-8b25a"
+          ],
+          "reason": "仅本地筛选",
+          "ready": "document.querySelector('.quota-filter-empty')?.textContent.includes('没有匹配')"
+        }
+      ]
+    },
+    {
+      "id": "llm-request-audit",
+      "path": "/llm-calls?range=30d",
+      "state": "请求诊断中的首条证据展开",
+      "ready": "document.querySelector('[data-request-identity]') && document.querySelector('#llm-state:not(.loading)')",
+      "exclude": {
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            "#llm-requests-body tr:first-child [data-request-identity]"
+          ],
+          "reason": "聚焦请求详情只读入口"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "打开已记录请求诊断",
+          "ready": "document.querySelector('#llm-detail[open] .llm-request-summary')"
+        },
+        {
+          "action": "focus",
+          "args": [
+            "#llm-detail .llm-detail-attempt:nth-child(1 of .llm-detail-attempt) .llm-audit-disclosure:first-of-type > summary"
+          ],
+          "reason": "聚焦本地只读入口"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "展开历史证据，不产生请求",
+          "ready": "document.querySelector('#llm-detail .llm-audit-disclosure').open"
+        }
+      ]
+    },
+    {
+      "id": "llm-analysis",
+      "path": "/llm-calls?range=30d",
+      "state": "按需读取全范围统计，展开成本和尝试列表",
+      "ready": "document.querySelector('[data-request-identity]') && document.querySelector('#llm-state:not(.loading)')",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖"
+      },
+      "steps": [
+        {
+          "action": "focus",
+          "args": [
+            ".llm-cost-panel > summary"
+          ],
+          "reason": "聚焦本地只读入口"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "展开成本小计，沿产品既有行为读取统计",
+          "ready": "document.querySelector('#llm-analysis-status')?.textContent === '统计、请求与尝试来自同一次读取。'"
+        },
+        {
+          "action": "focus",
+          "args": [
+            ".llm-attempt-panel > summary"
+          ],
+          "reason": "聚焦本地只读入口"
+        },
+        {
+          "action": "press",
+          "args": [
+            "Enter"
+          ],
+          "reason": "查看已有尝试记录，不发起模型调用",
+          "ready": "document.querySelector('.llm-attempt-panel').open && document.querySelector('#llm-attempts-body')?.getAttribute('aria-busy') === 'false'"
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-09
+
+- Complete the shared console template across chart disclosures, account readings, request details and narrow-screen pagination. Keep batch results visible while account actions are collapsed, and explain unavailable quota windows inline.
+- Add keyboard-accessible Overview chart tables and complete tooltip units; constrain long chart labels without discarding their full names. Add reusable route/state/viewport bindings for the user-scope template verifier.
+
 ## 2026-10-08
 
 - Apply one shared visual style across Overview, Explore, Sessions, LLM Calls and Network, including details and disclosures. Unify typography, controls and neutral surfaces while retaining the blue brand and business states; reflow large metrics on narrow screens.

@@ -85,7 +85,11 @@
               <p>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按 bundled GLM-5 定价推算。</p>
               <p>近 28 天的数据每次按当前可读的源重算：已有精确成本的保持原值，其余用 agent-monitor 当前的定价推算；源缺失或计数变小的保持上次可信值，其余照常更新——所以之前看到的合计仍可能变。28 天以外的不再变动。</p>
             </details>
-            <div class="chart-box"><canvas id="daily-cost-chart"></canvas></div>
+            <div class="chart-box"><canvas id="daily-cost-chart" role="img" aria-label="成本趋势；完整读数见下方数据表"></canvas></div>
+            <details id="daily-cost-data" class="chart-data-disclosure">
+              <summary>查看成本趋势数据表</summary>
+              <div class="chart-data-scroll" tabindex="0" role="region" aria-label="成本趋势数据"><table class="chart-data-table"></table></div>
+            </details>
             <p id="cost-over-time-coverage" class="estimate-note" hidden></p>
           </section>
           <section class="panel-grid" aria-label="总览图表">
@@ -95,14 +99,22 @@
                 <a class="panel-link" data-preserve-range href="/explore?x=project&group=none&metric=cost">→ 透视</a>
               </div>
               <p class="scope-note">按会话启动目录归类，可能显示其 Git 仓库标识；跨项目工作不拆分费用。</p>
-              <div class="chart-box short"><canvas id="top-projects-chart"></canvas></div>
+              <div class="chart-box short"><canvas id="top-projects-chart" role="img" aria-label="本周会话目录成本；完整读数见下方数据表"></canvas></div>
+            <details id="top-projects-data" class="chart-data-disclosure">
+              <summary>查看本周会话目录成本数据表</summary>
+              <div class="chart-data-scroll" tabindex="0" role="region" aria-label="本周会话目录成本数据"><table class="chart-data-table"></table></div>
+            </details>
             </article>
             <article class="panel">
               <div class="panel-head">
                 <h2>本月模型构成</h2>
                 <a class="panel-link" data-preserve-range href="/explore?x=model&group=agent&metric=total">→ 透视</a>
               </div>
-              <div class="chart-box short"><canvas id="model-mix-chart"></canvas></div>
+              <div class="chart-box short"><canvas id="model-mix-chart" role="img" aria-label="本月模型构成；完整读数见下方数据表"></canvas></div>
+            <details id="model-mix-data" class="chart-data-disclosure">
+              <summary>查看本月模型构成数据表</summary>
+              <div class="chart-data-scroll" tabindex="0" role="region" aria-label="本月模型构成数据"><table class="chart-data-table"></table></div>
+            </details>
             </article>
           </section>
           <section class="kpi-group" aria-labelledby="kpi-quota-title">
@@ -122,9 +134,8 @@
             <p id="quota-match-count" class="quota-scope" role="status" aria-live="polite"></p>
             <p id="quota-signed-out" class="quota-scope" hidden></p>
             <details id="codex-account-actions" class="codex-account-actions">
-              <summary>Codex 账号操作 · 一键发送</summary>
+              <summary>Codex 账号操作 · 一键发送<span id="codex-batch-status" role="status" aria-live="polite">正在读取账号…</span></summary>
               <div class="codex-batch-summary">
-                <p id="codex-batch-status" role="status" aria-live="polite"></p>
                 <p class="quota-scope">向当前及历史登录账号各发送一条 “Please reply with OK.”，会使用账号额度；需要授权的账号不阻塞其他账号。</p>
                 <div class="codex-account-controls">
                   <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>

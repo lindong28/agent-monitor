@@ -79,3 +79,26 @@ A task-owned headless browser read the live overview and completed native naviga
 Live evidence is in `/Users/lindong/.codex/artifacts/webui-site-style-20261008/monitor-live-*.json`, `monitor-live-overview.txt`, `monitor-assets.json` and the live session/request screenshots. Browser commands initially lost their page when proxy/launch environment differed between invocations; the successful chain reused the same session and complete no-proxy launch environment. No user browser was attached.
 
 The first live request screenshot captured its loading shell because an initial wait checked the wrong loading phrase. It is not detail-readiness evidence. The later `monitor-live-call-ready.json` / `monitor-live-call-ready.png` wait for the actual `.llm-request-summary` and show the populated summary and attempt; the earlier `monitor-live-call.png` is retained as the failed check.
+
+## Repeatable product application (2026-10-09)
+
+The current application uses the published, frozen v2 definition at https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json (SHA256 `9649007c17bee2216e15d95d12789548ad85491bd50cf93f6aa7d28278c9325b`). The template was fetched again for this task and matched that identity. No Vercel login or source-site comparison is required.
+
+[Project-owned batch bindings](../tests/webui-template/README.md) separate the compiled effective design from route/state selectors and the installed shared runner. The scope is all five navigation routes, account/history/chart disclosures, Explore parameter views, successful and missing session details, request diagnostics and their audit/candidate disclosures. `/ip-check-docs` serves the existing raw CLI manual; it is a linked document, not a sixth dashboard renderer. Native browser date-picker chrome and external authorization pages are outside this app's CSS scope.
+
+| Template family | Product consumers / reading states |
+| --- | --- |
+| Identity and status | Quota identities, history rows, machine status, request outcomes; semantic text stays visible |
+| Usage progress | Active and historical quota windows, including 0%, unknown and not-applicable |
+| Lists and tables | Quota, session list and usage details, requests, attempts, costs; local scroll at narrow widths |
+| Notices and actions | Source freshness/error summaries, collapsed batch results and account cards |
+| Charts | Three Overview charts and Explore trends/rankings; keyboard-readable values and complete units |
+| Actions and filters | Shared Refresh, quota segments/search/reset, query builder, session filters, request filters/pagination |
+| Fields and details | Account readings, session metadata and request/candidate/audit fields |
+| Local states | Search empty/reset, missing session, loading, stale/error information and disabled operations |
+
+Table request links and compact filter chips remain inline text actions rather than 36px primary controls. Series colors, blue brand/link/focus roles, native checkbox geometry and the light-only theme retain their existing explicit project roles. All other default typography, surfaces and fields follow v2. Machine rules preserve manual clauses instead of silently treating them as automatic passes.
+
+Implementation and isolated-preview verification are complete; final deployment verification is pending; the earlier dated records above describe earlier deliveries, not this task's acceptance. Evidence is retained in `/Users/lindong/research/agent-monitor-template-application-evidence-20261009/`. The baseline batch executed five routes at 1440×1000 and 390×844 and found the existing section-title, collapsed-summary, chart-access and quota-reason failures. Request detail reading additionally observed labels at 14px and competing 18/20px heading levels. Backend performance and collection assertion failures remain outside this visual application.
+
+The implementation adds three keyboard-accessible chart tables, complete tooltip units, adaptive long labels, neutral identity badges, common detail typography and narrow pager/summary layout. Two independently reproduced display findings were accepted by the user and fixed: tiny cost ticks remain distinguishable, and account read failures are visible in the collapsed summary while preserving previous batch results. The independent review found no CRITICAL/HIGH. Follow-up tests cover initial failure, successful recovery, retained batch results, repeated failure and tiny/zero/unknown chart values.

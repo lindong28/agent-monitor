@@ -421,7 +421,7 @@
               label(context) {
                 const value = context.raw;
                 const label = context.dataset.fullLabel || context.dataset.label;
-                return `${label}: ${formatValue(value, metric)}`;
+                return `${label}: ${formatValue(value, metric)} ${metric === "cost" ? "USD" : metric === "messages" ? "条" : "tokens"}`;
               },
             },
           },

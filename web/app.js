@@ -345,7 +345,7 @@
       const specific = extra.scales?.[key] || {};
       scales[key] = { ...axis, ...specific,
         grid: { ...axis.grid, display: key === "y" && extra.indexAxis !== "y", ...specific.grid },
-        ticks: { ...axis.ticks, maxRotation: 0, autoSkip: true, ...specific.ticks },
+        ticks: { ...axis.ticks, maxRotation: 0, autoSkip: true, ...(key === "y" && extra.indexAxis === "y" ? { callback: categoryTick } : {}), ...specific.ticks },
       };
     }
     scales[extra.indexAxis === "y" ? "x" : "y"].beginAtZero = true;
@@ -361,6 +361,76 @@
       },
       scales,
     };
+  }
+
+  // Keep full labels in tooltips and data tables; fit only the painted axis.
+  function categoryTick(value) {
+    const full = String(this.getLabelForValue(value));
+    const ctx = this.chart.ctx;
+    // Chart.js may allocate less than half the canvas after layout padding.
+    const budget = Math.max(12, Math.min(220, this.chart.width * 0.38, (this.maxWidth || Infinity) - 16));
+    const font = this.options?.ticks?.font || {};
+    ctx.save();
+    ctx.font = `${font.style || "normal"} ${font.weight || "normal"} ${font.size || 12}px ${font.family || window.Chart?.defaults.font.family || getComputedStyle(document.body).fontFamily}`;
+    let label = full;
+    let length = full.length;
+    while (length > 2 && ctx.measureText(label).width > budget) {
+      length--;
+      const head = Math.ceil(length / 2), tail = Math.floor(length / 2);
+      label = full.slice(0, head) + "…" + full.slice(-tail);
+    }
+    ctx.restore();
+    return label;
+  }
+
+  function chartMoneyTick(value) {
+    const amount = Number(value);
+    if (amount === 0) return "$0";
+    return "$" + (Math.abs(amount) < 0.001
+      ? amount.toExponential(2)
+      : amount.toLocaleString("en-US", { maximumSignificantDigits: 3 }));
+  }
+
+  function chartReading(value, unit) {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return "未知";
+    if (unit === "USD") {
+      const amount = Number(value);
+      const formatted = amount !== 0 && Math.abs(amount) < 0.0001 ? "$" + amount.toPrecision(3) : moneyPrecise(amount);
+      return `${formatted} USD`;
+    }
+    return `${integer(value)} tokens`;
+  }
+
+  function renderChartTable(id, headings, rows) {
+    const table = qs(`#${id} table`);
+    if (!table) return;
+    const head = document.createElement("thead"), header = document.createElement("tr");
+    for (const [index, title] of headings.entries()) {
+      const cell = document.createElement("th");
+      cell.scope = "col"; cell.textContent = title;
+      if (index > 0) cell.className = "numeric";
+      header.appendChild(cell);
+    }
+    head.appendChild(header);
+    const body = document.createElement("tbody");
+    for (const values of rows) {
+      const row = document.createElement("tr");
+      values.forEach((value, index) => {
+        const cell = document.createElement(index === 0 ? "th" : "td");
+        if (index === 0) cell.scope = "row";
+        else cell.className = "numeric";
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+      body.appendChild(row);
+    }
+    if (!rows.length) {
+      const row = document.createElement("tr"), cell = document.createElement("td");
+      cell.colSpan = headings.length; cell.textContent = "该范围暂无数据";
+      row.appendChild(cell); body.appendChild(row);
+    }
+    // Preserve an open disclosure and its focused scroller during polling.
+    table.replaceChildren(head, body);
   }
 
   function renderOverview(data, selectedRange) {
@@ -381,6 +451,8 @@
 
     const costHistory = data.cost_over_time || legacyCostHistory(data.daily_cost_30d || []);
     const costGranularity = data.cost_over_time_granularity || "day";
+    renderChartTable("daily-cost-data", ["时间", ...costHistory.columns.map((column) => `${agentLabel(column)} · USD`)],
+      costHistory.rows.map((row) => [row.x, ...costHistory.columns.map((column) => chartReading(row.values[column], "USD"))]));
     chart("dailyCost", "daily-cost-chart", {
       type: "line",
       data: {
@@ -392,7 +464,9 @@
           })
         ),
       },
-      options: chartOptions({ scales: { x: { ticks: { maxTicksLimit: 7,
+      options: chartOptions({ plugins: { tooltip: { callbacks: {
+        label: (context) => `${context.dataset.label}: ${chartReading(context.raw, "USD")}`,
+      } } }, scales: { y: { ticks: { callback: (value) => chartMoneyTick(value) } }, x: { ticks: { maxTicksLimit: 7,
         callback(value) {
           const label = String(this.getLabelForValue(value));
           if (!/^\d{4}-\d{2}-\d{2}$/.test(label)) return label;
@@ -427,6 +501,8 @@
     }
 
     const projects = data.top_projects_week.slice();
+    renderChartTable("top-projects-data", ["会话目录", "成本 · USD"],
+      projects.map((row) => [row.project, chartReading(row.cost_usd, "USD")]));
     chart("topProjects", "top-projects-chart", {
       type: "bar",
       data: {
@@ -439,9 +515,12 @@
         // only repeat the title. Bar ends carry the values instead.
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { title: (items) => projects[items[0].dataIndex].project } },
+          tooltip: { callbacks: {
+            title: (items) => projects[items[0].dataIndex].project,
+            label: (context) => `${context.dataset.label}: ${chartReading(context.raw, "USD")}`,
+          } },
         },
-        scales: { x: { beginAtZero: true }, y: { ticks: { autoSkip: false } } },
+        scales: { x: { beginAtZero: true, ticks: { callback: (value) => "$" + compactNumber(value) } }, y: { ticks: { autoSkip: false, callback: categoryTick } } },
         layout: { padding: { right: 64 } },
       }),
       plugins: [barValueLabels(money)],
@@ -452,6 +531,8 @@
     // while each still claimed a legend entry; ranked horizontal bars let every
     // model be read and compared directly.
     const mix = data.model_mix_month.slice().sort((a, b) => Number(b.tokens) - Number(a.tokens));
+    renderChartTable("model-mix-data", ["模型", "用量 · tokens"],
+      mix.map((row) => [row.model, chartReading(row.tokens, "tokens")]));
     chart("modelMix", "model-mix-chart", {
       type: "bar",
       data: {
@@ -460,10 +541,12 @@
       },
       options: chartOptions({
         indexAxis: "y",
-        plugins: { legend: { display: false } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: {
+          label: (context) => `${context.dataset.label}: ${chartReading(context.raw, "tokens")}`,
+        } } },
         scales: {
           x: { beginAtZero: true, ticks: { callback: (value) => compactNumber(value) } },
-          y: { ticks: { autoSkip: false } },
+          y: { ticks: { autoSkip: false, callback: categoryTick } },
         },
         layout: { padding: { right: 64 } },
       }),
@@ -593,8 +676,7 @@
     return "将于 " + fmtAbs(resetAt) + " 重置";
   }
 
-  // An agent keeps one colour everywhere, so these reuse the .pill classes the
-  // charts and tables already use rather than introducing a second scheme.
+  // Provider identity reuses the neutral .pill treatment from session tables.
   // Each window owns a fixed column for every row, regardless of which windows a
   // provider reports. Codex has no 5h, so its 5h cell says "n/a" (see
   // quotaWindowCell — an em dash there would mean something else) rather than
@@ -1229,7 +1311,10 @@
       // screen reader, and not for anyone who cannot hover a tooltip.
       cell.classList.add("not-applicable");
       cell.textContent = "不适用";
-      cell.title = `${provider.label} 没有 ${spec.key} 窗口`;
+      const reason = document.createElement("span");
+      reason.className = "quota-window-reason";
+      reason.textContent = `${provider.label} 没有 ${spec.key} 窗口`;
+      cell.appendChild(reason);
       return cell;
     }
 

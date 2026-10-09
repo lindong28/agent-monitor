@@ -35,6 +35,145 @@ assert.strictEqual(config.scales.x.beginAtZero, true);
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_chart_data_readings_preserve_unknown_zero_and_full_labels(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+function node(tag) {
+  return {tag, children: [], textContent: "", appendChild(child) {this.children.push(child); return child;},
+    replaceChildren(...children) {this.children = children;}};
+}
+const table = node("table");
+global.window = {location: {origin: "http://example.test", pathname: "/", search: ""}, history: {replaceState() {}}};
+global.document = {readyState: "loading", addEventListener() {},
+  querySelector(selector) {return selector === "#sample table" ? table : null;}, createElement: node};
+eval(fs.readFileSync("web/app.js", "utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { chartReading, renderChartTable, categoryTick,"));
+const ui = window.AgentMonitor;
+assert.strictEqual(ui.chartReading(null, "USD"), "未知");
+assert.strictEqual(ui.chartReading(undefined, "tokens"), "未知");
+assert.strictEqual(ui.chartReading(NaN, "tokens"), "未知");
+assert.strictEqual(ui.chartReading(0, "USD"), "$0.0000 USD");
+assert.strictEqual(ui.chartReading(12003, "tokens"), "12,003 tokens");
+const full = "host/owner/a-long-project-that-must-not-be-truncated-in-the-data-table";
+ui.renderChartTable("sample", ["会话目录", "成本 · USD"], [[full, ui.chartReading(0, "USD")], ["missing", ui.chartReading(null, "USD")]]);
+assert.strictEqual(table.children[0].children[0].children[0].scope, "col");
+assert.strictEqual(table.children[1].children[0].children[0].scope, "row");
+assert.strictEqual(table.children[1].children[0].children[0].textContent, full);
+assert.strictEqual(table.children[1].children[1].children[1].textContent, "未知");
+ui.renderChartTable("sample", ["模型", "tokens"], []);
+assert.strictEqual(table.children[1].children.length, 1);
+assert.strictEqual(table.children[1].children[0].children[0].colSpan, 2);
+assert.strictEqual(table.children[1].children[0].children[0].textContent, "该范围暂无数据");
+ui.renderChartTable("missing", [], []); // Older cached HTML has no data-table slot.
+global.getComputedStyle = () => ({fontFamily: "sans-serif"});
+const ctx = {save() {}, restore() {}, measureText(text) {return {width: text.length * 12};}};
+for (const width of [254, 324, 1000]) {
+  const scale = {chart: {width, ctx}, maxWidth: (width - 64) / 2, getLabelForValue: () => full};
+  const label = ui.categoryTick.call(scale, 0);
+  assert(ctx.measureText(label).width <= Math.min(220, width * .38, scale.maxWidth - 16));
+  assert(label.includes("…"));
+}
+assert.strictEqual(ui.categoryTick.call({chart: {width: 324, ctx}, getLabelForValue: () => "短名"}, 0), "短名");
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_small_cost_ticks_and_readings_do_not_round_positive_values_to_zero(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+global.window = {location: {origin: "http://example.test", pathname: "/", search: ""}, history: {replaceState() {}}};
+global.document = {readyState: "loading", addEventListener() {}};
+const source = fs.readFileSync("web/app.js", "utf8");
+// Extract the callback actually wired to dailyCost, rather than testing an unused formatter.
+const daily = source.slice(source.indexOf('chart("dailyCost"'), source.indexOf('const costMeta'));
+const match = daily.match(/y: \{ ticks: \{ callback: (.*?) \} \}, x:/);
+assert(match, "dailyCost currency callback exists");
+const ui = eval(source.slice(0, source.lastIndexOf('})();')) + '\nreturn {chartReading, callback: (' + match[1] + ')};\n})();');
+for (const values of [[0, .001, .002, .003, .004], [0, .000001, .000002, .000003], [0, 10, 20, 30]]) {
+  const labels = values.map(ui.callback);
+  assert.strictEqual(new Set(labels).size, values.length, `distinct ticks collapsed: ${labels}`);
+  assert(labels.every(label => label.startsWith("$")));
+}
+for (const value of [1e-5, 1e-9, Number.MIN_VALUE]) {
+  const label = ui.chartReading(value, "USD");
+  assert(Number(label.replace(/^\$/, "").replace(/ USD$/, "")) > 0, `positive value rendered as zero: ${label}`);
+}
+assert.strictEqual(ui.chartReading(0, "USD"), "$0.0000 USD");
+assert.strictEqual(ui.chartReading(null, "USD"), "未知");
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_collapsed_account_summary_exposes_load_failure_and_recovers(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+function node() {return {dataset: {}, children: [], textContent: "", addEventListener() {}, replaceChildren(...children) {this.children = children;}};}
+const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable"].map(id => [id, node()]));
+nodes["#codex-batch-status"].textContent = "正在读取账号…";
+const root = node(); root.querySelector = id => nodes[id];
+global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: node};
+global.window = {AgentMonitor: {pageScope: () => () => true, ensureTimezone: async () => {}, onPageCleanup() {}, pageInterval() {}, formatDate: x => x}};
+let failure = true;
+global.fetch = async (url, options) => {
+  assert.strictEqual(options.method, "GET");
+  if (failure) throw Error("test unavailable");
+  return {ok: true, json: async () => ({accounts: [], unavailable_accounts: [], batch: {id: "b1", created_at: "2026-10-09T00:00:00Z", items: [{profile_id: "former", operation: {message_status: "succeeded"}}]}})};
+};
+let source = fs.readFileSync("web/codex-accounts.js", "utf8").replace("export function init()", "function init()");
+source = source.replace("  load();\n  window.AgentMonitor.pageInterval(load, 30000);", "  window.testLoad = load;");
+eval(source); init();
+(async () => {
+  await window.testLoad();
+  assert(nodes["#codex-batch-status"].textContent.includes("读取失败"));
+  assert(!nodes["#codex-batch-status"].textContent.includes("正在读取"));
+  failure = false; await window.testLoad();
+  const good = nodes["#codex-batch-status"].textContent;
+  assert(good.includes("本轮发送成功 1/1"));
+  assert(!good.includes("读取失败"));
+  failure = true; await window.testLoad();
+  const stale = nodes["#codex-batch-status"].textContent;
+  assert(stale.includes(good), "preserve the last batch result when refresh fails");
+  assert(stale.includes("刷新失败"));
+  await window.testLoad();
+  assert.strictEqual(nodes["#codex-batch-status"].textContent, stale, "repeated failure must not duplicate notices");
+  failure = false; await window.testLoad();
+  assert.strictEqual(nodes["#codex-batch-status"].textContent, good);
+  assert.strictEqual(nodes["#codex-account-notice"].textContent, "");
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_batch_status_and_chart_tables_remain_keyboard_readable(self):
+        from html.parser import HTMLParser
+
+        class Tree(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack = []
+                self.locations = {}
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if attrs.get("id"):
+                    self.locations[attrs["id"]] = (list(self.stack), attrs)
+                if tag not in {"meta", "link", "input", "br", "hr"}:
+                    self.stack.append((tag, attrs))
+
+            def handle_endtag(self, tag):
+                for index in range(len(self.stack) - 1, -1, -1):
+                    if self.stack[index][0] == tag:
+                        del self.stack[index:]
+                        break
+
+        tree = Tree()
+        tree.feed((ROOT / "web/index.html").read_text())
+        parents, attrs = tree.locations["codex-batch-status"]
+        self.assertEqual(parents[-1][0], "summary")
+        self.assertEqual(parents[-2][1]["id"], "codex-account-actions")
+        self.assertEqual(attrs["aria-live"], "polite")
+        for name in ("daily-cost-data", "top-projects-data", "model-mix-data"):
+            self.assertIn("chart-data-disclosure", tree.locations[name][1]["class"])
+
     def test_session_detail_preserves_refresh_collection_and_page_watch(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");

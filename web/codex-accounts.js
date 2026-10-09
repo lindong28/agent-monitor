@@ -38,6 +38,7 @@ export function init() {
   let batch = null;
   let unavailable = [];
   let submittingBatch = false;
+  let lastBatchStatus = "";
   const controller = new AbortController();
 
   async function request(action, payload) {
@@ -71,8 +72,14 @@ export function init() {
       window.AgentMonitor.updateCodexQuotaReadings?.(accounts);
       notice.textContent = "";
       render();
+      lastBatchStatus = batchStatus.textContent;
     } catch (error) {
-      if (current() && error.name !== "AbortError") notice.textContent = error.message + " 可重新展开此面板刷新。";
+      if (current() && error.name !== "AbortError") {
+        notice.textContent = error.message + " 可重新展开此面板刷新。";
+        batchStatus.textContent = lastBatchStatus
+          ? lastBatchStatus + " · 刷新失败，以上为上次结果；重新展开可重试。"
+          : "账号读取失败；重新展开此面板可重试。";
+      }
     } finally {
       loading = false;
       if (reloadPending) { reloadPending = false; load(); }

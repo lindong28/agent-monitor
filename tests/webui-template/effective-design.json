@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "template": {
+    "id": "style:vercel-gateway-console",
+    "version": "2",
+    "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json"
+  },
+  "rules": [
+    {
+      "id": "component-reading-0",
+      "role": "component-0",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[0]",
+      "description": "身份与状态徽章：服务方、套餐等身份分类使用中性浅灰底与深灰字；成功、警告、错误使用语义色并带明确文字，未知和历史状态使用中性文字，不伪装成功。字号 12px、行高 16px、内距 2×8px、圆角 6px，短徽章保持单行。长名称在徽章外换行；一行身份信息与一个主要状态分别呈现，避免每个属性都抢占强调色。"
+    },
+    {
+      "id": "component-reading-1",
+      "role": "component-1",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[1]",
+      "description": "用量进度：同类用量采用同一排列：首行名称与右对齐数值，下方宽度至少 96px、高 4px 的浅灰轨道，底部 12px 重置时间或范围说明；数值使用等宽数字。正常填充为中性色，需要注意时使用业务已定义的警告或危险色，并补文字，不由风格新增阈值。真实 0% 显示 0%；未知显示“未知”并说明数据状态，不绘制零进度；不适用显示“不适用”及原因，不出现虚假轨道。"
+    },
+    {
+      "id": "component-reading-2",
+      "role": "component-2",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[2]",
+      "description": "身份列表与复杂表格：白色行与轻分隔承载身份、状态、时间和行尾操作。主名称 14px，辅助身份与时间 12px、行高 16px；主信息在上，辅助信息在下，状态列及数值列保持对齐。表头 12px，单元格默认内距 12×16px；长名称可换行，身份标签保持单行，完整标识在详情可读。操作集中于行尾或明确的操作列，少量次要动作可用文本按钮，多项动作按项目既有菜单收纳。历史组用左对齐的展开标题、数量与轻分隔接续同一列表，历史含义由文字说明，避免整组重灰底。宽表局部滚动，不将页面整体撑宽。"
+    },
+    {
+      "id": "component-reading-3",
+      "role": "component-3",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[3]",
+      "description": "信息提示与操作卡：普通范围说明使用 12px 辅助文字；影响用户判断的过期、缺失或失败采用图标／状态文字加轻边框提示条，必要动作靠近提示。操作卡使用白底、8px 圆角、轻边线，标题与简短摘要在上，内容与底部操作区由轻分隔组织。批量任务沿用该外观：摘要清楚区分完成、待处理和异常，账号或对象行默认紧凑、详情按需展开；失败与待处理状态不因折叠而消失。此处仅约束已有任务的呈现，不指定批量业务、权限或重试行为。"
+    },
+    {
+      "id": "component-reading-4",
+      "role": "component-4",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[4]",
+      "description": "趋势与分布图表：图表沿用项目系列语义色，通常以 2px 细线呈现趋势，常态不为每一点画圆点；仅有一个有效观测点时保留可见标记，悬浮或键盘选择时突出当前点。保留必要的浅灰水平网格，减少无助读数的纵向网格；轴与图例用 12px 辅助字，时间轴按跨度显示稀疏短日期，跨年时保留年份语境。图例使用小色点／短线与文字，不用大色块。提示框使用白底、轻边线和仅浮层使用的阴影，完整显示时间、系列、数值及单位；可经键盘或等价数据表读取。条形排序、比例与数值含义沿用业务，空／未知不绘制伪零值。"
+    },
+    {
+      "id": "component-reading-5",
+      "role": "component-5",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[5]",
+      "description": "动作与分段筛选：主动作深色底白字，次动作白底浅边线，危险动作使用危险色文字或边线，进入确认步骤时按项目原有行为突出危险后果。默认高 36px、14px 字体、8px 圆角；hover、focus、disabled、处理中可辨且保留动作名称。分段筛选置于一个轻边框容器，选中项中性浅灰底深字，通过 aria-pressed 或等价语义暴露选择。品牌链接和焦点色可保留，不将品牌覆盖扩散为所有按钮与普通身份的强调色。"
+    },
+    {
+      "id": "component-reading-6",
+      "role": "component-6",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[6]",
+      "description": "字段与详情：输入与选择控件采用 14px 字体和 36px 默认高度；标签与验证说明紧邻字段，错误文字配合语义色。详情键值中标签 12px 辅助色、值 14px，长值可换行；相关字段分组，次级技术信息按需展开。展开标题左对齐并包含可辨状态，折叠不隐藏需要立即注意的结果。详情浮层采用白色表面、8px 圆角与轻阴影，保留关闭、返回和键盘路径；窄屏可纵向排列键值。"
+    },
+    {
+      "id": "component-reading-7",
+      "role": "component-7",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[7]",
+      "description": "空态与局部状态：筛选空态放在结果区域，说明没有匹配并提供清除筛选；真实无数据、加载中、数据过期和失败各保留其含义。局部状态沿所属组件的宽度、字体和边线，必要动作保持可达。布局允许重排，长内容与状态不依赖颜色、截断或 hover 才能辨认。"
+    },
+    {
+      "id": "acceptance-0",
+      "role": "acceptance-0",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#acceptance[0]",
+      "description": "路由及详情状态、实际组件和展开状态均映射到主题／组件规范；逐项记录符合、合理例外、未落实和未核实。"
+    },
+    {
+      "id": "acceptance-1",
+      "role": "acceptance-1",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#acceptance[1]",
+      "description": "按钮、字段、表头、分段筛选、身份／状态徽章的实际字号与视觉角色符合有效设计；例外包含明确对象和用途。"
+    },
+    {
+      "id": "acceptance-2",
+      "role": "acceptance-2",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#acceptance[2]",
+      "description": "用量 0%、未知、不适用和异常状态可区分；复杂行、长名称和历史组保持阅读层次与一致操作位置。"
+    },
+    {
+      "id": "acceptance-3",
+      "role": "acceptance-3",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#acceptance[3]",
+      "description": "实际阅读宽窄屏的操作卡、提示和图表；图表完整读数通过悬浮、键盘或等价表格可达。"
+    },
+    {
+      "id": "acceptance-4",
+      "role": "acceptance-4",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#acceptance[4]",
+      "description": "真实导航、筛选、清除、展开与详情返回完成原任务；有副作用的状态在隔离预览验证时明确不代表业务链路已验证。"
+    },
+    {
+      "id": "acceptance-5",
+      "role": "acceptance-5",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#acceptance[5]",
+      "description": "项目有效设计记录固定版本、共享入口与组件覆盖；后续页面沿用同一体系，共享 CSS 加载不替代组件验收。"
+    },
+    {
+      "id": "canvas",
+      "role": "body",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.canvas",
+      "description": "background-color follows template token",
+      "property": "background-color",
+      "expected": "rgb(250, 250, 250)"
+    },
+    {
+      "id": "body-font",
+      "role": "body",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.body_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "14px"
+    },
+    {
+      "id": "body-line",
+      "role": "body",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.body_line_height_px",
+      "description": "line-height follows template token",
+      "property": "line-height",
+      "expected": "22px"
+    },
+    {
+      "id": "body-ink",
+      "role": "body",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.ink",
+      "description": "color follows template token",
+      "property": "color",
+      "expected": "rgb(23, 23, 23)"
+    },
+    {
+      "id": "page-title",
+      "role": "page-title",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.page_title_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "24px"
+    },
+    {
+      "id": "section-title",
+      "role": "section-title",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.section_title_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "16px"
+    },
+    {
+      "id": "control-font",
+      "role": "controls",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.body_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "14px"
+    },
+    {
+      "id": "control-height",
+      "role": "controls",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.control_height_px",
+      "description": "height follows template token",
+      "property": "height",
+      "expected": "36px"
+    },
+    {
+      "id": "control-radius",
+      "role": "controls",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.radius_px",
+      "description": "border-radius follows template token",
+      "property": "border-radius",
+      "expected": "8px"
+    },
+    {
+      "id": "panel-surface",
+      "role": "panels",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.surface",
+      "description": "background-color follows template token",
+      "property": "background-color",
+      "expected": "rgb(255, 255, 255)"
+    },
+    {
+      "id": "panel-radius",
+      "role": "panels",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.radius_px",
+      "description": "border-radius follows template token",
+      "property": "border-radius",
+      "expected": "8px"
+    },
+    {
+      "id": "panel-shadow",
+      "role": "panels",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.description",
+      "description": "box-shadow follows template token",
+      "property": "box-shadow",
+      "expected": "none"
+    },
+    {
+      "id": "table-heading",
+      "role": "table-heading",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.supporting_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "12px"
+    },
+    {
+      "id": "detail-label",
+      "role": "detail-label",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.supporting_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "12px"
+    },
+    {
+      "id": "detail-value",
+      "role": "detail-value",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.body_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "14px"
+    },
+    {
+      "id": "badge-font",
+      "role": "badges",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.tokens.supporting_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "12px"
+    },
+    {
+      "id": "page-overflow",
+      "role": "document",
+      "kind": "no-horizontal-overflow",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[2]",
+      "description": "宽表局部滚动，文档本身不溢出"
+    },
+    {
+      "id": "collapsed-summary",
+      "role": "batch-summary",
+      "kind": "count",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[3]",
+      "description": "批次结果摘要在默认折叠状态仍可读",
+      "expected": 1
+    },
+    {
+      "id": "chart-data-access",
+      "role": "chart-access",
+      "kind": "predicate",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[4]",
+      "description": "每张总览图均有原生键盘可达的数据展开控件和非空等价表格"
+    },
+    {
+      "id": "quota-reason",
+      "role": "quota-reason",
+      "kind": "predicate",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#components[1]",
+      "description": "不适用配额的原因在同一单元格内常显，不依赖title"
+    },
+    {
+      "id": "theme-reading",
+      "role": "theme-reading",
+      "kind": "manual",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/2.json#theme.description",
+      "description": "中性色画布、白色表面和轻边线建立层级；常态面板不靠重阴影，浮层才有阴影。系统无衬线字体，页标题 24px、区块标题 16px、正文与控件 14px、辅助文字 12px、主要指标 28px，正文行高 22px；数值等宽对齐。间距采用 4/8/12/16/24/32px，控件默认高 36px，面板与控件圆角 8px，表格单元默认内距 12×16px。已有导航保持结构，以浅灰底和清晰文字标记当前位置，页头及操作对齐；标签页采用轻选中底色或底线。主按钮深色，次按钮白底边线，hover、focus、disabled 与错误各可辨；保留明确品牌色角色。输入、筛选和表单沿同一控件体系，验证说明靠近已有字段。表格轻分隔、弱表头、数值对齐，密集页可记录紧凑例外；宽表局部滚动。图表使用低对比网格、清晰标签和稳定系列色，不因配色改变数据含义。详情、抽屉及展开区沿同一字体和表面规则；空态、加载及错误保持原业务含义，色彩配合文字。各页保留任务布局，窄屏允许重排且主要操作可达；主题模式沿项目已有能力映射语义色，示例只演示浅色。"
+    }
+  ]
+}
