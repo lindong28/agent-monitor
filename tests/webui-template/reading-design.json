@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "template": {
+    "id": "style:vercel-gateway-console",
+    "version": "3",
+    "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json"
+  },
+  "rules": [
+    {
+      "id": "body-font",
+      "role": "body",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#theme.tokens.body_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "14px"
+    },
+    {
+      "id": "body-ink",
+      "role": "body",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#theme.tokens.ink",
+      "description": "color follows template token",
+      "property": "color",
+      "expected": "rgb(23, 23, 23)"
+    },
+    {
+      "id": "page-title",
+      "role": "page-title",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#theme.tokens.page_title_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "24px"
+    },
+    {
+      "id": "control-font",
+      "role": "controls",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#theme.tokens.body_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "14px"
+    },
+    {
+      "id": "table-heading",
+      "role": "table-heading",
+      "kind": "style",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#theme.tokens.supporting_font_px",
+      "description": "font-size follows template token",
+      "property": "font-size",
+      "expected": "12px"
+    },
+    {
+      "id": "page-overflow",
+      "role": "document",
+      "kind": "no-horizontal-overflow",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#components[2]",
+      "description": "宽表局部滚动，文档本身不溢出"
+    },
+    {
+      "id": "task-density",
+      "role": "reading",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#components[3]",
+      "description": "账号摘要的身份、主状态、必要动作紧凑；异常可见、公共说明集中一份",
+      "kind": "manual"
+    },
+    {
+      "id": "snapshot-time",
+      "role": "reading",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#components[9]",
+      "description": "旧操作配额旁常显上次查询与绝对时间；不冒充当前配额",
+      "kind": "manual"
+    },
+    {
+      "id": "single-divider",
+      "role": "reading",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#components[3]",
+      "description": "摘要与第一行之间只有一条分隔，展开详情不改变分组归属",
+      "kind": "manual"
+    },
+    {
+      "id": "number-roles",
+      "role": "reading",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#components[9]",
+      "description": "金额概要、精确详情和小额展示依角色一致；未知不变成零",
+      "kind": "manual"
+    },
+    {
+      "id": "narrow-association",
+      "role": "reading",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#components[2]",
+      "description": "局部配额滚动后账号身份仍与读数关联",
+      "kind": "manual"
+    },
+    {
+      "id": "shared-icons",
+      "role": "reading",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console/3.json#components[8]",
+      "description": "共享图标与展开方向一致，名称和键盘入口可用",
+      "kind": "manual"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "project": "Agent Monitor · Vercel Gateway console v2 · product routes and states",
+  "project": "Agent Monitor · Vercel Gateway console v3 · product routes and states",
   "base_url": "http://macstudio:39001",
   "viewports": [
     {
