@@ -2,6 +2,9 @@
 
 ## 2026-10-09
 
+- Add `session-quota FULL_SESSION_UUID [--json]` for a session's stored weekly quota, preserving its observation and reset times without querying providers or substituting another session.
+- Retry explicit Hub bootstrap failures at most three times; stop on timeout and disclose an unloaded previous job when replacement was not confirmed.
+
 - Complete the shared console template across chart disclosures, account readings, request details and narrow-screen pagination. Keep batch results visible while account actions are collapsed, and explain unavailable quota windows inline.
 - Add keyboard-accessible Overview chart tables and complete tooltip units; constrain long chart labels without discarding their full names. Add reusable route/state/viewport bindings for the user-scope template verifier.
 

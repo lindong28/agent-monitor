@@ -65,6 +65,12 @@ Overview Refresh acknowledges promptly while machines update in the background. 
 
 Quota exploration supports All / Claude / Codex and account, plan or machine search. Counts distinguish current accounts, historical accounts and machine records with unknown identity. Filters remain during polling; clearing restores all records. Collection failures and signed-out notices remain visible regardless of filters. The page date range does not change provider quota windows.
 
+Hub launchd bootstrap retries explicit nonzero failures at most three times, with a one-second pause between attempts. A timeout is not retried because the launch outcome is uncertain. After a failed replacement, the error reports whether the old job was unloaded; inspect the named job before another start. No automatic rollback or availability guarantee is implied.
+
+## Stored Codex session quota
+
+`agent-monitor session-quota FULL_SESSION_UUID` reads only that session's local rollout. Add `--json` for machine output. It reports the recorded seven-day percentage, reset Unix timestamp and observation time; it does not query a provider, infer account identity, or turn an elapsed reset into a new zero-percent observation. Exit 0 means a stored weekly reading was found, 1 means no matching rollout or usable weekly reading, and 2 means the input/source could not be verified. None proves the account's current quota. The public Python entry is `parsers.codex.load_session_rate_limits(session_id, sessions_dir=None)`; tests can supply an isolated sessions directory without reading the live store.
+
 ## Codex account actions
 
 Expand **Codex 账号操作** in the overview's quota section. Current and historical Codex login identities already recorded by agent-monitor appear automatically; no manual account addition is required. Click **给全部 N 个账号发送** to send one message to those accounts. The quota-row **登录/发消息** action locates its account card. Saved valid logins in this panel are reused; historical identity metadata is not a credential. Accounts needing authorization queue for one official OpenAI link and device code at a time; completion or cancellation admits the next account. Queued accounts show **等待授权排队** and do not consume the check/send slots, so saved logins continue working. Any email verification code belongs on that official page. Device-code login must be enabled in the account or workspace security settings. The serving machine needs a Codex CLI supporting `chatgptDeviceCode` and experimental thread/turn `environments` (interface checked locally with 0.158.0).

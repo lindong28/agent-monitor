@@ -197,3 +197,12 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 - **Owner**: agent-monitor 后端维护者；本轮记录，采纳扩展由用户裁决。
 - **Evidence**: Gateway reader 接受 query 值为字符串、tuple 或 list；新增定向读取按 HTTP `parse_qs` 的 list 形态取值，内部直接调用传字符串或 tuple 时返回 404，旧完整读取可返回同一请求的两个 attempts。现有 HTTP 入口始终传 list，不受该差异影响。
 - **Disposition**: 本次按网页 HTTP 运行包络交付，未扩展内部调用形态；以后支持此类直接调用前，应复用一致的单值归一化并验证三种形态。
+
+## [open] ISSUE-QUOTA-20261009-741d：session-quota 非法字段形状未使用来源不可核退出码
+
+- Type: bug
+- Priority: medium
+- Discovered: 2026-10-09，Wave128 独立 change review（finish_68）。
+- Description: 新 `session-quota FULL_UUID --json` 入口只捕获 ValueError/OSError；若合法 JSON 的 `token_count.rate_limits` 是数组等非法字段形状，复用 parser 抛 AttributeError，CLI exit 1 并打印 traceback。README 将来源不可核约定为 exit 2，而 exit 1 表示缺 rollout 或无可用 weekly reading，消费者会混淆二者。
+- Evidence: 隔离 HOME 下，rollout 首条 session_meta 与完整请求 UUID 相符，后续 token_count 的 `rate_limits=["invalid"]`；独立 reviewer 实测 stdout 为空、exit 1、stderr 有 AttributeError。仅合成异常形状，真实 provider 出现率未核；正常 public reader/CLI 与既有 parser 回归不受此结论替代。
+- Notes: 用户 2026-10-09 已裁决“单列待办，先交付”，本轮接受此非阻塞边界，不改已审源码、不追加 review。后续归 CLI/parser owner 定点统一非法来源的受控失败与退出契约，不新增 provider 请求或扩大成 schema 全矩阵。

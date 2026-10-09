@@ -256,7 +256,21 @@ def install_web():
     candidate.write_bytes(plistlib.dumps(plist))
     candidate.chmod(0o600)
     candidate.replace(dest)
-    subprocess.run(["launchctl", "bootstrap", domain, str(dest)], check=True, timeout=15)
+    for attempt in range(1, 4):
+        try:
+            subprocess.run(["launchctl", "bootstrap", domain, str(dest)], check=True, timeout=15)
+            break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            # A timeout has an uncertain outcome; do not blindly repeat it.
+            if isinstance(exc, subprocess.CalledProcessError) and attempt < 3:
+                time.sleep(1)
+                continue
+            prior = "Previous job was unloaded. " if loaded.returncode == 0 else ""
+            raise RuntimeError(
+                "agent-monitor hub: %sbootstrap did not confirm a replacement after %s attempt(s); "
+                "service availability is unverified. Inspect 'launchctl print %s/%s' "
+                "before retrying 'agent-monitor start'." % (prior, attempt, domain, WEB_LABEL)
+            ) from exc
     print("agent-monitor hub: launchd service loaded; browser reachability and source admission still need verification.")
 
 

@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -251,6 +252,37 @@ def load_rate_limits(sessions_dir=None, state_db=None):
     return latest
 
 
+def load_session_rate_limits(session_id, sessions_dir=None):
+    """Read a session's stored weekly quota; no provider or account lookup."""
+    try:
+        if str(uuid.UUID(session_id)) != session_id:
+            raise ValueError
+    except (ValueError, AttributeError, TypeError):
+        raise ValueError("use the full canonical session UUID; session not queried") from None
+    sessions_path = Path(SESSIONS_DIR if sessions_dir is None else sessions_dir)
+    if not sessions_path.is_dir():
+        raise ValueError("session directory unavailable; session not queried")
+    paths = list(sessions_path.rglob("rollout-*-" + session_id + ".jsonl"))
+    result = {"session_id": session_id, "status": "no_rollout",
+              "seven_day_pct": None, "seven_day_resets_at": None,
+              "updated_at": None, "account_identity": "unknown"}
+    if not paths:
+        return result
+    if len(paths) != 1:
+        raise ValueError("multiple rollout files for this session; quota unverified")
+    path = paths[0]
+    if _read_session_id(path) != session_id:
+        raise ValueError("rollout identity unreadable or mismatched; quota unverified")
+    limits = _extract_latest_rate_limits(path, {}, expire=False)
+    if limits is None or limits.seven_day_pct is None:
+        result["status"] = "no_weekly_reading"
+        return result
+    result.update(status="observed", seven_day_pct=limits.seven_day_pct,
+                  seven_day_resets_at=limits.seven_day_resets_at,
+                  updated_at=limits.updated_at)
+    return result
+
+
 def _files_signature(paths, state_db):
     signature = []
     for path in paths:
@@ -376,7 +408,7 @@ def _extract_rate_limits(path, models):
     return _build_rate_limits(rate_limits, timestamp, session_id, models)
 
 
-def _extract_latest_rate_limits(path, models):
+def _extract_latest_rate_limits(path, models, *, expire=True):
     session_id = _read_session_id(path)
     try:
         for line in _reverse_lines(path):
@@ -393,7 +425,7 @@ def _extract_latest_rate_limits(path, models):
                 continue
             rate_limits = payload.get("rate_limits")
             if rate_limits:
-                return _build_rate_limits(rate_limits, data.get("timestamp", ""), session_id, models)
+                return _build_rate_limits(rate_limits, data.get("timestamp", ""), session_id, models, expire=expire)
     except (OSError, PermissionError, UnicodeDecodeError):
         return None
     return None
@@ -435,7 +467,7 @@ def _reverse_lines(path, chunk_size=65536):
                     yield raw.decode("utf-8")
 
 
-def _build_rate_limits(rate_limits, timestamp, session_id, models):
+def _build_rate_limits(rate_limits, timestamp, session_id, models, *, expire=True):
     primary = rate_limits.get("primary") or {}
     secondary = rate_limits.get("secondary") or {}
     windows = [window for window in (primary, secondary) if isinstance(window, dict)]
@@ -457,9 +489,9 @@ def _build_rate_limits(rate_limits, timestamp, session_id, models):
     seven_reset = seven_day.get("resets_at")
 
     now_ts = datetime.now(timezone.utc).timestamp()
-    if five_reset and five_reset < now_ts:
+    if expire and five_reset and five_reset < now_ts:
         five_pct = 0.0
-    if seven_reset and seven_reset < now_ts:
+    if expire and seven_reset and seven_reset < now_ts:
         seven_pct = 0.0
 
     if five_pct is None and seven_pct is None:

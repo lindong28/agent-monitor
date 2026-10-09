@@ -223,6 +223,40 @@ class HubTests(unittest.TestCase):
             hub.install_web()
             self.assertEqual([call.args[0][1] for call in run.call_args_list], ["print"])
 
+    def test_bootstrap_retries_only_explicit_failures(self):
+        for failures, timeout, expected_calls in ((1, False, 2), (3, False, 3), (1, True, 1)):
+            with self.subTest(failures=failures, timeout=timeout):
+                dest = self.root / "Library/LaunchAgents" / (hub.WEB_LABEL + ".plist")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                previous = hub.web_plist(hub.ROOT, hub.sys.executable)
+                previous["old_fixture"] = True
+                dest.write_bytes(plistlib.dumps(previous))
+                actions = []
+
+                def launchctl(argv, **kwargs):
+                    actions.append(argv[1])
+                    if argv[1] == "print":
+                        return SimpleNamespace(returncode=0, stdout=str(hub.ROOT / "hub.py") + "\n")
+                    if argv[1] == "bootstrap" and actions.count("bootstrap") <= failures:
+                        self.assertEqual(kwargs["timeout"], 15)
+                        if timeout:
+                            raise hub.subprocess.TimeoutExpired(argv, 15)
+                        raise hub.subprocess.CalledProcessError(5, argv)
+                    return SimpleNamespace(returncode=0)
+
+                with mock.patch("hub.Path.home", return_value=self.root), \
+                        mock.patch("hub.is_hub", return_value=True), \
+                        mock.patch("hub.subprocess.run", side_effect=launchctl), \
+                        mock.patch("hub.time.sleep") as sleep:
+                    if failures == 3 or timeout:
+                        with self.assertRaisesRegex(RuntimeError, "Previous job was unloaded.*availability is unverified"):
+                            hub.install_web()
+                    else:
+                        hub.install_web()
+                    self.assertEqual(actions.count("bootstrap"), expected_calls)
+                    self.assertEqual(actions.count("bootout"), 1)
+                    self.assertEqual(sleep.call_args_list, [mock.call(1)] * (expected_calls - 1))
+
     def test_stop_checks_loaded_owner_as_well_as_plist(self):
         dest = self.root / "Library/LaunchAgents" / (hub.WEB_LABEL + ".plist")
         dest.parent.mkdir(parents=True)
