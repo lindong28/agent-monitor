@@ -120,19 +120,6 @@
           <section class="kpi-group" aria-labelledby="kpi-quota-title">
             <h2 id="kpi-quota-title" class="kpi-group-title">配额用量</h2>
             <p class="quota-scope">配额按账号计量，不跨账号求和。页面日期范围不改变服务商的 5h / 7d 配额窗口。</p>
-            <div id="quota-explorer" class="quota-explorer">
-              <div class="quota-provider-filter" role="group" aria-label="配额服务商">
-                <button type="button" class="btn" data-quota-provider="all" aria-pressed="true">全部</button>
-                <button type="button" class="btn" data-quota-provider="claude" aria-pressed="false">Claude</button>
-                <button type="button" class="btn" data-quota-provider="codex" aria-pressed="false">Codex</button>
-              </div>
-              <label class="quota-search-label" for="quota-search">搜索账号、套餐或机器
-                <input id="quota-search" type="search" autocomplete="off" placeholder="邮箱、Pro、机器名…">
-              </label>
-              <button id="quota-clear" type="button" class="btn">清空筛选</button>
-            </div>
-            <p id="quota-match-count" class="quota-scope" role="status" aria-live="polite"></p>
-            <p id="quota-signed-out" class="quota-scope" hidden></p>
             <details id="codex-account-actions" class="codex-account-actions">
               <summary>Codex 账号操作 · 一键发送<span id="codex-batch-status" role="status" aria-live="polite">正在读取账号…</span></summary>
               <div class="codex-batch-summary">
@@ -153,6 +140,19 @@
               <div id="codex-account-list"></div>
               <p class="quota-scope">配额表采用同一账号最新的查询或采集读数，并标明「本页查询」来源；机器归属与套餐仍按机器记录显示。仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>
             </details>
+            <div id="quota-explorer" class="quota-explorer">
+              <div class="quota-provider-filter" role="group" aria-label="配额服务商">
+                <button type="button" class="btn" data-quota-provider="all" aria-pressed="true">全部</button>
+                <button type="button" class="btn" data-quota-provider="claude" aria-pressed="false">Claude</button>
+                <button type="button" class="btn" data-quota-provider="codex" aria-pressed="false">Codex</button>
+              </div>
+              <label class="quota-search-label" for="quota-search">搜索账号、套餐或机器
+                <input id="quota-search" type="search" autocomplete="off" placeholder="邮箱、Pro、机器名…">
+              </label>
+              <button id="quota-clear" type="button" class="btn">清空筛选</button>
+            </div>
+            <p id="quota-match-count" class="quota-scope" role="status" aria-live="polite"></p>
+            <p id="quota-signed-out" class="quota-scope" hidden></p>
             <!-- Focusable and named: on narrower viewports this box is the only
                  way to reach the later columns, and a scroller a keyboard
                  cannot enter hides part of the seven-column comparison. -->
@@ -160,9 +160,9 @@
             <table id="quota-accounts" class="quota-table">
               <thead>
                 <tr>
+                  <th scope="col" class="quota-identity">账号</th>
                   <th scope="col">服务商</th>
                   <th scope="col">套餐</th>
-                  <th scope="col">账号</th>
                   <th scope="col" class="numeric">5h 已用</th>
                   <th scope="col" class="numeric">7d 已用</th>
                   <th scope="col">机器</th>

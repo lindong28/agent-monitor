@@ -673,8 +673,10 @@ button:disabled {
 }
 
 .quota-past-toggle {
+  position: sticky;
+  left: var(--sp-4);
   justify-content: flex-start;
-  width: 100%;
+  width: max-content;
   color: var(--ink-muted);
   font-weight: 500;
 }
@@ -2010,11 +2012,11 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 .panel-link::before { mask-image: var(--icon-arrow); }
 @media (max-width: 600px) {
   #quota-accounts { overflow: visible; }
-  #quota-accounts th:nth-child(3), #quota-accounts tr:not(.quota-summary) > td:nth-child(3) {
+  #quota-accounts .quota-identity {
     position: sticky; left: 0; z-index: 1; min-width: 156px; width: 156px; max-width: 156px; background: var(--surface);
     box-shadow: 1px 0 var(--line);
   }
-  #quota-accounts th:nth-child(3) { z-index: 2; }
+  #quota-accounts th.quota-identity { z-index: 2; }
   #quota-accounts .quota-account-label { overflow-wrap: anywhere; white-space: normal; }
 }
 

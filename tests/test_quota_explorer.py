@@ -67,7 +67,9 @@ const originalButton=descendants(rows()[0]).find(n=>n.className.includes('codex-
 ui.updateCodexQuotaReadings([{...action,busy:true,operation:{...action.operation,stage:'login'}}]);
 assert(descendants(table).includes(originalButton),'unchanged readings must preserve table controls during progress polling');
 assert(rows()[0].cells[6].textContent.includes('本页查询'));
-assert(rows()[0].cells[1].textContent.includes('机器记录'));
+assert(rows()[0].cells[0].textContent.includes('本页查询'));
+assert(!rows()[0].cells[0].textContent.includes('最后观测值，不代表当前状态'), 'fresh action reading must not be labelled as a machine-history reading');
+assert(rows()[0].cells[2].textContent.includes('机器记录'));
 assert.equal(rows()[0].dataset.observedAt,past.updated_at,'deletion CAS stays on machine observation');
 assert(rows()[1].cells[4].textContent.includes('91%'),'same workspace different member stays separate');
 assert(rows()[2].cells[4].textContent.includes('91%'),'same email different workspace stays separate');
@@ -79,6 +81,7 @@ for (const newer of [observed,'2099-01-01T00:00:00Z']) {
   ui.renderQuotaAccounts({codex:{accounts:[{...past,updated_at:newer,seven_day_used_pct:42}]}});
   assert(rows()[0].cells[4].textContent.includes('42%'));
   assert(!rows()[0].cells[6].textContent.includes('本页查询'));
+  assert(rows()[0].cells[0].textContent.includes('最后观测值，不代表当前状态'));
 }
 ui.renderQuotaAccounts(projection);
 ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:'invalid',seven_day_used_pct:8}},batch_result:action.operation} ]);

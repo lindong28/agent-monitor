@@ -62,6 +62,12 @@
     },
     "numeric-detail-value": {
       "selector": ".codex-account-reading dd, .session-fields dd, .llm-detail-fields dd"
+    },
+    "quota-filter-adjacency": {
+      "expression": "(() => {const b=document.querySelector('#codex-account-actions'), f=document.querySelector('#quota-explorer'), t=document.querySelector('.quota-table-wrap'); return {pass:!!(b&&f&&t&&(b.compareDocumentPosition(f)&4)&&(f.compareDocumentPosition(t)&4)),samples:b&&f&&t?1:0,detail:'Batch workspace precedes quota-only filters and results'};})()"
+    },
+    "history-context": {
+      "expression": "(() => {const w=document.querySelector('.quota-table-wrap'), b=document.querySelector('#quota-past-accounts'); if(!w||!b||b.hidden)return {pass:false,samples:0,detail:'Expanded historical account sample required'};const clip=w.getBoundingClientRect();const nodes=[document.querySelector('.quota-past-toggle'),...b.querySelectorAll('.quota-account-observation')];const visible=el=>{if(!el)return false;const r=document.createRange();r.selectNodeContents(el);const x=r.getBoundingClientRect();return x.width>0&&x.left>=clip.left-1&&x.right<=clip.right+1;};return {pass:nodes.length>1&&nodes.every(visible),samples:nodes.length,detail:'Visible history title and row provenance; scrollLeft='+w.scrollLeft};})()"
     }
   },
   "cases": [
@@ -74,7 +80,8 @@
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       }
     },
     {
@@ -83,7 +90,8 @@
       "state": "账号区域与首个账号详情键盘展开",
       "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
       "exclude": {
-        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case."
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -127,7 +135,8 @@
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -161,7 +170,9 @@
         "table-heading": "透视使用排名列表及键盘可读时间值，不使用表格",
         "badge-font": "默认透视没有身份徽章；分组名为普通文本",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       }
     },
     {
@@ -178,7 +189,9 @@
         "table-heading": "排名列表无表头",
         "badge-font": "排名条目无身份徽章",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       }
     },
     {
@@ -193,7 +206,9 @@
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       }
     },
     {
@@ -210,7 +225,9 @@
         "table-heading": "无留存详情不绘制虚假表格",
         "badge-font": "空详情只有说明，无身份徽章",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       }
     },
     {
@@ -225,7 +242,9 @@
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       }
     },
     {
@@ -237,7 +256,9 @@
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
-        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case."
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -268,7 +289,9 @@
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "table-heading": "网络采用键值列表，无数据表",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "Network identifiers/IP addresses are not measured numeric quantities; preserve proportional text to avoid introducing extra line breaks."
+        "VG-V06.tabular": "Network identifiers/IP addresses are not measured numeric quantities; preserve proportional text to avoid introducing extra line breaks.",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       }
     },
     {
@@ -311,7 +334,8 @@
         "quota-reason": "无匹配状态无配额窗口；原因在默认和历史状态验证",
         "badge-font": "搜索空态无账号徽章；其他状态验证",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -334,7 +358,9 @@
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
-        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case."
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -437,7 +463,9 @@
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -481,7 +509,8 @@
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -523,7 +552,8 @@
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -577,7 +607,8 @@
       "state": "账号详情与批次帮助展开",
       "ready": "document.querySelector('.codex-account-card') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
       "exclude": {
-        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case."
+        "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -638,7 +669,9 @@
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "VG-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "VG-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {
@@ -666,7 +699,9 @@
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
-        "badge-font": "Session detail renders plain identity text and metrics, not a status badge."
+        "badge-font": "Session detail renders plain identity text and metrics, not a status badge.",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
       },
       "steps": [
         {

@@ -1023,6 +1023,7 @@
       row.classList.add("stale");
     }
 
+    row.appendChild(quotaAccountCell(provider, account, display));
     row.appendChild(quotaProviderCell(provider, display));
     const plan = quotaPlanCell(account);
     if (display.quota_source === "account_action") {
@@ -1032,7 +1033,6 @@
       plan.appendChild(source);
     }
     row.appendChild(plan);
-    row.appendChild(quotaAccountCell(provider, account));
     QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell(provider, spec, display)));
     row.appendChild(quotaMachinesCell(account));
     row.appendChild(quotaUpdatedCell(display, stale, display.quota_source === "account_action"
@@ -1111,8 +1111,9 @@
     return reading !== credential;
   }
 
-  function quotaAccountCell(provider, account) {
+  function quotaAccountCell(provider, account, display = account) {
     const cell = document.createElement("td");
+    cell.className = "quota-identity";
     const wrap = document.createElement("div");
     wrap.className = "quota-account-cell";
 
@@ -1120,6 +1121,16 @@
     name.className = "quota-account-label";
     name.textContent = quotaAccountName(account);
     wrap.appendChild(name);
+    if (quotaPresence(account) === "remembered") {
+      // Keep the rendered reading's provenance with the frozen identity column.
+      // A newer account-action reading must not inherit the machine's old time.
+      const observation = document.createElement("span");
+      observation.className = "quota-history-note quota-account-observation";
+      observation.textContent = display.quota_source === "account_action"
+        ? `机器历史账号 · 本页查询 ${formatDate(display.updated_at)}`
+        : `最后观测 ${formatDate(display.updated_at)}；最后观测值，不代表当前状态`;
+      wrap.appendChild(observation);
+    }
     const actions = document.createElement("div");
     actions.className = "quota-account-links";
 

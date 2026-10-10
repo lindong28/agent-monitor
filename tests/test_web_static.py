@@ -546,7 +546,7 @@ process.stdout.write(JSON.stringify({
         header = re.search(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", prose).group(1)
         self.assertEqual(
             re.findall(r">([^<]+)</th>", header),
-            ["服务商", "套餐", "账号", "5h 已用", "7d 已用", "机器", "更新于"],
+            ["账号", "服务商", "套餐", "5h 已用", "7d 已用", "机器", "更新于"],
         )
         # Two files decide one thing. The header row is static markup; the cells
         # under it are emitted in QUOTA_COLUMNS order. Reorder one and every
@@ -894,10 +894,10 @@ function reading(row) {
   return {
     cellCount: row.cells.length,
     rowClass: row.className,
-    providerText: row.cells[0].textContent,
-    providerPillClass: byClass(row.cells[0], "pill")[0]?.className || "",
-    planText: row.cells[1].textContent,
-    accountText: row.cells[2].textContent,
+    providerText: row.cells[1].textContent,
+    providerPillClass: byClass(row.cells[1], "pill")[0]?.className || "",
+    planText: row.cells[2].textContent,
+    accountText: row.cells[0].textContent,
     warningTexts: byClass(row, "status-pill")
       .map((node) => node.textContent)
       .filter((text) => text === "余量偏低" || text === "即将用尽"),

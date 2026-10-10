@@ -3,7 +3,7 @@
   "template": {
     "id": "style:vercel-gateway-console",
     "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json",
-    "sha256": "94fea8412c94f50411fa3e5c4a90afe95f0eccc6725060414b688809b9844c7b"
+    "sha256": "47797c957b4e0b3388031885bac495beb84998e099a6d0184d5de8cde7c2e921"
   },
   "rules": [
     {
@@ -259,6 +259,20 @@
       "description": "Detail values keep tabular numerals",
       "property": "font-variant-numeric",
       "expected": "tabular-nums"
+    },
+    {
+      "id": "quota-filter-adjacency",
+      "role": "quota-filter-adjacency",
+      "kind": "predicate",
+      "source": "docs/design.md#2026-10-10-component-follow-up",
+      "description": "独立批次工作台位于配额筛选之前，不插在筛选及结果之间。"
+    },
+    {
+      "id": "history-context",
+      "role": "history-context",
+      "kind": "predicate",
+      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V06",
+      "description": "历史组标题和既有观测说明在局部横滚后仍与身份关联；读数口径归产品。"
     }
   ]
 }

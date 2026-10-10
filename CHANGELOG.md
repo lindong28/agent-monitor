@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-10
+
+- Keep account identity and historical reading context visible from the left edge through horizontal scrolling, including long plan names. Place the independent Codex batch workspace before quota filters so filters remain next to their results.
+
 ## 2026-10-09
 
 - Align shared account, session, request and network detail fields; stack request labels with values on narrow screens and use neutral session date groups. Keep complete cost-chart amounts inside the canvas. Bind visual checks to the current Vercel Gateway acceptance IDs.
