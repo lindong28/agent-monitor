@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-11
+
+- Serve GUI quota-refresh requests concurrently with local statistics rollup, preserving hourly scheduling and request receipts.
+
 ## 2026-10-04
 
 - Extracted the CLI, Web dashboard, backend and network diagnostics into the independent agent-monitor project; the canonical command is now `agent-monitor`.

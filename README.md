@@ -113,3 +113,5 @@ LLM_GATEWAY_ROOT=/path/to/llm-gateway .venv/bin/python -m unittest discover -s t
 ```
 
 Use a disposable HOME when testing to isolate credentials and user files. Tests use temporary databases and mocked services; live deployment and browser acceptance are separate checks. [Architecture](docs/architecture.md), [documentation index](docs/AGENTS.md) and [changelog](CHANGELOG.md) are the maintenance entry points. `token_cost.py` retains the original byte-identical cross-project arithmetic contract, including its historical naming comments.
+
+GUI collectors serve explicit quota-refresh requests while local statistics rollup is running; the existing collection and hourly quota schedules remain unchanged.
