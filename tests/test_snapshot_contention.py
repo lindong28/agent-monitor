@@ -16,6 +16,69 @@ from tests.test_llm_attempts import LedgerFixture
 
 
 class SnapshotContentionTests(unittest.TestCase):
+    def test_readers_continue_during_snapshot_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            root = path / "generations"
+            first = generation_fixtures.GenerationGCTests.make_db(path / "first.db", 10)
+            old = generation.publish_generation("macbook", first,
+                generation_fixtures.GenerationGCTests.make_meta(first, "2026-08-04T12:00:00Z"), root=root)
+            second = generation_fixtures.GenerationGCTests.make_db(path / "second.db", 20)
+            meta = generation_fixtures.GenerationGCTests.make_meta(second, "2026-08-04T12:01:00Z")
+            entered, release = threading.Event(), threading.Event()
+            copy = generation.shutil.copyfile
+
+            def paused(*args, **kwargs):
+                entered.set()
+                if not release.wait(5):
+                    raise AssertionError("copy test was not released")
+                return copy(*args, **kwargs)
+
+            with mock.patch.object(generation.shutil, "copyfile", side_effect=paused):
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    writer = pool.submit(generation.publish_generation, "macbook", second, meta, root=root)
+                    try:
+                        self.assertTrue(entered.wait(5))
+                        reader = pool.submit(generation.read_current_generation, "macbook", root=root)
+                        try:
+                            current = reader.result(timeout=1)
+                        except TimeoutError:
+                            self.fail("reader blocked behind snapshot copy")
+                        self.assertEqual(current.meta["generation_id"], old.meta["generation_id"])
+                        current.close()
+                        # Another publisher/recovery pass must not delete the
+                        # live preparation while its large copy is in flight.
+                        pool.submit(generation.gc_generations, "macbook", root=root).result(timeout=1)
+                    finally:
+                        release.set()
+                    writer.result(timeout=5)
+            self.assertEqual(list((root / "macbook").glob(".preparing-*")), [])
+
+    def test_abandoned_preparations_are_reaped_and_changed_copy_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            root = path / "generations"
+            first = generation_fixtures.GenerationGCTests.make_db(path / "first.db", 10)
+            old = generation.publish_generation("macbook", first,
+                generation_fixtures.GenerationGCTests.make_meta(first, "2026-08-04T12:00:00Z"), root=root)
+            abandoned = root / "macbook" / ".preparing-abandoned"
+            abandoned.mkdir()
+            (abandoned / "snapshot.db").write_bytes(b"partial")
+            generation.gc_generations("macbook", root=root)
+            self.assertFalse(abandoned.exists())
+            second = generation_fixtures.GenerationGCTests.make_db(path / "second.db", 20)
+            def mutate(previous, candidate):
+                with Path(candidate).open("ab") as handle:
+                    handle.write(b"modified after validation")
+            with mock.patch.object(statistics_snapshot, "ensure_retained", side_effect=mutate):
+                with self.assertRaisesRegex(generation.GenerationValidationError, "changed before publication"):
+                    generation.publish_generation("macbook", second,
+                        generation_fixtures.GenerationGCTests.make_meta(second, "2026-08-04T12:01:00Z"), root=root)
+            current = generation.read_current_generation("macbook", root=root)
+            self.assertEqual(current.meta["generation_id"], old.meta["generation_id"])
+            current.close()
+            self.assertEqual(list((root / "macbook").glob(".preparing-*")), [])
+
     def test_exported_detail_queries_use_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)

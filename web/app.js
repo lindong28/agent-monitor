@@ -1890,7 +1890,8 @@
     };
     let status = initialStatus || await api("/api/sync-status");
     const instance = status.instance_id;
-    let fingerprint = snapshotFingerprint(status);
+    const includeQuota = !options || options.includeQuota !== false;
+    let fingerprint = snapshotFingerprint(status, includeQuota);
     const requested = status.refresh_request || status.refresh_requested || 0;
     const targeted = !(options && options.waitForIdle) && requested > 0;
     const deadline = Date.now() + 720000;
@@ -1914,7 +1915,7 @@
       if (!isCurrent()) return status;
       if (status.instance_id !== instance) throw new Error("刷新期间服务重启，请重试。");
       renderIfCurrent(status);
-      const next = snapshotFingerprint(status);
+      const next = snapshotFingerprint(status, includeQuota);
       if (next !== fingerprint && options && options.onProgress) {
         await options.onProgress(status);
         fingerprint = next;
@@ -1923,9 +1924,9 @@
     return status;
   }
 
-  function snapshotFingerprint(status) {
+  function snapshotFingerprint(status, includeQuota = true) {
     return JSON.stringify([(status.machines || []).map((machine) =>
-      [machine.name, machine.admitted, machine.generation_id]).sort(), status.quota_refresh]);
+      [machine.name, machine.admitted, machine.generation_id]).sort(), includeQuota ? status.quota_refresh : null]);
   }
 
   async function refreshStatistics(options) {
@@ -3326,6 +3327,7 @@
     shortText,
     renderSyncStatus,
     waitForSyncTerminal,
+    snapshotFingerprint,
     refreshStatistics,
     pollFreshness,
     initNetwork,

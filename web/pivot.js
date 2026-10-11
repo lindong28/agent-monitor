@@ -30,11 +30,16 @@
       const generation = ++loadGeneration;
       if (!validDates()) return;
       AgentMonitor.qs("#pivot-status").textContent = "加载中…";
+      // Establish a generation boundary before queries can acquire a view.
+      // Otherwise an old pivot can be paired with two already-new statuses.
       const before = await AgentMonitor.api("/api/sync-status");
       if (!isCurrentLoad(generation)) return;
-      await loadFilterOptions(force, undefined, generation);
-      if (!isCurrentLoad(generation)) return;
-      await loadPivot(false, undefined, generation);
+      // URL filters are available before the option lists have arrived.
+      const initialFilters = Object.fromEntries(filterNames.map((name) => [name, desiredFilterValue(name)]).filter(([, value]) => value));
+      await Promise.all([
+        loadFilterOptions(force, undefined, generation),
+        loadPivot(false, false, generation, initialFilters),
+      ]);
       if (!isCurrentLoad(generation)) return;
       let status = await AgentMonitor.api("/api/sync-status");
       if (!isCurrentLoad(generation)) return;
@@ -42,19 +47,16 @@
       if (status.syncing) {
         status = await AgentMonitor.waitForSyncTerminal(status, {
           isCurrent: () => isCurrentLoad(generation),
+          includeQuota: false,
           onProgress: async () => {
-            await loadFilterOptions(false, false, generation);
-            if (!isCurrentLoad(generation)) return;
-            await loadPivot(false, false, generation);
+            await Promise.all([loadFilterOptions(false, false, generation), loadPivot(false, false, generation)]);
           },
         });
         if (!isCurrentLoad(generation)) return;
         if (status.polling_error) return;
       }
-      if (force || status.completed_at !== before.completed_at) {
-        await loadFilterOptions(false, false, generation);
-        if (!isCurrentLoad(generation)) return;
-        await loadPivot(false, false, generation);
+      if (AgentMonitor.snapshotFingerprint(status, false) !== AgentMonitor.snapshotFingerprint(before, false)) {
+        await Promise.all([loadFilterOptions(false, false, generation), loadPivot(false, false, generation)]);
       }
     }
     AgentMonitor.bindShell(load, { range: false });
@@ -255,14 +257,14 @@
     return filters;
   }
 
-  async function loadPivot(force, allowSync, generation) {
+  async function loadPivot(force, allowSync, generation, filters = selectedFilters()) {
     const group_by = dimensions.join(",") || "none";
     const metric = AgentMonitor.qs("#metric").value;
     const range = AgentMonitor.getRange();
     AgentMonitor.qs("#pivot-status").textContent = "加载中…";
     const data = await AgentMonitor.api(
       "/api/pivot",
-      Object.assign({ group_by, metric, range, ...dateParams(), force: force ? "1" : undefined, sync: allowSync === false ? "0" : undefined }, selectedFilters())
+      Object.assign({ group_by, metric, range, ...dateParams(), force: force ? "1" : undefined, sync: allowSync === false ? "0" : undefined }, filters)
     );
     if (generation !== undefined && !isCurrentLoad(generation)) {
       return;

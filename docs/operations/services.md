@@ -1,5 +1,7 @@
 # agent-monitor service operations
 
+Hub startup prepares its aggregate query view before listening. A single preparation thread rechecks admissions at the existing schedule-check interval (at most ten seconds), and statistics callbacks prepare the view before announcing completion. Invalid configuration or changed snapshot files produce HTTP 503 until preparation completes; individual invalid sources retain the normal admission exclusions. Inspect the `query_view` preparation/error logs and API `Server-Timing` header to distinguish preparation from request processing. `Server-Timing` excludes browser/network waiting. Static assets use ETag revalidation; HTML and JSON remain uncached. See [Explore implementation record](../explore-performance.md) for bounded measurements and deployment status.
+
 Explicit Hub Refresh now starts a separate supervised quota worker. Inspect `quota_refresh` in `/api/sync-status` and the quota-table progress note independently of statistics. The private `state/machine_quota.json` retains matching observations across Hub restarts; preserve it with other state. Participating Mac collectors must include the concurrent quota handler so a busy rollup cannot delay the GUI receipt. Existing schedules and service labels stay unchanged.
 
 ## 2026-10-11 account recovery deployment

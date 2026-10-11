@@ -5,6 +5,7 @@ Current usage and installation belong in the root README; current architecture a
 | Path | Purpose |
 | --- | --- |
 | [architecture.md](architecture.md) | Runtime ownership, data flow and independent dependencies |
+| [explore-performance.md](explore-performance.md) | Explore performance evidence, improvement scope and implementation results |
 | [design.md](design.md) | Shared product visual design, inheritance, exceptions and observed coverage |
 | [operations/services.md](operations/services.md) | Current lifecycle/migration instructions and preserved historical deployment record |
 | [contracts/ux-contract.md](contracts/ux-contract.md) | Existing observable behavior contract |

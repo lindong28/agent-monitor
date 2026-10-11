@@ -32,6 +32,7 @@ import hub
 import sync
 import sync_process
 import query_process
+import query_view
 import quota_sync
 from aggregators import extract_metric, load_all_entries
 from parsers import claude_status, codex
@@ -94,6 +95,7 @@ _SYNC_STATE = {
     "statistics_pending": (),
 }
 SERVER_INSTANCE_ID = uuid.uuid4().hex
+QUERY_VIEW = None
 
 # Host/port this process is serving on, stashed by main() so /api/restart can
 # re-exec with identical arguments.
@@ -141,10 +143,17 @@ def _web_signature():
 BOOT_SIGNATURE = _source_signature()
 
 
+@contextmanager
+def _query_admission():
+    context = QUERY_VIEW.snapshot() if QUERY_VIEW is not None else generation.generation_admission_snapshot()
+    with context as admission:
+        yield admission
+
+
 def overview(query):
     completed_before = _sync_runtime_snapshot()["completed_at"]
     sync_started = _maybe_sync_remotes(query)
-    with generation.generation_admission_snapshot() as admission:
+    with _query_admission() as admission:
         with rollup.use_admitted_generations(admission.admitted):
             return _overview_from_admission(
                 query,
@@ -224,6 +233,14 @@ def _pivot_window(query):
 def pivot_endpoint(query):
     window = _pivot_window(query)
     _maybe_sync_remotes(query)
+    if QUERY_VIEW is None:
+        return _pivot_from_view(query, window)
+    with _query_admission() as admission:
+        with rollup.use_admitted_generations(admission.admitted):
+            return _pivot_from_view(query, window)
+
+
+def _pivot_from_view(query, window):
     if "group_by" in query:
         group_by = _first(query, "group_by", "none")
         return rollup.query_grouped(
@@ -250,9 +267,11 @@ def pivot_endpoint(query):
 def pivot_filters_endpoint(query):
     window = _pivot_window(query)
     _maybe_sync_remotes(query)
-    return rollup.filter_options(
-        time_range=window
-    )
+    if QUERY_VIEW is None:
+        return rollup.filter_options(time_range=window)
+    with _query_admission() as admission:
+        with rollup.use_admitted_generations(admission.admitted):
+            return rollup.filter_options(time_range=window)
 
 
 def sync_status_endpoint(_query):
@@ -347,6 +366,8 @@ def _schedule_reexec():
     def _reexec():
         codex_accounts.manager.close()
         QUOTA_REFRESH.shutdown()
+        if QUERY_VIEW is not None:
+            QUERY_VIEW.close()
         os.execv(
             sys.executable,
             [sys.executable, str(ROOT / "server.py"), "--host", _BIND_HOST, "--port", str(_BIND_PORT)],
@@ -506,13 +527,40 @@ ROUTES = {
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    timeout = 30
+
+    def handle_one_request(self):
+        self._request_started = None
+        return super().handle_one_request()
+
+    def parse_request(self):
+        accepted = super().parse_request()
+        self._request_started = time.monotonic()
+        return accepted
+
+    def end_headers(self):
+        started = getattr(self, "_request_started", None)
+        if started is not None:
+            self.send_header("Server-Timing", "app;dur=%.2f" % ((time.monotonic() - started) * 1000))
+        if self.close_connection and not any(header.lower().startswith(b"connection:")
+                                             for header in getattr(self, "_headers_buffer", ())):
+            self.send_header("Connection", "close")
+        super().end_headers()
+
     def do_HEAD(self):
+        if self.headers.get("Content-Length") or self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
         self._handle_request(send_body=False)
 
     def do_GET(self):
+        if self.headers.get("Content-Length") or self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
         self._handle_request(send_body=True)
 
     def do_POST(self):
+        # Some actions have no body; never reuse their unread input as a request.
+        self.close_connection = True
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/codex-accounts/"):
             self._handle_codex_accounts(parsed.path, post=True)
@@ -692,6 +740,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._serve_static(parsed.path, send_body=send_body)
                 return
             self.send_error(404)
+        except query_view.ViewUnavailable as exc:
+            self._send_json({"error": str(exc)}, status=503, send_body=send_body)
         except llm_attempts.ProjectionError as exc:
             self._send_json(exc.payload(), status=exc.status, send_body=send_body)
         except Exception as exc:
@@ -757,10 +807,21 @@ class Handler(BaseHTTPRequestHandler):
             content_type = "text/markdown"
         if content_type is None:
             content_type = "application/octet-stream"
+        cacheable = path.startswith("/web/") and resolved.suffix != ".html"
+        etag = '"%s"' % hashlib.sha256(data).hexdigest()
+        if cacheable and etag in [part.strip().removeprefix("W/") for part in
+                                 getattr(self, "headers", {}).get("If-None-Match", "").split(",")]:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-cache" if cacheable else "no-store")
+        if cacheable:
+            self.send_header("ETag", etag)
         self.end_headers()
         if send_body:
             self.wfile.write(data)
@@ -814,9 +875,9 @@ def _maybe_sync_remotes(query, *, queued=False, request_receipt=None):
     if force and hub.enabled() and not queued:
         # Explicit quota reads start even if an older statistics round is busy.
         QUOTA_REFRESH.request(sync.load_machine_config().machines)
-    if request_receipt is not None:
-        # Accepting a request needs configuration, not a snapshot read that can
-        # block behind publication's retention/copy/validation lock.
+    # The Hub's prepared-view path schedules from configuration only. Keep the
+    # standalone admission path for its existing direct-query lifecycle.
+    if QUERY_VIEW is not None or request_receipt is not None:
         round_machines = tuple(machine.name for machine in sync.load_machine_config().machines)
     else:
         with generation.generation_admission_snapshot() as admission:
@@ -897,7 +958,7 @@ def _automatic_sync_due(now=None):
 
 def _sync_due(now=None):
     current_time = _aware_now(now)
-    with generation.generation_admission_snapshot() as admission:
+    with _query_admission() as admission:
         for record in admission.records:
             if not record.admitted:
                 return True
@@ -907,6 +968,12 @@ def _sync_due(now=None):
 
 
 def _sync_machine_completed(name, result, *, statistics_only=False):
+    if QUERY_VIEW is not None:
+        # Keep terminal/progress notifications behind query-view publication.
+        try:
+            QUERY_VIEW.refresh()
+        except Exception:
+            logger.exception("statistics completed but query view is unavailable")
     outcome = _normalize_sync_outcomes({name: result}, (name,))[name]
     attempted_at = _utc_timestamp()
     with _SYNC_LOCK:
@@ -1190,7 +1257,7 @@ def _capture_startup_machine_config():
 def _sync_status(now=None, admission=None):
     current_time = _aware_now(now)
     if admission is None:
-        with generation.generation_admission_snapshot() as loaded:
+        with _query_admission() as loaded:
             runtime = _sync_runtime_snapshot(
                 record.machine.name for record in loaded.records
             )
@@ -2346,7 +2413,7 @@ def _json_default(value):
 
 
 def main():
-    global _BIND_HOST, _BIND_PORT
+    global _BIND_HOST, _BIND_PORT, QUERY_VIEW
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=39001)
@@ -2355,6 +2422,9 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     _capture_startup_machine_config()
+    if hub.enabled():
+        QUERY_VIEW = query_view.QueryView()
+        QUERY_VIEW.start(interval=min(10, hub.interval()))
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     logger.info("agent-monitor listening on http://%s:%s", args.host, args.port)
     stop = threading.Event()
@@ -2386,6 +2456,8 @@ def main():
             codex_accounts.manager.close()
         finally:
             QUOTA_REFRESH.shutdown()
+            if QUERY_VIEW is not None:
+                QUERY_VIEW.close()
             server.server_close()
 
 

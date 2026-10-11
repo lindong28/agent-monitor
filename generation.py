@@ -167,6 +167,7 @@ class CurrentGeneration:
     generation_dir: Path
     meta: dict
     _lease: object = field(default=None, repr=False, compare=False)
+    _signature: object = field(default=None, repr=False, compare=False)
 
     def close(self):
         if self._lease is not None:
@@ -263,30 +264,64 @@ def publish_generation(
     # Keep the history being checked alive without excluding new readers. A
     # competing publication invalidates the check, so retry against its result.
     from statistics_snapshot import ensure_retained, StatisticsSnapshotError
-    while True:
-        previous = read_current_generation(name, root=root)
-        try:
-            previous_id = previous.meta["generation_id"] if previous else None
-            if previous:
-                try:
-                    ensure_retained(previous.db_path, snapshot_path)
-                except StatisticsSnapshotError as exc:
-                    raise GenerationValidationError(str(exc)) from exc
-            with _machine_gc_lock(machine_dir, exclusive=True):
-                _recover_pending_locked(machine_dir)
-                if _read_pointer(machine_dir / "current") != previous_id:
-                    continue
-                return _publish_generation_locked(
-                    name,
-                    snapshot_path,
-                    meta,
-                    machine_dir=machine_dir,
-                    now=now,
-                    phase_hook=phase_hook,
-                )
-        finally:
-            if previous:
-                previous.close()
+    with _prepare_generation(machine_dir, snapshot_path, meta, now) as prepared:
+        staging_dir, published_meta, signature = prepared
+        while True:
+            previous = read_current_generation(name, root=root)
+            try:
+                previous_id = previous.meta["generation_id"] if previous else None
+                if previous:
+                    try:
+                        ensure_retained(previous.db_path, staging_dir / "snapshot.db")
+                    except StatisticsSnapshotError as exc:
+                        raise GenerationValidationError(str(exc)) from exc
+                with _machine_gc_lock(machine_dir, exclusive=True):
+                    if name in persisted_retired_names(root):
+                        raise GenerationRetiredError("machine %s is persistently retired" % name)
+                    _recover_pending_locked(machine_dir)
+                    if _read_pointer(machine_dir / "current") != previous_id:
+                        continue
+                    if _generation_file_signature(staging_dir) != signature:
+                        raise GenerationValidationError("prepared generation changed before publication")
+                    return _publish_generation_locked(
+                        name, staging_dir, published_meta,
+                        machine_dir=machine_dir, phase_hook=phase_hook,
+                    )
+            finally:
+                if previous:
+                    previous.close()
+
+
+@contextmanager
+def _prepare_generation(machine_dir, snapshot_path, meta, now):
+    staging_dir = machine_dir / (".preparing-" + uuid.uuid4().hex)
+    published_meta = dict(meta, published_at=_timestamp(now))
+    _validate_meta_shape(published_meta)
+    # Creation and lease acquisition are atomic with respect to temp cleanup.
+    with _machine_gc_lock(machine_dir, exclusive=True):
+        _recover_pending_locked(machine_dir)
+        _cleanup_machine_temps_locked(machine_dir)
+        _gc_generations_locked(machine_dir, extra_retained={meta["generation_id"]})
+        _preflight_copy_space(snapshot_path, machine_dir)
+        staging_dir.mkdir(mode=0o700)
+        fd = os.open(staging_dir / ".prepare.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        lease = _GenerationLease(staging_dir / ".prepare.lock", fd)
+    try:
+        shutil.copyfile(snapshot_path, staging_dir / "snapshot.db")
+        _fsync_file(staging_dir / "snapshot.db")
+        _write_json(staging_dir / "meta.json", published_meta)
+        signature = _generation_file_signature(staging_dir)
+        _validate_generation(staging_dir / "snapshot.db", published_meta, allow_unpublished=False)
+        if signature != _generation_file_signature(staging_dir):
+            raise GenerationValidationError("prepared generation changed during validation")
+        _fsync_directory(staging_dir)
+        yield staging_dir, published_meta, signature
+    finally:
+        with _machine_gc_lock(machine_dir, exclusive=True):
+            if staging_dir.exists():
+                shutil.rmtree(staging_dir)
+            lease.close()
 
 
 def bind_source_identity(
@@ -335,35 +370,23 @@ def bind_source_identity(
 
 def _publish_generation_locked(
     name,
-    snapshot_path,
-    meta,
+    staging_dir,
+    published_meta,
     *,
     machine_dir,
-    now,
     phase_hook,
 ):
     _recover_pending_locked(machine_dir)
     _cleanup_machine_temps_locked(machine_dir)
-    staging_dir = machine_dir / (".staging-" + uuid.uuid4().hex)
+    meta = published_meta
     final_dir = machine_dir / meta["generation_id"]
     _gc_generations_locked(machine_dir, extra_retained={meta["generation_id"]})
     old_current = _read_pointer(machine_dir / "current")
     old_previous = _read_pointer(machine_dir / "previous")
-    published_meta = dict(meta)
-    published_meta["published_at"] = _timestamp(now)
-    _validate_meta_shape(published_meta)
 
     final_created = False
     try:
-        _preflight_copy_space(snapshot_path, machine_dir)
-        staging_dir.mkdir(mode=0o700)
-        shutil.copyfile(snapshot_path, staging_dir / "snapshot.db")
-        _fsync_file(staging_dir / "snapshot.db")
-        _write_json(staging_dir / "meta.json", published_meta)
-        _validate_generation(
-            staging_dir / "snapshot.db", published_meta, allow_unpublished=False
-        )
-        _fsync_directory(staging_dir)
+        (staging_dir / ".prepare.lock").unlink()
         if final_dir.exists():
             existing = _load_generation(name, final_dir)
             if old_current == meta["generation_id"]:
@@ -393,6 +416,9 @@ def _publish_generation_locked(
             final_created = True
             existing = None
 
+        # These exact files were checked before the lock and re-statted inside
+        # it. Rename changes their path, not the validated bytes or signature.
+        _remember_validation(final_dir, _generation_file_signature(final_dir))
         pending = {
             "schema_version": 1,
             "old_generation_id": old_current,
@@ -490,6 +516,21 @@ def _cleanup_machine_temps_locked(machine_dir):
     temporary_prefixes = (".staging-", ".current-", ".previous-", "..publication-pending.json-")
     changed = False
     for child in machine_dir.iterdir():
+        if child.name.startswith(".preparing-") and child.is_dir() and not child.is_symlink():
+            lock_path = child / ".prepare.lock"
+            if _lease_is_active(lock_path):
+                continue
+            fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                shutil.rmtree(child)
+                changed = True
+            finally:
+                os.close(fd)
+            continue
         if not child.name.startswith(temporary_prefixes):
             continue
         if child.is_symlink() or not child.is_dir():
@@ -627,6 +668,7 @@ def read_current_generation(name, *, root=DEFAULT_GENERATIONS_ROOT):
             generation_dir=loaded.generation_dir,
             meta=loaded.meta,
             _lease=lease,
+            _signature=loaded._signature,
         )
     except BaseException:
         lease.close()
@@ -1175,17 +1217,23 @@ def _load_generation(name, generation_dir):
         _validate_generation(snapshot_path, meta, allow_unpublished=False)
     if _generation_file_signature(generation_dir) != signature:
         raise GenerationValidationError("generation changed while being read")
-    with _READ_VALIDATIONS_LOCK:
-        _READ_VALIDATIONS[key] = signature
-        _READ_VALIDATIONS.move_to_end(key)
-        while len(_READ_VALIDATIONS) > _READ_VALIDATIONS_LIMIT:
-            _READ_VALIDATIONS.popitem(last=False)
+    _remember_validation(generation_dir, signature)
     return CurrentGeneration(
         host=name,
         db_path=snapshot_path,
         generation_dir=generation_dir,
         meta=meta,
+        _signature=signature,
     )
+
+
+def _remember_validation(directory, signature):
+    key = str(Path(directory).resolve())
+    with _READ_VALIDATIONS_LOCK:
+        _READ_VALIDATIONS[key] = signature
+        _READ_VALIDATIONS.move_to_end(key)
+        while len(_READ_VALIDATIONS) > _READ_VALIDATIONS_LIMIT:
+            _READ_VALIDATIONS.popitem(last=False)
 
 
 def _generation_file_signature(directory):

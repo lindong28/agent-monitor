@@ -245,7 +245,7 @@ class GenerationTests(unittest.TestCase):
             staging_sync = next(
                 index
                 for index, event in enumerate(events)
-                if event[0] == "directory" and event[1].startswith(".staging-")
+            if event[0] == "directory" and event[1].startswith(".preparing-")
             )
             generation_parent_sync = events.index(("directory", "macbook"))
             pointer_switch = events.index(("pointer", "current"))

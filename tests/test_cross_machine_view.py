@@ -1835,6 +1835,7 @@ let resolveA;
 let resolveB;
 const rendered = [];
 global.AgentMonitor = {
+  snapshotFingerprint(status) { return JSON.stringify(status.machines || []); },
   qs(selector) { return nodes[selector] || null; },
   qsa(selector) { return selector === "[data-filter-control]" ? [controls["#agent-filter"], controls["#project-filter"], controls["#model-filter"], controls["#machine-filter"]] : []; },
   params() { return new URLSearchParams(page.search); },

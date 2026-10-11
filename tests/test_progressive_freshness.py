@@ -12,6 +12,66 @@ import sync
 
 
 class ProgressiveFreshnessTests(unittest.TestCase):
+    def test_explore_queries_start_together_after_status_barrier_with_url_filters(self):
+        result = self.run_browser(BROWSER_NODES + r'''
+const pending = [], requested = [];
+qs("#metric").selectedOptions = [{textContent: "成本"}];
+const params = new URLSearchParams("range=30d&group_by=project&machine=selected");
+const status = {machines: [{name: "selected", admitted: true, generation_id: "one"}], syncing: false};
+global.AgentMonitor = {
+  pageScope: () => () => true, qs, qsa: () => [], params: () => params,
+  autoTimeDim: () => "day", getRange: () => qs("#range").value,
+  integer: value => String(value),
+  bindShell() {}, watchPageData() {}, renderSyncStatus() {},
+  snapshotFingerprint: s => JSON.stringify(s.machines),
+  api: (path, query) => {requested.push({path, query}); return new Promise(resolve => pending.push({path, resolve}));},
+};
+eval(fs.readFileSync("web/pivot.js", "utf8"));
+(async () => {
+  const loading = window.AgentMonitorPivot.init();
+  if (requested.length !== 1 || requested[0].path !== "/api/sync-status") throw Error("queries crossed status barrier");
+  pending.shift().resolve(status);
+  await new Promise(resolve => setImmediate(resolve));
+  const first = requested.slice();
+  if (first.length !== 3) throw Error("independent requests were serialized");
+  for (const call of pending.splice(0)) call.resolve(call.path === "/api/pivot" ? {dimensions: ["project"], rows: []}
+    : call.path === "/api/pivot-filters" ? {machine: ["selected"]} : status);
+  await new Promise(resolve => setImmediate(resolve));
+  for (const call of pending.splice(0)) call.resolve(status);
+  await loading;
+  process.stdout.write(JSON.stringify({first, selected: qs("#machine-filter").value, ready: qs("#pivot-status").textContent}));
+})().catch(e => {console.error(e); process.exit(1);});
+''')
+        self.assertEqual([item["path"] for item in result["first"]],
+                         ["/api/sync-status", "/api/pivot-filters", "/api/pivot"])
+        self.assertEqual(result["first"][2]["query"]["machine"], "selected")
+        self.assertEqual(result["selected"], "selected")
+        self.assertEqual(result["ready"], "无数据")
+
+    def test_statistics_polling_ignores_quota_only_but_default_observes_it(self):
+        result = self.run_browser(r'''
+const fs = require("fs");
+global.window = {location: {origin: "http://test"}};
+global.document = {readyState: "loading", addEventListener() {}, querySelector() {return null;}};
+global.setTimeout = fn => fn();
+let replies = [];
+global.fetch = async () => ({ok: true, json: async () => replies.shift()});
+eval(fs.readFileSync("web/app.js", "utf8"));
+function status(quota, gen, syncing) {return {instance_id: "one", syncing,
+  machines: [{name: "one", admitted: true, generation_id: gen}], quota_refresh: {requested: quota}};}
+(async () => {
+  const counts = [];
+  for (const includeQuota of [false, true]) {
+    replies = [status(2, "old", true), status(2, "new", false)];
+    let count = 0;
+    await window.AgentMonitor.waitForSyncTerminal(status(1, "old", true), {includeQuota, onProgress: async () => count++});
+    counts.push(count);
+  }
+  process.stdout.write(JSON.stringify(counts));
+})().catch(e => {console.error(e); process.exit(1);});
+''')
+        self.assertEqual(result, [1, 2])
+
     def run_browser(self, script):
         result = subprocess.run(["node", "-e", script], cwd=Path(__file__).resolve().parents[1],
                                 capture_output=True, text=True, timeout=5)

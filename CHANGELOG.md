@@ -3,6 +3,7 @@
 ## 2026-10-11
 
 - Use HTTP directly for isolated Codex account messages. Preserve safe failure categories and the newest pre/post-send quota reading; query quota once after failed or uncertain sends without replaying the message.
+- Prepare validated Hub aggregate views before requests, keep readers moving during snapshot copy/validation, and load Explore filters and results concurrently. Reuse HTTP connections and revalidate cached assets; quota-only changes no longer recompute Explore statistics.
 
 - Refresh machine quotas independently of statistics export and publication, including during an ongoing sync. Show separate quota progress, persist matching observations, retain old values on failure, and serve GUI quota requests while local rollup is busy.
 

@@ -168,7 +168,7 @@ def use_admitted_generations(currents):
     if getattr(_PINNED_GENERATIONS, "value", None) is not None:
         raise RuntimeError("admitted generation snapshots cannot be nested")
     _PINNED_GENERATIONS.value = tuple(
-        AdmittedGeneration(current.host, current.db_path)
+        AdmittedGeneration(current.host, current.db_path, _source=current)
         for current in currents
     )
     try:
