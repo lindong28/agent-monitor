@@ -32,6 +32,7 @@ import hub
 import sync
 import sync_process
 import query_process
+import quota_sync
 from aggregators import extract_metric, load_all_entries
 from parsers import claude_status, codex
 from parsers.accounts import quota_identity
@@ -54,6 +55,8 @@ _ACCOUNT_MEMORY_DELETED_AT_EPOCH = {}
 _ACCOUNT_MEMORY_VERSION = 2
 _UNSPECIFIED_ACCOUNT_LABEL = object()
 _ACCOUNT_MEMORY_PATH = ROOT / "state" / "account_memory.json"
+QUOTA_REFRESH = quota_sync.Manager(ROOT / "state" / "machine_quota.json",
+                                  on_complete=lambda: _remember_accounts_after_sync_publish())
 _ACCOUNT_MEMORY_ENTRY_FIELDS = frozenset(
     {
         "provider",
@@ -343,7 +346,7 @@ def _compile_check():
 def _schedule_reexec():
     def _reexec():
         codex_accounts.manager.close()
-        sync_process.shutdown()
+        QUOTA_REFRESH.shutdown()
         os.execv(
             sys.executable,
             [sys.executable, str(ROOT / "server.py"), "--host", _BIND_HOST, "--port", str(_BIND_PORT)],
@@ -808,6 +811,9 @@ def _maybe_sync_remotes(query, *, queued=False, request_receipt=None):
     force = _first(query, "force", "0") == "1"
     if not force and not _automatic_sync_due():
         return False
+    if force and hub.enabled() and not queued:
+        # Explicit quota reads start even if an older statistics round is busy.
+        QUOTA_REFRESH.request(sync.load_machine_config().machines)
     if request_receipt is not None:
         # Accepting a request needs configuration, not a snapshot read that can
         # block behind publication's retention/copy/validation lock.
@@ -935,13 +941,14 @@ def _run_sync_round(round_machines=()):
     completed_round_machines = tuple(round_machines)
     completed_at = None
     observations = None
+    quota_ticket = QUOTA_REFRESH.status()["requested"] if hub.enabled() else 0
     try:
         with _SYNC_LOCK:
             quota = _SYNC_STATE["round_quota_refresh"]
-        # Each machine publishes statistics, then quota, independently of peers.
+        # Hub quota has its own worker and does not publish a statistics DB.
         collect = sync_process.sync_all if hub.enabled() else sync.sync_all
         results = collect(
-            quota_refresh=quota, progressive=quota and hub.enabled(),
+            quota_refresh=quota and not hub.enabled(), progressive=False,
             on_statistics=lambda name, result: _sync_machine_completed(name, result, statistics_only=True),
             on_complete=_sync_machine_completed,
         )
@@ -981,6 +988,10 @@ def _run_sync_round(round_machines=()):
                 observations.get(name), completed_at, reason
             )
     finally:
+        if quota_ticket:
+            with _SYNC_LOCK:
+                _SYNC_STATE["phase"] = "quota"
+            QUOTA_REFRESH.wait(quota_ticket)
         _remember_accounts_after_sync_publish()
         completed_at = completed_at or _utc_timestamp()
         if observations is None:
@@ -1257,6 +1268,7 @@ def _sync_status_from_admission(admission, current_time, runtime):
             )}
     return {
         "instance_id": SERVER_INSTANCE_ID,
+        "quota_refresh": QUOTA_REFRESH.status() if hub.enabled() else None,
         "refresh_requested": runtime.get("refresh_requested", 0),
         "refresh_completed": runtime.get("refresh_completed", 0),
         "queued_refresh": runtime.get("queued_refresh", False),
@@ -1591,6 +1603,10 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
     signed_out = {"claude": [], "codex": []}
     for current in admission.admitted:
         rate_limits = current.meta.get("rate_limits")
+        if hub.enabled():
+            config = getattr(admission, "config", None)
+            machine = getattr(config, "by_name", {}).get(current.host)
+            rate_limits = QUOTA_REFRESH.merge(current, machine)
         if not isinstance(rate_limits, dict):
             rate_limits = {}
         for provider, buckets in grouped.items():
@@ -2369,7 +2385,7 @@ def main():
         try:
             codex_accounts.manager.close()
         finally:
-            sync_process.shutdown()
+            QUOTA_REFRESH.shutdown()
             server.server_close()
 
 

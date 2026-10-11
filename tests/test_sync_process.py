@@ -113,7 +113,8 @@ sync_process._worker()
                                  refresh_requested=1, pending_machines=("fast", "slow"),
                                  statistics_pending=("fast", "slow"), phase="statistics")
         def collect(**kwargs):
-            self.assertTrue(kwargs['progressive'])
+            self.assertFalse(kwargs['progressive'])
+            self.assertFalse(kwargs['quota_refresh'])
             ok, fail = sync_process.Outcome(True), sync_process.Outcome(False, 'offline')
             kwargs['on_statistics']('fast', ok)
             self.assertIn('fast', server._SYNC_STATE['pending_machines'])

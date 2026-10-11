@@ -52,6 +52,30 @@ class GuiQuotaTests(unittest.TestCase):
         with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(exporter, "_rate_limits", return_value=self.limits):
             hub.collect()
 
+    def test_quota_request_is_served_while_statistics_are_blocked(self):
+        (self.state / "quota-collection-at").write_text(str(time.time()))
+        statistics_started, release = threading.Event(), threading.Event()
+        def statistics():
+            statistics_started.set()
+            release.wait(3)
+            return {}
+        with mock.patch.object(rollup, "run", side_effect=statistics), \
+                mock.patch.object(exporter, "_rate_limits", return_value=self.limits):
+            collector = threading.Thread(target=hub.collect)
+            collector.start()
+            try:
+                self.assertTrue(statistics_started.wait(1))
+                hub._write_quota_message(self.request, {"nonce": "b" * 32})
+                deadline = time.monotonic() + 1
+                while not self.receipt.exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue(self.receipt.exists(), "quota waited for local statistics")
+                self.assertEqual(json.loads(self.receipt.read_text())["nonce"], "b" * 32)
+                self.assertTrue(collector.is_alive())
+            finally:
+                release.set()
+                collector.join(3)
+
     def test_idle_collector_receipt_bypasses_hourly_schedule_and_uses_original_result(self):
         (self.state / "quota-collection-at").write_text(str(time.time()))
         calls = []

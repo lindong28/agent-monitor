@@ -144,6 +144,24 @@ window.AgentMonitor.waitForSyncTerminal({instance_id:'hub',refresh_request:1,ref
         result = subprocess.run(["node", "-e", script], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_quota_progress_reloads_without_a_new_statistics_generation(self):
+        script = r'''
+const fs = require('fs'), assert = require('assert');
+global.window = {location:{origin:'http://example.test',pathname:'/',search:''},history:{replaceState(){}}};
+global.document = {readyState:'loading',addEventListener(){},querySelector(){return null},querySelectorAll(){return []}};
+global.setTimeout = cb => { cb(); return 1; };
+const base = {instance_id:'hub',refresh_request:1,refresh_requested:1,refresh_completed:0,syncing:true,
+  machines:[{name:'macmini',admitted:true,generation_id:'unchanged'}],quota_refresh:{revision:0}};
+let polls=0, progress=[];
+global.fetch=async url => ({ok:true,json:async()=>url.pathname==='/api/timezone'?{timezone:'UTC'}:
+  Object.assign({},base,{quota_refresh:{revision:1},refresh_completed:++polls===2?1:0})});
+eval(fs.readFileSync('web/app.js','utf8'));
+window.AgentMonitor.waitForSyncTerminal(base,{onProgress:async s=>progress.push(s.refresh_completed)})
+ .then(()=>assert.deepStrictEqual(progress,[0])).catch(e=>{console.error(e);process.exitCode=1;});
+'''
+        result = subprocess.run(["node", "-e", script], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_request_receipt_survives_later_request_before_response(self):
         server._reset_sync_state_for_tests()
         admission = SimpleNamespace(records=())

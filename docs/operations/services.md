@@ -1,5 +1,7 @@
 # agent-monitor service operations
 
+Explicit Hub Refresh now starts a separate supervised quota worker. Inspect `quota_refresh` in `/api/sync-status` and the quota-table progress note independently of statistics. The private `state/machine_quota.json` retains matching observations across Hub restarts; preserve it with other state. Participating Mac collectors must include the concurrent quota handler so a busy rollup cannot delay the GUI receipt. Existing schedules and service labels stay unchanged.
+
 ## Account child cleanup
 
 The local lifecycle drains account children on reexec and SIGTERM, and refuses reexec if cleanup fails. CLI stop allows up to ten seconds before forced termination. When diagnosing existing zombies, capture parent/child PIDs and check for active account operations first; a full stop/start replaces the old parent, whereas same-PID reexec cannot reclaim a child whose owner was lost by an earlier execution. Verify old PIDs disappear and `/api/health?asset_watch=1` returns current health after restart. Never retry an interrupted message automatically. Source and isolated regression evidence do not substitute for that live check.

@@ -8,6 +8,7 @@ import plistlib
 import re
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -181,16 +182,17 @@ def collect():
     """One bounded scheduled job. No dependency on the central server or SSH."""
     import rollup
 
-    result = rollup.run()
     stamp = ROOT / "state" / "quota-collection-at"
     try:
         last = float(stamp.read_text())
     except (FileNotFoundError, ValueError):
         last = 0
     quota_due = time.time() - last >= configuration()["quota_interval_seconds"]
-    nonce = _pending_quota_nonce()
-    quota_due = quota_due or nonce is not None
-    if quota_due:
+    stopping = threading.Event()
+    queried = threading.Event()
+    failures = []
+
+    def query(nonce):
         import exporter
         # Provider refresh has its own deadlines and persists its observed state.
         limits = exporter._rate_limits(refresh=True)
@@ -198,8 +200,33 @@ def collect():
             _write_quota_message(ROOT / "state" / "quota-refresh-receipt.json",
                                  {"nonce": nonce, "rate_limits": limits})
         stamp.write_text(str(time.time()))
+        queried.set()
+
+    def serve_quota():
+        try:
+            nonce = _pending_quota_nonce()
+            if quota_due or nonce is not None:
+                query(nonce)
+            while not stopping.wait(QUOTA_POLL_INTERVAL):
+                nonce = _pending_quota_nonce()
+                if nonce is not None:
+                    query(nonce)
+        except Exception as exc:
+            failures.append(exc)
+
+    # The collector owns this thread and joins it before exiting. Requests can
+    # arrive while rollup holds its lock; quota reads do not require that lock.
+    worker = threading.Thread(target=serve_quota, name="agent-monitor-gui-quota")
+    worker.start()
+    try:
+        result = rollup.run()
+    finally:
+        stopping.set()
+        worker.join()
+    if failures:
+        raise failures[0]
     print("agent-monitor collection: local statistics saved; Quota %s. Central transfer is independent."
-          % ("queried" if quota_due else "using its hourly schedule"))
+          % ("queried" if queried.is_set() else "using its hourly schedule"))
     return result
 
 

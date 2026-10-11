@@ -1679,6 +1679,7 @@
   }
 
   function renderSyncStatus(status) {
+    renderQuotaRefreshStatus(status?.quota_refresh);
     const coverageElement = qs("#sync-coverage");
     const summaryElement = qs("#sync-summary");
     const machineList = qs("#sync-machines");
@@ -1706,6 +1707,27 @@
     machineList.innerHTML = (status.machines || []).map(renderMachineStatus).join("");
     renderSpendCoverage(status.machines || []);
     revealSyncDetailOnTrouble(Boolean(warnings || status.polling_error));
+  }
+
+  function renderQuotaRefreshStatus(status) {
+    const table = qs("#quota-accounts");
+    if (!table || !status) return;
+    let note = qs("#quota-refresh-status");
+    if (!note) {
+      note = document.createElement("p");
+      note.id = "quota-refresh-status";
+      note.className = "quota-scope";
+      note.setAttribute("role", "status");
+      table.parentElement.before(note);
+    }
+    const pending = status.pending_machines || [];
+    const failed = Object.keys(status.errors || {});
+    note.textContent = status.running
+      ? `正在查询配额${pending.length ? "：" + pending.join("、") : ""} · 查询结果会直接显示`
+      : status.cache_error || (failed.length
+        ? `配额查询未全部完成：${failed.join("、")} · 保留上次读数，详情见采集说明`
+        : status.completed ? "配额查询已完成 · 统计同步单独进行" : "");
+    note.hidden = !note.textContent;
   }
 
   // The Spend figures are fleet totals, so a machine whose refresh failed is
@@ -1902,8 +1924,8 @@
   }
 
   function snapshotFingerprint(status) {
-    return JSON.stringify((status.machines || []).map((machine) =>
-      [machine.name, machine.admitted, machine.generation_id]).sort());
+    return JSON.stringify([(status.machines || []).map((machine) =>
+      [machine.name, machine.admitted, machine.generation_id]).sort(), status.quota_refresh]);
   }
 
   async function refreshStatistics(options) {
