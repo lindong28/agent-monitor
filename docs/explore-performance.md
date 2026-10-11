@@ -1,6 +1,6 @@
 # Explore 性能缺口与实施记录
 
-状态：实施中。用户要求先记录缺口和建议，再据此改进；目标入口为 `http://macstudio:39001/explore?range=30d`。
+状态：本轮改进已实施并部署 MacStudio，2026-10-11 完成现场验证。用户要求先记录缺口和建议，再据此改进；目标入口为 `http://macstudio:39001/explore?range=30d`。
 
 ## 已取得的证据
 
@@ -55,13 +55,13 @@
 - [x] 实现读取路径隔离及发布准备，覆盖配置切换、失败、代际切换和租约竞争。
 - [x] 实现 Explore 并发加载、统计变化检测及 HTTP 条件缓存。
 - [x] 执行相关 Python/Node 回归和一轮变更审查；一次 HIGH 修复后定向复核通过，无遗留 finding。
-- [ ] 本地提交并整合 main，部署 MacStudio，以同一入口核对源码身份与浏览器行为。
+- [x] 本地提交并整合 main，部署 MacStudio，以同一入口核对源码身份与浏览器行为。
 
 隔离开发树：`/Users/lindong/research/agent-monitor-explore-read-model`；分支：`perf/explore-read-model-20261011`。测试使用隔离 HOME/state；不修改他人工作树、不 push。
 
 ## 实施结果
 
-待填写。任何范围调整、未达成项及其归属在此记录。
+本轮五项实施改进均已完成。增量传输仍为有条件的后续方向，没有新增同步协议或监控服务。
 
 实施前新增复制竞争回归：冻结 snapshot copy 后读取 current，旧实现稳定在 1 秒读取期限超时；现有 46 项 generation/GC/聚合测试通过。
 
@@ -70,3 +70,27 @@
 实现审查发现并修复一项 HIGH：首个状态与 pivot 完全并行会把旧统计配上新代际状态，因此恢复首次状态屏障，只并行 filters/pivot。另同步架构文档中过时的锁内复制描述。修复前的全量 921 项回归仅剩基线相同的 9 个失败和 1 个错误；已在 ddd27a6 隔离归档逐一复现，证据位于 `~/.local/share/agent-monitor-diagnostics/20261011-explore/baseline-existing-failures.txt`。它们涉及 Gateway schema/projection 预期和 account-memory 测试 mock，未在本性能任务中修改，归 agent-monitor 既有测试维护。
 
 变更审查复核通过：状态屏障回归在当前代码退出 0，删除 await 的内存变异退出 1；19 项相关前端测试通过。全量最终复跑 921 项（87.995 秒），仅有已在基线复现的 9 失败/1 错误，没有本改动新增失败。真实部署前的新基线为 MacStudio `e459642`、本地 main `2008c5a`，均包含另一会话刚完成的账号恢复改动；部署须在这些版本上保留并整合本改动。
+
+
+### 最终验证与部署
+
+本地实现提交 `30f8af8c7d5188dc29eb183f54e34553303ae0f6` 快进整合到 main，保留 `2008c5a` 的账号恢复改动。MacStudio 有独立历史，因此在其 `e459642` 上生成部署提交 `02d1f040db0cafc3903dc538710ab4b8ad25f048`，经 Git bundle 快进后只重启 `com.agent-monitor.hub`；未执行 git push。六个改动运行文件的 SHA256 在本地实现与远端部署一致。state symlink 保留 inode 5804813 和目标 `/Users/lindong/.local/share/agent-monitor/state`。
+
+部署 health 为 `ok=true`、`stale=false`，instance `c5c77737849a4af7893dd9e7607e1d9e`，signature `6fa3a14286cef7cc`、web_signature `2268f805c579a350`。本地整合版本 199 项相关测试全部通过（16.239 秒）。远端历史上的部署候选同组 199 项为 197 通过、2 个旧 UI 断言失败；两项均在部署前 `e459642` 独立归档复现，分别为 quota 表列顺序和历史行 selector 预期。测试维护归 agent-monitor 既有测试维护，本次不扩入性能修复。
+
+同一客户端、部署前后分别新建隔离 headless 浏览器，每个浏览器连续访问三次目标 `range=30d`。下表的就绪时间是探针读到页面“就绪”时的 navigation-relative 时间，包含观测开销，不是精确首绘时刻或 P95；OS 缓存未清空，三次样本不能作长期延迟保证。
+
+| 观测 | 部署前 | 部署后 |
+| --- | --- | --- |
+| 三次就绪观测 | 531.3 / 437.1 / 396.7 ms | 431.4 / 351.2 / 298.7 ms |
+| 五项主要静态资源首次传输 | 479,169 B | 479,688 B |
+| 同一浏览器后两次主要资源传输 | 每次 479,169 B | 每次 1,500 B（条件缓存响应） |
+| filters / pivot 请求起点 | 串行 | 首次分别 240.4 / 240.6 ms，保留前置状态屏障 |
+
+实际交互覆盖两个机器值（macstudio / macbook）、两个时间范围（30d / 7d）：切换后页面就绪，URL 和请求筛选同步，排名为两行。另直接打开 `?range=7d&machine=macstudio`，控件和首次 pivot 请求均保留 URL 筛选。总览正常呈现 14 条 quota 表行，overview 请求总耗时 27.1 ms、服务端 14.94 ms。早期探针误用不存在的排名/配额 selector 所得零行不是产品失败；此处采用页面真实 DOM selector 重新观察。
+
+部署后的直接 API 样本：sync-status / filters / pivot 总耗时 24.6 / 23.5 / 28.9 ms，Server-Timing 为 1.43 / 3.18 / 2.24 ms；四个配置来源均已准入，pivot 返回 54 行。Hub 日志出现两次已准备视图记录，耗时 0.209 / 0.749 秒，所读日志尾段无准备失败。它们证明准备机制运行和请求计时可观测；未精确对齐一次真实后台准备与页面请求，不能据此宣称已测得重叠窗口的线上延迟上界。复制/准备暂停时的读者与 GC 行为由隔离竞争回归覆盖。
+
+原始证据位于本机 `~/.local/share/agent-monitor-diagnostics/20261011-explore/`：`browser-before.json`、`browser-after.json`、`browser-final.json`、`deployed-api.json`、`integrated-tests.txt`、`deployment-variant-tests.txt`、`deployment-baseline-failures.txt` 和全量/基线测试记录。服务部署身份另见 operations/services.md。
+
+本轮实现与评审未处置 finding：无。范围外事项：既有全量及远端 UI 测试失败按上文保留证据；MacBook 同步失败的当前原因未核实，保留既有服务状态，不将其归因为本轮 Explore 改动。后续若采集/传输成为主导项，再由 agent-monitor 同步链路任务取得读数并设计增量传输。本轮原始请求（诊断、文件记录、据记录改进与真实入口验证）均已完成，没有在飞任务。
