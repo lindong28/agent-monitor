@@ -37,6 +37,8 @@ agent-monitor stop
 
 The default local address is `http://127.0.0.1:39001`, listening on `0.0.0.0`; standalone mode advances to a free port when needed and saves it in `state/port`. The equivalent lifecycle wrappers are [start.sh](start.sh), [stop.sh](stop.sh), [status.sh](status.sh) and [uninstall.sh](uninstall.sh). Uninstall retains state and source. See [service operations](docs/operations/services.md) before changing an existing deployment.
 
+Restart and SIGTERM shutdown stop admitting account operations, cancel active account work and reap the owned child processes. Restart is refused if account cleanup cannot be confirmed. The CLI waits up to ten seconds for graceful shutdown before its existing forced-stop fallback; it returns sooner when the server exits. Interrupted messages are never automatically replayed. To clear children left by an older execution, use a full `agent-monitor stop` followed by `agent-monitor start` after checking account work is idle.
+
 | Service | Default behavior | Status and log |
 | --- | --- | --- |
 | Standalone Web | `agent-monitor start`, manual PID-file lifecycle | `agent-monitor status`, `state/server.log` |

@@ -135,8 +135,18 @@ sync_process._worker()
     def test_reexec_waits_for_sync_shutdown(self):
         events = []
         with mock.patch('server.threading.Timer') as timer, \
+             mock.patch('server.codex_accounts.manager.close', side_effect=lambda: events.append('accounts')), \
              mock.patch('server.sync_process.shutdown', side_effect=lambda: events.append('shutdown')), \
              mock.patch('server.os.execv', side_effect=lambda *args: events.append('exec')):
             server._schedule_reexec()
             timer.call_args.args[1]()
-        self.assertEqual(events, ['shutdown', 'exec'])
+        self.assertEqual(events, ['accounts', 'shutdown', 'exec'])
+
+    def test_reexec_does_not_discard_unfinished_account_cleanup(self):
+        with mock.patch('server.threading.Timer') as timer, \
+             mock.patch('server.codex_accounts.manager.close', side_effect=RuntimeError('not reaped')), \
+             mock.patch('server.os.execv') as execute:
+            server._schedule_reexec()
+            with self.assertRaises(RuntimeError):
+                timer.call_args.args[1]()
+        execute.assert_not_called()

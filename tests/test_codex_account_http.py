@@ -83,7 +83,11 @@ class AccountHttpTests(unittest.TestCase):
             status, data = self.request("/batch-start", {"expected_batch_id": None})
             self.assertEqual(status, 200)
             batch_id = data["batch"]["id"]
-            self.manager.close()
+            with self.manager.guard:
+                jobs = list(self.manager.jobs.values())
+            for job in jobs:
+                job["thread"].join(3)
+                self.assertFalse(job["thread"].is_alive())
             status, duplicate = self.request("/batch-start", {"expected_batch_id": None})
             self.assertEqual(status, 200)
             self.assertEqual(duplicate["batch"]["id"], batch_id)

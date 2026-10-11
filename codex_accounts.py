@@ -97,6 +97,7 @@ class Rpc:
         self.sequence = 0
         self.pending = []
         self.buffer = b""
+        self.process_guard = threading.Lock()
         for name in ("home", "codex", "work"):
             private_dir(home / name)
         env = child_environment(home)
@@ -196,19 +197,37 @@ class Rpc:
                                    "capabilities": {"experimentalApi": True}}, time.monotonic() + 20)
         self.send({"method": "initialized"})
 
+    def interrupt(self, force=False):
+        # The worker retains pipe/selector ownership. Only signal its child here
+        # so a blocked protocol write can return and reach that worker's finally.
+        with self.process_guard:
+            if self.process.poll() is None:
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL if force else signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+
     def close(self):
         self.selector.close()
-        if self.process.poll() is None:
+        with self.process_guard:
+            if self.process.poll() is None:
+                try:
+                    os.killpg(self.process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(self.process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    self.process.wait(timeout=2)
+        for stream in (self.process.stdin, self.process.stdout):
             try:
-                os.killpg(self.process.pid, signal.SIGTERM)
-                self.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                os.killpg(self.process.pid, signal.SIGKILL)
-                self.process.wait(timeout=2)
-            except ProcessLookupError:
-                self.process.wait(timeout=2)
-        self.process.stdin.close()
-        self.process.stdout.close()
+                stream.close()
+            except OSError:
+                pass  # the peer may have died with an unfinished buffered write
 
 
 def quota_reading(result, account_id):
@@ -239,6 +258,7 @@ class Manager:
         self.rpc_factory = rpc_factory
         self.guard = threading.RLock()
         self.jobs = {}
+        self.stopping = False
         self.slots = threading.BoundedSemaphore(8)
         self.login_slot = threading.BoundedSemaphore(1)
         self.login_generation = 0
@@ -368,6 +388,8 @@ class Manager:
         return None
 
     def prepare(self, profile_id, *, published_id=None, batch_id=None, refresh_only=False):
+        if self.stopping:
+            raise ActionError("服务正在停止，请稍后重试；本次未启动账号操作。", 503)
         directory = self.directory(profile_id)
         if profile_id in self.jobs:
             raise ActionError("这个账号已有操作正在进行。", 409)
@@ -521,7 +543,11 @@ class Manager:
             acquire_slot()
             slot = True
             self.update(directory, record, stage="checking", detail="正在检查登录状态。")
-            rpc = self.rpc_factory(directory, job["cancelled"])
+            with self.guard:
+                if job["cancelled"].is_set():
+                    raise Cancelled("操作已取消。")
+                rpc = self.rpc_factory(directory, job["cancelled"])
+                job["rpc"] = rpc
             rpc.initialize()
             if not self.identity(rpc, directory, record):
                 self.slots.release()
@@ -601,6 +627,9 @@ class Manager:
             try:
                 if rpc:
                     rpc.close()
+            except Exception as exc:
+                job["cleanup_error"] = exc
+                raise
             finally:
                 if login_slot:
                     self.login_slot.release()
@@ -608,16 +637,29 @@ class Manager:
                     self.slots.release()
                 with self.guard:
                     job["authorization"] = {}
-                    self.jobs.pop(record["id"], None)
+                    if "cleanup_error" not in job:
+                        self.jobs.pop(record["id"], None)
                     lock.close()
 
     def close(self):
         with self.guard:
+            self.stopping = True
             jobs = list(self.jobs.values())
             for job in jobs:
                 job["cancelled"].set()
-        for job in jobs:
-            job["thread"].join(timeout=3)
+        # One shared deadline per phase, not three seconds per queued account.
+        for force in (False, True):
+            for job in jobs:
+                if job["thread"].is_alive() and job.get("rpc"):
+                    job["rpc"].interrupt(force=force)
+            deadline = time.monotonic() + 3
+            for job in jobs:
+                job["thread"].join(timeout=max(0, deadline - time.monotonic()))
+            if not any(job["thread"].is_alive() for job in jobs):
+                if any("cleanup_error" in job for job in jobs):
+                    raise RuntimeError("账号子进程回收失败，已拒绝重启；请检查服务日志。")
+                return
+        raise RuntimeError("账号子进程清理未完成，已拒绝重启；请检查服务日志。")
 
 
 manager = Manager(Path(__file__).resolve().parent / "state/codex-accounts")

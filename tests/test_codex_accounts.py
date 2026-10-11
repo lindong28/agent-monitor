@@ -22,6 +22,7 @@ class AccountActionsTests(unittest.TestCase):
         self.scenario = "success"
         self.spawned = []
         real_popen = subprocess.Popen
+        self.real_popen = real_popen
 
         def spawn(command, **kwargs):
             self.spawned.append((command, dict(kwargs["env"])))
@@ -36,6 +37,48 @@ class AccountActionsTests(unittest.TestCase):
 
     def account(self, email="one@example.com", account_id="workspace-one"):
         return self.manager.add(email, account_id)
+
+    def test_shutdown_refuses_new_account_work(self):
+        account = self.account()
+        self.manager.close()
+        with self.assertRaises(ca.ActionError) as raised:
+            self.manager.start(account["id"], refresh_only=True)
+        self.assertEqual(raised.exception.status, 503)
+        self.assertEqual(self.spawned, [])
+
+    def test_shutdown_reaps_a_peer_that_blocks_protocol_writes(self):
+        account = self.account()
+        ready = threading.Event()
+        peers = []
+        real_popen = self.real_popen
+        # The peer deliberately never reads stdin and ignores TERM. No provider
+        # or real credentials are involved; the watchdog finally reaps it.
+        def factory(directory, cancelled):
+            with mock.patch.object(ca.shutil, "which", return_value=sys.executable), \
+                 mock.patch.object(ca.subprocess, "Popen", side_effect=lambda *a, **kw: real_popen(
+                     [sys.executable, "-c", "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready',flush=True); time.sleep(30)"], **kw)):
+                rpc = ca.Rpc(directory, cancelled)
+            rpc.process.stdout.readline()
+            peers.append(rpc.process)
+            def blocked_initialize():
+                ready.set()
+                rpc.send({"payload": "x" * 1000000})
+            rpc.initialize = blocked_initialize
+            return rpc
+        self.manager.rpc_factory = factory
+        try:
+            self.manager.start(account["id"], refresh_only=True)
+            self.assertTrue(ready.wait(3))
+            self.manager.close()
+            self.assertFalse(self.manager.jobs)
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(peers[0].pid, os.WNOHANG)
+        finally:
+            for peer in peers:
+                if peer.poll() is None:
+                    peer.kill()
+                peer.wait(timeout=3)
+            self.manager.close()
 
     def wait(self, profile_id, stage=None):
         deadline = time.monotonic() + 6

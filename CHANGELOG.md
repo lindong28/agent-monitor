@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-11
+
+- Drain account child processes before restart and SIGTERM shutdown, reject new account work while stopping, and refuse reexec when cleanup is incomplete. CLI stop now allows up to ten seconds for graceful cleanup before its forced-stop fallback.
+
 ## 2026-10-10
 
 - Keep account identity and historical reading context visible from the left edge through horizontal scrolling, including long plan names. Place the independent Codex batch workspace before quota filters so filters remain next to their results.

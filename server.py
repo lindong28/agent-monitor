@@ -8,6 +8,7 @@ import math
 import mimetypes
 import os
 import posixpath
+import signal
 import subprocess
 import sys
 import threading
@@ -341,6 +342,7 @@ def _compile_check():
 
 def _schedule_reexec():
     def _reexec():
+        codex_accounts.manager.close()
         sync_process.shutdown()
         os.execv(
             sys.executable,
@@ -2340,6 +2342,9 @@ def main():
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     logger.info("agent-monitor listening on http://%s:%s", args.host, args.port)
     stop = threading.Event()
+    def terminate(signum, frame):
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, terminate)
     if hub.is_hub():
         state = ROOT / "state"
         state.mkdir(parents=True, exist_ok=True)
@@ -2361,8 +2366,11 @@ def main():
         server.serve_forever()
     finally:
         stop.set()
-        sync_process.shutdown()
-        server.server_close()
+        try:
+            codex_accounts.manager.close()
+        finally:
+            sync_process.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

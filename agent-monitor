@@ -118,7 +118,8 @@ stop() {
   local pid
   pid="$(cat "$PID_FILE")"
   kill "$pid" 2>/dev/null || true
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
+  # Account shutdown has two bounded drain phases; allow it to reap children.
+  for (( attempt=0; attempt<50; attempt++ )); do
     if ! kill -0 "$pid" 2>/dev/null; then
       break
     fi

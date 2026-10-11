@@ -1,5 +1,9 @@
 # agent-monitor service operations
 
+## Account child cleanup
+
+The local lifecycle drains account children on reexec and SIGTERM, and refuses reexec if cleanup fails. CLI stop allows up to ten seconds before forced termination. When diagnosing existing zombies, capture parent/child PIDs and check for active account operations first; a full stop/start replaces the old parent, whereas same-PID reexec cannot reclaim a child whose owner was lost by an earlier execution. Verify old PIDs disappear and `/api/health?asset_watch=1` returns current health after restart. Never retry an interrupted message automatically. Source and isolated regression evidence do not substitute for that live check.
+
 ## 2026-10-10 quota-table context delivery
 
 

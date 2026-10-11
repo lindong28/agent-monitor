@@ -18,6 +18,8 @@ The overview and request workflow apply Prompt Planet's `usage-observability-con
 
 ## Independent runtime boundary
 
+Account RPC children remain owned by their manager through shutdown. Admission closes before cancellation; TERM and, if needed, KILL unblock protocol I/O, while each worker reaps its child and releases its profile lock. Same-PID reexec and SIGTERM both drain account work before sync/query shutdown. Incomplete cleanup prevents reexec. The CLI provides a ten-second grace period. See the [child-reaping decision](adr/20261011-a72c-child-process-reaping.md).
+
 `agent-monitor`, lifecycle scripts and `install.sh` resolve this project's `.venv`; the installer creates it from `requirements.txt` and vendors browser assets under `web/vendor`. `lib/install-output.sh` is the small optional FD ledger emitter, not a loader for the former parent repository. Installers can stage with `--no-services` before service cutover.
 
 `claude_oauth.py` owns the extracted read-only credential/date/HTTP helpers. File and keychain candidates are lazy, deduplicated and locally validated; profile/usage requests refuse redirects and carry tokens only as headers. `quota_refresh.py` bounds the complete provider child process. Statusline rendering, statusline cache persistence and model-specific statusline windows remain harness responsibilities.
