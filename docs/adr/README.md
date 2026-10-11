@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261011-7c3a: account round recovery](20261011-7c3a-account-round-recovery.md) | Accepted; scoped HTTP transport, safe failures and quota recovery without message replay |
 | [20261011-64e1: independent quota refresh](20261011-64e1-independent-quota-refresh.md) | Accepted; quota queries and display no longer wait for statistics, membership remains snapshot-owned |
 | [20261011-a72c: reap account children before restart](20261011-a72c-child-process-reaping.md) | Accepted; bounded account drain for reexec and SIGTERM, no automatic message replay |
 | [20261008-f7c1: Codex authorization queue](20261008-f7c1-codex-authorization-queue.md) | Accepted; one manual authorization at a time, known rate limits stop pending code requests |

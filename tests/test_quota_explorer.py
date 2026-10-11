@@ -90,6 +90,14 @@ ui.updateCodexQuotaReadings([{...action,last_quota:action.operation.after,operat
 assert(rows()[0].cells[4].textContent.includes('3%'),'failed refresh must retain successful post-send reading');
 assert(rows()[0].cells[6].textContent.includes('本页查询'));
 assert.equal(ui.latestCodexQuotaReading({last_quota:action.operation.after}),action.operation.after,'cards share retained quota selection');
+const before={observed_at:new Date(Date.parse(observed)+1000).toISOString(),seven_day_used_pct:100,seven_day_resets_at:null};
+for (const source of ['operation','batch_result']) {
+  const candidate={...action,last_quota:action.operation.after,[source]:{stage:'failed',before}};
+  ui.updateCodexQuotaReadings([candidate]);
+  assert.equal(ui.latestCodexQuotaReading(candidate),before,'cards select newer before observation');
+  assert(rows()[0].cells[4].textContent.includes('100%'),'before reaches quota table');
+  assert(rows()[0].cells[4].textContent.includes('重置时间未知'),'new null reset is preserved');
+}
 ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:observed,seven_day_used_pct:null,seven_day_resets_at:null}}} ]);
 assert(rows()[0].cells[4].textContent.includes('重置时间未知'));
 assert(!rows()[0].cells[4].textContent.includes('91%'),'unknown new reading never borrows old percentage');

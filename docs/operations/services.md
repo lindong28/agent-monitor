@@ -2,6 +2,10 @@
 
 Explicit Hub Refresh now starts a separate supervised quota worker. Inspect `quota_refresh` in `/api/sync-status` and the quota-table progress note independently of statistics. The private `state/machine_quota.json` retains matching observations across Hub restarts; preserve it with other state. Participating Mac collectors must include the concurrent quota handler so a busy rollup cannot delay the GUI receipt. Existing schedules and service labels stay unchanged.
 
+## 2026-10-11 account recovery deployment
+
+MacStudio advanced from `2018322` to `e459642a59f7cc048050f0424e206cca2681cc55`, including the previously completed account-child cleanup prerequisite. Restart followed a zero-busy account check; health returned ok=true/stale=false and instance `12da8f43ad7045aeb45b26f0368e0284`. State symlink and account lock inodes were preserved. Two quota-only refreshes completed in 4.272 seconds: lindong4 0%, lindong6 100%, both observed at 23:25:18 UTC+8. Original batch results remain unknown/failed, no message was replayed. The account panel and quota table were checked in an isolated browser; real HTTP send latency remains unverified. [Decision and evidence](../adr/20261011-7c3a-account-round-recovery.md).
+
 ## 2026-10-11 independent quota deployment
 
 Local main integrated `1d4936f0399cc0336f2a81dc6d68cd560a4861a2`. MacStudio received only this task on its existing eadb051 history as `2018322a6e10bfae0fdcadff7d916b956d781d59`; Macmini received the collector-only patch on 1b3b8f1 as `5bd2fc7f7845d8e8fd2532c18ee60f50860f8756`. Both remote checkouts were fast-forwarded under the repository lock backend, with no Git push. State symlink inodes 5804813 (MacStudio) and 154502586 (Macmini) and their targets stayed unchanged. No collector job was killed; future invocations use the changed code. Macbook uses the integrated local main. Tencent needs no GUI collector change.

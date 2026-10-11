@@ -713,7 +713,7 @@
   let boundQuotaExplorer = null;
 
   function latestCodexQuotaReading(account) {
-    return [account.operation?.after, account.batch_result?.after, account.last_quota]
+    return [account.operation?.after, account.operation?.before, account.batch_result?.after, account.batch_result?.before, account.last_quota]
       .filter((reading) => Number.isFinite(Date.parse(reading?.observed_at)))
       .sort((a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at))[0];
   }

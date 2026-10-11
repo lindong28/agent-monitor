@@ -27,9 +27,10 @@ SEND_SECONDS = 120
 
 
 class ActionError(Exception):
-    def __init__(self, message, status=400):
+    def __init__(self, message, status=400, category="unknown"):
         super().__init__(message)
         self.status = status
+        self.category = category
 
 
 class Cancelled(ActionError):
@@ -39,6 +40,35 @@ class Cancelled(ActionError):
 class LoginRateLimited(ActionError):
     def __init__(self):
         super().__init__("OpenAI 登录服务限流（429），本次授权已停止，设备码不可再用于此操作。请稍后重试；本次未发送消息。", 429)
+
+
+# Only structured protocol discriminants enter public/persisted failure data.
+TURN_FAILURES = {
+    "usageLimitExceeded": "账号额度已用尽。",
+    "rateLimitExceeded": "服务端限流。",
+    "unauthorized": "服务端拒绝了账号认证。",
+    "serverOverloaded": "服务端繁忙。",
+    "internalServerError": "服务端内部错误。",
+    "httpConnectionFailed": "HTTP 连接失败。",
+    "responseStreamConnectionFailed": "响应流连接失败。",
+    "responseStreamDisconnected": "响应流中断。",
+    "responseTooManyFailedAttempts": "响应重试次数已耗尽。",
+    "contextWindowExceeded": "请求超过上下文窗口。",
+    "sessionBudgetExceeded": "会话预算已耗尽。",
+    "badRequest": "服务端拒绝了请求参数。",
+}
+
+
+def turn_failure(error):
+    info = error.get("codexErrorInfo") if isinstance(error, dict) else None
+    category = info if isinstance(info, str) else next(iter(info), None) if isinstance(info, dict) and len(info) == 1 else None
+    result = {"stage": "sending", "category": category if category in TURN_FAILURES else "unknown"}
+    if isinstance(info, dict) and category in TURN_FAILURES:
+        data = info[category]
+        status = data.get("httpStatusCode") if isinstance(data, dict) else None
+        if type(status) is int and 100 <= status <= 599:
+            result["http_status"] = status
+    return result
 
 
 def now():
@@ -107,7 +137,13 @@ class Rpc:
             raise ActionError("服务所在机器未找到 Codex CLI，请安装后重试。", 503)
         config = {
             "cli_auth_credentials_store": '"file"', "forced_login_method": '"chatgpt"',
-            "model_provider": '"openai"', "web_search": '"disabled"',
+            "model_provider": '"agent-monitor-http"', "web_search": '"disabled"',
+            # Built-in provider IDs cannot be overridden. The OpenAI name and
+            # first-party auth retain ChatGPT routing; only this child uses HTTP.
+            "model_providers.agent-monitor-http.name": '"OpenAI"',
+            "model_providers.agent-monitor-http.wire_api": '"responses"',
+            "model_providers.agent-monitor-http.requires_openai_auth": "true",
+            "model_providers.agent-monitor-http.supports_websockets": "false",
             "features.shell_tool": "false", "features.code_mode": "false",
             "features.code_mode_host": "false", "features.multi_agent": "false",
             "features.hooks": "false", "features.apps": "false", "features.plugins": "false",
@@ -130,14 +166,14 @@ class Rpc:
             self.process.stdin.write((json.dumps(value) + "\n").encode())
             self.process.stdin.flush()
         except (BrokenPipeError, OSError):
-            raise ActionError("Codex 进程已退出，请检查 CLI 与网络。", 502)
+            raise ActionError("Codex 进程已退出，请检查 CLI 与网络。", 502, "processExited")
 
     def receive(self, deadline):
         while True:
             if self.cancelled.is_set():
                 raise Cancelled("操作已取消。")
             if time.monotonic() >= deadline:
-                raise ActionError("等待 Codex 超时；请检查登录状态或网络。", 504)
+                raise ActionError("等待 Codex 超时；请检查登录状态或网络。", 504, "timeout")
             if b"\n" in self.buffer:
                 line, self.buffer = self.buffer.split(b"\n", 1)
                 try:
@@ -156,7 +192,7 @@ class Rpc:
                 continue
             chunk = os.read(self.process.stdout.fileno(), 65536)
             if not chunk:
-                raise ActionError("Codex 进程提前退出，请检查 CLI 与网络。", 502)
+                raise ActionError("Codex 进程提前退出，请检查 CLI 与网络。", 502, "processExited")
             self.buffer += chunk
 
     def request(self, method, params, deadline):
@@ -245,7 +281,8 @@ def quota_reading(result, account_id):
 
 
 def retain_quota(record):
-    readings = [(record.get(key) or {}).get("after") for key in ("operation", "batch_result")]
+    readings = [(record.get(key) or {}).get(phase)
+                for key in ("operation", "batch_result") for phase in ("after", "before")]
     readings.append(record.get("last_quota"))
     readings = [reading for reading in readings if reading is not None]
     if readings:
@@ -603,8 +640,12 @@ class Manager:
             turn_id = turn["turn"]["id"]
             completed = rpc.event("turn/completed", lambda p: p.get("threadId") == thread_id and p.get("turn", {}).get("id") == turn_id, deadline)
             if completed["turn"].get("status") != "completed":
-                self.update(directory, record, message_status="failed")
-                raise ActionError("消息未成功完成。可能已消耗额度；不会自动重发。", 502)
+                failure = turn_failure(completed["turn"].get("error"))
+                self.update(directory, record, message_status="failed", failure=failure)
+                reason = TURN_FAILURES.get(failure["category"], "服务端未提供可识别的错误类别。")
+                if "http_status" in failure:
+                    reason += " HTTP %s。" % failure["http_status"]
+                raise ActionError("消息发送阶段：" + reason + "可能已消耗额度；不会自动重发。", 502)
             self.update(directory, record, stage="reading", message_status="succeeded", detail="消息已完成，正在查询服务端配额。")
             try:
                 after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
@@ -622,7 +663,34 @@ class Manager:
             detail = str(exc) if isinstance(exc, ActionError) else "操作未完成，请检查 Codex CLI 或服务状态目录。"
             if record["operation"]["message_status"] == "unknown":
                 detail += " 发送结果未知，可能已消耗额度，不会自动重发。可以仅刷新配额查看服务端读数。"
-            self.update(directory, record, stage="failed", detail=detail)
+            failure = record["operation"].get("failure") or {
+                "stage": record["operation"]["stage"],
+                "category": exc.category if isinstance(exc, ActionError) else "unknown",
+            }
+            self.update(directory, record, stage="failed", detail=detail, failure=failure)
+            if record["operation"]["message_status"] in ("failed", "unknown") and not job["cancelled"].is_set():
+                # The original result remains authoritative. A fresh owned peer
+                # avoids a broken send channel; no login or turn is ever started.
+                try:
+                    if rpc:
+                        rpc.close()
+                        rpc = None
+                    with self.guard:
+                        job["rpc"] = None
+                        if job["cancelled"].is_set():
+                            raise Cancelled("操作已取消。")
+                        rpc = self.rpc_factory(directory, job["cancelled"])
+                        job["rpc"] = rpc
+                    self.update(directory, record, detail=detail + " 正在补查配额，不会重发消息。")
+                    rpc.initialize()  # 20s; identity and quota each also cap at 20s.
+                    if not self.identity(rpc, directory, record):
+                        raise ActionError("登录态不可用。")
+                    after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
+                    self.update(directory, record, quota_status="observed", after=after,
+                                detail=detail + " 已补查服务端配额；原消息结果不变。")
+                except Exception:
+                    self.update(directory, record, quota_status="failed",
+                                detail=detail + (" 配额补查已取消。" if job["cancelled"].is_set() else " 配额补查未成功，可仅刷新配额。"))
         finally:
             try:
                 if rpc:

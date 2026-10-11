@@ -112,6 +112,8 @@ class AccountActionsTests(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", env)
         self.assertNotIn("CODEX_AUTH_TOKEN", env)
         self.assertTrue(env["HOME"].startswith(str(self.root)))
+        self.assertIn('model_provider="agent-monitor-http"', command)
+        self.assertIn('model_providers.agent-monitor-http.supports_websockets=false', command)
         self.assertIn('features.shell_tool=false', command)
         self.assertIn('project_doc_max_bytes=0', command)
         path = self.manager.directory(account["id"])
@@ -221,6 +223,65 @@ class AccountActionsTests(unittest.TestCase):
         result = self.run_case("failed_turn")
         self.assertEqual(result["operation"]["message_status"], "failed")
 
+    def test_failed_send_recovers_quota_once_without_replaying(self):
+        for scenario, status in (("failed_turn", "failed"), ("disconnect", "unknown")):
+            with self.subTest(scenario=scenario):
+                result = self.run_case(scenario)
+                op = result["operation"]
+                self.assertEqual(op["message_status"], status)
+                self.assertEqual(op["stage"], "failed")
+                self.assertEqual(op["quota_status"], "observed")
+                self.assertGreater(op["after"]["observed_at"], op["before"]["observed_at"])
+                self.assertEqual(result["last_quota"], op["after"])
+                methods = [c.get("method") for c in self.calls(result)]
+                # The account is reused between subcases; each adds exactly one turn.
+                self.assertEqual(methods.count("turn/start"), 1 if scenario == "failed_turn" else 2)
+                self.assertEqual(methods.count("account/login/start"), 1)
+
+    def test_structured_failure_is_safe_and_survives_recovery_failure(self):
+        for scenario, category in (("usage_limit", "usageLimitExceeded"),
+                                   ("stream_error", "responseStreamDisconnected"),
+                                   ("unsafe_error", "unknown"),
+                                   ("recovery_failure", "usageLimitExceeded")):
+            with self.subTest(scenario=scenario):
+                self.manager.root = self.root / scenario
+                result = self.run_case(scenario)
+                failure = result["operation"].get("failure", {})
+                self.assertEqual(failure.get("category"), category)
+                self.assertEqual(failure.get("stage"), "sending")
+                self.assertNotIn("SECRET_FIXTURE_TOKEN", json.dumps(result))
+                if scenario == "stream_error":
+                    self.assertEqual(failure.get("http_status"), 503)
+                if scenario == "recovery_failure":
+                    self.assertEqual(result["operation"]["quota_status"], "failed")
+                    self.assertEqual(result["last_quota"], result["operation"]["before"])
+
+    def test_recovery_rechecks_identity_without_login_or_quota(self):
+        result = self.run_case("recovery_identity")
+        self.assertEqual(result["operation"]["quota_status"], "failed")
+        methods = [c.get("method") for c in self.calls(result)]
+        self.assertEqual(methods.count("turn/start"), 1)
+        self.assertEqual(methods.count("account/login/start"), 1)
+        self.assertEqual(methods.count("account/rateLimits/read"), 1)
+        self.assertEqual(result["last_quota"], result["operation"]["before"])
+
+    def test_before_is_retained_across_replacement_and_restart(self):
+        for source in ("operation", "batch_result"):
+            account = self.account(email=source + "@example.com")
+            directory = self.manager.directory(account["id"])
+            record = self.manager.read(directory)
+            old = {"observed_at": "2026-10-08T01:00:00+00:00", "seven_day_used_pct": 16}
+            latest = {"observed_at": "2026-10-08T02:00:00+00:00", "seven_day_used_pct": 100, "seven_day_resets_at": None}
+            record[source] = {"stage": "failed", "before": latest, "after": old}
+            ca.write_record(directory / "profile.json", record)
+            with mock.patch.object(self.manager, "rpc_factory", side_effect=ca.ActionError("fixture failure")):
+                self.manager.start(account["id"], refresh_only=True)
+                result = self.wait(account["id"])
+            self.assertEqual(result["last_quota"], latest)
+            restarted = ca.Manager(self.manager.root)
+            self.addCleanup(restarted.close)
+            self.assertEqual(restarted.view(directory)["last_quota"], latest)
+
     def test_tools_are_rejected(self):
         result = self.run_case("tool_request")
         self.assertEqual(result["operation"]["stage"], "failed")
@@ -260,6 +321,39 @@ class AccountActionsTests(unittest.TestCase):
         self.assertEqual(result["operation"]["stage"], "failed")
         self.assertEqual(result["operation"]["message_status"], "unknown")
         self.assertFalse(self.manager.jobs)
+        self.assertEqual(result["operation"]["failure"]["category"], "timeout")
+        self.assertEqual(result["operation"]["quota_status"], "observed")
+        self.assertEqual([c.get("method") for c in self.calls(result)].count("turn/start"), 1)
+
+    def test_cancel_during_recovery_keeps_send_failure_and_reaps_peer(self):
+        ready = threading.Event()
+        original_factory = self.manager.rpc_factory
+        peers = []
+        def factory(directory, cancelled):
+            rpc = original_factory(directory, cancelled)
+            peers.append(rpc.process)
+            if len(peers) == 2:
+                initialize = rpc.initialize
+                def wait_for_cancel():
+                    ready.set()
+                    if not cancelled.wait(3):
+                        raise AssertionError("test cancellation missing")
+                    initialize()
+                rpc.initialize = wait_for_cancel
+            return rpc
+        self.manager.rpc_factory = factory
+        self.scenario = "failed_turn"
+        account = self.account()
+        self.manager.start(account["id"])
+        self.assertTrue(ready.wait(3))
+        self.manager.cancel(account["id"])
+        result = self.wait(account["id"])
+        self.assertEqual(result["operation"]["message_status"], "failed")
+        self.assertEqual(result["operation"]["quota_status"], "failed")
+        self.assertIn("补查已取消", result["operation"]["detail"])
+        self.assertEqual(len(peers), 2)
+        self.assertTrue(all(peer.poll() is not None for peer in peers))
+        self.assertEqual([c.get("method") for c in self.calls(result)].count("turn/start"), 1)
 
     def test_restart_is_visible_without_new_work(self):
         account = self.account()

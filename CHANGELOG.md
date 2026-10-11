@@ -2,6 +2,8 @@
 
 ## 2026-10-11
 
+- Use HTTP directly for isolated Codex account messages. Preserve safe failure categories and the newest pre/post-send quota reading; query quota once after failed or uncertain sends without replaying the message.
+
 - Refresh machine quotas independently of statistics export and publication, including during an ongoing sync. Show separate quota progress, persist matching observations, retain old values on failure, and serve GUI quota requests while local rollup is busy.
 
 - Drain account child processes before restart and SIGTERM shutdown, reject new account work while stopping, and refuse reexec when cleanup is incomplete. CLI stop now allows up to ten seconds for graceful cleanup before its forced-stop fallback.

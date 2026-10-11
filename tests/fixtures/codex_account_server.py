@@ -12,6 +12,7 @@ email = os.environ.get("FAKE_EMAIL", "one@example.com")
 account_id = os.environ.get("FAKE_ACCOUNT", "workspace-one")
 calls = home.parent / "calls.jsonl"
 quota_reads = 0
+recovery = calls.exists() and any(json.loads(line).get("method") == "turn/start" for line in calls.read_text().splitlines())
 
 
 def emit(value):
@@ -35,7 +36,7 @@ for line in sys.stdin:
         continue
     result = {}
     if method == "account/read":
-        result = {"account": {"type": "chatgpt", "email": "wrong@example.com" if scenario == "wrong_email" else email}
+        result = {"account": {"type": "chatgpt", "email": "wrong@example.com" if scenario == "wrong_email" or (recovery and scenario == "recovery_identity") else email}
                   if (home / "auth.json").exists() else None}
     elif method == "account/login/start":
         if scenario == "login_start_rate_limit":
@@ -69,7 +70,7 @@ for line in sys.stdin:
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
     elif method == "account/rateLimits/read":
         quota_reads += 1
-        if scenario == "quota_failure" and quota_reads == 2:
+        if (scenario == "quota_failure" and quota_reads == 2) or (recovery and scenario == "recovery_failure"):
             emit({"id": message["id"], "error": {"message": "SECRET_FIXTURE_TOKEN"}})
             continue
         result = {"accountId": account_id, "rateLimits": {"secondary": {"windowDurationMins": 10080, "usedPercent": 0,
@@ -88,5 +89,5 @@ for line in sys.stdin:
         if scenario == "wait_turn":
             time.sleep(20)
         result = {"turn": {"id": "turn-fixture"}}
-        emit({"method": "turn/completed", "params": {"threadId": "thread-fixture", "turn": {"id": "turn-fixture", "status": "failed" if scenario == "failed_turn" else "completed"}}})
+        emit({"method": "turn/completed", "params": {"threadId": "thread-fixture", "turn": {"id": "turn-fixture", "status": "failed" if scenario in ("failed_turn", "usage_limit", "stream_error", "unsafe_error", "recovery_failure", "recovery_identity") else "completed", "error": {"message": "SECRET_FIXTURE_TOKEN", "additionalDetails": "SECRET_FIXTURE_TOKEN", "codexErrorInfo": {"usage_limit": "usageLimitExceeded", "recovery_failure": "usageLimitExceeded", "stream_error": {"responseStreamDisconnected": {"httpStatusCode": 503, "secret": "SECRET_FIXTURE_TOKEN"}}, "unsafe_error": {"SECRET_FIXTURE_TOKEN": {"httpStatusCode": 503}}}.get(scenario)}}}})
     emit({"id": message["id"], "result": result})
