@@ -215,5 +215,38 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 
 - **Observed**: 2026-10-12 真实 MacStudio Hub，30d 按钮点击至完整选项加载成功32162ms，响应 Server-Timing app31905.44ms；新 UI 7d 同入口30336ms后成功，一次点击仅一个请求。不是永久卡住。
 - **Cause / Scope**: `/api/llm-call-filters` 仍向独立 Gateway reader 提供 admitted 来源的完整请求/尝试历史；本轮没有改变该 reader 或它的全量投影成本。已有按需设计保留，前端补重复点击去重、条件失效和失败重试状态。
+- **2026-10-12 follow-up**: 本轮真实浏览器再次观察到完整选项一次加载约 30.4 秒（`ui-reaudit-20261012/evidence/calls-result.json`，30419ms）。这是单次观察，不是冷热性能基准，也不据此新增 SLA。
 - **Owner / Next**: agent-monitor 后端维护者；后续性能工作应从筛选所需字段的定向投影/聚合入手，并协调 Gateway reader 契约。本轮按 UI 缺口范围交付，不扩大修改另一个仓库。当前能用，但等待仍在。
 - **Evidence**: 本机 `~/.local/share/agent-reports/ui-workflows-20261012/live-options-before.json`、`live-other-result.json`；含私有运行环境读数，不作公开演示数据。
+
+
+## [open] ISSUE-PRODUCT-20261012-72c1：周期比较缺少变化来源归因
+
+- **Type / Priority**: 产品改进建议 / medium；不是现有合同违约。
+- **Expected source**: README 的每日/每周复盘与消耗归因场景；当前合同只承诺两个完整等长周期的已记录总量比较。
+- **Observed**: 2026-10-12 复查本地 `bee318c`，`web/app.js` 的 `renderComparison()` 只呈现两期已知成本、token、未知定价条目和总差额。当前线上 app.js 字节与该源码一致。用户要知道哪些会话目录、模型或机器贡献了变化，仍需手工在透视页分别设置两个窗口并比较；这一项是实现检查得到的能力边界，不是本轮完成的双窗口用户试用。
+- **Proposal**: 在已有比较中提供两期相同维度的增减贡献及到透视的准确日期入口。保留未知定价与覆盖不完整说明，不能把缺记录解释成节省，也不推断因果。
+- **Owner / Next**: agent-monitor 产品与实现维护者；由用户决定是否进入下一轮功能范围，本轮只审查和记录。
+
+## [open] ISSUE-PRODUCT-20261012-b9f4：接入说明尚未形成首次数据到达检查
+
+- **Type / Priority**: 产品改进建议 / medium；不要求新增配置写入向导。
+- **Expected source**: README 的独立安装、多机监控场景和 `docs/references/open-source-preparation.md` 的采纳者可用性目标。
+- **Observed**: 2026-10-12，已部署 `/guide` 与本地 `bee318c` 页面字节一致；页面提供来源解释、配置/安装命令和机器状态，但明确把 Gateway 来源状态交给调用页。当前说明不提供同一处逐来源的首次有效观测、未配置/无匹配/采集失败区分及对应检查入口。尚未做全新安装，因此不把这些结构事实称为实际安装失败。
+- **Proposal**: 在现有只读接入页归拢来源是否配置、是否产生首份有效数据、最后观测和下一步检查入口；优先复用已有状态，不增加自动登录、后台发送或自动改配置。公开依赖可取得性、中性默认配置和干净安装仍按开源准备清单处理。
+- **Owner / Next**: agent-monitor 产品与实现维护者；本轮只记录建议，待确定下一轮功能范围。
+
+
+## [open] ISSUE-PRODUCT-20261012-63d2 — 机器可用状态没有呈现已知的部分来源阻止
+
+- **Type / Priority / Expected**: 能力缺口建议 / medium；不声称已有合同逐字段承诺 blocked-source 提示。README 多机监控、检查来源时点与失败的场景，以及 guide 的当前采集状态。机器纳入与来源完整性是两回事，不能把本项解释为要求放松来源保护。
+- **Observed**: 2026-10-12 当前 MacStudio Hub `/guide` 的 macmini 卡显示“可用”；同轮真实 `/api/sync-status` 为 admitted=true、stale=false、last_attempt_outcome=success、scan_complete=true，但 statistics.blocked_source_count=1。guide 虽有“已纳入不保证每种来源都存在或历史完整”的通用说明，没有把这一项已知缺口呈现在该机卡片上。其他三台 blocked_source_count=0，不能把它们一并报成受影响。
+- **Reproduce / Evidence**: 打开 `/guide` 读取 macmini 状态，与同一轮 sync-status 配对。隔离真实浏览器证据：`~/.local/share/agent-reports/ui-reaudit-20261012/evidence/guide.json`、`sync-status.json`；主线程另读取当前 API 核实该计数。线上 Web signature 为 `5555e188edd051e8`。
+- **Recommendation / Owner**: agent-monitor Web 维护者在机器状态保留“快照可用”，另外显示“部分来源未计入”及数量、可解释的原因/诊断入口；保留旧数据与身份保护。本轮只记录，不修采集器，不断言机器离线或数据损失。
+
+## [open] ISSUE-PRODUCT-20261012-81f0：回访与首次使用的几个可发现性改进点
+
+- **Type / Priority**: 低优先级产品建议；均未作为现有合同缺陷或必须实现项。
+- **Observed / Source**: 本轮真实浏览器 390px 的 guide 数据映射表宽 720px、滚动区宽 322px，“查看入口”列需要局部横滚；六项导航中的接入入口初始在屏外，但横滚后网络导航实际可达，符合现行 `docs/design.md`。配额已有“剩余额度少优先”、重置和观测时间排序，适合查快耗尽账号；直接找余量多的账号没有对应反向排序。调用筛选保留英文原始枚举，符合现行语言契约，但可为首次访问者增加中文解释。
+- **Proposal / Owner**: agent-monitor 产品维护者可按首次接入与挑选账号的优先级考虑：窄屏来源说明与入口成组；更易发现接入入口；余量多优先或可用账号视图（陈旧/未知不能当当前可用）；枚举旁补解释而不改取值。属于用户可选的产品优化，不在本轮实施。
+- **Evidence**: `~/.local/share/agent-reports/ui-reaudit-20261012/issues.md` 与 `evidence/mobile-result.json`、`tail-result.json`、`journey-result.json`。这些截图与原始读数含私人部署信息，不作公开演示资产。
