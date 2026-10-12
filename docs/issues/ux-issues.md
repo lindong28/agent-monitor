@@ -99,6 +99,8 @@
 - **Reproduce**: 打开 30d Overview，切换到 7d 和 All，逐项比较 Spend、Quota、三个 chart 标题及 Explore 链接。
 - **Recommended direction**: 在 Range 控件附近明确其作用域，或把受控区域与固定窗口区域在结构上分开；Explore 链接的 range 语义需与各卡标题共同核对，不能只改说明文字。
 
+- **2026-10-12 复验**：真实 Hub 总览默认 `range=30d` 下，本周目录图的透视链接为 `/explore?x=project&group=none&metric=cost&range=30d`，本月模型图同样传 `range=30d`；实际打开目录链接后仍为 30 天。该行为符合现有契约 A2/B5，因此这里是产品上下文与契约演化问题，不是实现违反契约。建议后续明确“查看同一窗口明细”与“沿用全局范围分析”的区别；本轮只审查，未改变契约。
+
 ## [resolved 2026-09-15] ISSUE-UX-20260826-5b81 — 英文 Overview 的历史账号与 All-history 说明局部切换为中文
 
 - **Type**: language-consistency
@@ -137,3 +139,20 @@
 - **Impact**: 窄屏回访用户无法一眼同时确认 quota、机器归属与读数新鲜度，这三者正是判断当前账号是否可用的同一决策单位。
 - **Reproduce**: 以 768×900 打开 Overview，滚到 Quota Used，在不横向滚动时读取 Machines 与 Updated。
 - **Recommended direction**: 重新评估窄屏列优先级或给出明确的受控滚动提示；必须保留 provider、账号、quota、机器归属与更新时间之间的可关联性，不能仅隐藏列。
+
+## [open] ISSUE-UX-20261012-6bc4 — 网络诊断未标明被检测的服务端机器
+
+- **Observed**: 2026-10-12，隔离浏览器访问真实 Hub `/network`，页面写“仅本机，这些诊断只针对本机，不跨机合并”，并列出“本机时区”；页面没有服务端机器名或 Hub 身份。此轮只读已有报告，没有强制刷新网络检测。
+- **Expected / Impact**: 契约 G5 要求明示检测的是打开页面的中心机器。多机用户从笔记本访问 Hub 时，容易把服务端出口、DNS 与时区当成浏览器所在机器的结果。
+- **Reproduce**: 从另一台设备访问 Hub 的网络页，尝试仅从正文确认检测目标；对照总览中可见的机器身份。
+- **Recommendation / Priority**: 优先明确“检测目标：<服务端机器>（Hub）”，保留检测时间；支持选择其他机器属于另一个功能建议，本条不要求新增探测能力。优先级中。
+- **Evidence / Owner**: 本轮真实页面文本与截图位于本地 `~/.local/share/agent-reports/agent-monitor-ui-review-20261012-worker/evidence/network.{json,png}`；源码佐证 `web/network.html` 与 `web/app.js:renderNetwork`。后续 agent-monitor UI 维护任务处理，本轮未修复。
+
+## [open] ISSUE-UX-20261012-7ad2 — LLM 调用加载后丢失 Gateway 覆盖范围说明
+
+- **Observed**: 2026-10-12，真实 Hub `/llm-calls` 健康且有记录时，范围标签为“全部已纳入机器”，说明只有快照来源与“Claude Code 与 Codex 的会话用量在总览和透视页”；没有明示本页仅覆盖经各机 LLM Gateway 的调用。
+- **Expected / Impact**: 契约 G5/H1 明确要求说明 Gateway 数据源以及未接入项目不在覆盖范围。新用户可能将“全部已纳入机器”理解为这些机器上的全部 LLM 请求。
+- **Reproduce**: 打开真实调用页，等待请求表加载完，阅读顶部范围说明；不要以 HTML 初始占位中的“Gateway 调用”作为最终可见证据。
+- **Source**: `web/llm-calls.html` 初始 Gateway 标签被 `web/llm-calls.js:setTerminal` 替换成机器范围；全部来源可用且有请求时，状态标题也不含 Gateway。
+- **Recommendation / Priority**: 机器覆盖和调用来源分别保留说明，明确未接入 Gateway 的请求不在本页；无需扩大采集范围。优先级中。
+- **Evidence / Owner**: 本轮真实页面记录位于本地 `~/.local/share/agent-reports/agent-monitor-ui-review-20261012-worker/evidence/llm-calls.{json,png}`。后续 agent-monitor UI 维护任务处理，本轮未修复。
