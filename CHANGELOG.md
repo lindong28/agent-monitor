@@ -2,6 +2,8 @@
 
 ## 2026-10-12
 
+- Report revoked Codex login credentials as requiring a new login on the affected machine. Reserve CLI-upgrade advice for unsupported RPC methods instead of treating every quota error as an outdated CLI; failed refreshes still retain their previous readings.
+
 - Add isolated backend cost diagnostics and a consumer cost map for proactive development and performance work. Report cold/hot admission, prepared reads and generation changes; retain structural regressions for repeated validation and blocked readers. Synthetic measurements are separate from live performance evidence.
 
 ## 2026-10-11

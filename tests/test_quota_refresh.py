@@ -72,13 +72,16 @@ class ProviderTests(unittest.TestCase):
                     self.assertEqual(result["signed_out"], signed_out)
                     self.assertEqual(result["refresh_error"], None if signed_out else "still offline")
 
-    def codex_cli(self, response, account_id="account-a"):
+    def codex_cli(self, response, account_id="account-a", error=None, error_id=2):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             shim = home / ".local/libexec/agent-shims/codex"
             shim.parent.mkdir(parents=True)
-            shim.write_text("#!%s\nimport sys,json\nresponse=%r\n" % (sys.executable, response) +
-                            "for line in sys.stdin:\n m=json.loads(line)\n if 'id' in m:\n  print(json.dumps({'id':m['id'],'result':{} if m['id']==1 else response}),flush=True)\n")
+            shim.write_text("#!%s\nimport sys,json\nresponse=%r\nerror=%r\nerror_id=%r\n" %
+                            (sys.executable, response, error, error_id) +
+                            "for line in sys.stdin:\n m=json.loads(line)\n if 'id' in m:\n"
+                            "  reply={'error':error} if error is not None and m['id']==error_id else {'result':{} if m['id']==1 else response}\n"
+                            "  print(json.dumps({'id':m['id'],**reply}),flush=True)\n")
             shim.chmod(0o700)
             with mock.patch("quota_refresh.Path.home", return_value=home):
                 return quota_refresh._codex({"account_id": account_id})
@@ -91,6 +94,36 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual((reading.five_hour_pct, reading.seven_day_pct), (9, 62))
         self.assertEqual(reading.plan, "pro")
         self.assertTrue(reading.updated_at)
+
+    def test_codex_revoked_token_requires_login_without_exposing_upstream_text(self):
+        # Shape captured from the macmini CLI's failed quota RPC, with no secrets.
+        error = {"code": -32603, "message":
+                 'failed to fetch codex rate limits: GET https://example.test/private failed: '
+                 '401 Unauthorized; content-type=text/plain; body=' + json.dumps({
+                     "error": {"message": "private upstream detail", "code": "token_revoked"},
+                     "status": 401})}
+        with self.assertRaises(quota_refresh.RefreshError) as caught:
+            self.codex_cli({}, error=error)
+        message = str(caught.exception)
+        self.assertIn("重新登录", message)
+        self.assertNotIn("更新", message)
+        self.assertNotIn("private", message)
+        self.assertNotIn("example.test", message)
+        self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)
+
+    def test_codex_only_unsupported_rpc_recommends_cli_update(self):
+        for request_id in (1, 2):
+            for error, upgrade in (({"code": -32601}, True),
+                                   ({"code": -32603, "message": "private upstream detail"}, False),
+                                   ({"code": -32603, "message": "body=not JSON token_revoked"}, False),
+                                   ({"code": -32603, "message": 'body={"error": []}'}, False)):
+                with self.subTest(request_id=request_id, error=error):
+                    with self.assertRaises(quota_refresh.RefreshError) as caught:
+                        self.codex_cli({}, error=error, error_id=request_id)
+                    self.assertEqual("更新" in str(caught.exception), upgrade)
+                    self.assertNotIn("private", str(caught.exception))
+                    self.assertNotIn("重新登录", str(caught.exception))
+                    self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)
 
     def test_codex_rejects_other_account_and_missing_identity(self):
         for identity in ("other", None):
