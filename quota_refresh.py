@@ -115,6 +115,25 @@ def _claude(account):
     raise NotSignedIn("这台机器上没有与当前账号匹配的可用 Claude 凭据。")
 
 
+def _codex_rpc_error(error, request_id):
+    # Never expose upstream free text: it can contain URLs and credentials.
+    if isinstance(error, dict):
+        if error.get("code") == -32601:
+            return "Codex CLI 不支持配额查询接口，请更新这台机器上的 CLI 后重试。"
+        message = error.get("message")
+        if request_id == 2 and isinstance(message, str):
+            # The CLI embeds the provider's JSON body in its RPC error message.
+            try:
+                body = json.loads(message.partition("body=")[2])
+            except ValueError:
+                body = None
+            if isinstance(body, dict) and body.get("status") == 401:
+                detail = body.get("error")
+                if isinstance(detail, dict) and detail.get("code") == "token_revoked":
+                    return "Codex 登录凭据已被撤销，无法刷新配额；请在这台机器上运行 codex login 重新登录后重试。"
+    return "Codex 配额请求失败，请检查这台机器的网络与登录状态后重试。"
+
+
 def _codex(account):
     env = os.environ.copy()
     # SSH/launchd do not load shell rc files. Supply installed user binary paths
@@ -145,13 +164,8 @@ def _codex(account):
                 message = json.loads(line)
                 if message.get("id") == request_id:
                     if "error" in message:
-                        # Not classified as a sign-in problem. This helper also
-                        # carries the `initialize` handshake, and a CLI that is
-                        # too old to know the method answers with an error here
-                        # while being perfectly signed in — calling that "not
-                        # signed in" would retire the one alarm that tells the
-                        # reader to update it.
-                        raise RefreshError("Codex 拒绝了配额请求，请更新这台机器上的 CLI 后重试。")
+                        # Keep failures visible and preserve the prior reading.
+                        raise RefreshError(_codex_rpc_error(message["error"], request_id))
                     return message["result"]
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not selector.select(remaining):
