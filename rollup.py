@@ -889,6 +889,21 @@ def query_pivot(
     }
 
 
+def period_summary(time_range):
+    """Known subtotal and missing pricing remain separate, including known zero."""
+    rows = _daily_rows(time_range=time_range, usage=True)
+    count = sum(row["entry_count"] for row in rows)
+    known = sum(row["cost_known_count"] for row in rows)
+    return {
+        "entries": count,
+        "known_cost_entries": known,
+        "unknown_cost_entries": max(0, count - known),
+        "known_cost_usd": sum(row["cost_usd"] or 0 for row in rows) if known else None,
+        "tokens": sum(_row_metric(row, "total") for row in rows) if rows else None,
+        "totals_provenance": _totals_provenance(rows, True, True),
+    }
+
+
 def query_grouped(dimensions, metric, agents=None, projects=None, models=None,
                   machines=None, time_range=None, db_path=None, source_machine=None):
     """Return actual joint groups; presentation limits belong to the chart."""

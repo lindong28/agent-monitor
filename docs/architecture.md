@@ -56,6 +56,14 @@ The initial list adapter batches complete timestamp buckets before loading child
 
 Publication checks history retention against the prepared copy outside the machine GC lock while holding a lease on the previous generation. It rechecks the current pointer under the commit lock and repeats retention validation if another writer advanced it. Copying and digest verification run outside that lock under a preparation lease; the signature check and recoverable pointer switch remain inside it. Reader admission acquires its generation lease under the same lock, then validates a cold generation after releasing it; the lease protects validation and use from GC. Matching sender/bundle manifests share one complete import validation. These changes preserve validation and retention rules while shortening the time readers must wait for publication.
 
+## Web workflow queries
+
+Overview adds `attribution_windows` from the same date windows used by its fixed charts. Only `compare=1` computes period comparison: two non-overlapping complete-day windows share the admitted generations, and usage rollup rows retain known/unknown cost counts instead of folding missing prices to zero. `token_cost.py` and snapshot accounting are unchanged.
+
+`/api/sessions` retains its default list response. The UI requests `with_filters=1` for an envelope of `sessions` and time-scoped `filters`, using one event read per source. Date and dimension matching precede grouping; filter choices come from the date-window events before dimension filtering. The UI no longer tests a session's representative first model to decide membership. Detail queries still read all retained records. This preserves the existing full-window scan and front-end pagination cost; it does not introduce a sessions query cache or claim constant-time reads.
+
+`/guide` uses the existing shell and sync-status reader without changing configuration. `/api/network` adds `checked_host` to successful, cached and failed reports. Quota ordering is local to display and uses the final observation overlay; account actions and machine snapshot identities remain unchanged.
+
 ## Preserved contracts
 
 `codex_accounts.py` owns explicit, click-triggered Codex account actions through a dedicated app-server subprocess per active profile. `server.py` exposes same-origin account-action endpoints; `web/codex-accounts.js` renders state within the overview lifecycle. Private profile directories under `state/codex-accounts` contain managed credentials and the last operation, with a persistent per-profile file lock. Isolated HOME/config/work directories keep ordinary CLI credentials and project tools out of these operations. Only pending device authorization information and sanitized account/operation metadata reach the browser. No background weekly scheduler is installed.
@@ -73,3 +81,5 @@ The [known-account extension](adr/20261007-d2af-codex-known-accounts.md) reads a
 Extraction changes names, installation ownership and source paths. It does not change bucket timezone, snapshot schemas, host/account identity, retention or arithmetic. `token_cost.py` is byte-identical to its extraction source. The source commit and historical docs are recorded in the [extraction ADR](adr/20261004-a902-standalone-project.md).
 
 The console application retains Prompt Planet `usage-observability-console`, `record-explorer`, and `request-diagnostics` v2 task structures, with their console design profile v1 visual defaults overridden by the product-wide `style:vercel-gateway-console` v1 recorded in [design.md](design.md). Project overrides retain brand blue, distinct cost windows, and on-demand full analysis/filter enumeration. Template rules guide layout and review; commercial-site access is not part of this application path.
+
+Large session-detail JSON responses negotiate gzip with accepting clients; other responses keep their existing transport. Compression preserves the complete record list and default identity response for clients that do not accept gzip. This addresses transfer volume, not snapshot query work.

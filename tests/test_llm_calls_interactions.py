@@ -31,7 +31,7 @@ global.AgentMonitor = { qs, pageScope() {const g=generation;return ()=>g===gener
 global.fetch = url => new Promise(resolve => requests.push({url, finish(payload, ok=true) {resolve({ok,status:404,json:async()=>payload,blob:async()=>new Blob([JSON.stringify(payload)],{type:'application/json'})});}}));
 URL.createObjectURL = () => 'blob:fixture'; URL.revokeObjectURL = () => {};
 eval(fs.readFileSync('web/llm-calls.js','utf8').replace('window.AgentMonitorLLMCalls = { init };',
- 'window.AgentMonitorLLMCalls = { init, state, openDetail, closeDetail, renderDetail, exportRecords, formatAmount, bindDiagnostics, renderAttempts, renderFilterSelection };'));
+ 'window.AgentMonitorLLMCalls = { init, state, loadOptions, openDetail, closeDetail, renderDetail, exportRecords, formatAmount, bindDiagnostics, renderAttempts, renderFilterSelection };'));
 const api = window.AgentMonitorLLMCalls;
 function payload(id, attempts=[]) { return {as_of:'2026-10-06T01:00:00Z',sources:[{machine:'b',state:'available',observed_at:'2026-10-06T00:00:00Z'}],request:{logical_request_id:id,canonical_project_id:'p',machine:'b',request_outcome:'local_rejected',request_reject_reason:'no_route',attempts}}; }
 '''
@@ -227,4 +227,20 @@ bodies[1](new Blob(['{"items":["old"]}']));await old;
 assert.equal(downloads.length,0);assert.equal(qs('#llm-export').disabled,true);
 bodies[2](new Blob(['{"items":["new"]}']));await latest;
 assert.equal(downloads.length,1);assert.equal(qs('#llm-export').disabled,false);
+''')
+
+    def test_complete_options_coalesce_and_finish_with_retry(self):
+        self.run_js(r'''
+const first=api.loadOptions();
+const duplicate=api.loadOptions();
+assert.equal(requests.length,1);
+assert.equal(qs('#llm-load-options').disabled,true);
+requests[0].finish({},false);await first;await duplicate;
+assert.equal(qs('#llm-load-options').disabled,false);
+assert(qs('#llm-options-status').textContent.includes('失败'));
+const retry=api.loadOptions();assert.equal(requests.length,2);
+api.state.reloadSequence++;
+requests[1].finish({},false);await retry;
+assert.equal(qs('#llm-load-options').disabled,false);
+assert(qs('#llm-options-status').textContent.includes('已变更'));
 ''')

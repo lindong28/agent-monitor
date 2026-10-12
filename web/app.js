@@ -95,9 +95,17 @@
   }
 
   function updateNavLinks() {
+    const nav = qs(".nav");
+    if (nav && !qs('a[href^="/guide"]')) {
+      const help = document.createElement("a");
+      help.href = "/guide";
+      help.setAttribute("data-nav", "");
+      help.textContent = "使用与接入";
+      nav.appendChild(help);
+    }
     const range = getRange();
     function setLinkRange(url) {
-      const custom = range === "custom" && url.pathname === "/explore";
+      const custom = range === "custom" && ["/explore", "/sessions"].includes(url.pathname);
       url.searchParams.set("range", range === "custom" && !custom ? "30d" : range);
       ["start", "end"].forEach((key) => {
         const value = custom && params().get(key);
@@ -502,6 +510,15 @@
       costLink.href = url.pathname + url.search;
     }
 
+    [["#top-projects-link", "week"], ["#model-mix-link", "month"]].forEach(([selector, key]) => {
+      const link = qs(selector), dates = data.attribution_windows?.[key];
+      if (!link || !dates) return;
+      const url = new URL(link.href, window.location.origin);
+      Object.entries({ range: "custom", start: dates.start, end: dates.end }).forEach(([k,v]) => url.searchParams.set(k,v));
+      link.href = url.pathname + url.search;
+      link.title = `${dates.start} 至 ${dates.end} · GMT+8`;
+    });
+    if (data.comparison) renderComparison(data.comparison);
     const projects = data.top_projects_week.slice();
     renderChartTable("top-projects-data", ["会话目录", "成本 · USD"],
       projects.map((row) => [row.project, chartReading(row.cost_usd, "USD")]));
@@ -554,6 +571,14 @@
       }),
       plugins: [barValueLabels(compactNumber)],
     });
+  }
+
+  function renderComparison(data) {
+    const target = qs("#comparison-result");
+    if (!target) return;
+    if (!data.available) { target.textContent = data.reason; return; }
+    const period = (label, p) => `<tr><th>${label}<br>${p.start} — ${p.end}</th><td>${p.entries ? money(p.known_cost_usd) : "无记录"}</td><td>${p.entries ? integer(p.tokens) : "无记录"}</td><td>${integer(p.unknown_cost_entries)} / ${integer(p.entries)}</td></tr>`;
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>周期 · ${data.days} 天</th><th>已知成本 · USD</th><th>已记录 token</th><th>未知定价 / 使用条目</th></tr></thead><tbody>${period("最近完整周期", data.current)}${period("前一周期", data.previous)}</tbody></table></div><p>已知成本差额：${data.known_cost_delta_usd === null ? "无法计算（一期无已知金额）" : money(data.known_cost_delta_usd)}。— 表示没有已知金额；$0.00 表示已知零成本。数据源的新鲜度与采集缺口见上方采集状态。</p>`;
   }
 
   // Project identifiers share a long host-and-owner prefix, so truncating from
@@ -709,7 +734,7 @@
   ];
   let renderedQuotaRateLimits = null;
   let codexQuotaReadings = [];
-  const quotaFilter = { provider: "all", search: "" };
+  const quotaFilter = { provider: "all", search: "", window: "five_hour", sort: "default" };
   let boundQuotaExplorer = null;
 
   function latestCodexQuotaReading(account) {
@@ -742,6 +767,24 @@
     return display;
   }
 
+  function sortQuotaAccounts(provider, accounts, now = Date.now() / 1000) {
+    if (quotaFilter.sort === "default") return accounts.slice();
+    const readingValue = (account) => {
+      const reading = quotaDisplayReading(provider, account);
+      if (quotaFilter.sort === "observed") {
+        const observed = Date.parse(reading.updated_at);
+        return Number.isFinite(observed) ? -observed : null;
+      }
+      const key = quotaFilter.window + (quotaFilter.sort === "remaining" ? "_used_pct" : "_resets_at");
+      const value = reading[key];
+      if (typeof value !== "number" || !Number.isFinite(value)) return null;
+      return quotaFilter.sort === "remaining" ? 100 - value : value > now ? value : null;
+    };
+    return accounts.map((account, index) => ({ account, index, value: readingValue(account) }))
+      .sort((a,b) => a.value === null ? (b.value === null ? a.index-b.index : 1)
+        : b.value === null ? -1 : a.value-b.value || a.index-b.index).map(item => item.account);
+  }
+
   function quotaMatches(provider, account) {
     if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return false;
     const terms = quotaFilter.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -759,6 +802,15 @@
     const search = qs("#quota-search");
     const buttons = explorer.querySelectorAll("[data-quota-provider]");
     search.value = quotaFilter.search;
+    ["window", "sort"].forEach((key) => {
+      const select = qs("#quota-" + key);
+      if (!select) return;
+      select.value = quotaFilter[key];
+      select.addEventListener("change", () => {
+        quotaFilter[key] = select.value;
+        renderQuotaAccounts(renderedQuotaRateLimits);
+      });
+    });
     buttons.forEach((button) => button.setAttribute("aria-pressed",
       String(button.dataset.quotaProvider === quotaFilter.provider)));
     const refresh = () => {
@@ -777,6 +829,9 @@
     qs("#quota-clear").addEventListener("click", () => {
       quotaFilter.provider = "all";
       quotaFilter.search = "";
+      quotaFilter.window = "five_hour";
+      quotaFilter.sort = "default";
+      ["window", "sort"].forEach(key => { const el = qs("#quota-" + key); if (el) el.value = quotaFilter[key]; });
       search.value = "";
       refresh();
     });
@@ -821,7 +876,7 @@
         return;
       }
       if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return;
-      const accounts = sourceAccounts.filter((account) => quotaMatches(provider, account));
+      const accounts = sortQuotaAccounts(provider, sourceAccounts.filter((account) => quotaMatches(provider, account)));
       const live = accounts.filter((account) => quotaPresence(account) === "in_use");
       const named = live.filter((account) => account.account_state === "known");
       const unknown = live.filter((account) => account.account_state !== "known");
@@ -840,7 +895,7 @@
     // larger groups collapsed, but still inside the live section so no current
     // machine falls into the past-account disclosure.
     QUOTA_PROVIDERS.forEach((provider) => {
-      const accounts = rateLimits?.[provider.key]?.accounts || [];
+      const accounts = sortQuotaAccounts(provider, rateLimits?.[provider.key]?.accounts || []);
       const unknown = accounts.filter(
         (account) => quotaMatches(provider, account)
           && quotaPresence(account) === "in_use" && account.account_state !== "known",
@@ -1966,6 +2021,20 @@
     return `${Math.floor(hours / 24)} 天前更新`;
   }
 
+  async function initGuide() {
+    const current = pageScope();
+    async function load() {
+      try {
+        const status = await api("/api/sync-status");
+        if (current()) renderSyncStatus(status);
+      } catch (error) {
+        if (current()) qs("#sync-summary").textContent = `状态检查失败：${error.message}。可重新检查。`;
+      }
+    }
+    bindShell(load);
+    await load();
+  }
+
   async function initNetwork() {
     async function load(force) {
       try {
@@ -1987,6 +2056,8 @@
   }
 
   function renderNetwork(data, retry) {
+    const target = qs("#network-checked-host");
+    if (target) target.textContent = `检测目标：服务端主机 ${data.checked_host || "身份未取得"}；不检测浏览器所在设备，不跨机合并。`;
     renderNetworkBanner(data);
     if (data.installed === false) {
       renderNetworkError({
@@ -2309,7 +2380,7 @@
       }
       let data;
       try {
-        data = await api("/api/overview", { range: selectedRange });
+        data = await api("/api/overview", { range: selectedRange, compare: qs("#period-comparison")?.open ? "1" : undefined });
       } catch (error) {
         if (generation === overviewGeneration) {
           showOverviewLoadError(error);
@@ -2343,7 +2414,7 @@
             waitForIdle: true,
             isCurrent: () => pageCurrent() && generation === overviewGeneration,
             onProgress: async () => {
-              const fresh = await api("/api/overview", { range: selectedRange, sync: "0" });
+              const fresh = await api("/api/overview", { range: selectedRange, sync: "0", compare: qs("#period-comparison")?.open ? "1" : undefined });
               if (!pageCurrent() || generation !== overviewGeneration) return;
               renderOverview(fresh, selectedRange);
               renderSyncStatus(fresh.sync);
@@ -2357,7 +2428,7 @@
         if (!pageCurrent() || generation !== overviewGeneration) {
           return;
         }
-        const finalData = await api("/api/overview", { range: selectedRange, sync: "0" });
+        const finalData = await api("/api/overview", { range: selectedRange, sync: "0", compare: qs("#period-comparison")?.open ? "1" : undefined });
         if (!pageCurrent() || generation !== overviewGeneration) {
           return;
         }
@@ -2365,6 +2436,12 @@
         renderSyncStatus(finalData.sync);
         qs("#overview-load-error")?.remove();
     }
+    qs("#period-comparison")?.addEventListener("toggle", () => {
+      if (qs("#period-comparison").open) {
+        qs("#comparison-result").textContent = "正在读取两个周期…";
+        load(false);
+      }
+    });
     bindShell(load);
     watchPageData(() => load(false, true));
     await load(false);
@@ -2454,14 +2531,15 @@
         activeLoads -= 1;
       }
       async function readData(keepPage, observeOnly = false) {
-        const data = normalizeSessionsPayload(
-          await api("/api/sessions", {
+        const payload = await api("/api/sessions", {
             range: getRange(),
+            start: params().get("start"), end: params().get("end"),
+            with_filters: "1", ...sessionsView.filters,
             sort: qs("#sort") ? qs("#sort").value : "time",
             order: "desc",
             sync: force === true || observeOnly ? "0" : undefined,
-          })
-        );
+          });
+        const data = normalizeSessionsPayload(payload.sessions || payload);
         if (!isValidSessionsPayload(data)) {
           throw new Error("会话数据包含无效行。");
         }
@@ -2470,13 +2548,29 @@
         }
         sessionsView.rows = data;
         if (!keepPage) sessionsView.page = 0;
-        populateSessionFilters(data);
+        populateSessionFilters(data, payload.filters);
         sessionsView.status = "ready";
         setSessionFiltersDisabled(false);
         renderSessions();
       }
     }
+    const dateControls = qs("#session-dates");
+    const syncDates = () => { if (dateControls) dateControls.hidden = getRange() !== "custom"; };
+    [["start", "#session-start"], ["end", "#session-end"]].forEach(([key, selector]) => {
+      const input = qs(selector);
+      if (!input) return;
+      input.value = params().get(key) || new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Shanghai"});
+      input.addEventListener("change", () => { setParam(key, input.value); load(false); });
+    });
+    qs("#range")?.addEventListener("change", () => {
+      syncDates();
+      if (getRange() === "custom") {
+        setParam("start", qs("#session-start").value);
+        setParam("end", qs("#session-end").value);
+      }
+    });
     bindShell(load);
+    syncDates();
     // Page-scoped: this poll belongs to the Sessions tab, and without the
     // registry it would keep reloading sessions from under whichever tab the
     // reader moved on to, once per visit.
@@ -2494,7 +2588,7 @@
           }
           sessionsView.filters[filter.key] = select.value;
           sessionsView.page = 0;
-          renderSessions();
+          load(false);
         });
       }
     });
@@ -2561,18 +2655,17 @@
     }
   }
 
-  // Options come from the rows actually loaded, so a filter can never offer a
-  // value that would return nothing. A selection that survives a reload stays
-  // selected; one whose value has aged out of the window resets to "all".
-  function populateSessionFilters(rows) {
+  // Options describe usage events in the date window, before dimension filters.
+  // Retain an unmatched selection so an empty result never silently broadens it.
+  function populateSessionFilters(rows, available) {
     SESSION_FILTERS.forEach((filter) => {
       const select = qs(filter.select);
       if (!select) {
         return;
       }
-      const values = Array.from(new Set(rows.map((row) => row[filter.field]).filter(Boolean))).sort();
       const previous = sessionsView.filters[filter.key];
-      const keep = values.includes(previous) ? previous : "";
+      const values = Array.from(new Set([...(available?.[filter.key] || rows.map(row => row[filter.field])), previous].filter(Boolean))).sort();
+      const keep = previous;
       const label = select.options[0] ? select.options[0].textContent : "All";
       const labels = optionLabels(filter.key, values);
       select.innerHTML =
@@ -2647,12 +2740,7 @@
   }
 
   function filteredSessions() {
-    return sessionsView.rows.filter((row) =>
-      SESSION_FILTERS.every((filter) => {
-        const wanted = sessionsView.filters[filter.key];
-        return !wanted || row[filter.field] === wanted;
-      })
-    );
+    return sessionsView.rows;
   }
 
   function renderSessions() {
@@ -2670,11 +2758,11 @@
     replaceCurrentUrl("/sessions?" + listParams);
     const start = sessionsView.page * SESSIONS_PAGE_SIZE;
     const pageRows = matched.slice(start, start + SESSIONS_PAGE_SIZE);
-    const filtering = matched.length !== sessionsView.rows.length;
+    const filtering = Object.values(sessionsView.filters).some(Boolean);
     if (!pageRows.length) {
       renderSessionState("empty", filtering ? "没有符合筛选条件的会话。" : "此范围内没有会话。");
       qs("#session-count").textContent = filtering
-        ? `0 / ${integer(sessionsView.rows.length)} 个会话`
+        ? "找到 0 个匹配会话"
         : "0 个会话";
       return;
     }
@@ -2719,7 +2807,7 @@
 
     syncStickyHeaderOffset();
     qs("#session-count").textContent = filtering
-      ? `${integer(matched.length)} / ${integer(sessionsView.rows.length)} 个会话`
+      ? `找到 ${integer(matched.length)} 个匹配会话`
       : `${integer(sessionsView.rows.length)} 个会话`;
     renderSessionPager(matched.length, start, pageRows.length);
   }
@@ -3112,6 +3200,7 @@
     ["/sessions", () => initSessions()],
     ["/llm-calls", () => window.AgentMonitorLLMCalls.init()],
     ["/network", () => initNetwork()],
+    ["/guide", () => initGuide()],
   ]);
 
   // Path *and* query. Two history entries for the same page differing only in
@@ -3331,6 +3420,7 @@
     refreshStatistics,
     pollFreshness,
     initNetwork,
+    initGuide,
     initOverview,
     initSessions,
   };

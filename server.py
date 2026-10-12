@@ -2,6 +2,7 @@ import argparse
 import ipaddress
 import socket
 import hashlib
+import gzip
 import json
 import logging
 import math
@@ -17,6 +18,8 @@ import uuid
 from collections import defaultdict
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from dataclasses import replace
+from project_alias import canonical_project
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import codex_accounts
@@ -193,7 +196,7 @@ def _overview_from_admission(
         or sync_status["syncing"]
         or sync_status.get("completed_at") != completed_before
     )
-    return {
+    result = {
         "rate_limits": _rate_limits(
             admission=admission,
             sync_status=sync_status,
@@ -212,9 +215,16 @@ def _overview_from_admission(
         "rollup_coverage": _rollup_coverage(rollup_range_window),
         "top_projects_week": _top_projects_from_rollup(week_window, limit=5),
         "model_mix_month": _model_mix_from_rollup(month_window),
+        "attribution_windows": {
+            "week": {"start": week_window[0].isoformat(), "end": today.isoformat()},
+            "month": {"start": month_window[0].isoformat(), "end": today.isoformat()},
+        },
         "history_gap": None,
         "codex_cost_estimated": True,
     }
+    if _first(query, "compare", "") == "1":
+        result["comparison"] = _period_comparison(range_value, now)
+    return result
 
 
 def _pivot_window(query):
@@ -291,31 +301,54 @@ def refresh_endpoint(query):
 
 
 def sessions_endpoint(query):
+    now = datetime.now().astimezone()
+    time_range = _session_window(query, now)
+    sessions = []
+    options = {key: set() for key in ("machine", "agent", "project", "model")}
+    with_filters = _first(query, "with_filters", "") == "1"
+
+    def collect(entries, machine=None, aliases=None):
+        # Match Explore display identities without rewriting stored usage.
+        in_window = [replace(entry, project=canonical_project(entry.project, aliases))
+                     for entry in _filter_time(entries, time_range)]
+        display_query = dict(query)
+        if query.get("project"):
+            display_query["project"] = [canonical_project(value, aliases)
+                                        for value in query["project"]]
+        if with_filters:
+            if machine and in_window:
+                options["machine"].add(machine)
+            for entry in in_window:
+                options["agent"].add(entry.agent_id)
+                options["project"].add(entry.project)
+                options["model"].add(entry.model)
+        if _first(query, "machine", "") not in ("", machine):
+            return
+        visible = _filter_values(in_window, display_query)
+        for items in _group_sessions(visible).values():
+            row = _session_stats(items)
+            if machine:
+                row["machine"] = machine
+            sessions.append(row)
+
     if hub.enabled():
         _maybe_sync_remotes(query)
-        now = datetime.now().astimezone()
-        sessions = []
         with generation.generation_admission_snapshot() as admission:
-            import statistics_snapshot
             for current in admission.admitted:
-                if _first(query, "machine", "") not in ("", current.host):
+                if not with_filters and _first(query, "machine", "") not in ("", current.host):
                     continue
-                time_range = _range_window(_first(query, "range", "30d"), now)
-                entries = statistics_snapshot.read_admitted_usage(current, time_range=time_range, query=query)
-                visible = _filter_values(_filter_time(entries, time_range), query)
-                sessions.extend({**_session_stats(items), "machine": current.host}
-                                for items in _group_sessions(visible).values())
-        sort = _first(query, "sort", "time")
-        sessions.sort(key=lambda row: _session_sort_key(row, sort), reverse=_first(query, "order", "desc") != "asc")
-        return sessions
-    entries = load_all_entries()
-    now = datetime.now().astimezone()
-    visible = _filter_time(entries, _range_window(_first(query, "range", "30d"), now))
-    visible = _filter_values(visible, query)
-    sessions = [_session_stats(items) for items in _group_sessions(visible).values()]
+                entries = statistics_snapshot.read_admitted_usage(
+                    current, time_range=time_range, query=None if with_filters else
+                    {key: value for key, value in query.items() if key != "project"})
+                collect(entries, current.host, (getattr(current, "meta", None) or {}).get("aliases"))
+    else:
+        collect(load_all_entries(), sync.load_machine_config().self_machine.name)
     sort = _first(query, "sort", "time")
-    reverse = _first(query, "order", "desc") != "asc"
-    sessions.sort(key=lambda row: _session_sort_key(row, sort), reverse=reverse)
+    sessions.sort(key=lambda row: _session_sort_key(row, sort),
+                  reverse=_first(query, "order", "desc") != "asc")
+    if with_filters:
+        return {"sessions": sessions, "filters": {key: sorted(v for v in values if v)
+                                                 for key, values in options.items()}}
     return sessions
 
 
@@ -407,6 +440,10 @@ def timezone_endpoint(_query):
 
 
 def network(query):
+    return {**_network_report(query), "checked_host": socket.gethostname()}
+
+
+def _network_report(query):
     force = query.get("force", [None])[0] == "1"
     now = time.time()
     if (not force) and _NETWORK_CACHE["data"] and (now - _NETWORK_CACHE["ts"] < _NETWORK_TTL):
@@ -726,7 +763,7 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path.startswith("/api/session/"):
                 session_id = unquote(parsed.path[len("/api/session/") :])
                 self._send_json(session_detail(session_id, _first(query, "machine", "")) if hub.enabled()
-                                else session_detail(session_id), send_body=send_body)
+                                else session_detail(session_id), send_body=send_body, compress=True)
                 return
             route = ROUTES.get(parsed.path)
             if route:
@@ -736,7 +773,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self._send_json(route(query), send_body=send_body)
                 return
-            if parsed.path in ("/", "/explore", "/sessions", "/network", "/llm-calls", "/ip-check-docs") or parsed.path.startswith("/web/"):
+            if parsed.path in ("/", "/explore", "/sessions", "/network", "/llm-calls", "/guide", "/ip-check-docs") or parsed.path.startswith("/web/"):
                 self._serve_static(parsed.path, send_body=send_body)
                 return
             self.send_error(404)
@@ -751,13 +788,35 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         logger.info("%s - %s", self.address_string(), fmt % args)
 
-    def _send_json(self, payload, status=200, send_body=True):
+    def _send_json(self, payload, status=200, send_body=True, compress=False):
         data = json.dumps(payload, default=_json_default).encode("utf-8")
-        self._send_json_bytes(data, status=status, send_body=send_body)
+        self._send_json_bytes(data, status=status, send_body=send_body, compress=compress)
 
-    def _send_json_bytes(self, data, status=200, send_body=True):
+    def _send_json_bytes(self, data, status=200, send_body=True, compress=False):
+        encoded = False
+        if compress and len(data) >= 65536:
+            for item in self.headers.get("Accept-Encoding", "").lower().split(","):
+                coding, *parameters = item.strip().split(";")
+                if coding.strip() != "gzip":
+                    continue
+                quality = 1.0
+                try:
+                    for parameter in parameters:
+                        key, _, value = parameter.strip().partition("=")
+                        if key == "q":
+                            quality = float(value)
+                except ValueError:
+                    quality = 0.0
+                if 0 < quality <= 1:
+                    data = gzip.compress(data, compresslevel=1, mtime=0)
+                    encoded = True
+                break
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if compress:
+            self.send_header("Vary", "Accept-Encoding")
+        if encoded:
+            self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -775,6 +834,8 @@ class Handler(BaseHTTPRequestHandler):
             file_path = WEB_ROOT / "network.html"
         elif path == "/llm-calls":
             file_path = WEB_ROOT / "llm-calls.html"
+        elif path == "/guide":
+            file_path = WEB_ROOT / "guide.html"
         elif path == "/ip-check-docs":
             file_path = ROOT / "ip_check" / "README.md"
         elif path.startswith("/web/"):
@@ -825,6 +886,32 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if send_body:
             self.wfile.write(data)
+
+
+def _session_window(query, now):
+    if _first(query, "range", "30d") != "custom":
+        return _range_window(_first(query, "range", "30d"), now)
+    start, end = _pivot_window(query)
+    return (datetime.combine(start, datetime.min.time(), tzinfo=rollup.BUCKET_TIMEZONE),
+            datetime.combine(end, datetime.max.time(), tzinfo=rollup.BUCKET_TIMEZONE))
+
+
+def _period_comparison(range_value, now):
+    if range_value == "all":
+        return {"available": False, "reason": "全部历史没有等长的前一期"}
+    days = RANGE_DAYS.get(range_value, 30)
+    end = now.astimezone(rollup.BUCKET_TIMEZONE).date() - timedelta(days=1)
+    start = end - timedelta(days=days - 1)
+    previous = (start - timedelta(days=days), start - timedelta(days=1))
+    def period(window):
+        return {"start": window[0].isoformat(), "end": window[1].isoformat(),
+                **rollup.period_summary(window)}
+    current, prior = period((start, end)), period(previous)
+    known = current["known_cost_usd"] is not None and prior["known_cost_usd"] is not None
+    return {"available": True, "timezone": str(rollup.BUCKET_TIMEZONE), "days": days,
+            "current": current, "previous": prior,
+            "known_cost_delta_usd": current["known_cost_usd"] - prior["known_cost_usd"] if known else None,
+            "coverage_complete": None}
 
 
 def _range_window(value, now):

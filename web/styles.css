@@ -2052,3 +2052,9 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   .llm-main .llm-detail-fields dd { margin-bottom: 8px; }
   .llm-main .llm-detail-fields dd:last-child { margin-bottom: 0; }
 }
+
+/* The guide reuses the dashboard panels and allows long configuration examples to wrap. */
+.guide-main > .panel + .panel { margin-top: 24px; }
+.guide-main code { overflow-wrap: anywhere; white-space: normal; }
+.guide-main li + li { margin-top: 12px; }
+#session-dates:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px; }

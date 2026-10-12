@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>agent-monitor 使用与接入</title>
+    <link rel="stylesheet" href="/web/styles.css">
+    <script src="/web/vendor/chart.umd.min.js"></script>
+    <script src="/web/app.js"></script>
+    <script src="/web/pivot.js"></script>
+    <script src="/web/llm-calls.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" data-preserve-range href="/">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-title">agent-monitor</span>
+        </a>
+        <nav class="nav" aria-label="主导航">
+          <a data-nav href="/">总览</a>
+          <a data-nav href="/explore">透视</a>
+          <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/llm-calls">LLM 调用</a>
+          <a data-nav href="/network">网络</a>
+        </nav>
+      </aside>
+      <main class="main guide-main">
+        <div class="page-toolbar"><h1 class="page-title">使用与接入</h1><button id="refresh" type="button" class="btn">重新检查状态</button></div>
+        <section class="panel">
+          <h2>先确认数据来自哪里</h2>
+          <p class="scope-note">agent-monitor 面向个人开发者、多机使用者和 Gateway 开发者，汇集用量、会话、配额与诊断信息。金额是记录或估算，不是服务商账单。</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="数据源与查看入口"><table><thead><tr><th>数据源</th><th>提供什么</th><th>查看入口</th></tr></thead><tbody>
+            <tr><th>Claude Code / Codex</th><td>本地日志采集出的 token、估算成本和留存会话。采集前已删除的日志无法恢复。</td><td><a href="/explore">透视归因</a> · <a href="/sessions">会话明细</a></td></tr>
+            <tr><th>LLM Gateway</th><td>经过 Gateway 的请求、尝试链、费用与路由诊断，不覆盖所有编码会话。</td><td><a href="/llm-calls">调用与来源状态</a></td></tr>
+            <tr><th>服务商账号</th><td>账号级 5h / 7d 配额与观测时间。采集失败保留旧读数，页面日期不改变配额窗口。</td><td><a href="/#quota-explorer">配额与账号</a></td></tr>
+            <tr><th>服务端网络</th><td>运行 Web 服务的主机出口与网络诊断，不是浏览器设备的网络。</td><td><a href="/network">检测主机与结果</a></td></tr>
+          </tbody></table></div>
+        </section>
+        <section class="panel">
+          <h2>当前采集状态</h2>
+          <p class="scope-note">“已纳入”表示机器快照可读，不保证每种来源都存在或历史完整。无匹配记录不等于尚未接入；Gateway 来源状态在调用页查看。</p>
+          <div class="panel-head"><span id="sync-coverage" class="status-line">已纳入 —/—</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
+          <div id="sync-machines" class="sync-machines"></div>
+        </section>
+        <section class="panel">
+          <h2>首次接入</h2>
+          <ol>
+            <li>在自己的 agent-monitor checkout 中配置 <code>machines.json</code>；新单机安装只保留自己的本机条目，例如 <code>{"machines":[{"name":"local","ssh_host":"localhost","self":true}],"retired_names":[]}</code>。已有安装须保留机器身份和退休记录。</li>
+            <li>准备 Python、Git、curl 及独立的 llm-gateway checkout（默认 <code>~/research/llm-gateway</code>，或设置 <code>LLM_GATEWAY_ROOT</code>）。当前 Web 运行仍依赖其 reader；安装 monitor 不会启动 Gateway。</li>
+            <li>运行 <code>./install.sh</code>，再运行 <code>agent-monitor start</code>。首次采集可运行 <code>agent-monitor refresh</code>；macOS 定时采集由安装器设置，Linux 需自行安排调度。</li>
+            <li>多机使用需配置自己的 <code>hub.json</code> 角色、URL、SSH 目标，在各机运行 <code>./install.sh hub &lt;机器名&gt;</code>。Hub 拉取快照，采集器独立保存本机数据。</li>
+          </ol>
+          <p>完整命令、依赖与已有服务迁移见 checkout 的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。本页只说明与检查状态，不修改配置或登录账号。</p>
+        </section>
+        <section class="panel">
+          <h2>从问题找到证据</h2>
+          <ul>
+            <li>想知道成本变化：总览展开周期比较，核对两个周期日期与未知定价，再进入透视定位目录、模型或机器。</li>
+            <li>想追溯某组用量：点击透视排行的“查看会话”。列表只计匹配记录；打开详情可看全部留存记录。汇总比明细更完整时，差额不能当成查询错误或零成本。</li>
+            <li>想挑选账号：在总览按配额窗口和剩余额度排序，同时核对更新时间。历史账号读数不代表当前可用。</li>
+            <li>页面为空：先检查日期和筛选，再看机器采集状态、Gateway 来源状态及 exporter 版本。连接失败会保留最后成功快照；修复接入后再刷新。</li>
+          </ul>
+          <p class="scope-note">请在可信个人网络使用；账号操作的来源检查不等于用户认证。开源代码与公开运行中的仪表盘是两件事。</p>
+        </section>
+      </main>
+    </div>
+    <script>AgentMonitor.initClientNavigation(); AgentMonitor.initGuide();</script>
+  </body>
+</html>

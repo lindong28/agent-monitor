@@ -27,6 +27,7 @@
     pageLoadSequence: null,
     optionsLoaded: false,
     optionsSequence: 0,
+    optionsPending: null,
     analysisSequence: null,
   };
 
@@ -103,10 +104,10 @@
 
   function setTerminal(payload) {
     const hubScope = payload.scope && payload.scope.kind === "admitted_machines";
-    AgentMonitor.qs("#llm-scope").textContent = hubScope ? "全部已纳入机器" : "仅本机";
+    AgentMonitor.qs("#llm-scope").textContent = hubScope ? "Gateway 调用 · 全部已纳入机器" : "Gateway 调用 · 仅服务端本机";
     AgentMonitor.qs("#llm-scope-detail").textContent = hubScope
-      ? "数据取自每台机器最后一次采集的快照，各机的观测时间与缺口见下方。"
-      : "数据取自本页所在机器的本地账本，不含其它机器。";
+      ? "仅含经过 Gateway 的调用，不含 Claude Code / Codex 全部会话。数据取自各机最后采集的快照，观测时间与缺口见下方。"
+      : "仅含经过 Gateway 的调用，不含 Claude Code / Codex 全部会话。数据取自服务端机器的本地账本，不含其它机器。";
     const status = AgentMonitor.qs("#llm-state");
     const sources = payload.sources || [];
     const coverage = sources.map((source) => {
@@ -761,7 +762,12 @@
 
   async function loadOptions() {
     const current = AgentMonitor.pageScope(), range = AgentMonitor.getRange();
-    const sequence = ++state.optionsSequence, reload = state.reloadSequence;
+    const reload = state.reloadSequence;
+    if (state.optionsPending?.range === range && state.optionsPending?.reload === reload) return;
+    const sequence = ++state.optionsSequence;
+    state.optionsPending = { range, reload, sequence };
+    const button = AgentMonitor.qs("#llm-load-options");
+    button.disabled = true;
     const status = AgentMonitor.qs("#llm-options-status");
     status.textContent = "正在加载完整选项…";
     try {
@@ -772,6 +778,14 @@
       resetPages(); await loadPage();
     } catch (error) {
       if (current() && sequence === state.optionsSequence && reload === state.reloadSequence) status.textContent = `筛选选项加载失败：${error.message}；可重试。`;
+    } finally {
+      if (state.optionsPending?.sequence === sequence) {
+        state.optionsPending = null;
+        if (current()) {
+          button.disabled = false;
+          if (sequence === state.optionsSequence && reload !== state.reloadSequence) status.textContent = "筛选条件已变更，可重新加载完整选项。";
+        }
+      }
     }
   }
 
@@ -879,6 +893,8 @@
     // Invalidate any old page/list response before refresh awaits network I/O.
     state.loadSequence += 1;
     state.optionsSequence += 1;
+    state.optionsPending = null;
+    AgentMonitor.qs("#llm-load-options").disabled = false;
     state.optionsLoaded = false;
     AgentMonitor.qs("#llm-options-status").textContent = "当前仅显示已选条件。";
     resetPages();

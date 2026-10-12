@@ -2,6 +2,13 @@
 
 ## 2026-10-12
 
+- Compress large session detail responses for accepting browsers without truncating usage records.
+
+- Add a read-only usage and onboarding guide. Keep Gateway coverage visible after loading and identify the server host used for network checks.
+- Match attribution drilldowns to the chart's actual week/month dates; link Explore rankings to event-filtered Sessions and retain custom dates through details and return.
+- Add on-demand comparisons of equal complete-day periods with explicit unknown costs and coverage limits; add quota ordering by remaining allowance, reset or observation time.
+- Coalesce repeated complete-filter requests in LLM Calls and show a retryable state after failure or superseded selection.
+
 - Report revoked Codex login credentials as requiring a new login on the affected machine. Reserve CLI-upgrade advice for unsupported RPC methods instead of treating every quota error as an outdated CLI; failed refreshes still retain their previous readings.
 
 - Add isolated backend cost diagnostics and a consumer cost map for proactive development and performance work. Report cold/hot admission, prepared reads and generation changes; retain structural regressions for repeated validation and blocked readers. Synthetic measurements are separate from live performance evidence.

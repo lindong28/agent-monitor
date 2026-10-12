@@ -4,6 +4,61 @@
 
 ---
 
+## [resolved] ISSUE-UX-20260826-8ade — Overview 的 Range 控件未说明只影响页面的一部分
+
+- **Type**: information-architecture
+- **Discovered**: 2026-08-26
+- **Priority**: medium
+- **Observed**: 在真实 `http://127.0.0.1:39001/?range=30d` 依次切换 30d、7d 与 All 后，第三张 Spend 卡和 Cost over time 随 Range 改变；Today、Week、Quota、Top projects this week 与 Model mix this month 保持各自固定窗口。页面只有一个位于顶栏的 Range 控件，没有说明它控制哪些区域。7d 状态下，`Model mix this month` 的 Explore 链接仍携带 `range=7d`。
+- **Impact**: 控件位置暗示全页作用域，读者需要反复切换并比较标题才能知道哪些数字受它影响。
+- **Reproduce**: 打开 30d Overview，切换到 7d 和 All，逐项比较 Spend、Quota、三个 chart 标题及 Explore 链接。
+- **Recommended direction**: 在 Range 控件附近明确其作用域，或把受控区域与固定窗口区域在结构上分开；Explore 链接的 range 语义需与各卡标题共同核对，不能只改说明文字。
+
+- **2026-10-12 复验**：真实 Hub 总览默认 `range=30d` 下，本周目录图的透视链接为 `/explore?x=project&group=none&metric=cost&range=30d`，本月模型图同样传 `range=30d`；实际打开目录链接后仍为 30 天。该行为符合现有契约 A2/B5，因此这里是产品上下文与契约演化问题，不是实现违反契约。建议后续明确“查看同一窗口明细”与“沿用全局范围分析”的区别；本轮只审查，未改变契约。
+
+- **Resolved 2026-10-12**: 首页明确顶部范围只影响区间成本、趋势与周期比较；两张固定图按实际周/月日期进入 custom 透视。真实 7d 首页的本月模型图进入 10月1—12日，再到同窗口会话。部署为 MacStudio `f3c9301`；来源、真实交互与读数见 [运维记录](../../operations/services.md#2026-10-12-web-workflow-deployment)。
+
+## [resolved] ISSUE-UX-20261012-6bc4 — 网络诊断未标明被检测的服务端机器
+
+- **Observed**: 2026-10-12，隔离浏览器访问真实 Hub `/network`，页面写“仅本机，这些诊断只针对本机，不跨机合并”，并列出“本机时区”；页面没有服务端机器名或 Hub 身份。此轮只读已有报告，没有强制刷新网络检测。
+- **Expected / Impact**: 契约 G5 要求明示检测的是打开页面的中心机器。多机用户从笔记本访问 Hub 时，容易把服务端出口、DNS 与时区当成浏览器所在机器的结果。
+- **Reproduce**: 从另一台设备访问 Hub 的网络页，尝试仅从正文确认检测目标；对照总览中可见的机器身份。
+- **Recommendation / Priority**: 优先明确“检测目标：<服务端机器>（Hub）”，保留检测时间；支持选择其他机器属于另一个功能建议，本条不要求新增探测能力。优先级中。
+- **Evidence / Owner**: 本轮真实页面文本与截图位于本地 `~/.local/share/agent-reports/agent-monitor-ui-review-20261012-worker/evidence/network.{json,png}`；源码佐证 `web/network.html` 与 `web/app.js:renderNetwork`。后续 agent-monitor UI 维护任务处理，本轮未修复。
+
+- **Resolved 2026-10-12**: 真实网络页显示“检测目标：服务端主机 macstudio”，并明确不检测浏览器设备、不跨机合并。部署为 MacStudio `f3c9301`；来源、真实交互与读数见 [运维记录](../../operations/services.md#2026-10-12-web-workflow-deployment)。
+
+## [resolved] ISSUE-UX-20261012-7ad2 — LLM 调用加载后丢失 Gateway 覆盖范围说明
+
+- **Observed**: 2026-10-12，真实 Hub `/llm-calls` 健康且有记录时，范围标签为“全部已纳入机器”，说明只有快照来源与“Claude Code 与 Codex 的会话用量在总览和透视页”；没有明示本页仅覆盖经各机 LLM Gateway 的调用。
+- **Expected / Impact**: 契约 G5/H1 明确要求说明 Gateway 数据源以及未接入项目不在覆盖范围。新用户可能将“全部已纳入机器”理解为这些机器上的全部 LLM 请求。
+- **Reproduce**: 打开真实调用页，等待请求表加载完，阅读顶部范围说明；不要以 HTML 初始占位中的“Gateway 调用”作为最终可见证据。
+- **Source**: `web/llm-calls.html` 初始 Gateway 标签被 `web/llm-calls.js:setTerminal` 替换成机器范围；全部来源可用且有请求时，状态标题也不含 Gateway。
+- **Recommendation / Priority**: 机器覆盖和调用来源分别保留说明，明确未接入 Gateway 的请求不在本页；无需扩大采集范围。优先级中。
+- **Evidence / Owner**: 本轮真实页面记录位于本地 `~/.local/share/agent-reports/agent-monitor-ui-review-20261012-worker/evidence/llm-calls.{json,png}`。后续 agent-monitor UI 维护任务处理，本轮未修复。
+
+- **Resolved 2026-10-12**: 真实调用列表加载后显示“Gateway 调用 · 全部已纳入机器”，保留不含 Claude Code/Codex 全部会话的限定。部署为 MacStudio `f3c9301`；来源、真实交互与读数见 [运维记录](../../operations/services.md#2026-10-12-web-workflow-deployment)。
+
+## [resolved] ISSUE-PRODUCT-20261012-38f1：产品场景与 Web UI 的下一步改进候选
+
+- **Scope / Status**: 2026-10-12 对照 README 的三类目标用户与七个场景，读取当前源码并使用真实 Hub 五个主页面。本条为建议清单，不是新增承诺、既有合同违约或已批准实施的计划；本轮不改产品行为。
+- **Version / Evidence**: 取证时本地主线 `0447ab3d141d99588f0ac23dcb574d1fde8f488b`；在线四份 HTML（index/explore/sessions/network）与三份 JS（app/pivot/llm-calls）逐字节匹配该 checkout；该读数不证明全部后端代码一致。浏览器记录保存在本地 `~/.local/share/agent-reports/agent-monitor-ui-review-20261012-worker/`，包含真实交互报告；原始记录可能含个人账号、项目或网络信息，不应直接用作开源演示材料。
+
+| 候选 | 本轮依据与边界 | 建议下一动作 |
+| --- | --- | --- |
+| 连通成本归因与会话调查 | 透视有目录／模型／机器分组和排行，但排行没有到会话的链接；会话列表有相应过滤，详情及带筛选返回可用。目前需重新组装查询；源码 `pivot.js:renderRanking` 也只生成展示行 | 优先设计透视结果到会话列表的带范围与维度跳转。只传语义相同的维度；不把 Claude/Codex 源日志 ID 冒充 Gateway 请求关联 |
+| 首次使用的接入说明 | 五页导航直接进入指标／数据；机器配置、采集来源和 Gateway 前置条件主要在 README 与配置文件。当前实测为已有数据实例，不是干净安装，不能据此声称新用户安装失败 | 面向开源采用者，先提供页面内可发现的接入状态和使用说明，区分未配置、未采集、无匹配、来源失败；是否建设设置向导另定，不默认增加复杂配置 UI |
+| 成本复盘的同周期比较 | 总览有固定今日／本周与范围趋势，透视支持日期、指标和维度；本轮查阅的总览／透视控件及实现未提供上一等长周期增减比较 | 作为后续功能候选，先明确两个周期的覆盖率与价格口径，再考虑成本、token、调用量的并列比较；不能把部分采集变化当作消费变化 |
+| 多账号的快速判断 | 实测已有服务商过滤、搜索、历史账号、零匹配／清空，以及失败详情；能力存在。首页还需在多条账号读数间人工比较 | 后续评估按剩余额度、重置时间、读数新鲜度排序，或提供需要关注的摘要；摘要不替代逐账号原始读数，不自动登录或发送 |
+| 调用筛选选项的等待 | 真实点击获取筛选选项后，一次 20 秒等待内未完成，后续短观测仍显示正在加载；请求详情另一路径能打开。未取得完成耗时、请求终态或根因，不能称筛选永久不可用 | 后续调用页性能任务以同一真实过滤入口补取完成事件与服务端耗时，沿用已有按需加载设计；不因为等待就改为每次打开页面全量预载 |
+
+- **Related / Disposition**: 窗口跳转错位复验补入 `ux-issues.md` 的 `ISSUE-UX-20260826-8ade`（符合当前 A2/B5、需演化）；网络目标身份和调用来源说明分别记 `ISSUE-UX-20261012-6bc4`、`ISSUE-UX-20261012-7ad2`。建议实施顺序为范围说明 → 跨页追溯与开源接入说明 → 复盘与账号判断增强。具体新增功能由产品负责人确认后进入实施，本轮仅记录评估。
+- **Coverage limits**: 独立桌面浏览器、真实部署、五主页面；深入配额搜索／历史、透视筛选、会话详情返回与一条成功请求诊断。未执行真实账号登录、发送、取消、删除、主动采集刷新、全量导出；未验证全新安装、移动端、失败／多次重试请求、长期轮询、全部筛选组合或所有机型。无产品修复或部署。
+
+- **2026-10-12 实施进度（38f1）**：用户已授权处理建议，私树实现范围说明、固定窗口钻取、事件维度会话追溯、只读接入页、完整日比较与配额排序。隔离浏览器在 1440×1000 / 390×844 检查布局，并走通图卡→透视→会话→详情返回；实际 Hub 部署与完整选项终态待本轮后续验证，尚不关闭本条。141 项定向测试覆盖两机、两模型会话、空/未知/零/混合成本、5h/7d 排序、正常/失败来源以及重复与失效选项请求；不代表完整安装或账号操作验收。
+
+- **Resolved 2026-10-12**: 已实现并部署范围说明、日期钻取、事件过滤会话追溯、只读接入页、等长完整周期比较和配额排序。真实跨机详情传输发现截断后补 gzip 协商，同一 6348 条记录由 3195995 bytes 压到216141 bytes，浏览器约3.09秒显示并返回原筛选；未裁剪记录。MacBook 当前采集成功，旧锁超时未复现；完整筛选可完成但仍约30秒，成本另转 ISSUE-CALLS-20261012-5f26。用户确认的 UI 能力已交付；不外推干净安装、真实账号动作或服务长期稳定性。
+
 ## [resolved] ISSUE-TTWEB-20260928-72ab：项目归属阻断文案容易被理解为用量未留存
 
 - **Type**: misleading-status

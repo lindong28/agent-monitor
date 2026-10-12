@@ -41,3 +41,7 @@ This round compared documentation with the existing installer, machine configura
 No runtime implementation, schema, accounting or service behavior is changed. The documentation-only change did not require a runtime regression suite or production/provider calls. No independent reviewer or full open-source readiness review was run.
 
 Preparation is complete only for the materials listed above. A later readiness review must bind its findings to the exact candidate commit, selected public history and artifacts, and separate static inspection, isolated adopter execution and actual publication. An accessible maintainer deployment or a successful local unit test does not establish a clean adopter installation.
+
+## 2026-10-12 UI preparation follow-up
+
+The dashboard now includes a discoverable read-only usage/onboarding guide with source boundaries, current collection status, standalone/multi-machine entry points and the external Gateway prerequisite. Fixed-window drilldowns, session tracing, period comparison and quota sorting were deployed and checked on the existing Hub. This improves adopter guidance; clean installation, neutral defaults, public dependency availability and the release decisions above remain unverified or pending. Private live screenshots are not release/demo assets.

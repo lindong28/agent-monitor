@@ -37,7 +37,9 @@
               <option value="1y">1y</option>
               <option value="2y">2y</option>
               <option value="all">全部</option>
+              <option value="custom">自定义</option>
             </select>
+            <span id="session-dates" hidden><label>起始 <input type="date" id="session-start"></label> <label>终止 <input type="date" id="session-end"></label></span>
             <select id="sort" aria-label="排序">
               <option value="time">按时间</option>
               <option value="cost">按成本</option>
@@ -56,6 +58,7 @@
           <div class="panel-head"><span id="sync-coverage" class="status-line">已纳入 —/—</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
           <div id="sync-machines" class="sync-machines"></div>
           <p id="session-source-coverage" class="scope-note"></p>
+          <p class="scope-note">本表成本、token 和用量条目仅计入当前日期与筛选匹配的使用记录；会话详情展示全部留存记录。透视汇总与留存明细可能存在历史覆盖差异。</p>
           <p class="scope-note">会话目录按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
           <details class="note-disclosure">
             <summary>这张表包含什么</summary>

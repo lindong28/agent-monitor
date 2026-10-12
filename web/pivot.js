@@ -499,7 +499,13 @@
       const label = row.key.map((value, i) => dimLabels[ranked.dimensions[i]] + "：" + value).join(" · ");
       const periods = row.periods.map((period) => `<div><span>${escapeHtml(period.label)}</span><span>${formatValue(period.value, metric)}</span></div>`).join("");
       const width = max > 0 && row.value !== null ? Math.max(0, row.value / max * 100) : 0;
-      return `<li class="ranking-item" tabindex="0"><div class="ranking-heading"><span>${escapeHtml(label)}</span><strong>${formatValue(row.value, metric)}</strong></div><div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${periods ? `<div class="ranking-periods" aria-label="各期数值">${periods}</div>` : ""}</li>`;
+      const query = new URLSearchParams({ range: AgentMonitor.getRange(), ...dateParams(), sort: metric === "cost" ? "cost" : "tokens" });
+      filterNames.forEach(name => { const value = desiredFilterValue(name); if (value) query.set(name, value); });
+      ranked.dimensions.forEach((dim, index) => query.set(dim, row.key[index]));
+      const gateway = query.get("agent") === "gateway";
+      const follow = gateway ? '<span class="scope-note">Gateway 记录请到 <a href="/llm-calls">LLM 调用</a> 查看</span>'
+        : `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">查看会话</a>`;
+      return `<li class="ranking-item" tabindex="0"><div class="ranking-heading"><span>${escapeHtml(label)}</span><strong>${formatValue(row.value, metric)}</strong></div><div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${follow}${periods ? `<div class="ranking-periods" aria-label="各期数值">${periods}</div>` : ""}</li>`;
     }).join("") : '<li class="empty-state">— 无数据</li>';
   }
   function displayLabel(value, dim) {

@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261012-6a92: Web UI workflows](20261012-6a92-ui-workflows.md) | Accepted; explicit scope, calendar comparison, event-filtered session drilldown and quota sorting |
 | [20261011-7c3a: account round recovery](20261011-7c3a-account-round-recovery.md) | Accepted; scoped HTTP transport, safe failures and quota recovery without message replay |
 | [20261011-a8d3: prepared aggregate query views](20261011-a8d3-prepared-query-view.md) | Accepted; leased admission outside requests, short publication lock and concurrent Explore loading |
 | [20261011-64e1: independent quota refresh](20261011-64e1-independent-quota-refresh.md) | Accepted; quota queries and display no longer wait for statistics, membership remains snapshot-owned |

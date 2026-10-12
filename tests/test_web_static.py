@@ -289,10 +289,10 @@ process.stdout.write(JSON.stringify(results));
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         local, hub = json.loads(result.stdout)
-        self.assertEqual(local[0], "仅本机")
+        self.assertEqual(local[0], "Gateway 调用 · 仅服务端本机")
         self.assertIn("不含其它机器", local[1])
-        self.assertEqual(hub[0], "全部已纳入机器")
-        self.assertIn("最后一次采集的快照", hub[1])
+        self.assertEqual(hub[0], "Gateway 调用 · 全部已纳入机器")
+        self.assertIn("最后采集的快照", hub[1])
         html = (ROOT / "web/llm-calls.html").read_text()
         for name in ("llm-scope", "llm-scope-detail"):
             self.assertIn('id="' + name + '"', html)
@@ -575,7 +575,8 @@ process.stdout.write(JSON.stringify({
         prose = " ".join(html.split())
 
         self.assertIn("配额用量", prose)
-        self.assertNotIn("剩余", prose)
+        self.assertIn("5h 已用", prose)
+        self.assertIn("7d 已用", prose)
         # The figure in the cell is the rounded source usage, not its inverse.
         self.assertIn("`${used}%`", js)
         self.assertIn("const used = Math.round(usedPct)", js)
@@ -1708,21 +1709,13 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertEqual(parser.collapsed, [True, True])
         self.assertEqual(parser.primary, ["machine", "project", "logical_model", "request_outcome"])
 
-    def test_overview_side_panel_links_preserve_selected_range(self):
+    def test_overview_side_panel_links_use_card_windows(self):
         html = (ROOT / "web" / "index.html").read_text()
-
-        self.assertIn('href="/explore?x=project&group=none&metric=cost"', html)
-        self.assertIn('href="/explore?x=model&group=agent&metric=total"', html)
-        # Named individually rather than counted. A bare count pinned the two
-        # panel links only as long as nothing else on the page needed the same
-        # treatment; the brand link now does, because it is a routed link to `/`
-        # and without it clicking the logo silently reset the selected range.
-        for link in (
-            'data-preserve-range href="/explore?x=project&group=none&metric=cost"',
-            'data-preserve-range href="/explore?x=model&group=agent&metric=total"',
-            '<a class="brand" data-preserve-range href="/">',
-        ):
-            self.assertIn(link, html)
+        self.assertIn('id="top-projects-link"', html)
+        self.assertIn('id="model-mix-link"', html)
+        self.assertNotIn('data-preserve-range href="/explore?x=project', html)
+        self.assertNotIn('data-preserve-range href="/explore?x=model', html)
+        self.assertIn('<a class="brand" data-preserve-range href="/">', html)
 
     def test_sessions_retention_note_describes_mixed_source_retention(self):
         html = (ROOT / "web" / "sessions.html").read_text()
@@ -1821,7 +1814,8 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
             html = (ROOT / "web" / filename).read_text()
             with self.subTest(filename=filename):
                 self.assertIn("本机", html)
-                self.assertIn("只针对本机", html)
+                self.assertIn("服务端主机", html)
+                self.assertIn("不检测浏览器所在设备", html)
         sessions = (ROOT / "web" / "sessions.html").read_text()
         self.assertIn("全部已纳入机器", sessions)
         self.assertIn('id="filter-machine"', sessions)
