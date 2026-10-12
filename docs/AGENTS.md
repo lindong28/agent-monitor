@@ -12,6 +12,7 @@ Current usage and installation belong in the root README; current architecture a
 | [contracts/ux-contract.md](contracts/ux-contract.md) | Existing observable behavior contract |
 | [adr/README.md](adr/README.md) | Extraction decision and source provenance |
 | [references/tt-web-readme-20261004.md](references/tt-web-readme-20261004.md) | Full pre-extraction README, with original dated observations |
+| [references/open-source-preparation.md](references/open-source-preparation.md) | Open-source preparation status, evidence boundaries, unresolved decisions and release gaps |
 | [issues/general.md](issues/general.md) | Product issues inherited from tt-web |
 | [issues/harness-issues.md](issues/harness-issues.md) | Project-specific agent workflow gaps and evidence |
 | [issues/ux-issues.md](issues/ux-issues.md) | UX issue ledger |

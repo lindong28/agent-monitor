@@ -2,15 +2,50 @@
 
 Personal CLI and Web dashboard for Claude Code, Codex and LLM Gateway usage: tokens, estimated cost, model mix, session directories, sessions, quotas and network diagnostics. Run locally or aggregate declared machines through SSH with a MacStudio Hub.
 
+Use it to answer: **How much AI usage accumulated, where did it come from, which accounts have quota left, and what happened to a model request?**
+
+## Who it is for
+
+- Developers who use Claude Code and Codex frequently, especially across multiple models, accounts and computers.
+- Engineers maintaining a personal AI development environment who need one place to inspect collection status, usage history, quotas and connectivity.
+- Developers using LLM Gateway who need to inspect requests, retries, route switches and usage attribution alongside their coding-agent activity.
+
+The current product is a personal monitoring console. Organization permissions, team budget enforcement and enterprise governance are outside its documented capabilities.
+
+## Use cases and capabilities
+
+| Use case | Question | Available capability |
+| --- | --- | --- |
+| Review daily or weekly usage | How much did I use, and how is it changing? | Overview totals, token usage, estimated cost, trends and model mix |
+| Attribute consumption | Which model, machine or session directory accounts for the usage? | Explore filters and pivots, plus retained Claude/Codex sessions and their usage |
+| Monitor several computers | How do laptop, desktop and server activity add up? | Local collection and SSH snapshot aggregation into one Hub dashboard |
+| Manage account quotas | Which account is near its limit, when does it reset, and how old is the reading? | Claude/Codex account quotas, reset times, account history, observation times and refresh failures |
+| Diagnose model requests | Did a request fail, retry or switch routes? | Gateway request filters, complete attempt chains, routing diagnostics and JSON request/attempt exports |
+| Operate Codex accounts | Can I authorize an account, send a message or refresh its quota? | Explicit single-account and batch actions, queued device authorization and retained operation results |
+| Check connectivity | What does the current network diagnostic report show? | Shared Web and CLI diagnostics through `agent-monitor network` and `ip-check` |
+
+The CLI also manages start, stop, status and refresh. Periodic collection and manual refresh retain usable history when a machine is offline, with source times and failures visible. See [Dashboard behavior](#dashboard-behavior) for the page workflows and [Codex account actions](#codex-account-actions) for action semantics.
+
+Cost is an estimate at configured model rates, not a subscription charge or an invoice. Data comes from collection rounds and snapshots; check observation times before treating a reading as current. The “session directory” dimension follows the session's starting directory and Git identity, not every repository touched later. Request-level diagnostics cover LLM Gateway records; Claude/Codex session usage does not imply the same request-level trace coverage.
+
+## Project status
+
+Open-source preparation is in progress. The license and publication history scope have not been selected, and a clean adopter installation has not yet been verified as part of this preparation. See the [preparation checklist](docs/references/open-source-preparation.md) for concrete gaps and the [contribution guide](CONTRIBUTING.md) for development and reporting instructions.
+
 This is the independent successor to `tt-web`, extracted from ai-agent-config commit `3d61487d5386dfe9bb6ba7d26807005bbf0bd7f2` on 2026-10-04. The CLI, Web UI, backend, network tools, tests and operational documents live here. Runtime code and installation do not require an ai-agent-config checkout. [Extraction decision](docs/adr/20261004-a902-standalone-project.md) and [historical feature/deployment record](docs/references/tt-web-readme-20261004.md) preserve provenance; historical measurements are not new deployment checks.
 
 ## Install
 
 Prerequisites: Python 3 with `venv`/`pip`, Git, curl, and an independent [llm-gateway checkout](https://github.com/lindong28/llm-gateway) at `~/research/llm-gateway` (or set `LLM_GATEWAY_ROOT`). SSH and rsync are required for remote collection. macOS supports launchd scheduling; Linux installs the portable CLI and Web service and reports a scheduling skip. The test suite requires Python 3.10 or newer and Node. Set `AGENT_MONITOR_PYTHON=/path/to/python3` on first installation to choose the interpreter that creates the project environment.
 
+The Gateway source checkout is currently a runtime prerequisite, including for the Web server; hiding the LLM Calls page does not remove that dependency. Installing agent-monitor does not install or start Gateway. Public availability and a compatible acquisition path for this prerequisite remain release-preparation items.
+
+The following clone command requires repository access. Before running the installer, configure [machines.json](machines.json) for your own installation: the shipped entries name the maintainer's fleet. For a new standalone installation, use exactly one local entry, for example `{"machines":[{"name":"local","ssh_host":"localhost","self":true}],"retired_names":[]}`. This uses the existing configuration format; do not replace the identities or retirement records of an existing installation. Hub setup additionally requires your own [hub.json](hub.json) roles, URL and SSH targets. See [Machines and retained data](#machines-and-retained-data).
+
 ```bash
 git clone git@github.com:lindong28/agent-monitor.git ~/research/agent-monitor
 cd ~/research/agent-monitor
+# Configure machines.json for your installation before continuing.
 ./install.sh
 ```
 
@@ -36,6 +71,8 @@ agent-monitor stop
 ```
 
 The default local address is `http://127.0.0.1:39001`, listening on `0.0.0.0`; standalone mode advances to a free port when needed and saves it in `state/port`. The equivalent lifecycle wrappers are [start.sh](start.sh), [stop.sh](stop.sh), [status.sh](status.sh) and [uninstall.sh](uninstall.sh). Uninstall retains state and source. See [service operations](docs/operations/services.md) before changing an existing deployment.
+
+Operate the dashboard on a trusted personal network. Account-action origin checks are not client authentication, and the dashboard exposes usage and account metadata. Do not expose the service directly to an untrusted network or the public Internet. Publishing the source repository and exposing a running dashboard are separate actions.
 
 Restart and SIGTERM shutdown stop admitting account operations, cancel active account work and reap the owned child processes. Restart is refused if account cleanup cannot be confirmed. The CLI waits up to ten seconds for graceful shutdown before its existing forced-stop fallback; it returns sooner when the server exits. Interrupted messages are never automatically replayed. To clear children left by an older execution, use a full `agent-monitor stop` followed by `agent-monitor start` after checking account work is idle.
 
