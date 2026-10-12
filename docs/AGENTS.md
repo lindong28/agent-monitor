@@ -12,6 +12,7 @@ Current usage and installation belong in the root README; current architecture a
 | [adr/README.md](adr/README.md) | Extraction decision and source provenance |
 | [references/tt-web-readme-20261004.md](references/tt-web-readme-20261004.md) | Full pre-extraction README, with original dated observations |
 | [issues/general.md](issues/general.md) | Product issues inherited from tt-web |
+| [issues/harness-issues.md](issues/harness-issues.md) | Project-specific agent workflow gaps and evidence |
 | [issues/ux-issues.md](issues/ux-issues.md) | UX issue ledger |
 | [issues/ux-contract-issues.md](issues/ux-contract-issues.md) | Contract issue ledger |
 | [issues/archive/closed.md](issues/archive/closed.md) | Closed historical issues |
