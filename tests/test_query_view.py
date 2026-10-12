@@ -36,14 +36,24 @@ class QueryViewTests(unittest.TestCase):
         return generation.publish_generation("macbook", db, meta, root=self.root)
 
     def test_http_queries_reuse_prepared_admission_and_existing_aggregates(self):
-        self.publish(1)
-        self.view.refresh()
-        with mock.patch.object(server, "QUERY_VIEW", self.view), mock.patch.object(server, "_maybe_sync_remotes"), \
-                mock.patch.object(generation, "_validate_generation", side_effect=AssertionError("HTTP did validation")), \
-                mock.patch.object(generation, "generation_admission_snapshot", side_effect=AssertionError("HTTP did admission")):
-            result = server.pivot_endpoint({"range": ["all"], "group_by": ["none"], "metric": ["input"]})
-            self.assertEqual(result["rows"], [{"key": [], "value": 10}])
-            self.assertEqual(server.pivot_filters_endpoint({"range": ["all"]})["machine"], ["macbook"])
+        for index in (1, 2):
+            current = self.publish(index)
+            self.view.refresh()
+            with mock.patch.object(server, "QUERY_VIEW", self.view), mock.patch.object(server, "_maybe_sync_remotes"), \
+                    mock.patch.object(server.hub, "enabled", return_value=False), \
+                    mock.patch.object(server, "_rate_limits", return_value={}), \
+                    mock.patch.object(generation, "_validate_generation", side_effect=AssertionError("HTTP did validation")), \
+                    mock.patch.object(generation, "generation_admission_snapshot", side_effect=AssertionError("HTTP did admission")):
+                for repeat in (1, 2):
+                    with self.subTest(generation=index, repeat=repeat):
+                        result = server.pivot_endpoint({"range": ["all"], "group_by": ["none"], "metric": ["input"]})
+                        self.assertEqual(result["rows"], [{"key": [], "value": index * 10}])
+                        self.assertEqual(server.pivot_filters_endpoint({"range": ["all"]})["machine"], ["macbook"])
+                        status = server.sync_status_endpoint({})
+                        self.assertEqual(status["machines"][0]["generation_id"], current.meta["generation_id"])
+                        overview = server.overview({"range": ["all"]})
+                        self.assertEqual(overview["sync"]["coverage"], {"admitted": 1, "declared": 1})
+                        self.assertEqual(overview["range"]["tokens"], index * 10 + 9)
 
     def test_old_readers_keep_leases_across_refresh_and_gc(self):
         first = self.publish(1)

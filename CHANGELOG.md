@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-12
+
+- Add isolated backend cost diagnostics and a consumer cost map for proactive development and performance work. Report cold/hot admission, prepared reads and generation changes; retain structural regressions for repeated validation and blocked readers. Synthetic measurements are separate from live performance evidence.
+
 ## 2026-10-11
 
 - Use HTTP directly for isolated Codex account messages. Preserve safe failure categories and the newest pre/post-send quota reading; query quota once after failed or uncertain sends without replaying the message.

@@ -2,6 +2,20 @@
 
 agent-monitor collects local agent usage and publishes read-only machine snapshots for a Web dashboard. It is an independent repository; ai-agent-config may invoke its installer but supplies no implementation at runtime.
 
+## Backend performance checks
+
+Development follows the user-scope performance workflow for affected paths; explicit optimization starts by discovering consumers and representative states. Project evidence and commands live in [proactive-performance.md](proactive-performance.md). No deployment-wide latency SLA is implied by synthetic timings.
+
+| Consumer / stage | Cost and lifetime to inspect | Existing evidence / regression |
+| --- | --- | --- |
+| Overview, Explore pivot/filters, sync status | `server` → `QueryView.snapshot` → admitted daily aggregates; per-request signatures grow with machine count, aggregate work with selected daily rows, not snapshot payload bytes | `test_query_view`: four consumers, repeated reads and generation change; `benchmark_backend.py`: row count and snapshot volume independently varied |
+| View preparation | `QueryView.refresh` → admission → digest/schema validation; paid at startup and a new generation, retains old leased view while preparing | Application-cold/hot phases and new-generation preparation in benchmark; paused preparation and invalidation in `test_query_view` |
+| Snapshot publication / GC | Copy and retained-history validation grow with snapshot/history size; their long work must remain outside the shared GC lock | Frozen copy at two volumes, retention check and cold validation in `test_snapshot_contention` |
+| Full-history requests / sessions / LLM calls | Separate query workers perform their own admission and materialization; bounded worker count limits overlap, not total work | Existing query-process ADR and tests; aggregate-view measurements do not cover these routes |
+| Sync / quota / browser | Export, transport, publication, quota-only lifecycle, frontend status barrier and subsequent API fan-out have different costs | Existing sync/quota and Web tests; use the actual deployed page/API for latency claims |
+
+Residual costs include cold/new-generation validation, full-history worker admission/materialization and aggregate cardinality. Reassess the relevant row when changing its consumers; a completed Explore optimization does not close all rows. Synthetic padding only isolates digest volume; it does not model request-history retention, network or production distribution.
+
 ## Data flow and ownership
 
 Snapshot preparation copies and validates under a preparation lease outside the machine GC lock. The short publication section rechecks the retained predecessor and retirement ledger, verifies the prepared file signature, and commits the existing journal/current/previous transition. Cleanup skips live preparations and reclaims abandoned ones. See the [prepared-view decision](adr/20261011-a8d3-prepared-query-view.md) and [performance evidence](explore-performance.md).

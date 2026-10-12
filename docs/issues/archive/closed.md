@@ -79,3 +79,35 @@ MacMini 旧快照原因已进一步定位：数据卷仅剩 261MiB，12 个遗�
 第五轮 `a06da5e` 已获批推送并部署 MacStudio，新索引快照已发布并被页面读取；真实列表仍为约 7.7–10.1s，不能以本地毫秒级结果结案。按真实来源分解发现 MacMini 旧快照单次约 7.0s，主要等待落在无 child 索引时的逐请求重复扫描。已补齐候选请求批量读取；同一已租约保护的四来源、固定时间、完整响应不变，独立读取由 9.078s 降至 0.855s，4 项列表回归通过。这是独立只读进程的候选代码测量，尚未部署该补丁；新提交发布及 MacStudio 更新许可归用户，获批后的执行与真实页面验收仍归本 session。详见 [发布与旧来源后续记录](../../operations/services.md#2026-10-08-request-first-release-and-legacy-source-follow-up)。
 
 2026-10-08 结案：用户批准“请求优先，附加功能按需加载”后，`218bf2f` 已推送并部署 MacStudio。真实四来源页面 30d 列表读取 822.4ms，翻页渲染 866.1ms；两个同时列表读取 964.4/965.4ms，7d/aihot 筛选 423.9ms，详情 24.6ms。首屏 50 条请求可读，未加载总数明确标注。此前 schema 兼容、快照恢复与详情工作保留以上逐轮证据；本轮完成普通列表打开，未把全量分析算法也说成已加速。该分析按用户选择保留显式加载；非穷尽样本不承诺所有冷读或稀疏筛选的上界。独立的 MacBook 间歇 rollup-lock timeout 另归 ISSUE-SYNC-20261008-b74e，不掩盖在本结案中。完整现场读数见 [最终交付记录](../../operations/services.md#2026-10-08-request-list-performance-delivery)。
+
+---
+
+## [resolved] HARNESS-20261012-36ec：后端性能发现依赖用户报慢，共享冷路径残余未形成主动检查
+
+- Type: coverage gap
+- Priority: medium
+- Discovered: 2026-10-12，用户在 Explore 优化交付后要求分析为什么此前后端优化未提前消除这些问题。
+- Owner: agent-monitor 开发流程维护者；通用入口候选归 ai-agent-config 的 performance-optimization / coding-guidelines owner。本轮只诊断并记账，不修改通用规则。
+- Scope: 本项目端到端性能发现和开发预防；不等于所有旧性能优化无效，也不证明所有历史 session 都漏读了规则。
+
+### 当前证据
+
+`docs/adr/20261008-c4e2-sync-process.md` 已明确记下 process-local validation cache 的残余：父进程账号记忆或首次 HTTP 请求仍会校验新 generation。`20261008-d102-query-process.md` 也明确区分进程隔离与算法提速。此前调用列表交付只覆盖其具名用途，不足以证明 Explore 或全部后端链路已优化。2026-10-11 Explore 诊断得到冷 admission 1.0706 秒、同进程第二次 0.0015 秒、固定代际聚合 SQL 约 1–3 ms；完整证据和边界见 `docs/explore-performance.md`。这支持共享请求准入成本没有被那几项局部优化消除，不反推此前完整执行轨迹。
+
+开发时可通过调用链和复杂度发现全量文件校验进入请求、锁覆盖复制等候选，再以最小测试证实。当前 `tests/test_query_view.py` 明确断言 HTTP 不重新 admission / validation，`tests/test_snapshot_contention.py` 冻结复制后检查读取能否继续；这些机制测试比单纯增加业务断言数量更能阻止同类退化。它们仍不能证明未知性能问题已被全面发现。
+
+### 规则检索与缺口
+
+本轮读取 `~/.claude/AGENTS.md` 性能入口、`references/performance-optimization.md`、`references/coding-guidelines.md` 和 `skills/review-changes/SKILL.md`。前者触发原句为“用户明确指出慢、卡或明显延迟、要求优化性能，或当前任务的真实入口读数已显示主导等待时”；性能正文要求“从用户或真实消费者实际使用的入口取得端到端读数”。它们已覆盖报慢后的诊断，不能把问题笼统归为缺少性能原则。当前读到的 coding-guidelines 有有界并发和可观察验证，但未给上述同步/存储改动明确接入按生命周期检查成本的要求。这里只判断已读入口，不断言全 harness 没有仪器。
+
+检索命令：`rg -n '主动.*性能|性能.*主动|冷.*热|复杂度|主导等待|性能问题|20260830-4b84' /Users/lindong/research/ai-agent-config/docs/issues/harness-issues.md /Users/lindong/research/ai-agent-config/docs/issues/archive/closed.md /Users/lindong/.claude/AGENTS.md /Users/lindong/.claude/skills/task-workflows/references/nonfunctional-requirements.md /Users/lindong/.claude/references/rigor-tiers.md`。中央仓历史命中 `HARNESS-20260902-a4e9`，它讨论批调用遥测，2026-10-08 已按用户裁决 wontfix 且注明未证明修复；本条是新的项目具体证据，不重开该历史条目、不沿用其中已撤回的全局无仪器断言。项目检索 `rg -n 'performance|性能|cold|admission|27.051|全量' docs/issues/general.md docs/issues/archive/closed.md` 命中旧调用页逐轮验证与结案范围，核对其具体覆盖而非把结案当全后端通过。
+
+### 建议方向与处置
+
+建议在涉及请求、采集、发布和存储的开发中检查本次受影响的完整消费路径：工作量随什么增长、何时发生、是否争用读取资源；识别到具体风险后写能使错误结构报红的测试。显式性能优化则从具名入口主动取得冷/热、新代际、后台任务重叠与代表性数据规模读数，并复用既有性能决策正文。共享组件的已知残余应在后续涉及其消费者时重新评估，不能由一个页面的交付隐含关闭。无需每次提交全站压测、强制多轮外审或无读数重写数据库。
+
+下一动作：对齐用户期望后，由上述 owner 分别落实开发入口和项目回归接入；验证原 Explore 类路径能在用户反馈之前被发现，并保留普通局部改动不被扩大为全项目性能工程的合法情况。本轮未运行 harness 行为实验，不能宣称主动发现能力已修复；架构、规则和历史记录的诊断已完成，待实施项保持 open。
+
+### 2026-10-12 关闭记录
+
+用户批准两时点与文件范围后，通用入口和性能正文已改，项目成本地图、隔离诊断及回归已接入；完整变更、13 项最终测试、两种反向变异、三个只读设计响应及测量边界见 `docs/proactive-performance.md`。关闭的是已识别的入口和项目诊断能力缺口，不宣称未来所有 session 都会遵循。复发判据：相关后端开发仍只看局部 SQL/业务正确性、显式优化仍等待用户指定慢接口，或普通文案小改被扩成全仓压测；发生时用具名任务轨迹重开核查。原始诊断段保留为当时记录。

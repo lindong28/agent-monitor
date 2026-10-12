@@ -17,6 +17,11 @@ from tests.test_llm_attempts import LedgerFixture
 
 class SnapshotContentionTests(unittest.TestCase):
     def test_readers_continue_during_snapshot_copy(self):
+        for padding_bytes in (0, 1024 * 1024):
+            with self.subTest(padding_bytes=padding_bytes):
+                self.check_readers_during_copy(padding_bytes)
+
+    def check_readers_during_copy(self, padding_bytes):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             root = path / "generations"
@@ -24,6 +29,9 @@ class SnapshotContentionTests(unittest.TestCase):
             old = generation.publish_generation("macbook", first,
                 generation_fixtures.GenerationGCTests.make_meta(first, "2026-08-04T12:00:00Z"), root=root)
             second = generation_fixtures.GenerationGCTests.make_db(path / "second.db", 20)
+            with closing(sqlite3.connect(second)) as conn, conn:
+                conn.execute("CREATE TABLE test_payload (data BLOB)")
+                conn.execute("INSERT INTO test_payload VALUES (zeroblob(?))", (padding_bytes,))
             meta = generation_fixtures.GenerationGCTests.make_meta(second, "2026-08-04T12:01:00Z")
             entered, release = threading.Event(), threading.Event()
             copy = generation.shutil.copyfile

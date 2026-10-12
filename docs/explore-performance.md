@@ -2,6 +2,8 @@
 
 状态：本轮改进已实施并部署 MacStudio，2026-10-11 完成现场验证。用户要求先记录缺口和建议，再据此改进；目标入口为 `http://macstudio:39001/explore?range=30d`。
 
+后续 2026-10-12：主动发现能力的缺口、开发/优化两个入口、隔离诊断与结构回归归 [proactive-performance.md](proactive-performance.md)。本文保留原现场读数，不把后续合成测量当成新部署或生产收益。
+
 ## 已取得的证据
 
 2026-10-11 从 MacBook 访问 MacStudio，并核对两端源码。MacStudio 基线为 `2018322`，本地开发基线为 `ddd27a6`；generation.py、rollup.py 和 pivot.js 内容一致，server.py 存在既有部署差异。以下为诊断样本，不代表延迟分位数。
