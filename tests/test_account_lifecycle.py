@@ -76,8 +76,7 @@ else:
 class AccountLifecycleTests(unittest.TestCase):
     def run_lifecycle(self, mode):
         with tempfile.TemporaryDirectory() as home:
-            env = dict(os.environ, HOME=home, PYTHONPATH=str(ROOT),
-                       LLM_GATEWAY_ROOT=os.environ.get("LLM_GATEWAY_ROOT", str(Path.home() / "research/llm-gateway")))
+            env = dict(os.environ, HOME=home, PYTHONPATH=str(ROOT))
             peer = subprocess.Popen([sys.executable, '-c', SCRIPT, mode], env=env,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                     start_new_session=True)

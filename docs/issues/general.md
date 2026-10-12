@@ -1,5 +1,13 @@
 # tt-web Issues
 
+## [open] ISSUE-TEST-20261012-bd71: baseline fixture and census mismatch
+
+- Type / Priority: test maintenance / low.
+- Observed: the 847-test separation run failed `test_pivot_sync_publish_remembers_account_before_later_signed_out_publish` because its sync mock does not accept `quota_refresh`, leaving no account-memory file; `test_production_daily_rollup_and_attach_sites_match_explicit_census` omits two synthetic daily-rollup accesses in `scripts/benchmark_backend.py:make_snapshot`.
+- Baseline: both failures reproduced in a clean `git archive` of c16ce83 with isolated HOME and the project Python. The final 139-test affected run retains only the census failure. The separate census change caused by removing the Gateway reader is fixed.
+- Owner / Next: Monitor test maintainer should update the mock keyword arguments and classify the synthetic benchmark sites, then rerun both tests. Existing fixture maintenance is outside this product-separation change; the full suite is not reported as passing.
+- Evidence: local `~/.local/state/agent-monitor-boundary-20261012/baseline-tests.log` and `monitor-final-tests.log`; scope and result in `docs/product-boundary-separation.md`.
+
 本组件里已知、但当轮未就地修的问题。
 
 ## [open] ISSUE-TEST-20260915-6c2e：测试套在**开发工作树**上有 26 个 ERROR，在干净导出树上一个都没有
@@ -18,13 +26,6 @@
 - **为什么值得记**：这 26 个 ERROR **在到达断言之前就挂了**，于是"断言期望的字符串对不对"在它们身上**读数恒定**。同一天的文案中文化就因此漏掉 5 条真回归——"失败集合与基线逐条相同"这条验证读数在那 26 个用例上什么也证明不了，却读起来像全绿。任何拿本地套件做回归基线的人都会踩同一个坑。
 - **修法方向**：要么让这些用例的 fixture 不依赖 `state/` 的存在与否（给 `SimpleNamespace` 补 `db_path`，或让 `_sync_status_from_admission` 对缺字段的 admission 走显式分支），要么让套件在有 `state/` 时也跑同一条路径。在此之前，**回归比较应以 `git archive HEAD` 的导出树为准**，工作树读数只作参考。
 
-## [open] ISSUE-EXPORT-20260915-e3a1：gateway ledger 一段读不了，整台机器的 export 就失败，用量与配额一起停更
-
-- **Type**: bug
-- **Priority**: high
-- **Discovered**: 2026-09-15，hub 页显示 `tencent-webserver-china` 刷新失败；在该机手动跑 `~/.local/bin/tt-web export --out <tmp>/bundle --cached-quota` 复现，exit 1，末行 `llm_attempts.ProjectionError: Audit ledger schema is unsupported`
-- **Description**: `statistics_snapshot._gateway_snapshot()` 对 ledger 只有 `missing` / `available` 两态，`_validate_schema` 抛出即让 `write_snapshot()` 整个失败，于是 `exporter.export_bundle()` 不产出 snapshot——该机的 Claude Code / Codex 用量、配额读数全部停在上一代，只因为 LLM Gateway 的 ledger schema 比这台机器上的 tt-web 新。契约 H8 要求"ledger 不可读 / schema 不兼容时显示明确 error"，但这个错误在 export 阶段就把整份快照否掉了，页面永远走不到 H8 那一态。
-- **Notes**: 修法方向是给 gateway 段一个 `error` 态（`state: "error"`, `reason`），usage 段照常写入，hub 的 LLM Calls 按 H8 显示该机 ledger 错误。这是跨 `statistics_snapshot` / `llm_attempts` 读取端 / server 的行为决策，当轮未做。**这台机器的即时修复是更新其 tt-web checkout**——2026-09-15 已做（部署 commit `a831a34`，导出恢复，见 `archive/closed.md` f2b9），本条只剩设计缺陷本身：下一次 gateway 与 tt-web 版本再错开时，同样会整台停更。
 
 ## [open] ISSUE-DEPLOY-20260915-0a4c：hub 部署目录由仓外流程生成，`web/vendor` 以 symlink 指回源码 checkout
 

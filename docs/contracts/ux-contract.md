@@ -27,7 +27,7 @@
 - 查单个 session 的明细（成本、token、消息、turn 级展开）。
 - 顺带做网络环境诊断（VPN/代理/时区是否影响 Claude 使用）。
 
-**多机范围（决定页面上"All"是什么）**：hub 模式固定由 MacStudio 汇聚 macbook、macmini、macstudio。三台机器各自持续采集本地 archive，MacStudio 每 120 秒独立拉取每个来源的完整快照；gateway 仍在各机本地承接调用。使用者看到的是：`All` 覆盖了哪几台、每台的数据有多新、哪台联系不上。首次接入一台远端仍需显式确认机器绑定。
+**多机范围（决定页面上"All"是什么）**：hub 模式固定由 MacStudio 汇聚 macbook、macmini、macstudio。三台机器各自持续采集本地 archive，MacStudio 每 120 秒独立拉取每个来源的完整快照。使用者看到的是：`All` 覆盖了哪几台、每台的数据有多新、哪台联系不上。首次接入一台远端仍需显式确认机器绑定。
 
 机器清单每台一行，可在行首加 `#` 或 `//` 停用；保存后后续拉取跳过该机，页面更新后隐藏其卡片、在用机器标签及统计贡献。取消注释恢复已有历史，无需重启或 Git commit；必须保留一台 `self: true`。支持缩进和尾随逗号，不支持行尾注释。验证条件见 G1a。
 
@@ -40,26 +40,25 @@
 | 总览 | `/` | **机器状态条**（coverage N/M + 逐台卡片）；KPI 卡片（今日成本、本周成本、当前 range 的成本）与**逐账号配额列表**（Claude 5h/7d、Codex 7d）；「成本趋势」时间图；「本周会话目录成本」「本月模型构成」侧面板。**除配额外均为全机合计** |
 | 透视 | `/explore` | 机器状态条；SELECT 选择指标；WHERE 提供预设范围或起止日期与四类过滤；GROUP BY 组合 Agent 类型／会话目录／模型／机器及可选天／周／月；预设、时间趋势与组合排名，无分组时显示总量 |
 | 会话 | `/sessions` | **全机完整已采历史**：session 列表（列：agent/project/model/起始/cost/tokens/messages）；排序下拉（Time / Cost / Tokens / Duration）；进入按机器定位的独立会话详情 |
-| LLM 调用 | `/llm-calls` | **全机、仅各机本地 LLM Gateway**：Machine 过滤；按 request 汇总调用结果，按 attempt 追踪实际 provider/model、fallback、credential source、usage、latency、成本与定价依据；request 与 attempt 各自独立分页；从请求或 attempt-parent 进入右侧完整诊断并关闭返回列表（H9）；按当前筛选导出全部匹配请求 JSON（H10） |
 | 网络 | `/network` | **仅本机**：五块诊断卡：本机（内网 IP / IPv6 泄漏 / DNS+地域）、公网（IP/位置/运营商/时区）、风险（proxycheck 风险分+type、ip-api hosting/marked-proxy、stopforumspam 垃圾评分+报告次数、本地 shell 代理环境变量）、时区（本机 vs 公网时区匹配）、结论（逐条结论 + verdict 规则说明）；总体 verdict banner + Refresh |
 
-**全局控件**：导航含五个数据页面及“使用与接入”。顶部 range 下拉 `7d / 30d / 90d / 6m / 1y / 2y / 全部`；Refresh 按钮。切到另一页后顶部 range 仍是之前所选。Refresh 立即要求中心更新；若点击前已有一轮在跑，中心在其后补排一轮，不能只认旧轮为本次完成。首页按钮在受理后恢复，后台进度继续可见；需要等待完成的消费者只等本次请求，不等后来的队列。
+**全局控件**：导航含四个数据页面及“使用与接入”。顶部 range 下拉 `7d / 30d / 90d / 6m / 1y / 2y / 全部`；Refresh 按钮。切到另一页后顶部 range 仍是之前所选。Refresh 立即要求中心更新；若点击前已有一轮在跑，中心在其后补排一轮，不能只认旧轮为本次完成。首页按钮在受理后恢复，后台进度继续可见；需要等待完成的消费者只等本次请求，不等后来的队列。
 
 **跨页约定**：所有绝对时间戳按本机当前系统时区渲染并带 UTC-offset 标签（如 `GMT+8`），跟随系统时区设置、刷新即更新，不随浏览器陈旧时区漂移。时刻本身按 `zh-CN` 格式化（`2026/9/15 21:22:59 GMT+8`），不随浏览器 locale 变动。
 
-**界面语言**（用户 2026-09-15 裁定）：五页的**界面用语**——导航、页标题、面板标题、表头、按钮、状态短语与全部说明段落——一律简体中文；**取值型标识符保留原文**：机器名、账号、模型名、项目路径、provider / route id，以及 `success` / `failed` / `usd_per_request` 这类枚举值（它们同时是过滤器取值、URL 参数与 gateway 账本里的原词，译了就与排查时 grep 的词对不上）。**判据**：逐页取 `document.body.innerText`，其中长度 ≥18 的纯拉丁字符行必须全部可归入上述取值类，不得出现英文句子；同时配额表头恰为 B2 那七个中文列名。
+**界面语言**（用户 2026-09-15 裁定）：各页的**界面用语**——导航、页标题、面板标题、表头、按钮、状态短语与全部说明段落——一律简体中文；**取值型标识符保留原文**：机器名、账号、模型名、项目路径、provider / route id，以及 `success` / `failed` / `usd_per_request` 这类枚举值（它们同时是过滤器取值、URL 参数与 gateway 账本里的原词，译了就与排查时 grep 的词对不上）。**判据**：逐页取 `document.body.innerText`，其中长度 ≥18 的纯拉丁字符行必须全部可归入上述取值类，不得出现英文句子；同时配额表头恰为 B2 那七个中文列名。
 
-**会话目录口径**（用户 2026-09-21 裁定）：总览、透视和会话列表保留启动目录归类；可显示该目录的 Git 仓库标识，同一会话的跨项目工作不拆分费用。**判据**：三页对应标题、过滤器、分组和表头显示“会话目录”，并能读到上述说明；相同 URL 的 `project` 值、历史归类与统计数值不因改名变化。LLM 调用页仍使用 Gateway 的独立项目归属。
+**会话目录口径**（用户 2026-09-21 裁定）：总览、透视和会话列表保留启动目录归类；可显示该目录的 Git 仓库标识，同一会话的跨项目工作不拆分费用。**判据**：三页对应标题、过滤器、分组和表头显示“会话目录”，并能读到上述说明；相同 URL 的 `project` 值、历史归类与统计数值不因改名变化。
 
 **成本口径（user-observable）**：
 - Codex 成本按已识别模型的费率**估算**，不代表实际账单；GLM-5.1/5.2 无精确 LiteLLM key 时由 bundled GLM-5 family 定价**推算**；推算项标 `推算`；未知模型定价显示 `—`，不显示 `0`。
 - 28 天 recompute 窗口内，各 `(day, agent, project, model)` bucket 分别从当前可读源更新。日志中已有精确成本的条目保持记录值；没有精确成本的条目使用 agent-monitor 当时可用的定价数据推算。某个 bucket 的源缺失，或其 token、消息、条目计数低于此前显示值时，该 bucket 的成本贡献保持最后可信值；其他 bucket 继续更新，因此页面或 project 聚合成本仍可能变化。窗口外的既有 bucket 保持冻结。长范围图上有 footnote 说明这三段口径。
 - 数据从启用起累积，最早可见日 = 最早采集日（当前约 2026-04-21）；长范围超出该日时图上有覆盖提示。
-- 新 archive authority 从首次采集后的下一完整日开始；此后的 token、消息与条目统计不会因原始日志被裁剪、归档或项目目录删除而减少。此前历史是 legacy best effort，沿用旧 floor / shrink / freeze 口径。Sessions 与 gateway ledger 的已采全历史不受该日界裁剪。
+- 新 archive authority 从首次采集后的下一完整日开始；此后的 token、消息与条目统计不会因原始日志被裁剪、归档或项目目录删除而减少。此前历史是 legacy best effort，沿用旧 floor / shrink / freeze 口径。Sessions 的已采全历史不受该日界裁剪。
 
 **范围 / 约束 / 假设**：
 - 单用户本机 dashboard。G4e 的移除是明确的破坏性操作：经逐账号确认后，不可恢复地删除该条 server-side remembered record。
-- archive 只保留统计所需 `UsageEntry`，不保留 prompt/response。LLM Calls 只覆盖经各机本地 gateway 的 API 调用；当前已知接入项目是 `philo-prompt`，其它尚未列名接入的项目不在覆盖范围内。
+- archive 只保留统计所需 `UsageEntry`，不保留 prompt/response。Monitor 不采集 Gateway API 调用。
 - 假设本机有 Claude Code / Codex 的 JSONL 日志；无数据时相应视图为空。
 - 时区随系统设置；改系统时区后刷新即更新。
 
@@ -113,7 +112,7 @@
 - **C6 预设按钮**：点每日成本／会话目录成本／模型 token／Agent × 会话目录／缓存读取任一预设后，SELECT 指标与 GROUP BY 复选框、时间单位切到对应组合，趋势与排名随之刷新。
 - **C7 原始日志部分失源时保真**：只在受控副本（不得使用生产库）中，在同一天、同一 agent、同一 model 下准备 project A 与 B，并确保每个 project 只对应一个被观察的 bucket。令 A 的部分或全部原始日志失源后刷新 Overview / Explore：A bucket 显示的 token、消息与条目计数不得低于刷新前，B bucket 的新增计数必须出现；A bucket 的当前源计数低于此前显示值时，该 bucket 的成本贡献保持最后可信值。
 
-- **C8 排行追溯会话**：排行的“查看会话”保留范围、custom 起止日、当前过滤及该行维度，进入 Sessions 匹配记录列表；目录显示身份与透视一致。Gateway 来源另去调用页，不伪造编码会话关联。
+- **C8 排行追溯会话**：排行的“查看会话”保留范围、custom 起止日、当前过滤及该行维度，进入 Sessions 匹配记录列表；目录显示身份与透视一致。不把 agent 会话伪造为 Gateway 请求关联。
 
 ### D. Sessions `/sessions`
 
@@ -161,30 +160,16 @@
 - **G4d 未标注机器不按机器数撑开首屏**：≥2 台机器无账号标记时折叠为**一行**汇总并点名待更新的机器，展开后才逐台显示；该折叠行由一个 `<button>` 承载（`aria-expanded` 随开合变化），可键盘聚焦，且带可见的展开标记。**判据**：①3 台机器全部未标注时，配额区行数为「具名账号数 + 每 provider 一行」而非「provider × 机器数」；②折叠行**逐状态点名机器**（待更新的哪几台、未登录的哪几台），两种补救不同、不得混成一句笼统话；③**折叠不得吞掉警示**——组内任一窗口的使用率进入 G4b 的警示档时，折叠行本身带出该档的文字标记与最高使用率、对应窗口及机器名，闭合状态下即可见。
 - **G4a 归属的已知风险须可见**：一台机器的读数按**该机当前登录账号**归属（ADR-024 的 waive）。换号后、该机产生新账号的第一条读数之前，页面会把上一个账号的数字挂在新账号名下。`in_use` 行显示观测新鲜度，陈旧读数以 stale pill 可见为陈旧；`remembered` 行不显示这种 live stale pill，而以“已登出 + 最后观测时刻”标明历史身份，并可读地写明“最后观测值，不代表当前状态”。**判据**：①`remembered` 行不出现 live stale pill，但明确显示最后观测时刻与不代表当前状态的文字，且不依赖颜色单独承载；②`in_use` 行的 stale pill 行为不变；③机器可读的 `stale` 类名在两类行上都保留；④导出端未标注账号的机器（agent-monitor 版本过旧）**不得并入任何具名账号，其读数也不得与另一台未标注机器的读数合并成一个数**——未知不是一个可以共享的账号。版面上把多台未标注机器**折叠成一个可展开的入口**不违反本条（见 G4d），前提是折叠行点名涉及哪几台、展开后逐台各自成行、且折叠不吞掉 G4b 要求的低余量警示。
 - **G4e 账号记忆的边界与移除**：配额区记住的是**曾在某次 admitted 快照中被观测为已登录**的账号——观测下限由各机器的导出节奏决定，在两次导出之间登录又登出的账号不保证被记住。记忆自本功能上线起累积，**上线前已登出的账号不会出现**（无历史数据源可回填）。记录无自动过期，只由用户在页面上手动移除；移除**不可恢复**，且只对已不在任何机器使用的账号开放。记忆**跨服务重启存续**。**判据**：①`remembered` 行提供移除入口，`in_use` 行不提供；②移除前的确认文案点名该账号、它的最后观测时刻与最后记录的读数，取消不删除；③对在用账号调用移除端点被拒绝并说明仍在用它的机器；④该 provider 存在任何 `unstamped` entry 时移除被拒，说明无法确认归属、点名相关机器并提示更新其 agent-monitor；`signed_out` 不阻塞删除；⑤被移除的账号若日后重新登录，会作为在用账号重新出现；⑥重启服务后记忆中的账号仍在、值不变；⑦对一个已不在任何机器使用、且其 provider 不存在任何 `unstamped` entry 的 remembered 账号，用户确认后移除必须成功，当前表格不再显示该行；⑧随后刷新页面、离开后重新进入页面、以及重启服务后重新进入页面，该行均不再出现。
-- **G5 页面范围标明**：`/sessions` 与 `/llm-calls` 明示覆盖 admitted 机器，`/network` 显示被检测的服务端主机名，明确不检测浏览器所在设备。LLM Calls 加载完成后仍明示只覆盖经各机本地 LLM Gateway 发出的 API 调用，不把 Claude Code / Codex 自身调用或未接入项目算作全量。**判据**：页面上可直接读出三者的数据源和机器范围；当前 registry 只有 `philo-prompt` 时，页面不得写“全部项目已覆盖”。
+- **G5 页面范围标明**：`/sessions` 明示已纳入机器，`/network` 显示被检测的服务端主机名，明确不检测浏览器所在设备。**判据**：页面直接显示对应数据源和机器范围。
 - **G6 首页受理与后台完成分离**：打开页面先渲染已有数据并显示后台同步。首页点击 Refresh 只等待受理与当前数据读取，明确显示“已受理”，不暗示来源已更新；显式刷新立即并行启动独立配额查询，不等待本机或其它机器的统计；配额结果逐机显示，进度与统计分开，配额更新保留统计采集时间。**判据**：同步仍在进行时按钮已恢复且进度可见；新代发布后同页自动读取；统计或配额失败都能显示原因并保留旧值，恢复后同页能更新；第一轮中发生的新事件与新点击由补排轮覆盖，按本次请求完成时检查事件，不用按钮恢复作为后台完成证据。需要等待的消费者在本次请求完成后返回，即使后续轮仍运行。
 
-### H. LLM Calls `/llm-calls`
+### H. 独立产品边界
 
-- **H1 范围与快照语义可读**：页面明示数据来自各机本地 LLM Gateway ledger，不含 Claude Code / Codex 自身调用，也不声称覆盖尚未注册的 API 项目；一次刷新里的 KPI、request 表与 attempt 表来自同一组 admitted machine snapshots，并显示 `as of`。本地 request/attempt id 仅在机器内唯一，页面 identity、排序和 cursor 均含 machine。翻到下一页表示读取当时的 latest-first 结果，不承诺跨多次请求冻结同一历史快照。
-- **H2 request-first 加载与汇总**：首屏先显示 request 页及本页条数，明确全范围总数未加载；全范围 request/outcome 汇总、attempt-time 成本与独立 attempt 表由用户点击加载统计或展开对应分析区后读取。未加载值不显示为零，也不把本页条数当总数。加载后把成功、拒绝、失败、中断或未知、仍在进行中的 request 分开计数；request 行至少可读 session、project、logical model、outcome、attempt 数与时间，不生成 request-level 成本字段。一个 request 经 fallback 产生多个 attempt 时，request 只计一次，attempt 表保留每次尝试。**判据**：初次打开只请求列表、显示默认 50 行页且不显示空 KPI 卡片；显式加载后各项计数与同次 API `request_summary` 一致，五类 outcome 共存时 `interrupted_or_unknown_requests` 不得省略或并入 failed。加载期间保留当前筛选，不因轮询取消分析；新来源观测到达时清除旧分析，避免混合快照。2026-10-08 用户选择“请求优先，附加功能按需加载”；隔离实际浏览器已观察到首屏 50 行、统计卡片隐藏、点击后完整统计出现，生产部署验收另记。
-- **H3 attempt 追溯**：attempt 表可读 request/attempt identity、provider、API profile、非敏感 credential source kind / ref、funding source（公司/个人与 paid/subscription 合一）、route、actual model、outcome、latency、usage、cost 与 pricing basis；同一行还要把 API profile 的 current-label source 与 pricing state / basis 组合呈现，避免把当前 registry 装饰误读为调用时快照、或把 pricing state 与 basis 拆散。Standalone 的 profile label source 分成三态：`current_registry` 表示当前 registry 给出了 label；`current_registry_missing_profile` 表示 registry 有效但已无该历史 profile；`registry_unreadable` 表示当前 registry 无法读取、解析或解释。后两态都保留稳定 profile id 和 ledger audit，页面分别显示「当前标签不可用」与「当前 registry 不可读」，不把装饰源故障升级成历史账本故障。不显示 credential value。长标签的完整值可通过 title 读取，未知 actual model/cost/usage 不伪装成空字符串或 `0`；ledger 未报告 latency 时显示 `未报告`，不把它推断成某一种恢复路径。**判据**：使用同一 ledger fixture 做两次 observation；valid registry observation 中让 current label 与历史 profile 缺席共现，unreadable registry observation 中让同一稳定 profile id 读成 `registry_unreadable`，分别核对 API row/filter option 的 source 与页面文字，并确认后两态仍显示 profile id 与其余 audit 字段。 Hub 额外使用 `source_registry_not_collected`，表示此次来源快照未收集 profile label；保留来源机的稳定 profile id 与审计行，不用中心 registry 冒充来源机标签。判据另含三机快照中的该状态与实际页面文字。
-- **H4 双时间窗过滤**：顶部 range 同时形成 request-time 与 attempt-time 窗口。未启用 attempt-level filter 时，request 切片只按 request 自身时间判断；启用 provider/profile/credential/actual-model/attempt-outcome 等 attempt-level filter 时，request 自身须在 request-time 窗口内，且至少一个匹配 child attempt 须在 attempt-time 窗口内。页面可读地说明当前 request 数是“有匹配 attempt 的 request 集合”，避免把任意历史 child 当成当前窗口命中。Request 维度的 option 集合覆盖窗内请求及窗内 attempt 的父请求，不能因为父请求在窗外就清掉仍有效的机器、项目或 session 深链。
-- **H5 过滤与深链**：过滤器覆盖 machine、session、project、logical model、request outcome，以及 provider、API profile、credential source kind / ref、route、actual model、attempt outcome 与 cost basis；`/api/llm-call-filters` 是当前 range 的 option authority，完整选项在点击加载筛选选项后读取。初始列表在服务端按同一 authority 定向验证 active URL 值，返回已验证的选择；无效值在投影请求行前移除，响应后同时清空控件与 URL，不生成 synthetic option，也不让 ghost filter 在后续扩大 range 时复活。选择后 URL 保留所选值，刷新与分享有效深链后选择仍生效；清空过滤器会从 URL 移除对应参数。过滤结果须改变 request/attempt 行集合，不能只改控件外观。**判据**：分别从有效 machine 深链、其它有效深链与带 range-invalid machine/project/profile 的深链加载；前两者保留 URL、控件和值，后者首屏响应的有效条件不含失效值，控件与 URL 同步清空。点击加载完整选项后可选择新的条件；选择后行集合与 URL 一致。
-- **H6 成本口径不混算**：成本只按 attempt-time 口径统计，request 汇总仍按 request-time；成本按 `exact / estimated / unknown / subscription` 分开呈现，并继续按 currency、funding category、pricing basis 与 authority 区分；公司与个人 subscription 的行归属可区分，subtotal 仍同属 subscription 类别，不把不同币种相加。`unknown` 显示未知而非零；subscription 显示“未报告逐调用收费”而非 `$0`。已知 exact/estimated 项显示金额与依据；不生成 request-level 成本。
-- **H7 独立分页**：request 与 attempt 各自有 latest-first、默认 50 行的独立上一页/下一页控制；翻 request 页不改变 attempt 页，反之亦然。最后一页后 Next 禁用，返回上一页恢复前一页；过滤或 range 改变后两张表都回到第一页。
-- **H8 来源状态完整**：加载时显示 busy/loading；存在兼容 ledger 时显示 data；某机没有 ledger 时该来源显示明确 missing；ledger 不可读、schema 不兼容、数据无效或 ledger 路径是 dangling symlink 时显示明确 error，不把故障降级成“暂无调用”；旧 exporter 没有 source detail 时显示“未采集”。**判据**：三机分别构造 compatible、missing、旧 exporter/invalid 状态；兼容机数据继续可见，另外两机各自保留明确状态，页面停止 busy 且不把部分覆盖写成全量。
-- **H9 请求详情与返回**：点击逻辑请求或 attempt 表的父请求入口打开同一右侧诊断，显示所选 machine/project/request 身份、结果、完整尝试链、usage/latency/cost 与详情自身快照及各来源时刻；成本未知仍显示未知。路由摘要区分选择意图、指定路由解析与首次尝试；相邻已知 route ID 决定同路由重试／切换，否则关系未知。历史候选资格与对应尝试分别展示，原始证据可展开；不据此推断当前可用、完整最优性或 Provider 已接收。Escape 关闭详情并返回当前列表。**判据**：从真实多机入口选择一条请求，逐项核对详情身份与所选行，读取其完整尝试及来源时刻，再从该请求的一条 attempt 父请求入口打开详情，核对同一 machine/project/request 与完整链；按 Escape 确认面板关闭、列表仍在。路由解释另核 policy、显式指定、同路由重试、异路由切换、缺失身份及无尝试样本。2026-10-06 `25697a3` 的生产样本为 `macstudio` / `aihot` 的一个成功请求、一个 `deepseek-v4.1-flash` attempt、1734ms/2309 token/unknown 成本；两种入口已观察到同一父请求及完整单次尝试；首次请求详情的 Escape 返回已核实，attempt 入口后的 Escape 命令虽已发出，但浏览器随后失联，未额外核实该次焦点返回。该历史读数不外推生产重试链、导出或新增路由摘要。2026-10-08 `e91b400` 另从真实 MacStudio 入口验证同一机器／项目的一条 policy 请求：路由摘要、三个历史候选（一个符合资格、两个 caller_route_not_allowed）、390px 阅读及 Escape 返回；样本快照仍为 2026-10-06，不代表采集新鲜或生产 pin／重试分支已验收。
-
-- **H10 全匹配请求 JSON 导出**：选择逻辑请求与 JSON 后，导出点击时筛选范围内的全部匹配请求，不截成当前 50 行页；下载文件为可解析的 JSON envelope，kind=requests、format=json，items 保留所选 project/machine 身份。**判据**：在真实入口选一个超过一页的请求集合，点击导出后实际读取下载文件，完整解析 items并核对数量与页面 matching 一致、所选维度一致且超过单页行数；不能仅凭 HTTP 200或成功文案判通过。2026-10-06 `0b85ade` 生产样本为 7d/project=aihot，369,757 requests、618,330,927 bytes、projects 仅 aihot、machines 仅 macstudio；`jq --stream` 完整解析成功。此生产验收仅覆盖 requests；attempts JSON 仅在隔离fixture验证，不外推生产。
-
----
-
-- **H10 模板应用后的筛选与详情（2026-10-08）**：四个常用筛选常显，九个高级筛选默认折叠；已选条件独立显示且可逐个清除。详情先显示模型／结果与完整尝试链，采集来源位于具名折叠内，缺失来源警告仍常显。隔离前端真实数据验证了 `7d + project=aihot + provider=deepseek` 深链接、关闭高级区时仍显示两枚条件、单独清除 provider 保留 project；390px 文档宽度为 390px。打开一条成功请求显示一条尝试、791 token、2192ms、未知费用；Escape 后焦点回原请求按钮。此样本不外推所有重试或失败分支，未操作账号。
+- Monitor 不要求安装 Gateway，不显示 Gateway 调用导航或跳转，也不提供调用明细 API。**判据**：未安装 Gateway 的隔离环境可进入使用说明和会话页；主导航为总览、透视、会话、网络、使用与接入；旧 `/llm-calls` 和调用 API 返回 404，不跳转到别的产品。2026-10-12 隔离 HTTP/Chromium 已观察 guide→sessions 导航及旧页面/API 404；线上切换尚未执行，历史承接要求归 product-boundary-separation.md。
 
 ### I. 使用与接入 `/guide`
 
-- 导航可进入只读使用说明；解释 Claude Code/Codex、Gateway、账号配额和服务端网络的来源差异，给出首次接入与多机配置入口，说明当前部署仍依赖独立 Gateway reader。
+- 导航可进入只读使用说明；解释 Claude Code/Codex、账号配额和服务端网络的来源差异，给出首次接入与多机配置入口，说明独立安装要求。
 - 复用真实采集状态，区分已纳入机器与来源完整性；说明无匹配不等于未接入。重新检查只重读状态，不修改配置或登录账号。
 
 ## domain 专属验收

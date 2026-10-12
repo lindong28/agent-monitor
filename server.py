@@ -28,13 +28,10 @@ from zoneinfo import ZoneInfo
 
 import rollup
 import generation
-import llm_attempts
-import gateway_dependency
 import statistics_snapshot
 import hub
 import sync
 import sync_process
-import query_process
 import query_view
 import quota_sync
 from aggregators import extract_metric, load_all_entries
@@ -112,7 +109,6 @@ def _source_files():
     the imported .py files matter for detecting code drift."""
     files = sorted(ROOT.glob("*.py"))
     files += sorted((ROOT / "parsers").glob("**/*.py"))
-    files += gateway_dependency.source_files()
     return files
 
 
@@ -481,71 +477,7 @@ def _network_report(query):
         }
 
 
-def llm_call_list_endpoint(query):
-    import call_list
-    if hub.enabled():
-        with generation.generation_admission_snapshot() as admission:
-            return call_list.page(query, admission.admitted)
-    result = llm_attempts.llm_calls_page(query, normalize_filters=call_list.SELECTORS)
-    return {"selection_options": result["filters"], "calls": call_list.without_analysis(result["calls"])}
-
-
-def llm_calls_endpoint(query):
-    if hub.enabled():
-        with generation.generation_admission_snapshot() as admission:
-            sources = {g.db_path: g for g in admission.admitted}
-            return llm_attempts.llm_calls(query, sources=[(g.host, g.db_path) for g in admission.admitted],
-                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(sources[path]))
-    return llm_attempts.llm_calls(query)
-
-
-def llm_call_request_endpoint(query):
-    if hub.enabled():
-        with generation.generation_admission_snapshot() as admission:
-            sources = {g.db_path: g for g in admission.admitted}
-            return llm_attempts.llm_call_request(query,
-                sources=[(g.host, g.db_path) for g in admission.admitted],
-                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(
-                    sources[path], request_query=query))
-    return llm_attempts.llm_call_request(query)
-
-
-def llm_calls_export_endpoint(query):
-    if hub.enabled():
-        with generation.generation_admission_snapshot() as admission:
-            sources = {g.db_path: g for g in admission.admitted}
-            return llm_attempts.llm_calls_export(query,
-                sources=[(g.host, g.db_path) for g in admission.admitted],
-                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(sources[path]))
-    return llm_attempts.llm_calls_export(query)
-
-
-def llm_call_filters_endpoint(query):
-    if hub.enabled():
-        with generation.generation_admission_snapshot() as admission:
-            sources = {g.db_path: g for g in admission.admitted}
-            return llm_attempts.llm_call_filters(query, sources=[(g.host, g.db_path) for g in admission.admitted],
-                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(sources[path]))
-    return llm_attempts.llm_call_filters(query)
-
-
-def llm_calls_page_endpoint(query):
-    # Match the page's option controls; direct calls retain their original
-    # valid-empty selection semantics and do not opt into normalization.
-    selectors = ("machine", "project", "session_ref", "logical_model", "request_outcome",
-                 "provider", "account_profile", "route", "actual_model", "attempt_outcome",
-                 "cost_basis", "credential_source_kind", "credential_source_ref")
-    if hub.enabled():
-        with generation.generation_admission_snapshot() as admission:
-            sources = {g.db_path: g for g in admission.admitted}
-            return llm_attempts.llm_calls_page(query, normalize_filters=selectors,
-                sources=[(g.host, g.db_path) for g in admission.admitted],
-                snapshot_reader=lambda path: statistics_snapshot.read_admitted_gateway(sources[path]))
-    return llm_attempts.llm_calls_page(query, normalize_filters=selectors)
-
-
 ROUTES = {
-    "/api/llm-call-list": llm_call_list_endpoint,
     "/api/health": health,
     "/api/timezone": timezone_endpoint,
     "/api/overview": overview,
@@ -555,11 +487,6 @@ ROUTES = {
     "/api/refresh": refresh_endpoint,
     "/api/sessions": sessions_endpoint,
     "/api/network": network,
-    "/api/llm-calls": llm_calls_endpoint,
-    "/api/llm-call-filters": llm_call_filters_endpoint,
-    "/api/llm-calls-page": llm_calls_page_endpoint,
-    "/api/llm-call-request": llm_call_request_endpoint,
-    "/api/llm-calls-export": llm_calls_export_endpoint,
 }
 
 
@@ -767,20 +694,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             route = ROUTES.get(parsed.path)
             if route:
-                if parsed.path in query_process.PATHS and hub.enabled():
-                    status, data = query_process.response(parsed.path, query)
-                    self._send_json_bytes(data, status=status, send_body=send_body)
-                else:
-                    self._send_json(route(query), send_body=send_body)
+                self._send_json(route(query), send_body=send_body)
                 return
-            if parsed.path in ("/", "/explore", "/sessions", "/network", "/llm-calls", "/guide", "/ip-check-docs") or parsed.path.startswith("/web/"):
+            if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/ip-check-docs") or parsed.path.startswith("/web/"):
                 self._serve_static(parsed.path, send_body=send_body)
                 return
             self.send_error(404)
         except query_view.ViewUnavailable as exc:
             self._send_json({"error": str(exc)}, status=503, send_body=send_body)
-        except llm_attempts.ProjectionError as exc:
-            self._send_json(exc.payload(), status=exc.status, send_body=send_body)
         except Exception as exc:
             logger.exception("Request failed: %s", exc)
             self.send_error(500, str(exc))
@@ -832,8 +753,6 @@ class Handler(BaseHTTPRequestHandler):
             file_path = WEB_ROOT / "sessions.html"
         elif path == "/network":
             file_path = WEB_ROOT / "network.html"
-        elif path == "/llm-calls":
-            file_path = WEB_ROOT / "llm-calls.html"
         elif path == "/guide":
             file_path = WEB_ROOT / "guide.html"
         elif path == "/ip-check-docs":

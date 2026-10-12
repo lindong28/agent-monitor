@@ -114,7 +114,7 @@ plist = {
     "WorkingDirectory": str(root),
     "StandardOutPath": os.environ["ROLLUP_LOG"],
     "StandardErrorPath": os.environ["ROLLUP_LOG"],
-    "EnvironmentVariables": {"PYTHONPATH": str(root), "LLM_GATEWAY_ROOT": str(Path(os.environ.get("LLM_GATEWAY_ROOT", Path.home() / "research/llm-gateway")).expanduser().resolve())},
+    "EnvironmentVariables": {"PYTHONPATH": str(root)},
 }
 dest = Path(os.environ["ROLLUP_PLIST"])
 state = "installed"

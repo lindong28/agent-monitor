@@ -4,8 +4,6 @@
 JSON on stdout; exit 0 means measurement completed, not an SLA verdict. No HTTP,
 provider, SSH, or production state is accessed. Cases run serially because they
 share the disk and process validation cache; concurrency would pollute timings.
-Set LLM_GATEWAY_ROOT to the independent Gateway source checkout before running;
-the isolated HOME intentionally has no default checkout.
 """
 
 import argparse

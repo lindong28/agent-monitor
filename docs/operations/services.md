@@ -1,5 +1,9 @@
 # agent-monitor service operations
 
+## 2026-10-12 product separation — local source pending cutover
+
+The new source removes Monitor's Gateway page, APIs and collection dependency. Do not deploy source exporters before preserving the four currently retained Gateway sources in Gateway-owned archives and verifying native collection continuity. Upgrade the compatible Hub reader before statistics-v2 writers. Gateway remote source updates require authorized dual-remote push/pull. No production source, service, ledger or snapshot has been changed by this implementation record; local tests/browser evidence is in [product-boundary-separation.md](../product-boundary-separation.md).
+
 Hub startup prepares its aggregate query view before listening. A single preparation thread rechecks admissions at the existing schedule-check interval (at most ten seconds), and statistics callbacks prepare the view before announcing completion. Invalid configuration or changed snapshot files produce HTTP 503 until preparation completes; individual invalid sources retain the normal admission exclusions. Inspect the `query_view` preparation/error logs and API `Server-Timing` header to distinguish preparation from request processing. `Server-Timing` excludes browser/network waiting. Static assets use ETag revalidation; HTML and JSON remain uncached. See [Explore implementation record](../explore-performance.md) for bounded measurements and deployment status.
 
 Explicit Hub Refresh now starts a separate supervised quota worker. Inspect `quota_refresh` in `/api/sync-status` and the quota-table progress note independently of statistics. The private `state/machine_quota.json` retains matching observations across Hub restarts; preserve it with other state. Participating Mac collectors must include the concurrent quota handler so a busy rollup cannot delay the GUI receipt. Existing schedules and service labels stay unchanged.

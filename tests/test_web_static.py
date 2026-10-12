@@ -271,31 +271,6 @@ eval(fs.readFileSync("web/app.js", "utf8"));
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_llm_scope_follows_the_actual_response(self):
-        script = r'''
-const fs = require("fs");
-const nodes = {};
-global.window = { location: { origin: "http://example.test" } };
-global.AgentMonitor = { qs(selector) { return nodes[selector] ||= {}; } };
-eval(fs.readFileSync("web/llm-calls.js", "utf8").replace(
-  "window.AgentMonitorLLMCalls = { init };", "window.AgentMonitorLLMCalls = { init, setTerminal };"));
-const results = ["this_machine_only", "admitted_machines"].map(kind => {
-  window.AgentMonitorLLMCalls.setTerminal({scope: {kind}, sources: [], ledger: {state: "missing"},
-    requests: {matching_count: 0}, attempts: {matching_count: 0}});
-  return [nodes["#llm-scope"].textContent, nodes["#llm-scope-detail"].textContent];
-});
-process.stdout.write(JSON.stringify(results));
-'''
-        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        local, hub = json.loads(result.stdout)
-        self.assertEqual(local[0], "Gateway 调用 · 仅服务端本机")
-        self.assertIn("不含其它机器", local[1])
-        self.assertEqual(hub[0], "Gateway 调用 · 全部已纳入机器")
-        self.assertIn("最后采集的快照", hub[1])
-        html = (ROOT / "web/llm-calls.html").read_text()
-        for name in ("llm-scope", "llm-scope-detail"):
-            self.assertIn('id="' + name + '"', html)
 
     def test_overview_shows_only_codex_weekly_quota(self):
         """Codex reports no 5h window, so no Codex row may offer a value there.
@@ -1705,9 +1680,8 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertLess(overview.index('id="model-mix-chart"'), overview.index('id="codex-account-actions"'))
         parser = Controls()
         parser.feed(overview)
-        parser.feed((ROOT / "web/llm-calls.html").read_text())
-        self.assertEqual(parser.collapsed, [True, True])
-        self.assertEqual(parser.primary, ["machine", "project", "logical_model", "request_outcome"])
+        self.assertEqual(parser.collapsed, [True])
+        self.assertEqual(parser.primary, [])
 
     def test_overview_side_panel_links_use_card_windows(self):
         html = (ROOT / "web" / "index.html").read_text()
@@ -1876,8 +1850,8 @@ class ClientNavigationPrerequisitesTests(unittest.TestCase):
     arrived.
     """
 
-    PAGES = ("index.html", "explore.html", "sessions.html", "llm-calls.html", "network.html")
-    REQUIRED = ("/web/app.js", "/web/pivot.js", "/web/llm-calls.js", "/web/vendor/chart.umd.min.js")
+    PAGES = ("index.html", "explore.html", "sessions.html", "network.html")
+    REQUIRED = ("/web/app.js", "/web/pivot.js", "/web/vendor/chart.umd.min.js")
 
     def test_every_page_loads_every_route_handler_it_might_have_to_run(self):
         for name in self.PAGES:
@@ -1899,7 +1873,6 @@ class ClientNavigationPrerequisitesTests(unittest.TestCase):
             "initSessions": app,
             "initNetwork": app,
             "window.AgentMonitorPivot": (ROOT / "web" / "pivot.js").read_text(encoding="utf-8"),
-            "window.AgentMonitorLLMCalls": (ROOT / "web" / "llm-calls.js").read_text(encoding="utf-8"),
         }
         for handler, source in defined.items():
             if handler in table:
@@ -1911,9 +1884,9 @@ class ClientNavigationPrerequisitesTests(unittest.TestCase):
                         or f"{bare}," in source,
                         f"{handler} is routed but not defined by its script",
                     )
-        # And the table covers exactly the five served paths, so a page that
+        # And the table covers exactly the four served paths, so a page that
         # exists cannot silently fall back to a full reload.
-        for path in ('["/"', '["/explore"', '["/sessions"', '["/llm-calls"', '["/network"'):
+        for path in ('["/"', '["/explore"', '["/sessions"', '["/network"'):
             self.assertIn(path, table)
 
 

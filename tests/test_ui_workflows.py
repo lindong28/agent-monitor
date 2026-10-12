@@ -48,20 +48,6 @@ class ScopeTests(unittest.TestCase):
                 self.assertLess(len(data), len(json.dumps(payload).encode()) / 2)
             self.assertEqual(headers.get("Vary"), "Accept-Encoding")
 
-    def test_loaded_llm_scope_keeps_gateway_boundary(self):
-        script = r'''const fs=require('fs'),assert=require('assert');
-const nodes=new Map();
-global.AgentMonitor={qs(k){if(!nodes.has(k))nodes.set(k,{});return nodes.get(k);}};
-global.window={};
-eval(fs.readFileSync('web/llm-calls.js','utf8').replace('window.AgentMonitorLLMCalls = { init };','window.AgentMonitorLLMCalls = { init, setTerminal };'));
-for(const kind of ['admitted_machines','local']) {
-window.AgentMonitorLLMCalls.setTerminal({scope:{kind},sources:[],requests:{matching_count:1,items:[{}]},attempts:{matching_count:1},ledger:{state:'available'}});
-assert(AgentMonitor.qs('#llm-scope').textContent.includes('Gateway'));
-assert(AgentMonitor.qs('#llm-scope-detail').textContent.includes('Claude Code'));
-}
-'''
-        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=8)
-        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class QueryTests(unittest.TestCase):

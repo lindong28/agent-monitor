@@ -2,6 +2,8 @@
 
 ## 2026-10-12
 
+- Make Monitor independent of llm-gateway: retire the duplicate Calls page/API and Gateway collection. Keep Claude/Codex usage and session history, including legacy snapshots. Existing multi-machine Gateway histories require a verified Gateway-owned handover before live cutover.
+
 - Compress large session detail responses for accepting browsers without truncating usage records.
 
 - Add a read-only usage and onboarding guide. Keep Gateway coverage visible after loading and identify the server host used for network checks.

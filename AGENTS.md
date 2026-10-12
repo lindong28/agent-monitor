@@ -2,7 +2,7 @@
 
 This repository owns agent-monitor: CLI, Web dashboard, usage collection, snapshots, quota lookup and network diagnostics. Read [README.md](README.md) and [docs/architecture.md](docs/architecture.md) for runtime boundaries; read [docs/AGENTS.md](docs/AGENTS.md) before editing documentation.
 
-- Keep runtime dependencies independent of ai-agent-config. `LLM_GATEWAY_ROOT` locates the separately owned Gateway reader; do not edit that project as an incidental fix.
+- Keep runtime dependencies independent of ai-agent-config and llm-gateway. Gateway calls belong to that separate product; do not reintroduce its reader, UI or service dependency.
 - Install with `./install.sh`; `.venv`, `state` and `web/vendor` are runtime files and stay untracked. Use `--no-services` for staging. Existing state may be a symlink; never replace it or its persistent locks during ordinary installation.
 - Preserve snapshot schemas, machine/account identities, archive retention and accounting semantics unless explicitly asked to change them. `token_cost.py` has a byte-identical cross-project contract; coordinate any arithmetic edit with its consumers.
 - Use isolated HOME/state for tests, and report live verification separately. Do not print credentials or read real provider stores in tests.

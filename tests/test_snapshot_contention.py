@@ -12,7 +12,6 @@ from unittest import mock
 import generation
 import statistics_snapshot
 from tests import test_generation_gc as generation_fixtures
-from tests.test_llm_attempts import LedgerFixture
 
 
 class SnapshotContentionTests(unittest.TestCase):
@@ -87,25 +86,6 @@ class SnapshotContentionTests(unittest.TestCase):
             current.close()
             self.assertEqual(list((root / "macbook").glob(".preparing-*")), [])
 
-    def test_exported_detail_queries_use_indexes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp)
-            ledger = LedgerFixture(path / "ledger.db")
-            request = ledger.request("selected", "2026-08-31T00:00:00Z", project="one")
-            ledger.attempt(request, "selected-attempt", "2026-08-31T00:00:01Z")
-            snapshot = path / "snapshot.db"
-            statistics_snapshot.write_snapshot(snapshot, [], ledger_path=ledger.path)
-            with closing(sqlite3.connect(snapshot)) as conn:
-                for table, field, value in (("requests", "logical_request_id", "selected"),
-                                             ("requests", "id", request),
-                                             ("attempts", "logical_request_fk", request),
-                                             ("attempts", "attempt_id", "selected-attempt")):
-                    with self.subTest(table=table, field=field):
-                        plan = conn.execute("EXPLAIN QUERY PLAN SELECT payload FROM statistics_%s "
-                                            "WHERE json_extract(payload, '$.%s') = ? ORDER BY position"
-                                            % (table, field), (value,)).fetchall()
-                        self.assertTrue(any("USING INDEX" in row[3] for row in plan), plan)
-            self.assertEqual(statistics_snapshot.read_snapshot(snapshot)["gateway"]["requests"][0]["logical_request_id"], "selected")
 
     def test_readers_continue_during_retention_check(self):
         with tempfile.TemporaryDirectory() as tmp:

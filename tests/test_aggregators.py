@@ -254,8 +254,6 @@ class AggregatorTests(unittest.TestCase):
             ("aggregators.py", "_store_project_identity", "project_identity_write"),
             ("exporter.py", "_vacuum_into_locked", "locked_read_only_vacuum_snapshot"),
             ("generation.py", "snapshot_stats", "immutable_generation_validation"),
-            # llm_attempts.py is a shim onto llm_gateway.audit since 795c37b; the
-            # audit read chokepoint now lives in the independent gateway checkout.
             ("rollup.py", "adopt_bucket_timezone", "explicit_legacy_adoption_write"),
             ("rollup.py", "_connect", "rollup_write_chokepoint"),
             # _read_connection still owns the marker contract and the choice of
@@ -264,7 +262,6 @@ class AggregatorTests(unittest.TestCase):
             ("rollup.py", "_connect_read_only", "rollup_read_chokepoint"),
             ("usage_archive.py", "read", "retained_usage_read_only"),
             ("usage_archive.py", "collect", "retained_usage_transaction_write"),
-            ("statistics_snapshot.py", "_gateway_snapshot", "gateway_snapshot_read_only"),
             ("statistics_snapshot.py", "write_snapshot", "unpublished_statistics_write"),
             ("statistics_snapshot.py", "read_snapshot", "admitted_statistics_read_only"),
             ("statistics_snapshot.py", "read_metadata", "admitted_statistics_metadata_read_only"),

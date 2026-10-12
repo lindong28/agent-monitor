@@ -233,7 +233,6 @@ def collect():
 def web_plist(root, python, *, ssh_auth_sock=None, path=None):
     root = Path(root)
     env = {"PYTHONPATH": str(root), "PATH": path or os.defpath}
-    env["LLM_GATEWAY_ROOT"] = str(Path(os.environ.get("LLM_GATEWAY_ROOT", Path.home() / "research/llm-gateway")).expanduser().resolve())
     socket = Path(ssh_auth_sock or "")
     # Apple creates this socket for each login session. Pinning it in a plist
     # overrides launchd's fresh environment after a reboot. Custom agents keep

@@ -188,10 +188,10 @@ class HubTests(unittest.TestCase):
         self.assertEqual(plist["EnvironmentVariables"]["SSH_AUTH_SOCK"], "/agent/socket")
         self.assertNotIn("StartInterval", plist)
 
-    def test_service_persists_independent_gateway_location(self):
+    def test_service_does_not_configure_gateway_dependency(self):
         with mock.patch.dict(os.environ, {"LLM_GATEWAY_ROOT": "/opt/custom-gateway"}):
             plist = hub.web_plist(self.root, "/usr/bin/python3")
-        self.assertEqual(plist["EnvironmentVariables"]["LLM_GATEWAY_ROOT"], "/opt/custom-gateway")
+        self.assertNotIn("LLM_GATEWAY_ROOT", plist["EnvironmentVariables"])
 
     def test_service_does_not_pin_apple_login_session_sockets(self):
         for parent in ("/var/run", "/private/var/run", "/tmp", "/private/tmp"):

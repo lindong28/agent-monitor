@@ -3198,7 +3198,6 @@
     ["/", () => initOverview()],
     ["/explore", () => window.AgentMonitorPivot.init()],
     ["/sessions", () => initSessions()],
-    ["/llm-calls", () => window.AgentMonitorLLMCalls.init()],
     ["/network", () => initNetwork()],
     ["/guide", () => initGuide()],
   ]);

@@ -1,14 +1,13 @@
 # agent-monitor
 
-Personal CLI and Web dashboard for Claude Code, Codex and LLM Gateway usage: tokens, estimated cost, model mix, session directories, sessions, quotas and network diagnostics. Run locally or aggregate declared machines through SSH with a MacStudio Hub.
+Personal CLI and Web dashboard for Claude Code and Codex usage: tokens, estimated cost, model mix, session directories, sessions, quotas and network diagnostics. Run locally or aggregate declared machines through SSH with a MacStudio Hub.
 
-Use it to answer: **How much AI usage accumulated, where did it come from, which accounts have quota left, and what happened to a model request?**
+Use it to answer: **How much coding-agent usage accumulated, which sessions contributed, which accounts have quota left, and whether machine collection is current?**
 
 ## Who it is for
 
 - Developers who use Claude Code and Codex frequently, especially across multiple models, accounts and computers.
 - Engineers maintaining a personal AI development environment who need one place to inspect collection status, usage history, quotas and connectivity.
-- Developers using LLM Gateway who need to inspect requests, retries, route switches and usage attribution alongside their coding-agent activity.
 
 The current product is a personal monitoring console. Organization permissions, team budget enforcement and enterprise governance are outside its documented capabilities.
 
@@ -20,13 +19,12 @@ The current product is a personal monitoring console. Organization permissions, 
 | Attribute consumption | Which model, machine or session directory accounts for the usage? | Explore filters and pivots, plus retained Claude/Codex sessions and their usage |
 | Monitor several computers | How do laptop, desktop and server activity add up? | Local collection and SSH snapshot aggregation into one Hub dashboard |
 | Manage account quotas | Which account is near its limit, when does it reset, and how old is the reading? | Claude/Codex account quotas, reset times, account history, observation times and refresh failures |
-| Diagnose model requests | Did a request fail, retry or switch routes? | Gateway request filters, complete attempt chains, routing diagnostics and JSON request/attempt exports |
 | Operate Codex accounts | Can I authorize an account, send a message or refresh its quota? | Explicit single-account and batch actions, queued device authorization and retained operation results |
 | Check connectivity | What does the current network diagnostic report show? | Shared Web and CLI diagnostics through `agent-monitor network` and `ip-check` |
 
 The CLI also manages start, stop, status and refresh. Periodic collection and manual refresh retain usable history when a machine is offline, with source times and failures visible. See [Dashboard behavior](#dashboard-behavior) for the page workflows and [Codex account actions](#codex-account-actions) for action semantics.
 
-Cost is an estimate at configured model rates, not a subscription charge or an invoice. Data comes from collection rounds and snapshots; check observation times before treating a reading as current. The “session directory” dimension follows the session's starting directory and Git identity, not every repository touched later. Request-level diagnostics cover LLM Gateway records; Claude/Codex session usage does not imply the same request-level trace coverage.
+Cost is an estimate at configured model rates, not a subscription charge or an invoice. Data comes from collection rounds and snapshots; check observation times before treating a reading as current. The “session directory” dimension follows the session's starting directory and Git identity, not every repository touched later. Agent session records support usage review and tracing prior work; they are not API request/attempt ledgers.
 
 ## Project status
 
@@ -36,9 +34,9 @@ This is the independent successor to `tt-web`, extracted from ai-agent-config co
 
 ## Install
 
-Prerequisites: Python 3 with `venv`/`pip`, Git, curl, and an independent [llm-gateway checkout](https://github.com/lindong28/llm-gateway) at `~/research/llm-gateway` (or set `LLM_GATEWAY_ROOT`). SSH and rsync are required for remote collection. macOS supports launchd scheduling; Linux installs the portable CLI and Web service and reports a scheduling skip. The test suite requires Python 3.10 or newer and Node. Set `AGENT_MONITOR_PYTHON=/path/to/python3` on first installation to choose the interpreter that creates the project environment.
+Prerequisites: Python 3 with `venv`/`pip`, Git and curl. SSH and rsync are required for remote collection. macOS supports launchd scheduling; Linux installs the portable CLI and Web service and reports a scheduling skip. The test suite requires Python 3.10 or newer and Node. Set `AGENT_MONITOR_PYTHON=/path/to/python3` on first installation to choose the interpreter that creates the project environment.
 
-The Gateway source checkout is currently a runtime prerequisite, including for the Web server; hiding the LLM Calls page does not remove that dependency. Installing agent-monitor does not install or start Gateway. Public availability and a compatible acquisition path for this prerequisite remain release-preparation items.
+Monitor runs independently of llm-gateway. It does not collect Gateway calls, require a Gateway checkout, or expose a Gateway navigation entry. Existing installations should follow the [history-preserving cutover](docs/product-boundary-separation.md) before upgrading source exporters.
 
 The following clone command requires repository access. Before running the installer, configure [machines.json](machines.json) for your own installation: the shipped entries name the maintainer's fleet. For a new standalone installation, use exactly one local entry, for example `{"machines":[{"name":"local","ssh_host":"localhost","self":true}],"retired_names":[]}`. This uses the existing configuration format; do not replace the identities or retirement records of an existing installation. Hub setup additionally requires your own [hub.json](hub.json) roles, URL and SSH targets. See [Machines and retained data](#machines-and-retained-data).
 
@@ -103,7 +101,6 @@ Expand **比较前后两个等长周期** to compare the latest N complete days 
 
 - **Overview / Explore:** totals, model mix and pivots; refreshing existing charts updates data without replaying their entrance animation. Range and selection remain visible during same-query refresh. Overview places the cost trend and project/model attribution before quota and account operations. The account-action section starts collapsed, with batch results visible in its summary; quota-row actions still open the matching account. Overview charts offer keyboard-accessible full data tables, complete identifiers and explicit USD/token units. Collection warnings stay visible.
 - **Sessions:** retained Claude/Codex sessions and usage. The UI calls the project dimension “会话目录”: attribution follows the session's starting directory and Git identity, not every project touched later in the conversation. Grouping keys and the `project` API parameter remain unchanged.
-- **LLM Calls:** Open the request list first, then load complete filter choices or full-range statistics, costs and independent attempts when needed. Machine, project, logical model and request result stay visible; advanced filters expand on demand, and selected conditions can be removed individually even while that section is closed. Request details start with the result and complete attempt chain; snapshot times remain available under **快照与采集来源**, with incomplete-source warnings outside the disclosure. Unloaded totals are labeled explicitly; they are not zero or current-page counts. Filter Gateway records by machine, project, model and account, then open a request ID to inspect its complete attempt chain without losing the list context. Routing diagnostics separate caller intent and pin resolution from the first attempt, same-route retries and route switches. Expand historical candidates to compare eligibility, reasons and corresponding attempt evidence; missing values remain unknown and history does not imply current readiness. Export either all matching requests or all matching attempts as JSON. Detail and export each show their own snapshot observation; they are not a frozen continuation of the list. The Hub uses monitor's `/api/llm-call-list` snapshot adapter for initial requests; full analysis and existing detail/export APIs retain the independent Gateway audit reader. Gateway owns credentials, inference and its separate Web UI.
 - **Quota:** readings remain on the account that produced them. Codex members with the same workspace ID and different emails remain separate; saved account history has no automatic expiry or count cap. Signed-out machines are distinct from failed queries. Failed refreshes preserve old readings and their observation time.
 - **Network:** `agent-monitor network`, `agent-monitor network --json` and `agent-monitor network --force` use the same report as the Web network page, which names the checked server host and does not describe the browser device. `ip-check` remains available independently; see [network remediation](NETWORK-REMEDIATION.md).
 
@@ -135,7 +132,7 @@ Design and validation boundaries are recorded in the [account actions decision](
 
 [machines.json](machines.json) declares SSH targets. Standalone mode requires exactly one enabled `self: true` machine; Hub mode selects self from the local role marker and restricts targets to `hub.json.machines`. The shipped fleet declares macbook, macmini, macstudio and tencent-webserver-china; dgx0023 is commented out. These are configuration defaults, not a reachability claim. Update them for another installation.
 
-Each remote needs this project, a compatible independent Gateway reader, non-interactive SSH from the Hub, and `~/.local/bin/agent-monitor`. After declaring a new target, bind its source identity explicitly:
+Each remote needs this project, non-interactive SSH from the Hub, and `~/.local/bin/agent-monitor`. After declaring a new target, bind its source identity explicitly:
 
 ```bash
 agent-monitor machines accept NAME
@@ -143,7 +140,7 @@ agent-monitor export --version
 agent-monitor export --out /path/to/new-bundle
 ```
 
-Snapshot export requires a clean committed runtime: Python modules (including `claude_oauth.py`), parsers, pricing, launcher, installer, requirements and installer library. Web-only, documentation and machine-declaration edits do not change exporter authority. Snapshots preserve source identity, digest checks, leases and versioned schema. Both Hub and exporters need Gateway schema-v8-compatible readers; unknown fields remain rejected.
+Snapshot export requires a clean committed runtime: Python modules (including `claude_oauth.py`), parsers, pricing, launcher, installer, requirements and installer library. Web-only, documentation and machine-declaration edits do not change exporter authority. Snapshots preserve source identity, digest checks, leases and versioned schema. Statistics extension v2 carries agent usage only. The Hub still reads agent usage from retained v1 snapshots; upgrade the Hub reader before source exporters. Existing history is not deleted.
 
 Comment a whole machine line with `#` or `//` to pause it; existing snapshots and bindings remain available when re-enabled. Saving the declaration is sufficient for the next sync and page read. Permanent `agent-monitor machines retire NAME` is a separate irreversible action that reserves the name. An offline machine retains its last admitted generation and is shown with its original observation time. Overview Refresh starts quota queries independently of statistics synchronization and shows quota progress beside the account table. Successful readings appear as each machine finishes; failures retain the last reading and its original time. An account identity change still waits for a validated statistics snapshot.
 
@@ -170,16 +167,15 @@ Reviewed recovery previews a batch unless `--apply` is given and refuses changed
 | `AGENT_MONITOR_PYTHON` | Explicit interpreter override for the CLI; the default is this project's `.venv/bin/python` |
 | `AGENT_MONITOR_ROLLUP_INTERVAL_SECONDS` | Installer override for the local collection schedule |
 | `AGENT_MONITOR_EXTRA_JSONL` | Additional Claude usage sources, using the existing parser contract |
-| `LLM_GATEWAY_ROOT` | Independent Gateway source checkout; defaults to `~/research/llm-gateway` |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME` | Existing provider input locations where supported by the readers |
 
 `claude_oauth.py` reads file/keychain credentials and dates locally. It never refreshes tokens, logs them, writes them to state, or follows HTTP redirects; OAuth tokens go only in request headers. Quota requests remain bounded child processes. Statusline rendering and its cache are owned by the harness, not this project.
 
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt
-LLM_GATEWAY_ROOT=/path/to/llm-gateway .venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m unittest discover -s tests
 ```
 
 Use a disposable HOME when testing to isolate credentials and user files. Tests use temporary databases and mocked services; live deployment and browser acceptance are separate checks. [Architecture](docs/architecture.md), [documentation index](docs/AGENTS.md) and [changelog](CHANGELOG.md) are the maintenance entry points. `token_cost.py` retains the original byte-identical cross-project arithmetic contract, including its historical naming comments.
 
-For backend cost diagnosis, run `LLM_GATEWAY_ROOT=/path/to/llm-gateway .venv/bin/python scripts/benchmark_backend.py`. It creates isolated synthetic snapshots and reports admission, preparation and aggregate-query work across sizes and generations. Read [the diagnostic scope and regression entry](docs/proactive-performance.md); these measurements do not establish production latency or an SLA.
+For backend cost diagnosis, run `.venv/bin/python scripts/benchmark_backend.py`. It creates isolated synthetic snapshots and reports admission, preparation and aggregate-query work across sizes and generations. Read [the diagnostic scope and regression entry](docs/proactive-performance.md); these measurements do not establish production latency or an SLA.

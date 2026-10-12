@@ -166,3 +166,13 @@ MacMini 旧快照原因已进一步定位：数据卷仅剩 261MiB，12 个遗�
 ### 2026-10-12 关闭记录
 
 用户批准两时点与文件范围后，通用入口和性能正文已改，项目成本地图、隔离诊断及回归已接入；完整变更、13 项最终测试、两种反向变异、三个只读设计响应及测量边界见 `docs/proactive-performance.md`。关闭的是已识别的入口和项目诊断能力缺口，不宣称未来所有 session 都会遵循。复发判据：相关后端开发仍只看局部 SQL/业务正确性、显式优化仍等待用户指定慢接口，或普通文案小改被扩成全仓压测；发生时用具名任务轨迹重开核查。原始诊断段保留为当时记录。
+
+## [closed] ISSUE-EXPORT-20260915-e3a1：gateway ledger 一段读不了，整台机器的 export 就失败，用量与配额一起停更
+
+- **Type**: bug
+- **Priority**: high
+- **Discovered**: 2026-09-15，hub 页显示 `tencent-webserver-china` 刷新失败；在该机手动跑 `~/.local/bin/tt-web export --out <tmp>/bundle --cached-quota` 复现，exit 1，末行 `llm_attempts.ProjectionError: Audit ledger schema is unsupported`
+- **Description**: `statistics_snapshot._gateway_snapshot()` 对 ledger 只有 `missing` / `available` 两态，`_validate_schema` 抛出即让 `write_snapshot()` 整个失败，于是 `exporter.export_bundle()` 不产出 snapshot——该机的 Claude Code / Codex 用量、配额读数全部停在上一代，只因为 LLM Gateway 的 ledger schema 比这台机器上的 tt-web 新。契约 H8 要求"ledger 不可读 / schema 不兼容时显示明确 error"，但这个错误在 export 阶段就把整份快照否掉了，页面永远走不到 H8 那一态。
+- **Notes**: 修法方向是给 gateway 段一个 `error` 态（`state: "error"`, `reason`），usage 段照常写入，hub 的 LLM Calls 按 H8 显示该机 ledger 错误。这是跨 `statistics_snapshot` / `llm_attempts` 读取端 / server 的行为决策，当轮未做。**这台机器的即时修复是更新其 tt-web checkout**——2026-09-15 已做（部署 commit `a831a34`，导出恢复，见 `archive/closed.md` f2b9），本条只剩设计缺陷本身：下一次 gateway 与 tt-web 版本再错开时，同样会整台停更。
+
+- **Resolution (2026-10-12, source only)**: Remove Gateway collection and imports from Monitor; isolated import/export with a forbidden Gateway package passes. Legacy v1 agent usage remains readable. Live deployment/cutover is tracked in docs/product-boundary-separation.md and is not claimed here.

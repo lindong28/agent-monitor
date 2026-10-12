@@ -44,43 +44,6 @@ class SourceSignatureTests(unittest.TestCase):
 
 
 class HealthStaleTests(unittest.TestCase):
-    def test_health_tracks_shared_gateway_reader_changes(self):
-        import server
-
-        loaded_funding = Path(server.llm_attempts._funding.__file__)
-        loaded_vertex = Path(server.llm_attempts._vertex.__file__)
-        dependencies = (
-            (loaded_funding, '"company_subscription": ("company", "subscription")',
-             '"company_subscription": ("personal", "subscription")'),
-            (loaded_vertex, '"vertex_request_mode",', '"vertex_request_mode", "future_control",'),
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            web_root = root / "agent-monitor"
-            web_root.mkdir()
-            (web_root / "server.py").write_text("# unchanged server\n", encoding="utf-8")
-            shared = root / "llm-gateway" / "src" / "llm_gateway"
-            shared.mkdir(parents=True)
-            for loaded, _, _ in dependencies:
-                (shared / loaded.name).write_text(loaded.read_text(encoding="utf-8"), encoding="utf-8")
-            with mock.patch.object(server, "ROOT", web_root), mock.patch.object(server.gateway_dependency, "PACKAGE", shared):
-                boot = server._source_signature()
-                with mock.patch.object(server, "BOOT_SIGNATURE", boot):
-                    self.assertFalse(server.health({"asset_watch": ["1"]})["stale"])
-                    for loaded, before, after in dependencies:
-                        path = shared / loaded.name
-                        original = path.read_text(encoding="utf-8")
-                        changed = original.replace(before, after)
-                        self.assertNotEqual(original, changed)
-                        with self.subTest(dependency=loaded.name):
-                            path.write_text(changed, encoding="utf-8")
-                            self.assertNotEqual(server._source_signature(), boot)
-                            self.assertTrue(server.health({"asset_watch": ["1"]})["stale"])
-                            path.write_text(original, encoding="utf-8")
-                            self.assertEqual(server._source_signature(), boot)
-                            self.assertFalse(server.health({"asset_watch": ["1"]})["stale"])
-        self.assertIn(loaded_funding, server._source_files())
-        self.assertIn(loaded_vertex, server._source_files())
 
     def test_health_reports_signature_and_not_stale_at_boot(self):
         import server

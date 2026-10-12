@@ -122,7 +122,6 @@ def export_bundle(
     generated_at=None,
     rate_limits=None,
     rollup_now=None,
-    ledger_path=None,
     quota_refresh=True,
     gui_quota=False,
 ):
@@ -151,13 +150,8 @@ def export_bundle(
             _vacuum_into_locked(db_path, snapshot_path)
 
         if loaded_entries is not None:
-            # An injected usage source must not accidentally read the host's real
-            # gateway ledger. Tests can explicitly inject a synthetic ledger.
-            gateway_path = ledger_path
-            if gateway_path is None and entries_loader is not None:
-                gateway_path = staging / "not-collected-gateway.sqlite3"
             statistics_snapshot.write_snapshot(
-                snapshot_path, loaded_entries, ledger_path=gateway_path,
+                snapshot_path, loaded_entries,
                 observed_at=generated_at,
             )
 

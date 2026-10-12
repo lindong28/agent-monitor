@@ -58,11 +58,11 @@
 在项目根运行：
 
 ```sh
-LLM_GATEWAY_ROOT="$HOME/research/llm-gateway" .venv/bin/python scripts/benchmark_backend.py
-LLM_GATEWAY_ROOT="$HOME/research/llm-gateway" .venv/bin/python scripts/benchmark_backend.py --rows 100 1000 --padding-mib 0 4 --repeat 3
+.venv/bin/python scripts/benchmark_backend.py
+.venv/bin/python scripts/benchmark_backend.py --rows 100 1000 --padding-mib 0 4 --repeat 3
 ```
 
-脚本在自身临时 HOME 和显式临时 generation/config 中创建 v2 快照，调用真实 admission、QueryView 和 grouped aggregate；不启动 HTTP、SSH、provider 或常驻服务。发布模块按项目既有合同导入 Gateway reader 源码，因此须显式设置 `LLM_GATEWAY_ROOT` 为实际 checkout（上例为本机位置）；不设时隔离 HOME 下找不到默认 checkout，会明确失败，不回到真实 HOME。无 `--state` / 生产目标参数。场景串行，共用磁盘与验证缓存时并发会污染读数。stdout 是 JSON 原始样本；需要留证时由调用者重定向到自己的持久目录。退出 0 只表示测量完成，不表示达成性能 SLA。
+脚本在自身临时 HOME 和显式临时 generation/config 中创建 v2 快照，调用真实 admission、QueryView 和 grouped aggregate；不启动 HTTP、SSH、provider 或常驻服务。发布模块现在只处理 agent 用量，不需要 Gateway checkout。无 `--state` / 生产目标参数。场景串行，共用磁盘与验证缓存时并发会污染读数。stdout 是 JSON 原始样本；需要留证时由调用者重定向到自己的持久目录。退出 0 只表示测量完成，不表示达成性能 SLA。
 
 默认两个聚合行数 × 两个 padding 体积，单机器、schema v2。padding 是额外 SQLite blob，单独改变文件体积，不冒充真实请求历史。每种组合分别测应用缓存冷准入、热准入、冷准备、已准备读取、新代际准备和新代际读取；准备阶段 `input_tokens=null`，读取返回可核对的合成总量。应用冷仅清除进程的验证缓存，不清 OS 缓存。每个样本报告秒数、准入/完整校验/digest 次数及 digest 字节数；计时包含计数包装开销，不作裸函数极限速度。
 

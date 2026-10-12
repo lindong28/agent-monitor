@@ -4,6 +4,7 @@ Current usage and installation belong in the root README; current architecture a
 
 | Path | Purpose |
 | --- | --- |
+| [product-boundary-separation.md](product-boundary-separation.md) | Authorized product separation, gaps, migration constraints and execution evidence |
 | [architecture.md](architecture.md) | Runtime ownership, data flow and independent dependencies |
 | [explore-performance.md](explore-performance.md) | Explore performance evidence, improvement scope and implementation results |
 | [proactive-performance.md](proactive-performance.md) | Proactive performance gaps, implementation, diagnostic commands and verification limits |
