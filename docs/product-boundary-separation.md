@@ -20,7 +20,7 @@ The user requested recording the gaps and proposed improvements, then implementi
 - Preserve existing state symlinks, source/account identities, quotas, accounting arithmetic and retained histories. No deletion of production data is authorized or needed.
 - Inspect machine-level Gateway record coverage and the receiving Gateway's historical access before retiring the deployed monitor entry.
 - Any snapshot format transition must preserve a readable path for older retained generations and avoid silently dropping agent history.
-- No git push authorization exists. Gateway remote updates require dual-remote push/pull under its repository policy; finish local code, review and commits before requesting any necessary publication permission.
+- At planning time no git push authorization existed. The owner subsequently approved the specific Gateway dual-remote publications and personal configuration branch used below. Monitor was deployed without a remote Git push.
 - Existing unrelated WIP: monitor main has untracked state; Gateway main has untracked gemini-gateway-src.tar.gz and gemini-gateway.md. Do not change them.
 
 ## Execution and acceptance
@@ -31,7 +31,7 @@ The user requested recording the gaps and proposed improvements, then implementi
 4. Verify monitor import/start and agent usage/snapshot paths with isolated HOME/state and no accessible Gateway package; verify removed routes/navigation and affected Python/Node tests. Verify Gateway access for each retained source needed by cutover, including request detail and export.
 5. Sync current documentation, run applicable change review, create local commits and integrate into local main. Deploy only within applicable authorization and source-transfer policy; report local and live evidence separately.
 
-## State
+## Implementation checkpoints (historical; final status below)
 
 ### Inventory and migration design (decision review passed)
 
@@ -72,3 +72,26 @@ Production handover remains pending for macmini, macstudio and tencent-webserver
 The two baseline test failures are outside this separation change and tracked as ISSUE-TEST-20261012-bd71 in docs/issues/general.md for the Monitor test maintainer: update the account-memory fixture to accept quota_refresh and classify the two synthetic benchmark rollup sites, then rerun those tests. They do not justify claiming the full suite passed.
 
 Final change review passed after the two Gateway fixes; no unaddressed review findings remain. Baseline test maintenance and production handover remain explicitly pending as described above.
+
+## Final deployment and acceptance (2026-10-13 Singapore)
+
+The historical pending items above are complete. Python and SQLite remain. Monitor has no Gateway runtime reader, call routes, navigation link or context protocol; its full agent session/history queries remain. Gateway independently owns request/attempt history, list/detail/export and native multi-machine collection.
+
+| Consumer | Delivered source and evidence |
+| --- | --- |
+| MacBook Monitor | Local main dcab6a9 integrated; installed CLI resolves to main |
+| MacStudio Monitor Hub | cf53954 preserves its pre-existing f3c9301 changes; 84 affected tests passed; main integrated and Hub restarted only after active account operations reached zero |
+| Tencent Monitor collector | Main advanced to cf53954; existing CLI and state target preserved |
+| MacMini Monitor collector | Deployment worktree ~/research/agent-monitor-boundary-20261012 at f1d50e1 preserves the prior quota-revocation fix; 27 affected tests passed; CLI and rollup job point to this checkout. Retain this tree as deployed source; owner lindong must move both consumers before retiring it. Original main and its state symlink remain intact |
+| Gateway console | 94997ae published to both approved remotes, pulled and installed on MacStudio; actual console reached through its 39031 SSH origin |
+| Independent Gateway scheduler | Personal configuration 971d0a52 published on the approved feature branch and integrated on MacStudio; launchd interval 600 seconds; two scheduled rounds completed with exit 0 and all four sources successful |
+
+Production Monitor HTTP returned 200 for overview/guide/sessions and 404 for the retired call page/API. Isolated headless Chromium used the actual Hub through a private SSH tunnel, clicked guide→sessions, loaded the 30-day session rows, and showed only overview, explore, sessions, network and guide navigation. Four source machines remained admitted; this is not a claim that every source log is readable (MacMini retains an existing blocked source count of 1).
+
+Gateway verified all four retained histories before Monitor retirement. Actual console HTTP resolved eight selected request details (earliest/latest from each source), and exported those eight requests across four sources. Headless Chromium opened a real detail, selected macbook, and downloaded a 25-request macbook export. These checks issued no provider inference calls. Original source ledgers and Monitor data/state targets were preserved; ordinary existing snapshot retention remains in effect.
+
+The four-source 30-day request/attempt list measured 1.207 seconds cold and 0.023 seconds warm in the direct reader, with 44.4 MiB peak RSS; actual console HTTP took 1.307 seconds. Each returned page contained 50 request and 50 attempt rows. Full analysis still loads history. One indexed collection round took 101.98 seconds with 11.84 GiB peak RSS; the owner chose a 10-minute interval. These are measured samples, not an SLA.
+
+Remaining findings: the two unrelated Monitor test failures remain ISSUE-TEST-20261012-bd71; the personal collector does not automatically stop an old job when its host selector is disabled, and has no active failure/no-success push notification. The operator README records manual job removal and both follow-ups under owner lindong. Neither expands this separation task into a general test repair or alerting project. No product-separation implementation item remains pending. Final documentation-only commits do not change the deployed runtime revisions listed above.
+
+Private evidence remains at ~/.local/state/agent-monitor-boundary-20261012 on the development host and ~/.local/state/llm-gateway on MacStudio. No raw request content or credentials are committed.
