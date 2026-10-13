@@ -11,6 +11,7 @@ Current usage and installation belong in the root README; current architecture a
 | [design.md](design.md) | Shared product visual design, inheritance, exceptions and observed coverage |
 | [operations/services.md](operations/services.md) | Current lifecycle/migration instructions and preserved historical deployment record |
 | [contracts/ux-contract.md](contracts/ux-contract.md) | Existing observable behavior contract |
+| [plans/20261013-published-main-deployment/plan.md](plans/20261013-published-main-deployment/plan.md) | Completed publication and production-source workflow plan |
 | [adr/README.md](adr/README.md) | Extraction decision and source provenance |
 | [references/tt-web-readme-20261004.md](references/tt-web-readme-20261004.md) | Full pre-extraction README, with original dated observations |
 | [references/open-source-preparation.md](references/open-source-preparation.md) | Open-source preparation status, evidence boundaries, unresolved decisions and release gaps |

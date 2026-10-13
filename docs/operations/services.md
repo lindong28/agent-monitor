@@ -2,7 +2,19 @@
 
 ## Current deployment source
 
-Deploy from the main worktree at main HEAD. On 2026-10-13 MacMini was moved from its temporary deployment worktree back to ~/research/agent-monitor after the approved history reconciliation in 06db5d9. Its CLI and rollup launchd job both reference that main checkout; persistent state is unchanged. See [deployment evidence](../product-boundary-separation.md#macmini-main-deployment-correction-2026-10-13).
+Use `./deploy.py --expect <full-release-sha>` from the primary main checkout after publishing and reading back live `origin/main`. Keep one release SHA for each rollout; the entry checks source identity before invoking `install.sh`. On 2026-10-13 MacMini was moved from its temporary deployment worktree back to ~/research/agent-monitor after the approved history reconciliation in 06db5d9. Its CLI and rollup launchd job both reference that main checkout; persistent state is unchanged. See [deployment evidence](../product-boundary-separation.md#macmini-main-deployment-correction-2026-10-13).
+
+## 2026-10-13 published-main deployment
+
+The production authorization now includes ordinary publication of completed, reviewed task commits, followed by live `origin/main` verification. Shared policy was published as ai-agent-config `4db4cb5a`; Monitor published `6e09a52`, and Gateway published the same `3faed1f` to both origin and philo-ai. Each product owns its standalone `deploy.py`; neither requires the other product or the harness at runtime. See the [decision](../adr/20261013-e7a4-published-main-deployment.md) and [completed plan](../plans/20261013-published-main-deployment/plan.md).
+
+MacMini fast-forwarded its primary checkout from `850bff8` to `6e09a52`. Both `deploy.py --check-only --expect <full-sha>` and the actual installer exited 0. The installed CLI points to `~/research/agent-monitor/agent-monitor`, and `export --version` returned `6e09a52e5f5ab217ea83a517a1f6dde315df6b7b`. The rollup launchd job still invokes `collect` from that checkout every 120 seconds. A newly triggered run advanced its count from 38 to 39 and finished with state `not running`, no PID and last exit code 0. The persistent state symlink retained inode 154502586 and target `/Users/lindong/.local/share/agent-monitor/state`.
+
+A real `export --cached-quota` exited 0 and produced schema 2 with exporter commit `6e09a52e5f5ab217ea83a517a1f6dde315df6b7b`, generated at `2026-10-13T06:26:07.941476Z`. This verifies the installed export path; cached quotas do not establish fresh provider readings. These measurements cover one MacMini deployment and one completed collector/export observation, not other hosts or Gateway live services. The documentation follow-up must also be published and deployed before handoff; its final SHA belongs in the private rollout receipt rather than recursively embedded in its own commit.
+
+The 44 related test methods passed: 16 source-check tests per project, 9 Monitor installer tests and 3 Gateway installer-health tests. Source-check inputs include three tracked-change states, seven Git intermediate states, two non-main states and four local/remote revision relationships; installer effects use isolated fixtures. Removing the remote-equality check caused three tests to fail. No full-suite result is claimed. Independent decision and implementation review completed with no blocking finding.
+
+Known limit: `assume-unchanged` and `skip-worktree` may hide modified tracked files. MacMini had neither flag (174 regular H entries before rollout); the deployment entry does not yet reject the flags. The maintainer owns the optional rejection check and two regressions, presented to the user for scope approval and still pending at this record. Both README files disclose the limit. Gateway company `site.json` pins and `deploy/manage.py` are unchanged, and no live Gateway rollout was performed. Recovery and deployment receipts are retained under `~/.local/state/published-main-deployment-20261013/` on the executing host and MacMini.
 
 ## 2026-10-12 product separation — pre-cutover checkpoint
 

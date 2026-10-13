@@ -19,8 +19,8 @@
 - [x] 在 ai-agent-config 自有 worktree 修改共享政策/流程；项目自身文档指向生产入口。
 - [x] 实现两个项目的生产源检查入口；用隔离本地 Git 仓验证允许已发布 main，以及拒绝 dirty、私树/分支、未发布/落后版本、中间态与指定 SHA 不符；失败路径不执行 installer。
 - [x] 独立审查本次政策/部署决定及最终实现；仅修承重缺陷，运行受影响既有测试。
-- [ ] 提交、整合、普通发布并回读；MacMini 从 origin/main 快进，执行 Monitor 生产入口，核对 CLI、launchd 与实际 refresh/export；Gateway 发布/部署边界单独记录。
-- [ ] 文档记录实际结果、未完成项及归属，清理本 session 临时工作树。
+- [x] 提交、整合、普通发布并回读；MacMini 从 origin/main 快进，执行 Monitor 生产入口，核对 CLI、launchd 与实际 collect/export；Gateway 本轮仅发布入口，未执行线上部署。
+- [x] 文档记录实际结果、未完成项及归属。工作树清理属于交付收尾，回执保存在本机持久证据目录。
 
 ## 隔离、档位与执行
 
@@ -30,14 +30,22 @@
 
 最小真实消费者路径：恢复 checkout 后，经新入口从已发布 main 更新 MacMini CLI/rollup。前置发布身份检查来自用户“一律用 main head”的要求；测试和单次独立审查来自生产入口的档位。其余节点未纳入本次 rollout，禁止把 MacMini 读数外推。
 
-显式版本及项目专门部署契约优先。Gateway 本轮入口接根 install.sh；公司 site.json pin、deploy/manage.py 及 operator 配置同步机制不变。独立决策审查已放行，七项成立；尚无生产入口实测。
+显式版本及项目专门部署契约优先。Gateway 本轮入口接根 install.sh；公司 site.json pin、deploy/manage.py 及 operator 配置同步机制不变。独立决策审查已放行，七项成立；生产入口实测见下述结果。
 
 ## 当前状态
 
-Monitor rebase 已中止，主树恢复 850bff8；tracked clean，state inode 102763913 与目标不变。现场及 history.bundle 已验证保存在 ~/.local/state/published-main-deployment-20261013/rebase-backup，无 autostash。共享规则提交 4db4cb5a 已快进整合，发布处理中。
+Monitor rebase 已中止，主树恢复 850bff8；tracked clean，state inode 102763913 与目标不变。现场及 history.bundle 已验证保存在 ~/.local/state/published-main-deployment-20261013/rebase-backup，无 autostash。共享规则提交 4db4cb5a 已快进整合并发布 origin/main。
 
 两项目新入口各 16 项测试通过；Monitor 既有 installer 9 项与 Gateway install_health 3 项通过。tracked 变化取值 3、中间态取值 7、非 main 状态取值 2、版本关系覆盖相等/未发布/远端前进/分叉；隔离 HOME 与真实本地 bare remote，不读取 provider 存储。移除 remote equality 的变异副本造成 3 项失败，证明该检查可被测试捕获；不据此声称并发写入或所有运行环境已覆盖。独立 reviewer 复跑 Monitor 16 项通过。最终 gate 放行，无 HIGH/CRITICAL 或承重未知。
 
-审查将部署 Git driver 的有效 V floor 取 V2：真实隔离 Git 路径覆盖解析与比较，只有 installer 为无副作用替身；真实服务效果仍需本轮 rollout。无新增长期服务，源检查失败同步显示且不启动 installer，不增加后台告警机制。检查只在部署前发生，一次远端 ref 查询，不扫描业务数据库或进入请求热路径。
+审查将部署 Git driver 的有效 V floor 取 V2：真实隔离 Git 路径覆盖解析与比较，只有 installer 为无副作用替身；真实服务效果见本轮 rollout 读数。无新增长期服务，源检查失败同步显示且不启动 installer，不增加后台告警机制。检查只在部署前发生，一次远端 ref 查询，不扫描业务数据库或进入请求热路径。
 
 唯一 MEDIUM finding：assume-unchanged / skip-worktree 可隐藏 tracked 修改，两种 flag 各一个实测样本会漏检。真实 MacMini 本轮 174 个 tracked 条目均 H，没有触发前提；当前不阻塞。已向用户异步询问是否加拒绝检查，未获答复前不扩大修复；两个 README 记录该限制，owner 为项目维护者，后续动作为实现 flag 拒绝并增加对应回归。独立 findings 无。
+
+## 执行结果
+
+Monitor 6e09a52 已整合并发布 origin/main；Gateway 3faed1f 已整合，origin/main 与 philo-ai/main 回读一致。MacMini 通过新 deploy.py 完成源检查及安装，CLI export --version 返回完整 6e09a52 SHA；launchd 仍从主 checkout 执行 collect，间隔 120 秒，运行次数 38 → 39，最终 not running、无 pid、last exit code=0。state symlink inode 154502586 及目标不变。实际 cached-quota export 成功，schema_version=2、exporter_commit=6e09a52e5f5ab217ea83a517a1f6dde315df6b7b、generated_at=2026-10-13T06:26:07.941476Z；不据缓存额度声称新的 provider 读数。
+
+本轮仅 MacMini rollout，Gateway 公司版本 pin 与现有服务未改。44 项相关测试通过，不是全套测试声明；历史测试基线问题不在本次修复范围。唯一待裁决项仍为上述隐藏 index 标记补强，未获答复前按已记录的无标记环境交付；无其他未处置 finding。
+
+部署证据须先有已发布 commit 才能取得，因此结果记录单独提交，之后再次发布并把 MacMini 快进至最新文档提交；最终 SHA 与回执保存在 ~/.local/state/published-main-deployment-20261013/，不通过反复把当前文档提交 SHA 写回自身制造提交循环。实际运维记录见 docs/operations/services.md 的 published-main deployment 小节。
