@@ -2,6 +2,7 @@
 
 ## 2026-10-13
 
+- Compress large session-list responses when the client accepts gzip, reusing the existing lossless detail-response path.
 - Index newly exported session history for date and detail queries, preserving existing snapshot and accounting behavior.
 - Add bounded live diagnostics for slow/in-flight operations and stale source observations, with local persisted events and a read-only API.
 

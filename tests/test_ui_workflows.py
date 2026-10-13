@@ -17,6 +17,31 @@ import server
 ROOT = Path(__file__).resolve().parents[1]
 
 class ScopeTests(unittest.TestCase):
+    def test_session_list_negotiates_lossless_compression(self):
+        import gzip
+        import io
+        payload = {"sessions": [{"session_id": "fixture-" + str(i), "tokens": i} for i in range(4000)],
+                   "filters": {"machine": ["fixture"]}}
+        for accepted, compressed in [("gzip, deflate, br", True), ("gzip;q=0.5", True),
+                                     ("gzip;q=0", False), ("identity", False), ("", False)]:
+            handler = object.__new__(server.Handler)
+            handler.path = "/api/sessions?range=30d&with_filters=1"
+            handler.headers = {"Accept-Encoding": accepted}
+            handler.wfile = io.BytesIO()
+            handler.send_response = mock.Mock()
+            handler.send_header = mock.Mock()
+            handler.end_headers = mock.Mock()
+            with mock.patch.dict(server.ROUTES, {"/api/sessions": lambda query: payload}):
+                handler._handle_request()
+            headers = dict(call.args for call in handler.send_header.call_args_list)
+            data = handler.wfile.getvalue()
+            self.assertEqual(headers.get("Content-Encoding") == "gzip", compressed)
+            self.assertEqual(headers.get("Vary"), "Accept-Encoding")
+            self.assertEqual(int(headers["Content-Length"]), len(data))
+            self.assertEqual(json.loads(gzip.decompress(data) if compressed else data), payload)
+            if compressed:
+                self.assertLess(len(data), len(json.dumps(payload).encode()) / 3)
+
     def test_network_identity_survives_success_cache_and_failure(self):
         with mock.patch.dict(server._NETWORK_CACHE, data=None, ts=0), mock.patch("server.socket.gethostname", return_value="fixture-host"), mock.patch("server.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout=json.dumps({"verdict":"low"}))

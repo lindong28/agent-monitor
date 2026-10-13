@@ -723,7 +723,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             route = ROUTES.get(parsed.path)
             if route:
-                self._send_json(route(query), send_body=send_body)
+                self._send_json(route(query), send_body=send_body,
+                                compress=parsed.path == "/api/sessions")
                 return
             if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/ip-check-docs") or parsed.path.startswith("/web/"):
                 self._serve_static(parsed.path, send_body=send_body)

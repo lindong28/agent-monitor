@@ -56,3 +56,11 @@ SQL层三个体量161/244834/537064行，各三次、命中0/21930/11行。未�
 独立决策审查按R14执行，首轮要求约束active/事件容量并使用真实配置周期，两项已修，七项复核成立。独立变更审查首轮发现配额来源失败误记成功、拒绝reexec后观察器被关闭，两项HIGH已按失败读数建立RED测试并修复；同一reviewer定向复核通过，无遗留/独立findings、无承重未核实项。来源失败保留原callback，仅修正诊断outcome；成功exec替换线程，失败时不提前停观察器。
 
 最终134项相关回归通过（9.670秒）；两新增测试覆盖quota成功/机器错误/provider错误三种、reexec正常/cleanup拒绝/exec失败三种。仪器涵盖慢/快、失败/成功、在途/完成、过期/未知/恢复、持久化失败/恢复；不据此宣称所有生产状态均已覆盖。源码和测试完整纳入同一提交，token_cost.py未改。生产发布及同入口复验仍待下节实际记录。
+
+## 线上观测驱动的第二处优化
+
+第一批acbc65c已发布到四个主checkout并按deploy.py --expect安装，MacStudio完成restart，健康instance变为e3e13e578acc403ea9b1f0baedeb0eea、stale=false；诊断instance cfd28866461f414cae38f68737130b88。Mac的远端锁工具需显式远端shell PID；腾讯同一Git SSH路径在bash -lic/-ic均报host-key verification，改用命令级HTTPS URL映射成功，未改持久remote/SSH配置。原state symlink保留。
+
+第一轮真实复测7d三次中位数3.986→2.953秒，30d16.781→17.306秒，不能声称长窗口已改善。于是用新仪器接续诊断：单次30d共17.290秒/1483466字节，在3.53/4.83/7.14/8.90/11.90秒采样均为response_body_write；直接源端同函数profile3.157秒，包含四来源真实admission，219140次事件解码、200687次replace，不能把剩余网络等待归为数据库慢。文件events还自动记录了53.931秒sync round的long_running observed/completed/cleared，未注入生产故障。
+
+第二处仅为/api/sessions开启既有详情路径的gzip协商（64KiB门槛、level1、无损、Vary、拒绝gzip则identity），不改响应对象/更新时点。选择L0：已观察到传输等待，复用现有路径降低同一用途的数据量；一次CPU压缩开销随payload，随后同入口量测。新增既有ui_workflows回归先RED（缺Content-Encoding），后验证5种Accept-Encoding状态、完整JSON相同、长度准确与压缩体积。review-changes本增量免外审：该自动测试直接捕获错误协商/丢数据/错误长度，既有helper未改，不存在新增借用语义缺口。第一批134项的独立review仍有效，本增量验证单列。
