@@ -1,6 +1,6 @@
 # 监控响应、后台更新与运行观测优化
 
-状态：进行中。用户授权 performance-workflows optimize：自行从真实入口、架构和已有证据识别主要成本，实施有依据的优化，补齐慢操作、持续阻塞和数据更新停滞的自动发现、量化及诊断接续；保留数据正确性、快照和更新语义。
+状态：实施、发布与同入口复验完成；已知增长成本和进程外监控缺口由下文具名 owner 接续。用户授权 performance-workflows optimize：自行从真实入口、架构和已有证据识别主要成本，实施有依据的优化，补齐慢操作、持续阻塞和数据更新停滞的自动发现、量化及诊断接续；保留数据正确性、快照和更新语义。
 
 ## 范围、隔离与验收
 
@@ -64,3 +64,25 @@ SQL层三个体量161/244834/537064行，各三次、命中0/21930/11行。未�
 第一轮真实复测7d三次中位数3.986→2.953秒，30d16.781→17.306秒，不能声称长窗口已改善。于是用新仪器接续诊断：单次30d共17.290秒/1483466字节，在3.53/4.83/7.14/8.90/11.90秒采样均为response_body_write；直接源端同函数profile3.157秒，包含四来源真实admission，219140次事件解码、200687次replace，不能把剩余网络等待归为数据库慢。文件events还自动记录了53.931秒sync round的long_running observed/completed/cleared，未注入生产故障。
 
 第二处仅为/api/sessions开启既有详情路径的gzip协商（64KiB门槛、level1、无损、Vary、拒绝gzip则identity），不改响应对象/更新时点。选择L0：已观察到传输等待，复用现有路径降低同一用途的数据量；一次CPU压缩开销随payload，随后同入口量测。新增既有ui_workflows回归先RED（缺Content-Encoding），后验证5种Accept-Encoding状态、完整JSON相同、长度准确与压缩体积。review-changes本增量免外审：该自动测试直接捕获错误协商/丢数据/错误长度，既有helper未改，不存在新增借用语义缺口。第一批134项的独立review仍有效，本增量验证单列。
+
+## 最终交付读数
+
+代码发布 `9eec110fa76d3aee4e544d5a3ee1c9a585d9c62b`（前一提交acbc65c为索引/观测）。四台机器均从主checkout按实时origin/main和deploy.py --expect完成安装；MacStudio运行健康instance `c338f863e5ea47f89a106989a33a1d42`、signature `042d4eb0721e49a0`、stale=false。四个来源已接纳的generation均声明该exporter_commit，均含两个idx_usage索引。四来源观察时间相对初始样本向前推进，保留原120秒采集与3600秒quota周期、原state链接目标。原始身份/安装输出在final-deployment.json、各final-deploy日志、health-final.json、live-final-state.json。
+
+| 同入口 / 样本 | 优化前中位秒 | 最终中位秒 | 最终传输字节 / 解压字节 |
+| --- | --- | --- | --- |
+| /api/sessions，7d，with_filters=1，各3次 | 3.986 | 0.997 | 48306 / 252699 |
+| /api/sessions，30d，with_filters=1，各3次 | 16.781 | 4.636 | 278949 / 1483466 |
+| /api/overview，7d，各3次 | 0.307 | 0.159 | 16947 / 16947 |
+
+同一MacBook消费者→MacStudio Hub路径；最终会话请求声明Accept-Encoding:gzip，旧列表路径不启用压缩。7d样本区间3.02–6.04→0.931–1.065秒，30d15.71–17.77→4.216–5.216秒。真实数据在更新，7d会话652→653、30d3787→3788，不能当固定数据A/B或长期延迟分布；固定输出一致性由上述独立副本与回归承担。总览未改变计算实现，其读数仅说明本次负载下仍能推进，不把全部差异归因本次优化。两请求并发一次：7d会话0.998秒、overview0.153秒；早期基线分别2.452/0.155秒。来源数量4、范围2、客户端协商状态5由不同证据分别覆盖，不外推任意并发或全部窗口。
+
+实际独立Chrome读者：7d首次资源1187ms、48306字节/252699解压字节，102个tbody行（含日期分组）；自动后续请求859ms。选择30d后资源3999.5ms、278949字节/1483466解压字节；原生下一页按钮切到101–200条，随后点击可见会话链接打开真实详情，资源682ms/8829字节，显示会话/用量明细。工具的click不自动把viewport外元素滚入视口，首次点击只命中HTML；显式scrollintoview后同一原生点击命中按钮并推进。未把这些无效点击算验收通过。证据browser-final-7d.json、browser-final-30d.json、browser-detail.json。浏览器副本归本session，交回前关闭。
+
+运行观测已实际消费：/api/diagnostics及Hub本地current.json均返回活动记录与来源年龄；文件5秒周期推进，最终无sources_error/persistence_error、active_details_omitted/events_dropped均0（该窗口）。第一轮真实53.931秒同步产生long_running observed→operation_completed success→cleared；会话慢事件和response_body_write阶段直接驱动上述压缩优化。过期/未知/恢复与持久化失败的自动检测由隔离用例验证，未向生产注入阻塞或等待6小时造故障。诊断进程身份与HTTP health身份是两个独立UUID，按诊断自己的instance_id拼接事件。
+
+最终代码验证：第一批134项相关测试，第二批压缩增量59项（含重复覆盖，不能相加当独立总数）。测试使用隔离HOME/state，本仓Python与Node，源码实际解析到私树；完整测试源码随对应提交交付。独立实现审查遗留findings无；第二批按自动回归可直接捕获的窄增量免外审。文档按普通sync-docs同步README/CHANGELOG、架构、operations、ADR/索引及issue，未额外启动文档专项审查。
+
+部署复验另发现既有restart竞态：stop-web返回后立即install-web看到尚未消失的旧job，打印unchanged；随后launchctl报告job不存在，HTTP拒绝连接。已先通过同一hub.py install-web恢复，以上health与浏览器读数在恢复后取得。未扩大本次性能修改去改生命周期，跟踪ISSUE-SERVICE-20261013-restart-race。
+
+请求对账：成本发现/增长分析、索引与传输优化、自动慢/在途/来源停滞观测、同入口复验、消费说明与剩余归属均已交付。尚未具备的是进程外freeze/death主动探测及外部通知（ISSUE-PERF-20261013-observer）；不宣称已接通。仍保留长窗口解码/分组、快照全量构建/校验/传输的增长成本，按上表触发条件归对应维护者再评估，不预先改变会计或刷新语义。未处置的审查findings：无；部署竞态已恢复并留owner，不作为本次优化已修内容。
