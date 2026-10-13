@@ -127,6 +127,37 @@ class StatisticsSnapshotTests(unittest.TestCase):
         with self.assertRaises(generation.GenerationValidationError):
             generation.read_current_generation("macbook", root=root)
 
+    def test_usage_indexes_bound_scanning_without_changing_results(self):
+        entries = [replace(self.usage()[0], timestamp=NOW + timedelta(days=i),
+                           session_id=str(i), message_id=str(i), request_id=str(i))
+                   for i in range(2000)]
+        path = self.root / "indexed.db"
+        snapshots.write_snapshot(path, entries, observed_at=NOW)
+        with closing(sqlite3.connect(path)) as conn:
+            queries = [
+                ("SELECT payload FROM statistics_usage WHERE "
+                 "substr(json_extract(payload, '$.timestamp'), 1, 10) BETWEEN ? AND ? ORDER BY position",
+                 (NOW.date().isoformat(), (NOW + timedelta(days=2)).date().isoformat())),
+                ("SELECT payload FROM statistics_usage WHERE "
+                 "json_extract(payload, '$.session_id') = ? ORDER BY position", ("1000",)),
+            ]
+            def measure(sql, args):
+                steps = []
+                conn.set_progress_handler(lambda: steps.append(1) or 0, 1)
+                try:
+                    return conn.execute(sql, args).fetchall(), len(steps)
+                finally:
+                    conn.set_progress_handler(None, 0)
+            indexed = [measure(*query) for query in queries]
+            conn.execute("DROP INDEX idx_usage_date")
+            conn.execute("DROP INDEX idx_usage_session")
+            unindexed = [measure(*query) for query in queries]
+            for (rows, steps), (old_rows, old_steps) in zip(indexed, unindexed):
+                self.assertEqual(rows, old_rows)
+                self.assertTrue(rows)
+                self.assertLess(steps, old_steps / 10)
+        self.assertEqual(snapshots.read_snapshot(path)["usage_entries"], entries)
+
     def test_usage_roundtrip_and_safe_metadata(self):
         data = snapshots.read_snapshot(self.snapshot("usage"))
         self.assertEqual(data["usage_entries"], self.usage())

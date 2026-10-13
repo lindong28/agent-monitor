@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import threading
+import diagnostics
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ def _outcome(value):
     return Outcome(**value)
 
 
+@diagnostics.measured("statistics.sync_worker")
 def sync_all(*, on_complete=None, on_statistics=None, **kwargs):
     # stdin is a lifetime channel: close-on-exec and parent exit both yield EOF.
     completed = {}
@@ -118,7 +120,8 @@ def sync_all(*, on_complete=None, on_statistics=None, **kwargs):
                 if phase == "complete":
                     completed[name] = outcome
                 if callback:
-                    callback(name, outcome)
+                    with diagnostics.monitor.stage("publish_" + phase):
+                        callback(name, outcome)
             elif phase == "result" and set(message) == {"phase", "results"}:
                 result = {name: _outcome(value) for name, value in message["results"].items()}
                 if result != completed:
@@ -128,7 +131,9 @@ def sync_all(*, on_complete=None, on_statistics=None, **kwargs):
         code = process.wait()
         if code != 0 or result is None:
             raise RuntimeError("sync worker exited without a complete result (exit %s)" % code)
-        return result
+    if any(not value.success for value in result.values()):
+        diagnostics.monitor.outcome("source_failure")
+    return result
 
 
 def _worker():

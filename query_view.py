@@ -9,6 +9,9 @@ import time
 from contextlib import contextmanager
 
 import generation
+import diagnostics
+import hub
+import statistics_snapshot
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,7 @@ class QueryView:
         self._error = None
         self._thread = None
 
+    @diagnostics.measured("query_view.prepare_including_queue")
     def refresh(self):
         with self._prepare_lock:
             if self._stop.is_set():
@@ -52,9 +56,21 @@ class QueryView:
                     config_path=self.config_path, root=self.root)
                 candidate = _View(context, context.__enter__())
             except Exception as exc:
+                diagnostics.monitor.source_error("view_preparation_failed")
                 with self._lock:
                     self._error = exc
                 raise
+            try:
+                sources = {}
+                for record in candidate.admission.records:
+                    meta = record.current.meta if record.admitted else {}
+                    detail = statistics_snapshot.read_metadata(record.current.db_path) if record.admitted else {}
+                    sources[record.machine.name] = {"generated_at": meta.get("generated_at"),
+                                                    "observed_at": detail.get("observed_at"),
+                                                    "admitted": record.admitted}
+                diagnostics.monitor.set_sources(sources, interval=hub.interval(), stale_seconds=6*60*60)
+            except Exception:
+                diagnostics.monitor.source_error("source_metadata_unavailable")
             with self._lock:
                 if self._stop.is_set():
                     candidate.close()

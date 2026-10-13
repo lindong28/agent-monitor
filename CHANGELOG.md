@@ -2,6 +2,9 @@
 
 ## 2026-10-13
 
+- Index newly exported session history for date and detail queries, preserving existing snapshot and accounting behavior.
+- Add bounded live diagnostics for slow/in-flight operations and stale source observations, with local persisted events and a read-only API.
+
 - Reject hidden Git index flags before production installation; connect the personal configuration installer through the checked entrypoint while preserving explicit staging.
 - Add a production entrypoint that verifies published main before running the installer; preserve direct installation for staging and explicit deployment contracts.
 

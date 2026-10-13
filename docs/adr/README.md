@@ -30,3 +30,5 @@ Earlier decisions remain in the source repository at the immutable commit linked
 - [20261013-e7a4 — Published main deployment](20261013-e7a4-published-main-deployment.md): accepted; scoped production publication and independent project entrypoints.
 
 - [20261013-42b6 — Usage observation correction](20261013-42b6-usage-observation-correction.md): preserve actual usage across pagination and streaming, with retained observations and visible unknowns.
+
+- [20261013-b4d8 — Session indexes and runtime observations](20261013-b4d8-runtime-performance.md): accepted; bounded process-local diagnostics and preserved query semantics.

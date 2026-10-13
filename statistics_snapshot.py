@@ -7,6 +7,7 @@ import json
 import math
 from pathlib import Path
 import sqlite3
+import diagnostics
 
 from parsers import UsageEntry
 
@@ -88,7 +89,17 @@ def write_snapshot(snapshot_path, loaded_entries, *, observed_at=None):
             conn.executemany(f"INSERT INTO {name} VALUES (?, ?)",
                              [(index, json.dumps(row, allow_nan=False, sort_keys=True))
                               for index, row in enumerate(rows)])
+        _create_usage_indexes(conn)
     return read_snapshot(snapshot_path)
+
+
+def _create_usage_indexes(conn):
+    # Optional access paths: old snapshots remain readable, with identical
+    # predicates and position ordering. Build only on the unpublished copy.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_date ON statistics_usage "
+                 "(substr(json_extract(payload, '$.timestamp'), 1, 10))")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_session ON statistics_usage "
+                 "(json_extract(payload, '$.session_id'))")
 
 
 def _validate_meta(meta):
@@ -201,6 +212,7 @@ def _admitted_meta(conn):
     return meta
 
 
+@diagnostics.measured("statistics.read_usage")
 def read_admitted_usage(current, *, time_range=None, query=None, session_id=None):
     """Decode only usage needed by Sessions; callers retain exact time filtering."""
     with _admitted_connection(current) as conn:

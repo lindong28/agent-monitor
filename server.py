@@ -34,6 +34,7 @@ import sync
 import sync_process
 import query_view
 import quota_sync
+import diagnostics
 from aggregators import extract_metric, load_all_entries
 from parsers import claude_status, codex
 from parsers.accounts import quota_identity
@@ -147,6 +148,10 @@ def _query_admission():
     context = QUERY_VIEW.snapshot() if QUERY_VIEW is not None else generation.generation_admission_snapshot()
     with context as admission:
         yield admission
+
+
+def diagnostics_endpoint(_query):
+    return diagnostics.monitor.snapshot()
 
 
 def overview(query):
@@ -393,6 +398,8 @@ def _compile_check():
 
 def _schedule_reexec():
     def _reexec():
+        # Keep observation alive if cleanup/exec fails; successful exec replaces
+        # all threads and the observer's non-inheritable file descriptors.
         codex_accounts.manager.close()
         QUOTA_REFRESH.shutdown()
         if QUERY_VIEW is not None:
@@ -486,6 +493,7 @@ ROUTES = {
     "/api/sync-status": sync_status_endpoint,
     "/api/refresh": refresh_endpoint,
     "/api/sessions": sessions_endpoint,
+    "/api/diagnostics": diagnostics_endpoint,
     "/api/network": network,
 }
 
@@ -496,12 +504,33 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_one_request(self):
         self._request_started = None
-        return super().handle_one_request()
+        self._diagnostic_token = None
+        self._response_status = None
+        self._response_complete = False
+        try:
+            return super().handle_one_request()
+        finally:
+            if self._diagnostic_token is not None:
+                status = self._response_status
+                diagnostics.monitor.finish(self._diagnostic_token,
+                    "http_error" if status is not None and status >= 400 else
+                    "success" if self._response_complete else "incomplete")
+                diagnostics.monitor.local.token = None
 
     def parse_request(self):
         accepted = super().parse_request()
         self._request_started = time.monotonic()
+        if accepted:
+            path = urlparse(self.path).path
+            if path.startswith("/api/"):
+                label = path if path in ROUTES else "/api/session/:id" if path.startswith("/api/session/") else "/api/other"
+                self._diagnostic_token = diagnostics.monitor.begin(self.command + " " + label)
+                diagnostics.monitor.local.token = self._diagnostic_token
         return accepted
+
+    def send_response(self, code, message=None):
+        self._response_status = code
+        return super().send_response(code, message)
 
     def end_headers(self):
         started = getattr(self, "_request_started", None)
@@ -710,7 +739,8 @@ class Handler(BaseHTTPRequestHandler):
         logger.info("%s - %s", self.address_string(), fmt % args)
 
     def _send_json(self, payload, status=200, send_body=True, compress=False):
-        data = json.dumps(payload, default=_json_default).encode("utf-8")
+        with diagnostics.monitor.stage("json_encode"):
+            data = json.dumps(payload, default=_json_default).encode("utf-8")
         self._send_json_bytes(data, status=status, send_body=send_body, compress=compress)
 
     def _send_json_bytes(self, data, status=200, send_body=True, compress=False):
@@ -742,7 +772,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         if send_body:
-            self.wfile.write(data)
+            with diagnostics.monitor.stage("response_body_write"):
+                self.wfile.write(data)
+        self._response_complete = True
 
     def _serve_static(self, path, send_body=True):
         if path == "/":
@@ -1008,6 +1040,7 @@ def _sync_machine_completed(name, result, *, statistics_only=False):
             _SYNC_STATE["phase"] = "quota"
 
 
+@diagnostics.measured("statistics.sync_round")
 def _run_sync_round(round_machines=()):
     results = {}
     outcomes = {}
@@ -1026,6 +1059,8 @@ def _run_sync_round(round_machines=()):
             on_complete=_sync_machine_completed,
         )
         outcomes = _normalize_sync_outcomes(results, round_machines)
+        if any(outcome["kind"] != "success" for outcome in outcomes.values()):
+            diagnostics.monitor.outcome("source_failure")
         completed_round_machines = tuple(sorted(outcomes))
         completed_at = _utc_timestamp()
         with _SYNC_LOCK:
@@ -1052,6 +1087,7 @@ def _run_sync_round(round_machines=()):
                 )
     except Exception as exc:
         logger.exception("cross-machine sync failed: %s", exc)
+        diagnostics.monitor.outcome("error")
         completed_at = _utc_timestamp()
         reason = "%s: %s" % (type(exc).__name__, exc)
         with _SYNC_LOCK:
@@ -2427,6 +2463,7 @@ def main():
     _BIND_HOST, _BIND_PORT = args.host, args.port
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    diagnostics.monitor.start(ROOT / "state" / "diagnostics")
     _capture_startup_machine_config()
     if hub.enabled():
         QUERY_VIEW = query_view.QueryView()
@@ -2458,6 +2495,7 @@ def main():
         server.serve_forever()
     finally:
         stop.set()
+        diagnostics.monitor.close()
         try:
             codex_accounts.manager.close()
         finally:

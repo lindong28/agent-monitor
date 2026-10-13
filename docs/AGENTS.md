@@ -8,6 +8,7 @@ Current usage and installation belong in the root README; current architecture a
 | [usage-accounting-correction.md](usage-accounting-correction.md) | Pagination and streaming usage correction, bounded validation and recovery |
 | [architecture.md](architecture.md) | Runtime ownership, data flow and independent dependencies |
 | [explore-performance.md](explore-performance.md) | Explore performance evidence, improvement scope and implementation results |
+| [performance-20261013.md](performance-20261013.md) | Session indexes, runtime diagnostics and measured performance delivery |
 | [proactive-performance.md](proactive-performance.md) | Proactive performance gaps, implementation, diagnostic commands and verification limits |
 | [design.md](design.md) | Shared product visual design, inheritance, exceptions and observed coverage |
 | [operations/services.md](operations/services.md) | Current lifecycle/migration instructions and preserved historical deployment record |

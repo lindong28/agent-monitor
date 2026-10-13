@@ -200,3 +200,5 @@ Replace `FULL_SHA` with the full commit verified after authorized publication. F
 Installer arguments follow `--`, for example `./deploy.py --expect FULL_SHA -- rollup-daemon`. Keep `./install.sh --no-services` for isolated staging. The production entrypoint does not push, synchronize Git, migrate state or replace persistent locks.
 
 The preflight rejects `assume-unchanged` and `skip-worktree` index flags, including on files whose content currently matches HEAD. On rejection, inspect `git ls-files -v`, preserve any local edits and clear the flags before retrying. The entrypoint never clears them or discards edits automatically.
+
+For live slow-operation and stalled-update diagnosis, read `/api/diagnostics` or the Hub's `state/diagnostics/current.json` and rotating `events.jsonl`. The [operations guide](docs/operations/services.md#runtime-performance-diagnostics) explains thresholds, coverage, recovery and remaining external-monitoring limits. Session date/detail queries use indexes in newly exported snapshots; older snapshots remain readable.

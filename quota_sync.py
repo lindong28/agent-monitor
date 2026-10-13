@@ -15,6 +15,7 @@ from pathlib import Path
 
 import hub
 import sync_process
+import diagnostics
 from parsers.accounts import quota_identity
 
 
@@ -40,6 +41,7 @@ def _validate(payload):
         raise ValueError("配额查询返回的来源或格式无效")
 
 
+@diagnostics.measured("quota.query_worker")
 def run_queries(machines, complete):
     """Stream small results; never acquire a generation lease or publish a DB."""
     expected = {m.name for m in machines}
@@ -75,6 +77,9 @@ def run_queries(machines, complete):
                         raise ValueError("配额查询进度无效")
                     if value["payload"] is not None:
                         _validate(value["payload"])
+                    if value["error"] or any(block.get("refresh_error") for block in
+                                             (value["payload"] or {}).get("rate_limits", {}).values()):
+                        diagnostics.monitor.outcome("source_failure")
                     seen.add(value["machine"])
                     complete(value["machine"], value["payload"], value["error"])
         if process.wait(timeout=max(.1, deadline - time.monotonic())) or not done or seen != expected or buffer:
