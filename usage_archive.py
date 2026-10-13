@@ -6,7 +6,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from parsers import UsageEntry
+from parsers import UsageEntry, complete_usage_observation
 
 
 def _encode(entry):
@@ -49,8 +49,8 @@ class UsageArchive:
                 conn.execute("BEGIN IMMEDIATE")
                 conn.execute("CREATE TABLE IF NOT EXISTS archive_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
                 conn.execute("CREATE TABLE IF NOT EXISTS usage_events (dedup_key TEXT PRIMARY KEY, entry TEXT NOT NULL)")
-                # Per-file statistics preserve the existing sorted-file, first-call
-                # dedup winner even when only a later transcript copy changes.
+                # File caches retain observations; Claude completed usage may
+                # supersede an earlier copy while attribution stays stable.
                 conn.execute("CREATE TABLE IF NOT EXISTS parsed_files (path TEXT PRIMARY KEY, signature TEXT, entries TEXT NOT NULL)")
                 current = now or datetime.now(timezone.utc)
                 authority = (current.astimezone(bucket_timezone).date() + timedelta(days=1)).isoformat()
@@ -83,7 +83,9 @@ class UsageArchive:
                         conn.execute("UPDATE parsed_files SET signature = NULL WHERE path = ?", (key,))
                         continue
                     for entry in entries:
-                        if entry.dedup_key in seen:
+                        if entry.agent_id == "claude-code":
+                            entry = complete_usage_observation(retained_by_key.get(entry.dedup_key), entry, source_errors)
+                        elif entry.dedup_key in seen:
                             continue
                         seen.add(entry.dedup_key)
                         if retained_by_key.get(entry.dedup_key) == entry:

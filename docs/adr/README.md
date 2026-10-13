@@ -28,3 +28,5 @@ Earlier decisions remain in the source repository at the immutable commit linked
 - [20261012-b97e — Product boundary separation](20261012-b97e-product-boundary-separation.md): independent Monitor and Gateway with preserved audit history.
 
 - [20261013-e7a4 — Published main deployment](20261013-e7a4-published-main-deployment.md): accepted; scoped production publication and independent project entrypoints.
+
+- [20261013-42b6 — Usage observation correction](20261013-42b6-usage-observation-correction.md): preserve actual usage across pagination and streaming, with retained observations and visible unknowns.

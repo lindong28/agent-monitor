@@ -525,6 +525,21 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                              [("healthy", "new-model", 170), ("shared", "gpt-5", 100), ("unknown", "gpt-5", 100)])
         self.assertEqual(self.rows(), [("2026-02-10", "new-model", 510)])
 
+    def test_codex_parent_change_invalidates_unchanged_child_cache(self):
+        self.models_db().close()
+        parent = self.session("one", tokens=1000)
+        child = self.session("child", tokens=1200)
+        rows = child.read_text().splitlines()
+        meta = json.loads(rows[0])
+        meta["payload"]["history_base"] = {"thread_id": "one", "end_byte_offset": parent.stat().st_size}
+        rows[0] = json.dumps(meta)
+        child.write_text("\n".join(rows) + "\n")
+        self.assertEqual(next(e.input_tokens for e in self.load() if e.session_id == "child"), 200)
+        before = child.stat().st_mtime_ns
+        parent.write_text(parent.read_text().replace('"input_tokens": 1000', '"input_tokens": 1100'))
+        self.assertEqual(next(e.input_tokens for e in self.load() if e.session_id == "child"), 100)
+        self.assertEqual(child.stat().st_mtime_ns, before)
+
     def test_duplicate_file_cache_keeps_first_sorted_winner(self):
         one, two = self.sessions / "a.jsonl", self.sessions / "b.jsonl"
         one.write_text("a")

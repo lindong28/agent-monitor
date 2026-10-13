@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Optional
 
@@ -47,3 +47,22 @@ class RateLimits:
     # value the event carried. Codex fills it; Claude's status file
     # carries no plan, so it stays None there. See ADR 20260822-586a.
     plan: Optional[str] = None
+
+
+def complete_usage_observation(existing, incoming, source_errors=None):
+    """Keep call attribution; choose a real, non-regressing Claude usage snapshot."""
+    if existing is None or incoming.agent_id != "claude-code":
+        return incoming
+    fields = ("input_tokens", "output_tokens", "cache_creation_tokens",
+              "cache_read_tokens", "cache_creation_1h_tokens")
+    old = tuple(getattr(existing, name) for name in fields)
+    new = tuple(getattr(incoming, name) for name in fields)
+    if all(a <= b for a, b in zip(new, old)):
+        return existing
+    if all(a <= b for a, b in zip(old, new)):
+        return replace(existing, **{name: getattr(incoming, name) for name in fields},
+                       cost_usd=incoming.cost_usd)
+    if source_errors is not None:
+        source_errors.append({"path": incoming.dedup_key, "stage": "usage_observation",
+                              "error": "incomparable usage observations; retained earlier observed snapshot"})
+    return existing

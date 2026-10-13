@@ -251,3 +251,12 @@ overview 侧的窗口尤其宽——它在取得 admission 与注册 epoch 之�
 - **Observed / Source**: 本轮真实浏览器 390px 的 guide 数据映射表宽 720px、滚动区宽 322px，“查看入口”列需要局部横滚；六项导航中的接入入口初始在屏外，但横滚后网络导航实际可达，符合现行 `docs/design.md`。配额已有“剩余额度少优先”、重置和观测时间排序，适合查快耗尽账号；直接找余量多的账号没有对应反向排序。调用筛选保留英文原始枚举，符合现行语言契约，但可为首次访问者增加中文解释。
 - **Proposal / Owner**: agent-monitor 产品维护者可按首次接入与挑选账号的优先级考虑：窄屏来源说明与入口成组；更易发现接入入口；余量多优先或可用账号视图（陈旧/未知不能当当前可用）；枚举旁补解释而不改取值。属于用户可选的产品优化，不在本轮实施。
 - **Evidence**: `~/.local/share/agent-reports/ui-reaudit-20261012/issues.md` 与 `evidence/mobile-result.json`、`tail-result.json`、`journey-result.json`。这些截图与原始读数含私人部署信息，不作公开演示资产。
+
+
+## [open] ISSUE-20261013-test-drift Existing suite fixtures lag consumer paths
+
+Owner: agent-monitor test maintenance. Clean163be3c baseline reproduces test_aggregators.test_production_daily_rollup_and_attach_sites_match_explicit_census (benchmark make_snapshot not classified) and test_account_memory.test_pivot_sync_publish_remembers_account_before_later_signed_out_publish (mock sync_all missing quota_refresh). Both also fail in the accounting correction's874-test run. Correct the census and mock under their own behavior scope; this metric repair does not silently waive or disable them. Evidence: metric-review-20261013/product-tests-isolated.log plus baseline2-test replay in task transcript.
+
+## [open] ISSUE-20261013-lineage-notification Source completeness is pull-visible only
+
+Owner: agent-monitor service maintainer. The accounting correction surfaces unresolved Codex ancestry and incomparable Claude observations through source_errors/scan_complete and existing snapshot/Hub coverage indicators. It does not add a proactive push route; absent a page visit these failures may go unnoticed. Service-operations6.1 self-check therefore leaves a named follow-up to connect source completeness to the project's approved alert route with recovery/dedup semantics. This task repairs the requested calculation and shared on-demand review workflow; it does not claim an autonomous production detector is deployed. Raw source gaps remain visible unknowns rather than guessed zeros.

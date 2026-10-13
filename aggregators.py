@@ -821,7 +821,7 @@ def load_all_entries(force_reload=False, read_only=False, diagnostic=False, arch
                     archive, source_errors, force_reload, read_only or diagnostic,
                 )
             loaded = _with_calculated_costs(
-                _deduped(entries),
+                _deduped(entries, source_errors),
                 read_only=read_only or diagnostic,
                 diagnostic=diagnostic,
                 source_errors=source_errors,
@@ -873,6 +873,8 @@ def _load_archived_entries(archive, source_errors, force_reload, read_only):
                 json.dumps(codex_models, sort_keys=True, separators=(",", ":")).encode("utf-8")
             ).hexdigest()
 
+    history = codex.HistoryResolver(path for path in paths if _is_codex_usage_path(path))
+
     def signature_for(path):
         file_stat = path.stat()
         metadata = None
@@ -882,18 +884,21 @@ def _load_archived_entries(archive, source_errors, force_reload, read_only):
             # This signature names the mapping snapshot consumed by this
             # collection, not the live database after parsing has started.
             # The next collection reads and validates the mapping again.
-            metadata = model_mapping_digest
+            dependencies = history.signature(path)
+            if dependencies is None:
+                return None
+            metadata = (model_mapping_digest, dependencies)
         return json.dumps((file_stat.st_mtime_ns, file_stat.st_size, fingerprint, metadata))
 
     def parse(path):
-        return _parse_usage_file(path, source_errors=source_errors, codex_models=codex_models)
+        return _parse_usage_file(path, source_errors=source_errors, codex_models=codex_models, codex_history=history)
 
     if read_only:
         from cache import MtimeCache
 
         retained, authority = archive.read()
         entries = MtimeCache(lambda: paths, parse).load(source_errors=source_errors)
-        return _deduped(list(entries) + retained), authority
+        return _deduped(list(entries) + retained, source_errors), authority
     return archive.collect(paths, parse, signature_for, source_errors, USAGE_TIMEZONE, force_reload=force_reload)
 
 
@@ -952,18 +957,17 @@ def _assert_identity_connection_matches(conn, ownership_token):
         )
 
 
-def _deduped(entries):
-    # Files are parsed independently, so one API call reaches this point once
-    # per file that records it. Claude Code copies a whole transcript into a new
-    # session file on resume/fork, which is where the duplicates come from.
-    seen = set()
-    unique = []
+def _deduped(entries, source_errors=None):
+    from parsers import complete_usage_observation
+
+    unique = {}
     for entry in entries:
-        if entry.dedup_key in seen:
-            continue
-        seen.add(entry.dedup_key)
-        unique.append(entry)
-    return unique
+        key = entry.dedup_key
+        if key not in unique:
+            unique[key] = entry
+        elif entry.agent_id == "claude-code":
+            unique[key] = complete_usage_observation(unique[key], entry, source_errors)
+    return list(unique.values())
 
 
 def _with_calculated_costs(entries, read_only=False, diagnostic=False, source_errors=()):
@@ -1140,7 +1144,7 @@ def _walk_jsonl_paths(base, source_errors):
     return paths
 
 
-def _parse_usage_file(path, source_errors=None, codex_models=None):
+def _parse_usage_file(path, source_errors=None, codex_models=None, codex_history=None):
     path = Path(path)
     if _is_codex_usage_path(path):
         if codex_models is None:
@@ -1153,6 +1157,7 @@ def _parse_usage_file(path, source_errors=None, codex_models=None):
             path,
             models=codex_models,
             source_errors=source_errors,
+            history=codex_history,
         )
 
     fallback_project = "unknown"

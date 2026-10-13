@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import UsageEntry
+from . import UsageEntry, complete_usage_observation
 
 
 # Ported and dependency-stripped from token-tracker src/adapters/claude.py.
@@ -14,8 +14,7 @@ CLAUDE_DIRS = [
 
 
 def load_entries(hours_back=0, base_dirs=None):
-    entries = []
-    seen = set()
+    entries = {}
     cutoff = None
     if hours_back > 0:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
@@ -29,18 +28,13 @@ def load_entries(hours_back=0, base_dirs=None):
             for entry in parse_file(jsonl_path, fallback_project=fallback_project):
                 if cutoff and entry.timestamp < cutoff:
                     continue
-                if entry.dedup_key in seen:
-                    continue
-                seen.add(entry.dedup_key)
-                entries.append(entry)
+                entries[entry.dedup_key] = complete_usage_observation(entries.get(entry.dedup_key), entry)
 
-    entries.sort(key=lambda entry: entry.timestamp)
-    return entries
+    return sorted(entries.values(), key=lambda entry: entry.timestamp)
 
 
 def parse_file(path, fallback_project="unknown", source_errors=None):
-    entries = []
-    seen = set()
+    entries = {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
             for line_number, line in enumerate(handle, start=1):
@@ -57,14 +51,13 @@ def parse_file(path, fallback_project="unknown", source_errors=None):
                     continue
 
                 entry = _parse_assistant_entry(data, fallback_project)
-                if entry is None or entry.dedup_key in seen:
+                if entry is None:
                     continue
-                seen.add(entry.dedup_key)
-                entries.append(entry)
+                entries[entry.dedup_key] = complete_usage_observation(entries.get(entry.dedup_key), entry, source_errors)
     except (OSError, PermissionError, UnicodeError) as exc:
         _record_source_error(source_errors, path, None, exc)
         return []
-    return entries
+    return list(entries.values())
 
 
 def _record_source_error(source_errors, path, line_number, exc):

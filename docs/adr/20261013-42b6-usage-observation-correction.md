@@ -1,0 +1,13 @@
+# Preserve usage across pagination and streaming observations
+
+Date: 2026-10-13. Status: accepted; authorized metric-correctness plan; independent L1 decision review passed all seven criteria.
+
+Codex pagination inherits cumulative usage from the exact history_base byte boundary. Resolve that lineage, including pages with no counter, and subtract the inherited baseline. Preserve existing event keys; emit zero for a replayed boundary so retained derived events can be corrected. Detect invalid, missing, ambiguous and cyclic lineage. Unknown first deltas are not fabricated: retain any archived observation with source_errors, anchor at the first local cumulative observation and preserve later measurable differences. Dependency-aware cache reuse must include ancestors. Existing ordinary/fork accounting remains.
+
+For Claude, one API identity can have early and completed usage observations. Select a real observation that dominates the other token counters; do not sum duplicate calls or combine independent field maxima. Keep the existing first attribution/model/time, update the selected observation's usage and cost. Include retained archive observations so deleting a complete source copy cannot regress to an early snapshot. Incomparable observations retain the existing reading and surface source_errors. This does not resolve the existing cross-copy cwd ambiguity.
+
+Always-last Codex usage fails on replays; summing Claude observations doublecounts; first-wins loses completed usage. Independent raw-input replay found Codex split3390695 versus joined2233635 tokens, and Claude one request output5 versus164. These bounded samples establish the failure, not fleet totals or actual provider bills. Evidence: local task artifact metric-review-20261013/blind-case/report.md; source baseline163be3cdfec4501f7b441709f350e9b94c72a075.
+
+Preserve raw logs, schemas, event identity, archive authority threshold and token_cost.py arithmetic. Existing authoritative rollup replay applies corrected events. Production changes require a locked SQLite backup of derived databases, reviewed origin/main deployment, and actual source completeness plus consumer checks; rollup exit success alone does not prove completeness. Pre-authority history, missing raw facts, all-fleet effects and actual bills remain unverified until separately measured. Code rollback does not automatically restore derived data; keep its preimage. Reversible derived replay is A1 only while that recoverable preimage exists.
+
+This is compatible with a902 extraction and b97e product separation. Existing2026-08-07 cwd ambiguity concerned identical usage and remains unchanged. No new background scanner, pricing audit, schema migration or service dependency is introduced.

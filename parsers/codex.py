@@ -34,9 +34,11 @@ def load_entries(hours_back=0, sessions_dir=None, state_db=None):
     if not sessions_path.is_dir():
         return entries
 
-    for jsonl_path in sessions_path.rglob("*.jsonl"):
+    paths = list(sessions_path.rglob("*.jsonl"))
+    history = HistoryResolver(paths)
+    for jsonl_path in paths:
         try:
-            for entry in parse_file(jsonl_path, models=models):
+            for entry in parse_file(jsonl_path, models=models, history=history):
                 if cutoff and entry.timestamp < cutoff:
                     continue
                 if entry.dedup_key in seen:
@@ -50,7 +52,122 @@ def load_entries(hours_back=0, sessions_dir=None, state_db=None):
     return entries
 
 
-def parse_file(path, models=None, source_errors=None):
+class HistoryResolver:
+    """Resolve byte-bounded ancestry, caching only stable source observations."""
+
+    def __init__(self, paths):
+        self.paths = list(paths)
+        self.headers = {}
+        self.prefixes = {}
+        self.index = None
+
+    @classmethod
+    def for_path(cls, path):
+        path = Path(path)
+        root = Path(SESSIONS_DIR)
+        if not path.is_relative_to(root):
+            root = path.parent
+        return cls(root.rglob("*.jsonl"))
+
+    def header(self, path):
+        path = Path(path)
+        stamp = _file_signature(path)
+        cached = self.headers.get(path)
+        if cached and cached[0] == stamp:
+            return cached[1]
+        with path.open("rb") as handle:
+            data = json.loads(handle.readline())
+        payload = data.get("payload") if isinstance(data, dict) and data.get("type") == "session_meta" else None
+        if not isinstance(payload, dict) or not payload.get("id"):
+            raise ValueError("history source has no owner metadata")
+        self.headers[path] = (stamp, payload)
+        return payload
+
+    def _parents(self, path, base):
+        if self.index is None:
+            self.index = {}
+            for candidate in self.paths:
+                # Paginated files preserve the logical session id in metadata;
+                # history_base addresses the physical thread suffix instead.
+                identity = Path(candidate).stem[-36:]
+                try:
+                    if str(uuid.UUID(identity)) != identity:
+                        raise ValueError
+                except ValueError:
+                    try:
+                        identity = self.header(candidate)["id"]
+                    except (OSError, ValueError, UnicodeError):
+                        continue
+                self.index.setdefault(identity, []).append(candidate)
+        seen = {Path(path)}
+        while base is not None:
+            if not isinstance(base, dict):
+                raise ValueError("invalid history_base")
+            limit = base.get("end_byte_offset")
+            identity = base.get("thread_id")
+            if not isinstance(identity, str) or type(limit) is not int or limit < 0:
+                raise ValueError("invalid history_base identity or byte boundary")
+            candidates = self.index.get(identity, [])
+            if len(candidates) != 1:
+                raise ValueError("history_base parent missing or ambiguous")
+            parent = Path(candidates[0])
+            if parent in seen:
+                raise ValueError("cyclic history_base")
+            seen.add(parent)
+            stamp = _file_signature(parent)
+            if limit > stamp[2]:
+                raise ValueError("history_base byte boundary exceeds parent")
+            yield parent, stamp, limit
+            header = self.header(parent)
+            base = header.get("history_base")
+
+    def resolve(self, path, base):
+        dependencies = []
+        for parent, stamp, limit in self._parents(path, base):
+            dependencies.append((str(parent), stamp, limit))
+            key = (parent, stamp, limit)
+            if key not in self.prefixes:
+                if limit > stamp[2]:
+                    raise ValueError("history_base byte boundary exceeds parent")
+                latest = None
+                with parent.open("rb") as handle:
+                    while handle.tell() < limit:
+                        line = handle.readline(limit - handle.tell())
+                        if not line.endswith(b"\n"):
+                            raise ValueError("history_base boundary is not a complete record")
+                        data = json.loads(line)
+                        if not isinstance(data, dict):
+                            continue
+                        payload = data.get("payload")
+                        if data.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "token_count":
+                            info = payload.get("info")
+                            total = info.get("total_token_usage") if isinstance(info, dict) else None
+                            if isinstance(total, dict):
+                                if not _valid_fork_usage(total, total):
+                                    raise ValueError("history_base has invalid cumulative usage")
+                                latest = total
+                if _file_signature(parent) != stamp:
+                    raise ValueError("history_base changed during read")
+                self.prefixes[key] = latest
+            latest = self.prefixes[key]
+            if latest is not None:
+                return latest, dependencies
+            header = self.header(parent)
+            if header.get("history_base") is None and header.get("forked_from_id"):
+                raise ValueError("history_base ancestor has no measurable counter")
+        return {"input_tokens": 0, "output_tokens": 0}, dependencies
+
+    def signature(self, path):
+        try:
+            base = self.header(path).get("history_base")
+            # Dependency discovery reads headers/stat only; a warm archive hit
+            # must not rescan all ancestor transcript bodies just to key a cache.
+            return [(str(parent), stamp, limit) for parent, stamp, limit in self._parents(path, base)]
+        except (OSError, ValueError, UnicodeError):
+            return None
+
+
+def parse_file(path, models=None, source_errors=None, history=None):
     models = models or {}
     session_id = ""
     session_ts = ""
@@ -58,6 +175,8 @@ def parse_file(path, models=None, source_errors=None):
     model = DEFAULT_CODEX_MODEL
     is_fork = False
     previous_usage = None
+    inherited_pending = False
+    inherited_unknown = False
     entries = []
 
     try:
@@ -82,6 +201,15 @@ def parse_file(path, models=None, source_errors=None):
                     # Copied parent metadata can follow the real file owner.
                     session_id = payload.get("id", "") or ""
                     is_fork = bool(payload.get("forked_from_id"))
+                    if payload.get("history_base") is not None:
+                        inherited_pending = True
+                        try:
+                            history = history or HistoryResolver.for_path(path)
+                            previous_usage, _dependencies = history.resolve(path, payload["history_base"])
+                        except (OSError, ValueError, UnicodeError) as exc:
+                            _record_source_error(source_errors, path, line_number, exc)
+                            inherited_unknown = True
+
                     session_ts = payload.get("timestamp", "") or data.get("timestamp", "")
                     cwd = payload.get("cwd", "")
                     if cwd:
@@ -109,7 +237,16 @@ def parse_file(path, models=None, source_errors=None):
                 )
                 if timestamp is None:
                     continue
-                if is_fork and previous_usage is None:
+                if inherited_pending:
+                    inherited_pending = False
+                    if inherited_unknown:
+                        previous_usage = total_usage
+                        continue
+                    delta = _usage_delta(previous_usage, total_usage, info.get("last_token_usage")) or {
+                        "input_tokens": 0, "output_tokens": 0,
+                        "cache_creation_tokens": 0, "cache_read_tokens": 0,
+                    }
+                elif is_fork and previous_usage is None:
                     last = info.get("last_token_usage")
                     if not _valid_fork_usage(last, total_usage):
                         _record_source_error(source_errors, path, line_number,

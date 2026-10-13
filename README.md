@@ -4,6 +4,8 @@ Personal CLI and Web dashboard for Claude Code and Codex usage: tokens, estimate
 
 Use it to answer: **How much coding-agent usage accumulated, which sessions contributed, which accounts have quota left, and whether machine collection is current?**
 
+Usage accounting follows API-call observations across stored files: Codex pagination subtracts its inherited byte-boundary usage, and repeated Claude streaming observations keep the complete observed counters once. Missing ancestry or conflicting observations mark source coverage incomplete; they are not silently treated as zero. Corrected events replay retained authoritative history; unavailable or pre-authority history is not inferred. See [accounting correction](docs/usage-accounting-correction.md).
+
 ## Who it is for
 
 - Developers who use Claude Code and Codex frequently, especially across multiple models, accounts and computers.
