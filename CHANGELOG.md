@@ -2,6 +2,7 @@
 
 ## 2026-10-13
 
+- Reject hidden Git index flags before production installation; connect the personal configuration installer through the checked entrypoint while preserving explicit staging.
 - Add a production entrypoint that verifies published main before running the installer; preserve direct installation for staging and explicit deployment contracts.
 
 ## 2026-10-12

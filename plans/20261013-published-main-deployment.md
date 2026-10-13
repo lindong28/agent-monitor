@@ -49,3 +49,11 @@ Monitor 6e09a52 已整合并发布 origin/main；Gateway 3faed1f 已整合，ori
 本轮仅 MacMini rollout，Gateway 公司版本 pin 与现有服务未改。44 项相关测试通过，不是全套测试声明；历史测试基线问题不在本次修复范围。唯一待裁决项仍为上述隐藏 index 标记补强，未获答复前按已记录的无标记环境交付；无其他未处置 finding。
 
 部署证据须先有已发布 commit 才能取得，因此结果记录单独提交，之后再次发布并把 MacMini 快进至最新文档提交；最终 SHA 与回执保存在 ~/.local/state/published-main-deployment-20261013/，不通过反复把当前文档提交 SHA 写回自身制造提交循环。实际运维记录见 docs/operations/services.md 的 published-main deployment 小节。
+
+## 中立复核后的修复（2026-10-13）
+
+用户明确要求立即修复两项缺口，此前的索引标记待裁决状态结束。复核发现个人配置仓的两个 adapter 仍调用旧 install.sh，原改进没有覆盖真实消费者；两个生产 wrapper 也会放过带隐藏索引标记的修改。该结论修正前述“无其他未处置 finding”，历史归档保留当时记录。
+
+修复限定为：两个 deploy.py 自动拒绝 assume-unchanged / skip-worktree；配置仓的默认完整安装接入 deploy.py；Gateway 在写运行配置之前先做 source preflight；检查缺失或拒绝时不回退。Monitor 显式 --no-services 保留 staging，Gateway --config-only 保留原语义。不开新服务、不增加产品间依赖，不改公司显式 pin，不自动处置 Git 标记或 WIP。
+
+已先取得失败测试，再实现修复：两个产品各 17 项源检查测试通过（新增两种 flag × clean/dirty 四组合），配置仓 Monitor adapter 5 项、Gateway personal config 10 项通过，共 49 项。测试使用隔离 HOME 和临时仓；产品源检查用真实 Git，安装器为无副作用替身。独立复核另核真实 adapter → deploy.py → 假 installer 的完整链路。发布与 MacMini 实装后取得的最终 SHA/消费回执仍保存在同一持久证据目录；不把本地测试当生产验证。

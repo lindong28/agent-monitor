@@ -40,6 +40,10 @@ def check_local():
             raise PreflightError("Git operation in progress; resolve it with its owner before deployment.")
     if git("symbolic-ref", "--quiet", "HEAD") != "refs/heads/main":
         raise PreflightError("Deployment requires the main branch; inspect the checkout before switching.")
+    entries = git("ls-files", "-v", "-z").split("\0")
+    # Git -v uses lowercase tags for assume-unchanged and S/s for skip-worktree.
+    if any(entry and (entry[0].islower() or entry[0] == "S") for entry in entries):
+        raise PreflightError("Hidden index flags present (assume-unchanged or skip-worktree); inspect git ls-files -v, preserve local edits and clear the flags before retrying.")
     if git("status", "--porcelain=v1", "--untracked-files=no"):
         raise PreflightError("Tracked changes present; preserve WIP and finish development in its own worktree.")
     # Runtime state may be an untracked symlink. Other untracked source can alter installation.

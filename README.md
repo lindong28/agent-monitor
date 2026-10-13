@@ -40,6 +40,8 @@ Monitor runs independently of llm-gateway. It does not collect Gateway calls, re
 
 The following clone command requires repository access. Before running the installer, configure [machines.json](machines.json) for your own installation: the shipped entries name the maintainer's fleet. For a new standalone installation, use exactly one local entry, for example `{"machines":[{"name":"local","ssh_host":"localhost","self":true}],"retired_names":[]}`. This uses the existing configuration format; do not replace the identities or retirement records of an existing installation. Hub setup additionally requires your own [hub.json](hub.json) roles, URL and SSH targets. See [Machines and retained data](#machines-and-retained-data).
 
+The direct installer below supports local setup. For production updates, publish the intended changes and use [the published-main entrypoint](#production-deployment-from-published-main). The personal configuration repository's Monitor adapter uses that entrypoint by default; explicit `--no-services` retains staging behavior.
+
 ```bash
 git clone git@github.com:lindong28/agent-monitor.git ~/research/agent-monitor
 cd ~/research/agent-monitor
@@ -195,4 +197,4 @@ Replace `FULL_SHA` with the full commit verified after authorized publication. F
 
 Installer arguments follow `--`, for example `./deploy.py --expect FULL_SHA -- rollup-daemon`. Keep `./install.sh --no-services` for isolated staging. The production entrypoint does not push, synchronize Git, migrate state or replace persistent locks.
 
-Known preflight limit: Git index flags `assume-unchanged` and `skip-worktree` can conceal tracked edits from the source check. Inspect `git ls-files -v` before using the production entrypoint; deployment checkouts must not use these flags. Their automated rejection is a follow-up pending the owner’s choice.
+The preflight rejects `assume-unchanged` and `skip-worktree` index flags, including on files whose content currently matches HEAD. On rejection, inspect `git ls-files -v`, preserve any local edits and clear the flags before retrying. The entrypoint never clears them or discards edits automatically.

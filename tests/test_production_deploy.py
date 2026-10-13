@@ -98,6 +98,17 @@ class ProductionDeploymentTests(unittest.TestCase):
         (self.repo / "extra.py").write_text("# uncommitted source\n")
         self.blocked(self.deploy())
 
+    def test_hidden_index_flags_block_even_without_content_changes(self):
+        for flag in ("assume-unchanged", "skip-worktree"):
+            for dirty in (False, True):
+                with self.subTest(flag=flag, dirty=dirty):
+                    self.run_git(self.repo, "update-index", "--" + flag, "source.txt")
+                    if dirty:
+                        (self.repo / "source.txt").write_text("unpublished edit\n")
+                    self.blocked(self.deploy("--expect", self.head))
+                    self.run_git(self.repo, "update-index", "--no-" + flag, "source.txt")
+                    self.run_git(self.repo, "checkout", "--", "source.txt")
+
     def test_git_intermediate_states_block(self):
         for name in ("rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "BISECT_START"):
             with self.subTest(state=name):
