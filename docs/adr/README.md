@@ -26,3 +26,5 @@
 Earlier decisions remain in the source repository at the immutable commit linked by the extraction decision and historical references.
 
 - [20261012-b97e — Product boundary separation](20261012-b97e-product-boundary-separation.md): independent Monitor and Gateway with preserved audit history.
+
+- [20261013-e7a4 — Published main deployment](20261013-e7a4-published-main-deployment.md): accepted; scoped production publication and independent project entrypoints.

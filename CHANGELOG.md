@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-13
+
+- Add a production entrypoint that verifies published main before running the installer; preserve direct installation for staging and explicit deployment contracts.
+
 ## 2026-10-12
 
 - Make Monitor independent of llm-gateway: retire the duplicate Calls page/API and Gateway collection. Keep Claude/Codex usage and session history, including legacy snapshots. Existing multi-machine Gateway histories require a verified Gateway-owned handover before live cutover.

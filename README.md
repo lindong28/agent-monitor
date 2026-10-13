@@ -179,3 +179,20 @@ Reviewed recovery previews a batch unless `--apply` is given and refuses changed
 Use a disposable HOME when testing to isolate credentials and user files. Tests use temporary databases and mocked services; live deployment and browser acceptance are separate checks. [Architecture](docs/architecture.md), [documentation index](docs/AGENTS.md) and [changelog](CHANGELOG.md) are the maintenance entry points. `token_cost.py` retains the original byte-identical cross-project arithmetic contract, including its historical naming comments.
 
 For backend cost diagnosis, run `.venv/bin/python scripts/benchmark_backend.py`. It creates isolated synthetic snapshots and reports admission, preparation and aggregate-query work across sizes and generations. Read [the diagnostic scope and regression entry](docs/proactive-performance.md); these measurements do not establish production latency or an SLA.
+
+## Production deployment from published main
+
+Use `./deploy.py` for a production installation using the current published release. It checks the primary checkout, `main`, tracked and untracked source changes, unfinished Git operations, and the live `origin/main` SHA before invoking the existing `install.sh`. Runtime `state` and ignored runtime assets are preserved. `--check-only` performs no installation; `--expect FULL_SHA` also binds the node to the release selected after publication.
+
+```sh
+git fetch origin
+git merge --ff-only origin/main
+./deploy.py --check-only --expect FULL_SHA
+./deploy.py --expect FULL_SHA
+```
+
+Replace `FULL_SHA` with the full commit verified after authorized publication. Finish and publish changes in a development worktree first; a diverged or dirty deployment checkout needs its owner's resolution. Coordinate writers throughout deployment. This check is not a filesystem lock, and direct `install.sh` remains available for development/staging. Verify the installed runtime and actual consumer separately; a successful source check is not a service-health result.
+
+Installer arguments follow `--`, for example `./deploy.py --expect FULL_SHA -- rollup-daemon`. Keep `./install.sh --no-services` for isolated staging. The production entrypoint does not push, synchronize Git, migrate state or replace persistent locks.
+
+Known preflight limit: Git index flags `assume-unchanged` and `skip-worktree` can conceal tracked edits from the source check. Inspect `git ls-files -v` before using the production entrypoint; deployment checkouts must not use these flags. Their automated rejection is a follow-up pending the owner’s choice.
