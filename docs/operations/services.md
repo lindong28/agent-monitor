@@ -1,6 +1,10 @@
 # agent-monitor service operations
 
-## 2026-10-12 product separation — local source pending cutover
+## Current deployment source
+
+Deploy from the main worktree at main HEAD. On 2026-10-13 MacMini was moved from its temporary deployment worktree back to ~/research/agent-monitor after the approved history reconciliation in 06db5d9. Its CLI and rollup launchd job both reference that main checkout; persistent state is unchanged. See [deployment evidence](../product-boundary-separation.md#macmini-main-deployment-correction-2026-10-13).
+
+## 2026-10-12 product separation — pre-cutover checkpoint
 
 The new source removes Monitor's Gateway page, APIs and collection dependency. Do not deploy source exporters before preserving the four currently retained Gateway sources in Gateway-owned archives and verifying native collection continuity. Upgrade the compatible Hub reader before statistics-v2 writers. Gateway remote source updates require authorized dual-remote push/pull. No production source, service, ledger or snapshot has been changed by this implementation record; local tests/browser evidence is in [product-boundary-separation.md](../product-boundary-separation.md).
 
@@ -44,7 +48,7 @@ The actual `http://macstudio:39001/?range=30d` was read at 390×844 and 1440×10
 
 Current source layout is this repository's root. Install runtime and assets with `./install.sh`; stage without changing services with `./install.sh --no-services`. The canonical CLI is `~/.local/bin/agent-monitor`. `com.agent-monitor.rollup` collects locally (Hub mode: `collect`, 120 seconds; standalone: `refresh`, 3600 seconds); `com.agent-monitor.hub` serves MacStudio on port 39001. Configure a role with `./install.sh hub <machine>`. Lifecycle commands are documented in the [README](../../README.md).
 
-State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and the Gateway reader remains an independent checkout selected by `LLM_GATEWAY_ROOT`. Installation never reads the former parent repository's Python environment or statusline implementation.
+State remains rooted at `state/`; managed releases can point it to `~/.local/share/agent-monitor/state`. The runtime environment belongs to this project at `.venv`, and Monitor has no Gateway reader dependency. Installation never reads the former parent repository's Python environment or statusline implementation.
 
 ## 2026-10-08 whole-product visual style
 
