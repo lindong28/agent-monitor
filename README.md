@@ -96,9 +96,9 @@ Run only the role for that host. The local marker is `state/hub-machine`; [hub.j
 
 ## Dashboard behavior
 
-All pages share the Ark Console-inspired visual layer: a compact navigation rail, persistent brand bar, lavender-gray canvas and white content panels. On narrow screens navigation scrolls horizontally and wide tables scroll within their own regions. The redesign preserves Monitor's page workflows, account actions and accounting semantics; see [visual design and observed coverage](docs/design.md).
+All pages share the Ark Console-inspired visual layer: a persistent top bar with **控制台** and **使用与接入**, a local navigation rail, lavender-gray canvas and white content panels. On narrow screens the top bar uses two rows, navigation scrolls horizontally and wide tables scroll within their own regions. **搜索页面与帮助** finds existing destinations and guide sections locally; it does not search account or session data. See [visual design and observed coverage](docs/design.md).
 
-The sidebar's **使用与接入** page explains sources, installation prerequisites and current machine collection status. It is a read-only guide; a readable machine snapshot does not prove every source or all historical data is present.
+The top bar's **使用与接入** page explains sources, installation prerequisites and current machine collection status, with chapter navigation, a page outline and copyable commands. Returning to **控制台** within the same page session restores the console address, including filters and session detail. The guide does not execute copied commands or modify configuration; a readable machine snapshot does not prove every source or all historical data is present.
 
 Overview's fixed week/month attribution links open Explore with the chart's actual dates. Explore ranking rows open Sessions with the selected dimensions and dates. Sessions filters match individual usage records before grouping: list totals represent that matching subset, while a session detail retains all available records. Custom dates include both endpoints in Asia/Shanghai and survive detail/return navigation. Aggregate history can exceed retained session detail; the two are not guaranteed to reconcile.
 

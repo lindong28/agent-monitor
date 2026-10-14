@@ -3,7 +3,7 @@
   "template": {
     "id": "style:volcengine-ark-console",
     "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console",
-    "sha256": "e10cdc6a26a278652f6402d2bca97ea0ffdab88b3e847ce46ac4a0311cf7f5e7"
+    "sha256": "8693b3a1749619c1c4c10dfcb1fccf75844a7fdc2e47eedc183b0609867011ff"
   },
   "rules": [
     {
@@ -217,7 +217,7 @@
       "id": "page-overflow",
       "role": "document",
       "kind": "no-horizontal-overflow",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[2]",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[9]",
       "description": "宽表局部滚动，文档本身不溢出"
     },
     {
@@ -255,7 +255,7 @@
       "id": "ARK-V06.tabular",
       "role": "numeric-detail-value",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[9]",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[10]",
       "description": "Detail values keep tabular numerals",
       "property": "font-variant-numeric",
       "expected": "tabular-nums"
@@ -273,6 +273,47 @@
       "kind": "predicate",
       "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V06",
       "description": "历史组标题和既有观测说明在局部横滚后仍与身份关联；读数口径归产品。"
+    },
+    {
+      "id": "ARK-V10",
+      "role": "visual-page",
+      "kind": "manual",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V10",
+      "description": "顶层与局部导航：目标已有的区域入口、局部导航与详情归属区分清楚，选中、焦点与窄屏入口可见；新增示例能力不强制移植到产品。"
+    },
+    {
+      "id": "ARK-V11",
+      "role": "visual-page",
+      "kind": "manual",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V11",
+      "description": "展示组件：适用的推荐卡、目录筛选、作品主视觉、订阅状态和文档代码块按各自组件规则呈现，内容与操作关联明确；局部深色及未验证媒体能力分别说明。"
+    },
+    {
+      "id": "top-nav-height",
+      "role": "top-nav",
+      "kind": "style",
+      "property": "height",
+      "expected": "36px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[0]",
+      "description": "top-nav-height follows current template"
+    },
+    {
+      "id": "top-nav-radius",
+      "role": "top-nav",
+      "kind": "style",
+      "property": "border-radius",
+      "expected": "8px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[0]",
+      "description": "top-nav-radius follows current template"
+    },
+    {
+      "id": "search-radius",
+      "role": "search-dialog",
+      "kind": "style",
+      "property": "border-radius",
+      "expected": "16px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[1]",
+      "description": "search-radius follows current template"
     }
   ]
 }

@@ -10,6 +10,60 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebStaticTests(unittest.TestCase):
+    def test_area_navigation_preserves_full_console_context(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+const consoleLink = {dataset: {area: "console"}, setAttribute(k,v) {this[k]=v;}};
+const guideLink = {dataset: {area: "guide"}, setAttribute(k,v) {this[k]=v;}};
+const consoleNav = {}, guideNav = {}, chapter = {href: "/guide#setup"};
+const nodes = {'[data-area="console"]':consoleLink, '.sidebar .nav':consoleNav, '.guide-nav':guideNav};
+global.document = {readyState:"loading", addEventListener(){}, querySelector(s){return nodes[s]||null;},
+  querySelectorAll(s){return s==="[data-area]"?[consoleLink,guideLink]:s===".guide-nav a"?[chapter]:[];}};
+global.window = {location:{origin:"http://example.test",pathname:"/guide",search:"?range=7d",hash:""}};
+eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { updateAreaNavigation,"));
+const sync = window.AgentMonitor.updateAreaNavigation;
+sync(); assert.equal(consoleLink.href,"/?range=7d");
+for (const query of ["?range=custom&start=2026-10-01&end=2026-10-14&session=s1&session_machine=m1&sort=tokens&page=2", "?range=7d&machine=m2&model=a%2Fb&sort=cost"]) {
+  Object.assign(window.location,{pathname:"/sessions",search:query,hash:"#detail"}); sync();
+  const expected="/sessions"+query+"#detail";
+  assert.equal(consoleLink.href,expected); assert.equal(consoleNav.hidden,false); assert.equal(guideNav.hidden,true);
+  Object.assign(window.location,{pathname:"/guide",search:"?range=30d",hash:"#setup"}); sync(); sync();
+  assert.equal(consoleLink.href,expected,"guide must not normalize the return URL");
+  assert.equal(consoleNav.hidden,true); assert.equal(guideNav.hidden,false); assert.equal(guideLink['aria-current'],"page");
+  assert.equal(chapter.href,"/guide?range=30d#setup");
+  Object.assign(window.location,{pathname:"/sessions",search:query,hash:"#detail"}); sync();
+  assert.equal(consoleLink['aria-current'],"page"); assert.equal(guideLink['aria-current'],"false");
+}
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_guide_copy_reports_real_success_and_failure(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+global.document={readyState:"loading",addEventListener(){},getElementById(){return {textContent:"first\nsecond"};}};
+global.window={};
+eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { copyGuideCode,"));
+(async()=>{
+  let copied;
+  Object.defineProperty(globalThis,"navigator",{value:{clipboard:{async writeText(s){copied=s;}}},configurable:true});
+  const button={dataset:{copyCode:"example"},textContent:"复制命令"};
+  await window.AgentMonitor.copyGuideCode(button);
+  assert.equal(copied,"first\nsecond");assert.equal(button.textContent,"已复制");
+  navigator.clipboard.writeText=async()=>{throw new Error("denied")};
+  await window.AgentMonitor.copyGuideCode(button);assert.equal(button.textContent,"复制失败，请手动选择");
+  delete navigator.clipboard;
+  let selected=false,removed=false,focused=false,value;
+  document.createElement=()=>({style:{},set value(v){value=v;},select(){selected=true;},remove(){removed=true;}});
+  document.body={appendChild(){}};document.execCommand=()=>true;button.focus=()=>{focused=true;};
+  await window.AgentMonitor.copyGuideCode(button);
+  assert.equal(value,"first\nsecond");assert(selected&&removed&&focused);assert.equal(button.textContent,"已复制");
+  document.execCommand=()=>false;await window.AgentMonitor.copyGuideCode(button);assert.equal(button.textContent,"复制失败，请手动选择");
+})().catch(e=>{console.error(e);process.exit(1)});
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_chart_style_preserves_single_observation_and_caller_options(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");

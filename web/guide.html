@@ -15,37 +15,58 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-title">agent-monitor</span>
       </a>
-      <span class="header-section">控制台</span>
-      <a class="header-help" data-preserve-range href="/guide">使用与接入</a>
+      <nav class="top-nav" aria-label="区域导航">
+        <a data-area="console" href="/">控制台</a>
+        <a data-area="guide" aria-current="page" data-preserve-range href="/guide">使用与接入</a>
+      </nav>
+      <button class="header-search" id="open-page-search" type="button" aria-haspopup="dialog" aria-controls="page-search"><span aria-hidden="true">⌕</span> 搜索页面与帮助</button>
     </header>
+    <dialog id="page-search" class="page-search" aria-labelledby="page-search-title">
+      <div class="search-heading"><h2 id="page-search-title">搜索页面与帮助</h2><button type="button" id="close-page-search" aria-label="关闭搜索">关闭</button></div>
+      <p class="scope-note">查找功能入口和接入说明；账号与会话内容请使用各页面的筛选。</p>
+      <label class="sr-only" for="page-search-input">页面或帮助关键词</label>
+      <div class="search-input-row"><input id="page-search-input" type="search" placeholder="搜索总览、会话、安装…" autocomplete="off"><button type="button" id="clear-page-search">清空</button></div>
+      <p id="page-search-count" class="scope-note" role="status"></p>
+      <div id="page-search-results" class="search-results"></div>
+    </dialog>
     <div class="app-shell">
       <aside class="sidebar">
-        <nav class="nav" aria-label="主导航">
+        <nav class="nav" aria-label="控制台导航" hidden>
           <a data-nav href="/">总览</a>
           <a data-nav href="/explore">透视</a>
           <a data-nav href="/sessions">会话</a>
           <a data-nav href="/network">网络</a>
-          <a data-nav href="/guide">使用与接入</a>
+        </nav>
+        <nav class="guide-nav" aria-label="使用指南章节">
+          <span class="nav-caption">使用指南</span>
+          <a href="/guide#sources">数据来源</a>
+          <a href="/guide#collection">采集状态</a>
+          <a href="/guide#setup">首次接入</a>
+          <a href="/guide#questions">查找证据</a>
         </nav>
       </aside>
       <main class="main guide-main">
         <div class="page-toolbar"><h1 class="page-title">使用与接入</h1><button id="refresh" type="button" class="btn">重新检查状态</button></div>
-        <section class="panel">
+        <p class="guide-intro">了解数据来源，连接你的开发环境，再从用量追溯到具体会话。</p>
+        <div class="guide-layout">
+          <aside class="guide-toc" aria-label="本页目录"><span class="nav-caption">本页目录</span><a href="#sources">数据来源</a><a href="#collection">采集状态</a><a href="#setup">首次接入</a><a href="#questions">查找证据</a></aside>
+          <article class="guide-article">
+        <section class="panel" id="sources">
           <h2>先确认数据来自哪里</h2>
-          <p class="scope-note">agent-monitor 面向个人开发者、多机使用者和 Gateway 开发者，汇集用量、会话、配额与诊断信息。金额是记录或估算，不是服务商账单。</p>
+          <p class="scope-note">agent-monitor 面向个人开发者和多机使用者，汇集用量、会话、配额与诊断信息。金额是记录或估算，不是服务商账单。</p>
           <div class="table-wrap" tabindex="0" role="region" aria-label="数据源与查看入口"><table><thead><tr><th>数据源</th><th>提供什么</th><th>查看入口</th></tr></thead><tbody>
             <tr><th>Claude Code / Codex</th><td>本地日志采集出的 token、估算成本和留存会话。采集前已删除的日志无法恢复。</td><td><a href="/explore">透视归因</a> · <a href="/sessions">会话明细</a></td></tr>
             <tr><th>服务商账号</th><td>账号级 5h / 7d 配额与观测时间。采集失败保留旧读数，页面日期不改变配额窗口。</td><td><a href="/#quota-explorer">配额与账号</a></td></tr>
             <tr><th>服务端网络</th><td>运行 Web 服务的主机出口与网络诊断，不是浏览器设备的网络。</td><td><a href="/network">检测主机与结果</a></td></tr>
           </tbody></table></div>
         </section>
-        <section class="panel">
+        <section class="panel" id="collection">
           <h2>当前采集状态</h2>
-          <p class="scope-note">“已纳入”表示机器快照可读，不保证每种来源都存在或历史完整。无匹配记录不等于尚未接入；Gateway 来源状态在调用页查看。</p>
+          <p class="scope-note">“已纳入”表示机器快照可读，不保证每种来源都存在或历史完整。无匹配记录不等于尚未接入。</p>
           <div class="panel-head"><span id="sync-coverage" class="status-line">已纳入 —/—</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
           <div id="sync-machines" class="sync-machines"></div>
         </section>
-        <section class="panel">
+        <section class="panel" id="setup">
           <h2>首次接入</h2>
           <ol>
             <li>在自己的 agent-monitor checkout 中配置 <code>machines.json</code>；新单机安装只保留自己的本机条目，例如 <code>{"machines":[{"name":"local","ssh_host":"localhost","self":true}],"retired_names":[]}</code>。已有安装须保留机器身份和退休记录。</li>
@@ -53,18 +74,24 @@
             <li>运行 <code>./install.sh</code>，再运行 <code>agent-monitor start</code>。首次采集可运行 <code>agent-monitor refresh</code>；macOS 定时采集由安装器设置，Linux 需自行安排调度。</li>
             <li>多机使用需配置自己的 <code>hub.json</code> 角色、URL、SSH 目标，在各机运行 <code>./install.sh hub &lt;机器名&gt;</code>。Hub 拉取快照，采集器独立保存本机数据。</li>
           </ol>
+          <div class="code-card"><div class="code-card-head"><span>单机安装与首次采集</span><button type="button" data-copy-code="install-commands">复制命令</button></div><pre><code id="install-commands">./install.sh
+agent-monitor start
+agent-monitor refresh</code></pre></div>
+          <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div>
           <p>完整命令、依赖与已有服务迁移见 checkout 的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。本页只说明与检查状态，不修改配置或登录账号。</p>
         </section>
-        <section class="panel">
+        <section class="panel" id="questions">
           <h2>从问题找到证据</h2>
           <ul>
             <li>想知道成本变化：总览展开周期比较，核对两个周期日期与未知定价，再进入透视定位目录、模型或机器。</li>
             <li>想追溯某组用量：点击透视排行的“查看会话”。列表只计匹配记录；打开详情可看全部留存记录。汇总比明细更完整时，差额不能当成查询错误或零成本。</li>
             <li>想挑选账号：在总览按配额窗口和剩余额度排序，同时核对更新时间。历史账号读数不代表当前可用。</li>
-            <li>页面为空：先检查日期和筛选，再看机器采集状态、Gateway 来源状态及 exporter 版本。连接失败会保留最后成功快照；修复接入后再刷新。</li>
+            <li>页面为空：先检查日期和筛选，再看机器采集状态与采集器版本。连接失败会保留最后成功快照；修复接入后再刷新。</li>
           </ul>
           <p class="scope-note">请在可信个人网络使用；账号操作的来源检查不等于用户认证。开源代码与公开运行中的仪表盘是两件事。</p>
         </section>
+          </article>
+        </div>
       </main>
     </div>
     <script>AgentMonitor.initClientNavigation(); AgentMonitor.initGuide();</script>

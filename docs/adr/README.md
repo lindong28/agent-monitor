@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261014-c82a: Ark top-level areas and documentation](20261014-c82a-ark-top-navigation.md) | Accepted; console/guide navigation, local page/help search and copyable guide commands with console context retained |
 | [20261014-7d2f: Ark Console visual style](20261014-7d2f-ark-console-style.md) | Accepted design; independent reusable template and shared Monitor visual layer, product semantics preserved |
 | [20261012-6a92: Web UI workflows](20261012-6a92-ui-workflows.md) | Accepted; explicit scope, calendar comparison, event-filtered session drilldown and quota sorting |
 | [20261011-7c3a: account round recovery](20261011-7c3a-account-round-recovery.md) | Accepted; scoped HTTP transport, safe failures and quota recovery without message replay |

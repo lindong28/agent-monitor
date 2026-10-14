@@ -125,8 +125,16 @@ a:hover {
   background: var(--surface);
   border-bottom: 1px solid var(--line-soft);
 }
-.header-section { color: var(--ink-muted); border-left: 1px solid var(--line); padding-left: 24px; }
-.header-help { margin-left: auto; font-size: 13px; color: var(--ink-muted); }
+.top-nav { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.top-nav a { display: flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 8px; color: var(--ink-muted); white-space: nowrap; text-decoration: none; }
+.top-nav a:hover, .top-nav a[aria-current="page"] { background: var(--bg-active); color: var(--accent); }
+.header-search { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--ink-muted); background: var(--surface-sunken); white-space: nowrap; }
+.header-search > span { font-size: 20px; }
+.sidebar [hidden] { display: none; }
+.guide-nav { display: flex; flex-direction: column; gap: 4px; }
+.nav-caption { display: block; color: var(--ink-muted); font-size: 12px; line-height: 20px; padding: 8px 12px; white-space: nowrap; }
+.guide-nav a { display: flex; align-items: center; min-height: 40px; padding: 8px 12px; border-radius: 8px; color: var(--ink-muted); text-decoration: none; white-space: nowrap; }
+.guide-nav a:hover { background: var(--bg-active); color: var(--accent); }
 .app-shell {
   display: flex;
   align-items: flex-start;
@@ -236,7 +244,6 @@ button:active:not(:disabled) {
 .nav a[href^="/explore"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2v12h12M5 11V8m4 3V4m4 7V6' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E"); }
 .nav a[href^="/sessions"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 2h10v12H3ZM5 5h6M5 8h6M5 11h3' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 .nav a[href^="/network"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 10V8h10v2M8 6v4' fill='none' stroke='black' stroke-width='1.4'/%3E%3Cpath d='M6 2h4v4H6ZM1 10h4v4H1Zm5 0h4v4H6Zm5 0h4v4h-4Z' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-.nav a[href^="/guide"] { margin-top: 16px; --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 3C6 2 4 2 2 3v10c2-1 4-1 6 0 2-1 4-1 6 0V3c-2-1-4-1-6 0Zm0 0v10' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 
 .nav a:hover {
   border-color: transparent;
@@ -1719,8 +1726,6 @@ td.numeric {
   }
 
   .app-header { padding: 0 16px; }
-  .header-section { display: none; }
-  .nav a[href^="/guide"] { margin-top: 0; }
 
   .nav {
     flex-direction: row;
@@ -1872,8 +1877,48 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 }
 
 
-/* The guide reuses the dashboard panels and allows long configuration examples to wrap. */
-.guide-main > .panel + .panel { margin-top: 24px; }
+/* Documentation uses the same shell, with a reading column and local outline. */
+.guide-intro { color: var(--ink-muted); margin: -8px 0 24px; }
+.guide-layout { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 32px; align-items: start; }
+.guide-article { min-width: 0; grid-column: 1; grid-row: 1; }
+.guide-article > .panel + .panel { margin-top: 24px; }
+.guide-article section { scroll-margin-top: calc(var(--header-h) + 24px); }
+.guide-article p, .guide-article li { max-width: 75ch; }
+.guide-toc { grid-column: 2; grid-row: 1; position: sticky; top: calc(var(--header-h) + 24px); padding-left: 12px; border-left: 1px solid var(--line); }
+.guide-toc .nav-caption { padding: 0 0 8px; }
+.guide-toc a { display: block; color: var(--ink-muted); padding: 6px 0; text-decoration: none; }
+.guide-toc a:hover { color: var(--accent); }
 .guide-main code { overflow-wrap: anywhere; white-space: normal; }
 .guide-main li + li { margin-top: 12px; }
+.code-card { margin: 16px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-sunken); overflow: hidden; }
+.code-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--ink-muted); font-size: 12px; }
+.code-card pre { margin: 0; padding: 16px; overflow-x: auto; }
+.code-card pre code { white-space: pre; overflow-wrap: normal; padding: 0; background: transparent; }
+.page-search { box-sizing: border-box; width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--surface); box-shadow: 0 16px 64px #17173326; }
+.page-search::backdrop { background: #18182e66; }
+.search-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.search-heading h2 { margin: 0; font-size: 20px; line-height: 28px; }
+.search-input-row { display: flex; gap: 8px; }
+.search-input-row input { flex: 1; min-width: 0; }
+.search-results h3 { margin: 16px 8px 4px; font-size: 12px; color: var(--ink-muted); }
+.search-results a { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 8px; text-decoration: none; color: var(--ink); }
+.search-results a:hover, .search-results a:focus-visible { background: var(--bg-active); }
+.search-results a span { color: var(--ink-muted); font-size: 12px; }
+@media (max-width: 1100px) {
+  .guide-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .guide-toc { position: static; grid-column: 1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+  .guide-toc .nav-caption { padding: 0; }
+  .guide-article { grid-row: 2; }
+}
+@media (max-width: 900px) {
+  :root { --header-h: 104px; }
+  .app-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 56px 48px; gap: 0 8px; }
+  .app-header .brand { padding: 0; }
+  .top-nav { grid-row: 2; grid-column: 1 / -1; overflow-x: auto; align-self: start; }
+  .header-search { grid-row: 1; grid-column: 2; font-size: 12px; padding: 0 8px; }
+  .guide-nav { flex-direction: row; flex-shrink: 0; align-items: center; }
+  .guide-nav .nav-caption { display: none; }
+  .guide-article section { scroll-margin-top: calc(var(--header-h) + 96px); }
+  .page-search { padding: 16px; }
+}
 #session-dates:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px; }

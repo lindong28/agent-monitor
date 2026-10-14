@@ -68,6 +68,12 @@
     },
     "history-context": {
       "expression": "(() => {const w=document.querySelector('.quota-table-wrap'), b=document.querySelector('#quota-past-accounts'); if(!w||!b||b.hidden)return {pass:false,samples:0,detail:'Expanded historical account sample required'};const clip=w.getBoundingClientRect();const nodes=[document.querySelector('.quota-past-toggle'),...b.querySelectorAll('.quota-account-observation')];const visible=el=>{if(!el)return false;const r=document.createRange();r.selectNodeContents(el);const x=r.getBoundingClientRect();return x.width>0&&x.left>=clip.left-1&&x.right<=clip.right+1;};return {pass:nodes.length>1&&nodes.every(visible),samples:nodes.length,detail:'Visible history title and row provenance; scrollLeft='+w.scrollLeft};})()"
+    },
+    "top-nav": {
+      "selector": ".top-nav a"
+    },
+    "search-dialog": {
+      "selector": "#page-search"
     }
   },
   "cases": [
@@ -81,7 +87,8 @@
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
         "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       }
     },
     {
@@ -100,7 +107,8 @@
         "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
         "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
-        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       }
     },
     {
@@ -117,7 +125,8 @@
         "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
         "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
-        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       }
     },
     {
@@ -133,7 +142,8 @@
         "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
         "ARK-V06.tabular": "Network identifiers/IP addresses are not measured numeric quantities; preserve proportional text to avoid introducing extra line breaks.",
         "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
-        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       }
     },
     {
@@ -145,7 +155,8 @@
         "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
         "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖"
+        "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       },
       "steps": [
         {
@@ -177,7 +188,8 @@
         "badge-font": "搜索空态无账号徽章；其他状态验证",
         "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
         "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       },
       "steps": [
         {
@@ -202,7 +214,8 @@
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "badge-font": "Session detail renders plain identity text and metrics, not a status badge.",
         "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
-        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。"
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       },
       "steps": [
         {
@@ -240,6 +253,34 @@
       "path": "/guide?range=30d",
       "state": "Default guide",
       "ready": "document.querySelector('.guide-main .panel') && document.fonts.status === 'loaded'",
+      "exclude": {
+        "collapsed-summary": "The guide has no corresponding overview, quota or session detail component.",
+        "chart-data-access": "The guide has no corresponding overview, quota or session detail component.",
+        "quota-reason": "The guide has no corresponding overview, quota or session detail component.",
+        "detail-label": "The guide has no corresponding overview, quota or session detail component.",
+        "detail-value": "The guide has no corresponding overview, quota or session detail component.",
+        "ARK-V01.metric": "The guide has no corresponding overview, quota or session detail component.",
+        "ARK-V06.tabular": "The guide has no corresponding overview, quota or session detail component.",
+        "quota-filter-adjacency": "The guide has no corresponding overview, quota or session detail component.",
+        "history-context": "The guide has no corresponding overview, quota or session detail component.",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
+      }
+    },
+    {
+      "id": "guide-search",
+      "path": "/guide?range=30d",
+      "state": "页面与帮助搜索浮层展开",
+      "ready": "document.querySelector(\".guide-article\") && document.fonts.status === \"loaded\"",
+      "steps": [
+        {
+          "action": "click",
+          "args": [
+            "#open-page-search"
+          ],
+          "reason": "打开本地页面搜索",
+          "ready": "document.querySelector(\"#page-search\").open"
+        }
+      ],
       "exclude": {
         "collapsed-summary": "The guide has no corresponding overview, quota or session detail component.",
         "chart-data-access": "The guide has no corresponding overview, quota or session detail component.",

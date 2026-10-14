@@ -95,14 +95,6 @@
   }
 
   function updateNavLinks() {
-    const nav = qs(".nav");
-    if (nav && !qs('a[href^="/guide"]')) {
-      const help = document.createElement("a");
-      help.href = "/guide";
-      help.setAttribute("data-nav", "");
-      help.textContent = "使用与接入";
-      nav.appendChild(help);
-    }
     const range = getRange();
     function setLinkRange(url) {
       const custom = range === "custom" && ["/explore", "/sessions"].includes(url.pathname);
@@ -125,6 +117,111 @@
       setLinkRange(url);
       link.href = url.pathname + url.search;
     });
+    updateAreaNavigation();
+  }
+
+  // The shell survives main swaps. Keep the full console URL separately from
+  // ordinary range propagation, which deliberately normalizes custom on guide.
+  let lastConsoleUrl = null;
+  function updateAreaNavigation() {
+    const guide = window.location.pathname === "/guide";
+    if (!guide) lastConsoleUrl = window.location.pathname + window.location.search + (window.location.hash || "");
+    const consoleLink = qs('[data-area="console"]');
+    if (consoleLink) consoleLink.href = lastConsoleUrl || "/?range=" + encodeURIComponent(getRange() === "custom" ? "30d" : getRange());
+    qsa("[data-area]").forEach((link) => {
+      link.setAttribute("aria-current", (link.dataset.area === "guide") === guide ? "page" : "false");
+    });
+    const consoleNav = qs(".sidebar .nav");
+    const guideNav = qs(".guide-nav");
+    if (consoleNav) consoleNav.hidden = guide;
+    if (guideNav) guideNav.hidden = !guide;
+    // Native fragment navigation also retains the current range in its URL.
+    qsa(".guide-nav a").forEach((link) => {
+      const url = new URL(link.href, window.location.origin);
+      url.search = window.location.search;
+      link.href = url.pathname + url.search + url.hash;
+    });
+  }
+
+  const PAGE_SEARCH_ENTRIES = [
+    ["控制台", "总览", "用量、成本趋势与机器状态", "/"],
+    ["控制台", "透视", "按目录、模型、机器分析成本和 token", "/explore"],
+    ["控制台", "会话", "查找会话、筛选记录并查看明细", "/sessions"],
+    ["控制台", "网络", "查看服务端主机的出口和网络诊断", "/network"],
+    ["控制台", "配额与账号", "Claude / Codex 账号余量与更新时间", "/#quota-explorer"],
+    ["使用与接入", "数据来源", "本地日志、服务商账号与服务端网络", "/guide#sources"],
+    ["使用与接入", "采集状态", "检查已纳入机器与快照状态", "/guide#collection"],
+    ["使用与接入", "首次接入", "安装、命令行 CLI 与多机配置", "/guide#setup"],
+    ["使用与接入", "查找证据", "成本变化、会话追溯、账号选择与空页面", "/guide#questions"],
+  ];
+
+  function initPageSearch() {
+    const dialog = qs("#page-search");
+    const opener = qs("#open-page-search");
+    if (!dialog || !opener) return;
+    const input = qs("#page-search-input");
+    const results = qs("#page-search-results");
+    function render() {
+      const words = input.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+      const matches = PAGE_SEARCH_ENTRIES.filter((entry) => words.every((word) => entry.slice(0, 3).join(" ").toLocaleLowerCase().includes(word)));
+      qs("#page-search-count").textContent = matches.length ? `${matches.length} 个入口` : "没有匹配的页面或帮助，请换个关键词或清空搜索。";
+      results.replaceChildren();
+      let group = "";
+      matches.forEach(([category, title, description, path]) => {
+        if (group !== category) {
+          const heading = document.createElement("h3");
+          heading.textContent = category;
+          results.appendChild(heading);
+          group = category;
+        }
+        const link = document.createElement("a");
+        const url = new URL(path, window.location.origin);
+        const range = getRange();
+        const custom = range === "custom" && ["/explore", "/sessions"].includes(url.pathname);
+        url.searchParams.set("range", range === "custom" && !custom ? "30d" : range);
+        if (custom) ["start", "end"].forEach((key) => { if (params().get(key)) url.searchParams.set(key, params().get(key)); });
+        link.href = url.pathname + url.search + url.hash;
+        const label = document.createElement("strong");
+        label.textContent = title;
+        const detail = document.createElement("span");
+        detail.textContent = description;
+        link.append(label, detail);
+        results.appendChild(link);
+      });
+    }
+    opener.addEventListener("click", () => { render(); dialog.showModal(); input.focus(); });
+    qs("#close-page-search").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); dialog.close(); }
+    });
+    dialog.addEventListener("close", () => opener.focus());
+    results.addEventListener("click", (event) => { if (event.target.closest("a")) dialog.close(); });
+    input.addEventListener("input", render);
+    qs("#clear-page-search").addEventListener("click", () => { input.value = ""; render(); input.focus(); });
+  }
+
+  async function copyGuideCode(button) {
+    const code = document.getElementById(button.dataset.copyCode);
+    if (!code) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code.textContent);
+      } else {
+        // Personal-network HTTP deployments do not expose Clipboard API.
+        const field = document.createElement("textarea");
+        field.value = code.textContent;
+        field.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+        document.body.appendChild(field);
+        field.select();
+        let copied;
+        try { copied = document.execCommand("copy"); }
+        finally { field.remove(); button.focus(); }
+        if (!copied) throw new Error("Clipboard unavailable");
+      }
+      button.textContent = "已复制";
+    } catch (_) {
+      button.textContent = "复制失败，请手动选择";
+    }
   }
 
   async function api(path, query) {
@@ -3261,6 +3358,7 @@
     currentMain.replaceWith(nextMain);
     document.title = parsed.title || document.title;
     markActiveNav(pathname);
+    updateAreaNavigation();
     return true;
   }
 
@@ -3324,6 +3422,8 @@
       return;
     }
     document.documentElement.dataset.clientNav = "on";
+    updateAreaNavigation();
+    initPageSearch();
     renderedRoute = routeKey(
       new URL(
         window.location.pathname + (window.location.search || ""),
@@ -3332,6 +3432,8 @@
     );
 
     document.addEventListener("click", (event) => {
+      const copy = event.target.closest?.("[data-copy-code]");
+      if (copy) { copyGuideCode(copy); return; }
       if (event.defaultPrevented || event.button !== 0) {
         return;
       }
@@ -3349,6 +3451,9 @@
       }
 
       event.preventDefault();
+      if (window.location.pathname !== "/guide") {
+        lastConsoleUrl = window.location.pathname + window.location.search + (window.location.hash || "");
+      }
       renderRoute(url, { push: true })
         .then((handled) => {
           // Anything this swap cannot apply goes to a real navigation rather

@@ -15,17 +15,34 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-title">agent-monitor</span>
       </a>
-      <span class="header-section">控制台</span>
-      <a class="header-help" data-preserve-range href="/guide">使用与接入</a>
+      <nav class="top-nav" aria-label="区域导航">
+        <a data-area="console" aria-current="page" href="/">控制台</a>
+        <a data-area="guide" data-preserve-range href="/guide">使用与接入</a>
+      </nav>
+      <button class="header-search" id="open-page-search" type="button" aria-haspopup="dialog" aria-controls="page-search"><span aria-hidden="true">⌕</span> 搜索页面与帮助</button>
     </header>
+    <dialog id="page-search" class="page-search" aria-labelledby="page-search-title">
+      <div class="search-heading"><h2 id="page-search-title">搜索页面与帮助</h2><button type="button" id="close-page-search" aria-label="关闭搜索">关闭</button></div>
+      <p class="scope-note">查找功能入口和接入说明；账号与会话内容请使用各页面的筛选。</p>
+      <label class="sr-only" for="page-search-input">页面或帮助关键词</label>
+      <div class="search-input-row"><input id="page-search-input" type="search" placeholder="搜索总览、会话、安装…" autocomplete="off"><button type="button" id="clear-page-search">清空</button></div>
+      <p id="page-search-count" class="scope-note" role="status"></p>
+      <div id="page-search-results" class="search-results"></div>
+    </dialog>
     <div class="app-shell">
       <aside class="sidebar">
-        <nav class="nav" aria-label="主导航">
+        <nav class="nav" aria-label="控制台导航">
           <a data-nav href="/">总览</a>
           <a data-nav href="/explore">透视</a>
           <a data-nav href="/sessions">会话</a>
           <a data-nav href="/network">网络</a>
-          <a data-nav href="/guide">使用与接入</a>
+        </nav>
+        <nav class="guide-nav" aria-label="使用指南章节" hidden>
+          <span class="nav-caption">使用指南</span>
+          <a href="/guide#sources">数据来源</a>
+          <a href="/guide#collection">采集状态</a>
+          <a href="/guide#setup">首次接入</a>
+          <a href="/guide#questions">查找证据</a>
         </nav>
       </aside>
       <main class="main network-main">

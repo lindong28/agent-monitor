@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-14
+
+- Apply the expanded Ark Console template with console/guide top-level navigation, local page/help search, guide chapters and copyable installation commands.
+- Preserve the full console address when returning from the guide, including custom dates, filters and session detail; retain existing accounting and account actions.
+
 ## 2026-10-13
 
 - Compress large session-list responses when the client accepts gzip, reusing the existing lossless detail-response path.

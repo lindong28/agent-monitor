@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "id": "agent-monitor-ark-20261014",
-  "objective": "Apply the Ark Console style to Overview, Explore, Sessions and detail, Network, and Guide, preserving product data and interactions.",
+  "id": "agent-monitor-ark-topbar-20261014",
+  "objective": "Apply the expanded Ark Console template to the five Monitor routes and session detail, including top-level areas, local navigation, page/help search and documentation code display, while preserving data and context.",
   "application": "style",
   "design": {
     "path": "effective-design.json",
-    "sha256": "5007f9c6cdf143d9e2f177cf7e2b312774516124e1bd47a6d3d5fc3bfe4116e7"
+    "sha256": "ea33b5b7e240b077f2b8f0b67dce97f4cb988aaf31813fff4a37809240b61904"
   },
   "project": {
     "path": "project.json",
-    "sha256": "ec23ec2282ecb598ddb6c922bffdeea7d549da34918c4090088b16f1b6744c52"
+    "sha256": "ff12770ffce29de995df3f2eb6814f772bacafbc5d0d80938bec3aa554c06970"
   }
 }
