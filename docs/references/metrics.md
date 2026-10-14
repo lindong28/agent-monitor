@@ -2,6 +2,8 @@
 
 [Developer] This is the reusable definition and correctness reference for Monitor's displayed statistics. Maintenance CLI and diagnostic fields are in [the operations appendix](metrics-operations.md). Read this before changing a metric's producer, aggregation, label or missing-data behavior. Snapshot identity and retention remain governed by [architecture](../architecture.md) and [operations](../operations/services.md).
 
+The follow-up [upstream contract audit](upstream-contracts.md) traces the remaining producer boundaries: Claude sidechain final-usage persistence, Codex fork/revert and model rerouting, quota bucket identity, and tariff provenance. It includes counterexamples that a zero `source_errors` count or successful arithmetic tests do not detect; those results qualify completeness claims below and do not represent product fixes.
+
 This specification was established on 2026-10-14 against baseline `22507ab5fbe1c794cdfb870c386d89f572f1d91e` and the associated metric corrections. Definitions below describe the required behavior; they are not a claim that a running deployment or historical archive has been corrected. Source inspection and isolated counterexamples support the arguments, while release, replay and consumer verification must be recorded separately.
 
 ## Sources, versions and limits

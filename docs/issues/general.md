@@ -1,5 +1,54 @@
 # tt-web Issues
 
+## [open] ISSUE-IDENTITY-20261014-7a62: producer identity and credential selectors diverge
+
+- Owner / Priority: identity/account maintainer / high for Codex workspace selection, medium for missing labels or unavailable custom stores.
+- Evidence: fixed Codex 0.162.1 ordinary auth uses selected `tokens.account_id`; `parsers.accounts` overwrites it with the JWT workspace claim. A selected/claim conflict returns different identities; matching fields are the control. Namespaced profile email is valid upstream but becomes null locally. These affect display and pre-send checks; no production wrong-send was observed.
+- Claude 2.1.296: fixed binary selects custom global metadata and directory-specific Keychain service/account, including secure-storage override. Monitor's metadata/file/Keychain selectors disagree in that configuration. Synthetic default/custom inputs and selector comparison establish this without reading real credentials or contacting Keychain. Existing profile UUID verification mitigates wrong-account attribution; same UUID across organizations remains unverified, not a proven additional bug.
+- Next: use producer-auth-mode identity precedence and email fallback; align metadata/file/Keychain location semantics while retaining strict ownership checks. Stable member identity and historical identity migration require their own evidence and scope. [Argument](../references/upstream-contracts.md#2-账号身份与凭据归属); `upstream-contract-audit-20261014/accounts/audit.md` and `offline-counterexamples.json`.
+- Disposition: audit only; no identity migration, account action or product repair.
+
+## [open] ISSUE-QUOTA-20261014-c5e7: other quota buckets can be displayed as Codex
+
+- Owner / Priority: quota/parser maintainer / high for wrong bucket; medium for unsupported CLI-update advice.
+- Evidence: fixed producer's legacy rateLimits view chooses the first bucket when codex is absent. Both `quota_reading` and machine refresh fallback to this view. A synthetic other=91 is displayed as Codex, while codex=21 control is correct. The real passive producer emits multiple RateLimits into TokenCount; parser picks the last and discards limit_id, so codex21 followed by other91 becomes91.
+- Next: select the intended bucket before recency/window projection; explicit non-codex must not substitute. Missing target is unknown, with version-backed compatibility for legacy no-ID payloads. Preserve fail-closed handling of nullable accountId, but replace the unsupported claim that updating CLI resolves it. No live provider calls or frequency sampling in this audit.
+- Evidence/Disposition: [argument](../references/upstream-contracts.md#7-四项指标来源边界), `accounts/audit.md` and 10-case offline results. Product repair/replay not performed.
+
+## [open] ISSUE-ISOLATION-20261014-40ac: configuration and zero-tool guarantees need narrower boundaries
+
+- Owner / Priority: account-operation maintainer / medium, effective production tool reachability unverified.
+- Evidence: fixed Codex loader reads system/managed layers independently of HOME/CODEX_HOME. environments=[] disables environment access, but PlanHandler and other utility tools have separate enablement conditions. Rejecting server requests only gates that RPC direction, not every internal tool. Monitor separately disables several features; those controls are not equivalent to zero tools.
+- Next: express the exact existing isolation boundary; if zero tools is the intended account-action contract, identify a producer-supported enforcement point and verify effective tool exposure. Do not bypass managed policy or infer real MCP execution merely from registry code. [Argument and fixed links](../references/upstream-contracts.md#5-配置工具隔离与http请求边界); `accounts/audit.md`.
+- Disposition: configuration untouched; no real system-config/MDM inspection or app-server execution for this finding.
+
+## [open] ISSUE-HTTP-20261014-b6d4: write routes have inconsistent browser request boundaries
+
+- Owner / Priority: Web maintainer / high for restart admission; production browser exploitability unmeasured.
+- Evidence: at `eb6e797`, isolated real HTTP handler rejects cross-origin account POST (403) but admits cross-origin text/plain restart POST (200, scheduler called once), and refresh HEAD invokes forced collection. Only final side effects were replaced; no real restart occurred. [Argument and sources](../references/upstream-contracts.md#5-配置工具隔离与http请求边界), artifact `upstream-contract-audit-20261014/runtime/probes.json`.
+- Next: apply the existing browser-write boundary consistently and move explicit refresh actions off safe methods; retain the trusted-personal-network product scope. CORS response visibility is not a server-side admission check. No implementation in this audit.
+
+## [open] ISSUE-PROCESS-20261014-3e90: standalone PID ownership and descendant guarantees are incomplete
+
+- Owner / Priority: lifecycle maintainer / high for stale-PID termination; conditional descendant and remote-lifetime boundaries are medium.
+- Evidence: isolated actual CLI stop with a stale PID pointing at a separately owned fixture process sends SIGTERM to it and reports success. A separate `supervised_worker` fixture exits its leader normally while a same-group descendant survives the context. These are controlled local processes, not observed production incidents. [Argument](../references/upstream-contracts.md#6-进程sshrsynclaunchd与git部署); raw `runtime/probes.json`.
+- Next: establish stable process ownership before signalling; then define/reconcile the supervisor's normal-exit contract. The observed worker normally joins threads, so fixture leakage does not prove production leakage. Parent EOF across exec and SSH timeout provide distinct, conditional guarantees; killing a local SSH client is not remote cancellation evidence. Clarify the `shutdown` docstring versus the actual reexec path. No remote supervisor or higher availability requirement is added by this issue.
+- Disposition: recorded only because this task requested argumentation, not runtime repair or deployment.
+
+## [open] ISSUE-STORAGE-20261014-2b31: immutable/WAL assumptions and runtime-version risk
+
+- Owner / Priority: storage maintainer / medium; no established live data loss.
+- Evidence: `rollup._open_read_only` only checks WAL around opening, whereas immutable requires lifetime immutability. An injected first-open failure plus a real subsequent writer yields stale fallback data. Actual maintenance callers hold the rollup lock and Web callers use leased generations, so this does not establish a live request race. A real FULL checkpoint `[0,2,2]` leaves an 8272-byte WAL; `_wal_has_frames` and the resulting uncheckpointed diagnostic conflate file allocation with pending frames.
+- Version: local Python 3.13.12 embeds SQLite 3.50.4, within the official WAL-reset affected range; deployment versions and the necessary concurrent checkpoint/write pattern were not established. Do not infer corruption from version alone.
+- Next: bound the helper contract to locked/immutable callers and correct WAL diagnostics without weakening safety; verify actual runtime versions and checkpoint actors before choosing a dependency update. [Detailed argument and upstream sources](../references/upstream-contracts.md#3-sqlite导出和-archiverollup-恢复); `storage/report.md`, `reproduce-results.json`. No implementation/upgrade in this audit.
+
+## [open] ISSUE-GENERATION-20261014-f086: publication timestamp and legacy freshness semantics
+
+- Owner / Priority: snapshot/sync maintainer / medium.
+- Evidence: `published_at` is sampled before copy/validation/commit-lock wait but consumed as sync/contact time. A controlled 60-second preparation delay leaves it 60 seconds earlier than pointer switch. Actual `install_export_bundle` accepts a valid legacy A10→B20→C30→A10 sequence after A was GC'd; current replay is idempotent and previous replay is rejected. Statistics-extension retention/freshness checks have a narrower compatibility domain.
+- Next: align timestamp sampling/meaning with consumers. Separately decide and document whether explicit legacy rollback is supported; no independent prohibition or normal-scheduler occurrence was established, so do not silently impose anti-replay policy. [Argument](../references/upstream-contracts.md#4-generation多机查询租约与回放), `storage/report.md` and isolated reproduction results.
+- Disposition: no product change; legacy behavior is a capability boundary, timestamp is an implementation/semantic mismatch.
+
 ## [resolved] ISSUE-TEST-20261012-bd71: baseline fixture and census mismatch
 
 - Type / Priority: test maintenance / low.
@@ -12,6 +61,7 @@
 ## [open] ISSUE-METRIC-20261014-716c: source facts and historical provenance limit complete accounting
 
 - Owner: Monitor accounting maintainer, with upstream producer/identity evidence required for recovery.
+- Follow-up contract audit 2026-10-14 at `eb6e797`: [upstream arguments](../references/upstream-contracts.md#7-四项指标来源边界) establish that Claude 2.1.296 sidechain queues can serialize incomplete usage and Monitor accepts it without source_errors. Later same-UUID appends remain possible, so permanent undercount after a complete CLI run is not proved. Six fixed Codex versions omit ModelReroute from durable rollout; actual serving model cannot generally be recovered from requested-model history. A standard/fast price fixture yields the same nominal USD5 while current official first-party rates imply USD5/USD10. This does not prove production fast usage or invoice error. Preserve recorded/nominal-estimate scope, investigate final-write completion before claiming full usage, and obtain model/mode/effective-price evidence before expanding cost claims. Fixed sources, schedules and raw results are in `upstream-contract-audit-20261014/history/`; no runtime changes in this follow-up.
 - Evidence: the specification audit and first four-host replay at `8d94501` are retained in `/Users/lindong/task-artifacts/all-metric-spec-20261014/`. Two machines each contain one Claude response with incomparable token observations; selecting per-field maxima would create a vector never observed. MacMini additionally reports 86 copied forks without an explicit inherited cutoff and one existing `unreconciled_remote` project identity blocker. The paginated-subagent missing-counter errors found in the same replay have a proven producer-specific recovery and are handled by the follow-up correction; they are not an unavoidable limitation.
 - Current handling: preserve retained facts and explicit source errors/identity blockers. Owner checkpoints recover later known child deltas but cannot establish the earlier ambiguous copied interval. Do not delete history, invent zero usage or adopt an unverified remote identity to make the counts green.
 - Remaining evidence: complete Claude JSONL final-usage persistence for all producer paths, historical tariff effective dates and original model fallback/identity facts are not established. Costs remain configured-price estimates for recorded usage, not a complete provider invoice. The full definitions and version/consumer boundaries are in [metrics.md](../references/metrics.md).

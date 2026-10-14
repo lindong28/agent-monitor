@@ -2,6 +2,8 @@
 
 agent-monitor collects local agent usage and publishes read-only machine snapshots for a Web dashboard. It is an independent repository; ai-agent-config may invoke its installer but supplies no implementation at runtime.
 
+The [upstream contract audit](references/upstream-contracts.md) records versioned arguments, counterexamples and unresolved assumptions for account operations, credential identity, snapshots, isolation and process lifecycle. Read the affected section before relying on those guarantees; source review is separate from deployment verification.
+
 ## Backend performance checks
 
 Development follows the user-scope performance workflow for affected paths; explicit optimization starts by discovering consumers and representative states. Project evidence and commands live in [proactive-performance.md](proactive-performance.md). No deployment-wide latency SLA is implied by synthetic timings.
