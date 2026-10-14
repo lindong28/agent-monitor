@@ -1,12 +1,21 @@
 # tt-web Issues
 
-## [open] ISSUE-TEST-20261012-bd71: baseline fixture and census mismatch
+## [resolved] ISSUE-TEST-20261012-bd71: baseline fixture and census mismatch
 
 - Type / Priority: test maintenance / low.
 - Observed: the 847-test separation run failed `test_pivot_sync_publish_remembers_account_before_later_signed_out_publish` because its sync mock does not accept `quota_refresh`, leaving no account-memory file; `test_production_daily_rollup_and_attach_sites_match_explicit_census` omits two synthetic daily-rollup accesses in `scripts/benchmark_backend.py:make_snapshot`.
 - Baseline: both failures reproduced in a clean `git archive` of c16ce83 with isolated HOME and the project Python. The final 139-test affected run retains only the census failure. The separate census change caused by removing the Gateway reader is fixed.
 - Owner / Next: Monitor test maintainer should update the mock keyword arguments and classify the synthetic benchmark sites, then rerun both tests. Existing fixture maintenance is outside this product-separation change; the full suite is not reported as passing.
 - Evidence: local `~/.local/state/agent-monitor-boundary-20261012/baseline-tests.log` and `monitor-final-tests.log`; scope and result in `docs/product-boundary-separation.md`.
+- Resolution 2026-10-14: updated the sync mock's keyword arguments and explicitly classified both synthetic benchmark accesses. The final isolated 924-test run passed, including both affected cases; evidence is `/Users/lindong/task-artifacts/all-metric-spec-20261014/full-tests-final.log` and `failure-attribution/`. This resolves these two fixture failures, not every historical test-environment issue below.
+
+## [open] ISSUE-METRIC-20261014-716c: source facts and historical provenance limit complete accounting
+
+- Owner: Monitor accounting maintainer, with upstream producer/identity evidence required for recovery.
+- Evidence: the specification audit and first four-host replay at `8d94501` are retained in `/Users/lindong/task-artifacts/all-metric-spec-20261014/`. Two machines each contain one Claude response with incomparable token observations; selecting per-field maxima would create a vector never observed. MacMini additionally reports 86 copied forks without an explicit inherited cutoff and one existing `unreconciled_remote` project identity blocker. The paginated-subagent missing-counter errors found in the same replay have a proven producer-specific recovery and are handled by the follow-up correction; they are not an unavoidable limitation.
+- Current handling: preserve retained facts and explicit source errors/identity blockers. Owner checkpoints recover later known child deltas but cannot establish the earlier ambiguous copied interval. Do not delete history, invent zero usage or adopt an unverified remote identity to make the counts green.
+- Remaining evidence: complete Claude JSONL final-usage persistence for all producer paths, historical tariff effective dates and original model fallback/identity facts are not established. Costs remain configured-price estimates for recorded usage, not a complete provider invoice. The full definitions and version/consumer boundaries are in [metrics.md](../references/metrics.md).
+- Next: use an authoritative upstream final response/finite fork boundary or explicit project identity proof if it becomes available; re-evaluate only affected records under existing archive authority. No additional counter manipulation can reconstruct those missing facts. Final deployment/replay receipts belong to the task artifact's execution record, separately from this issue's initial observation.
 
 本组件里已知、但当轮未就地修的问题。
 
@@ -54,6 +63,8 @@
 本次 Mac Studio 告警另经 `curl -6 --noproxy '*' https://api6.ipify.org` 成功回显相同运营商 IPv6 得到独立确认，随后按用户授权关闭 Wi-Fi IPv6 并修正 Clash 全局覆盖。恢复后两个 IPv6 HTTPS 端点无法连接，两个公网 IPv6 字面量连接均返回 macOS errno 65，页面 API 不再报 IPv6 泄漏。现场修复不使当前探针获得通用泄漏判定能力。
 
 后续修复应区分本地 IPv6 地址、实测公网可达/出口身份、失败或未核实，避免仅改变文案便宣称检测已完备。本轮只恢复真实网络链路，未修改检测器。复核入口：`ip_check/cli.py:get_ipv6`、JSON 的 `ipv6_leaked` 与 conclusions、`web/app.js` 的 IPv6 展示，以及 `tests/test_ip_check_json.py` 的现有 mock 覆盖。
+
+2026-10-14 metric audit: Web and both CLI renderers now disclose local-address evidence and `ipv6_leak_unverified`; missing public/DNS/timezone evidence no longer yields an unqualified healthy result. The legacy positive heuristic and thresholds remain for compatibility. Actual end-to-end IPv6 leak measurement is still not implemented, so this issue remains open as a detector capability limitation rather than a claim that the label change proves leakage.
 
 ---
 

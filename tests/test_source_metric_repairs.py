@@ -152,6 +152,58 @@ class SourceMetricRepairTests(unittest.TestCase):
         self.assertEqual([e.input_tokens for e in entries], [30])
         self.assertTrue(errors)
 
+    def test_paginated_subagent_starts_own_counter_at_zero(self):
+        # Codex 0.162.1 spawn filters parent TokenCount before seeding the child.
+        metadata = meta('child', forked_from_id='missing', subagent_history_start_ordinal=2,
+                        cli_version='0.162.1', history_mode='paginated', thread_source='subagent')
+        checkpoint = {'type': 'event_msg', 'ordinal': 2, 'payload': {
+            'type': 'thread_settings_applied', 'thread_id': 'child',
+            'thread_settings': {'model': 'gpt-5.5'}}}
+        rows = [metadata, turn('parent-model'), checkpoint,
+                event(usage(1000, 800, 10)), event(usage(1030, 800, 15))]
+        errors = []
+        entries = codex.parse_file(self.write('fresh-child', rows), source_errors=errors)
+        self.assertEqual([(e.input_tokens, e.cache_read_tokens, e.output_tokens) for e in entries],
+                         [(200, 800, 10), (30, 0, 5)])
+        self.assertEqual(errors, [])
+        # A resume checkpoint, foreign owner, or unverified producer must not
+        # acquire the same zero-baseline meaning merely by matching usage.
+        for field, value in [('cli_version', '0.162.0'), ('history_mode', 'legacy'),
+                             ('thread_source', 'cli'), ('checkpoint_owner', 'parent'),
+                             ('checkpoint_ordinal', 3)]:
+            with self.subTest(field=field):
+                altered = json.loads(json.dumps(rows))
+                if field == 'checkpoint_owner':
+                    altered[2]['payload']['thread_id'] = value
+                elif field == 'checkpoint_ordinal':
+                    altered[2]['ordinal'] = value
+                else:
+                    altered[0]['payload'][field] = value
+                errors = []
+                entries = codex.parse_file(self.write('unknown-child', altered), source_errors=errors)
+                self.assertEqual([e.input_tokens for e in entries], [30])
+                self.assertTrue(errors)
+
+    def test_verified_paginated_producer_versions_and_old_owner_schema(self):
+        # Each version's spawn/initialization/persistence chain is pinned in
+        # docs/references/metrics.md; 0.147.0 did not emit checkpoint thread_id.
+        for version in ('0.147.0', '0.152.0', '0.153.4', '0.154.0', '0.158.0', '0.162.1'):
+            with self.subTest(version=version):
+                owner = {} if version == '0.147.0' else {'thread_id': 'child'}
+                rows = [meta('child', forked_from_id='parent', subagent_history_start_ordinal=2,
+                             cli_version=version, history_mode='paginated', thread_source='subagent'),
+                        turn('parent'), {'type': 'event_msg', 'ordinal': 2, 'payload': {
+                            'type': 'thread_settings_applied', 'thread_settings': {'model': 'gpt-5.5'}, **owner}},
+                        event(usage(30, 0, 5))]
+                errors = []
+                entries = codex.parse_file(self.write('versioned', rows), source_errors=errors)
+                self.assertEqual([(e.input_tokens, e.output_tokens) for e in entries], [(30, 5)])
+                self.assertEqual(errors, [])
+                rows[2]['payload']['thread_id'] = 'parent'
+                errors = []
+                self.assertEqual(codex.parse_file(self.write('foreign', rows), source_errors=errors), [])
+                self.assertTrue(errors)
+
     def test_unknown_fork_keeps_archived_facts_and_reports_each_scan(self):
         path = self.write('child', [meta('child', forked_from_id='missing'),
                                   event(usage(100, 0, 0)), event(usage(150, 0, 0))])

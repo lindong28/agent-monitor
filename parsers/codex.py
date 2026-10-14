@@ -18,6 +18,8 @@ CODEX_DIR = os.path.expanduser("~/.codex")
 SESSIONS_DIR = os.path.join(CODEX_DIR, "sessions")
 STATE_DB = os.path.join(CODEX_DIR, "state_5.sqlite")
 DEFAULT_CODEX_MODEL = "gpt-5"
+# Source-pinned spawn/filter/counter contracts: docs/references/metrics.md.
+_PAGINATED_ZERO_BASELINE_VERSIONS = {"0.147.0", "0.152.0", "0.153.4", "0.154.0", "0.158.0", "0.162.1"}
 
 logger = logging.getLogger(__name__)
 _RATE_LIMITS_CACHE = {"signature": None, "value": None}
@@ -264,6 +266,9 @@ def parse_file(path, models=None, source_errors=None, history=None):
     previous_usage = None
     inherited_pending = False
     inherited_unknown = False
+    fresh_paginated_subagent = False
+    producer_version = None
+    prefix_decoded = True
     entries = []
 
     try:
@@ -275,6 +280,7 @@ def parse_file(path, models=None, source_errors=None, history=None):
                 try:
                     data = json.loads(line)
                 except json.JSONDecodeError as exc:
+                    prefix_decoded = False
                     _record_source_error(source_errors, path, line_number, exc)
                     continue
                 if not isinstance(data, dict):
@@ -287,6 +293,14 @@ def parse_file(path, models=None, source_errors=None, history=None):
                         continue
                     # Copied parent metadata can follow the real file owner.
                     session_id = payload.get("id", "") or ""
+                    producer_version = payload.get("cli_version")
+                    fresh_paginated_subagent = (
+                        isinstance(producer_version, str)
+                        and producer_version in _PAGINATED_ZERO_BASELINE_VERSIONS
+                        and payload.get("history_mode") == "paginated"
+                        and payload.get("thread_source") == "subagent"
+                        and payload.get("history_base") is None
+                    )
                     inherited_ordinal = payload.get("subagent_history_start_ordinal")
                     if inherited_ordinal is not None and (type(inherited_ordinal) is not int or inherited_ordinal < 0):
                         _record_source_error(source_errors, path, line_number,
@@ -341,9 +355,21 @@ def parse_file(path, models=None, source_errors=None, history=None):
                     # Copied snapshots retain their original thread_id. Both
                     # fork startup and later resumes persist an own checkpoint,
                     # so it proves future ownership, not the earlier prefix.
-                    if not inherited and payload.get("thread_id") == session_id:
+                    own_checkpoint = payload.get("thread_id") == session_id
+                    zero_baseline = (
+                        fresh_paginated_subagent and prefix_decoded and previous_usage is None
+                        and type(inherited_ordinal) is int and inherited_ordinal > 0
+                        and type(data.get("ordinal")) is int and data["ordinal"] == inherited_ordinal
+                        and (own_checkpoint or (producer_version == "0.147.0" and "thread_id" not in payload))
+                    )
+                    if not inherited and (own_checkpoint or zero_baseline):
                         settings = payload.get("thread_settings")
                         model = (settings.get("model") or "unknown") if isinstance(settings, dict) else "unknown"
+                        if zero_baseline:
+                            # These paginated producers filter inherited TokenCount
+                            # before seeding usage. 0.147.0's startup checkpoint
+                            # predates thread_id; its exact boundary proves ownership.
+                            previous_usage = {}
                         if copied_unknown:
                             copied_unknown = False
                             inherited_pending = True

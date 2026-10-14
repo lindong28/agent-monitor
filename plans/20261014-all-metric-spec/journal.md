@@ -21,3 +21,11 @@ source修复92项相关测试通过；零化继承记录cost=0是已证无child�
 ## 最终审查与回归
 
 独立审查发现完整parent prefix假设不能覆盖过滤历史/父文件增长，按上游thread_settings_applied.thread_id恢复其后确定增量，绝不将resume前全部事件零化。新增4方法覆盖过滤×父增长、owner负例、归档冷热强制重读；source96测试通过，独立27项定向复核通过，新增finding无。现行UX5h/成本/网络口径已同步。初次fullsuite7处失败中两处经基线对比确认原有fixture问题，其余为本次接口期望更新；修正测试后最终924项通过。浏览器窄屏排名覆盖文案高度缺陷已修并复验，隔离实例已关闭。进入已授权发布阶段；现有未知不作完整性承诺。
+
+## 首次上线与生产反例
+
+8d94501已发布、四机deploy.py安装和派生重算；备份、部署、Hub同步及真实页面证据在task artifact。Mac远端非交互PATH缺node与持续占用缺pid分别用显式PATH和实际SSH shell PID解决；Tencent采用相同worktree-lock后端的内存执行，部署连接使用官方核验的GitHub known_hosts与临时agent forwarding，未复制私钥或引入项目运行依赖。
+
+生产错误精确hash匹配发现146/19/3条inherited subagent无counter，独立源码续查反证此前过宽unknown假设。0.162.1 paginated subagent过滤父TokenCount、新计数器为空，真实own checkpoint恰在显式ordinal边界时可从零计首项；legacy/其他版本/晚resume不可套用。root新增最小红测试后修，63项相关回归通过；原reviewer定向28项通过，无新finding/承重未知。发布及replay边界沿用已审方案，不扩大history authority。
+
+版本归属不能只取当前CLI：本机146条逐hash核出0.162.1只有9条，另137条来自0.152.0/0.153.4/0.158.0；Mini19条来自0.147.0/0.154.0，Studio3条为0.153.4。独立续查六个官方固定SHA均证过滤→新state→seed→checkpoint→append链；0.147.0原生checkpoint不含thread_id，Mini8条实物同形，仅该版本exact初始ordinal允许缺省key，显式foreign/null不放行。新六版本用例先5fail后全部通过，最终68项受影响回归。旧legacy86无明确边界不套用，保留源错误。
