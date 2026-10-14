@@ -29,3 +29,9 @@ source修复92项相关测试通过；零化继承记录cost=0是已证无child�
 生产错误精确hash匹配发现146/19/3条inherited subagent无counter，独立源码续查反证此前过宽unknown假设。0.162.1 paginated subagent过滤父TokenCount、新计数器为空，真实own checkpoint恰在显式ordinal边界时可从零计首项；legacy/其他版本/晚resume不可套用。root新增最小红测试后修，63项相关回归通过；原reviewer定向28项通过，无新finding/承重未知。发布及replay边界沿用已审方案，不扩大history authority。
 
 版本归属不能只取当前CLI：本机146条逐hash核出0.162.1只有9条，另137条来自0.152.0/0.153.4/0.158.0；Mini19条来自0.147.0/0.154.0，Studio3条为0.153.4。独立续查六个官方固定SHA均证过滤→新state→seed→checkpoint→append链；0.147.0原生checkpoint不含thread_id，Mini8条实物同形，仅该版本exact初始ordinal允许缺省key，显式foreign/null不放行。新六版本用例先5fail后全部通过，最终68项受影响回归。旧legacy86无明确边界不套用，保留源错误。
+
+## 最终生产核验
+
+0e8f624发布后四机deploy.py均核main=live origin/main；原state symlink及rollup锁inode保持。Hub busy=0后重启，health asset_watch=1返回stale=false，instance8c4ab5da9d0042af850bd71a822d729c、source7873e4177f319f04、web1d75ce3e91bf27ca。四机replay错误最终1/87/0/0，精确hash证明146+19+3条分支错误消除，保留两Claude矛盾观测和86无边界copied errors；Mini身份阻塞仍1。四份Hub generation exporter_commit均0e8f624，Overview真实API同时显示4/4和上述错误数，价格覆盖与来源完整性没有混同。代码以外最终文档提交的发布/部署回执单独保存在task artifact，避免递归把自身SHA写入自己。
+
+Mini首轮导出在获取既有锁前超时；实际非阻塞flock确认锁已释放后一次重试成功。手动单机sync另有exit1，原stderr未保留不归因；随后真实Hub已取得新版snapshot，取实际generation/API判定结果，不把失败命令包装成功。已审Web代码在补充parser修复中未变，复用真实浏览器证据并补最新API/health，不再全量浏览器巡检。
