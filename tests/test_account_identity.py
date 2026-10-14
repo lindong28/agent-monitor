@@ -43,14 +43,24 @@ class CodexAccountTests(unittest.TestCase):
         self.addCleanup(self.dir.cleanup)
         self.tmp = self.dir.name
 
-    def test_reads_id_label_and_plan_from_the_id_token(self):
+    def test_selected_workspace_wins_while_token_supplies_label_and_plan(self):
         path = self.write({"tokens": {"account_id": "cached", "id_token": id_token(CODEX_CLAIMS)}})
 
         account = accounts.codex_account(path)
 
-        self.assertEqual(account.account_id, "acct-from-token")
+        self.assertEqual(account.account_id, "cached")
         self.assertEqual(account.label, "someone@example.com")
         self.assertEqual(account.plan, "prolite")
+
+    def test_email_uses_upstream_namespaced_profile_fallback(self):
+        # Codex rust-v0.162.1 token_data.rs:174-179: email.or(profile.email).
+        for top, expected in ((None, "nested@example.com"), ("top@example.com", "top@example.com")):
+            with self.subTest(top=top):
+                claims = {"https://api.openai.com/profile": {"email": "nested@example.com"}}
+                if top is not None:
+                    claims["email"] = top
+                path = self.write({"tokens": {"account_id": "selected", "id_token": id_token(claims)}})
+                self.assertEqual(accounts.codex_account(path).label, expected)
 
     def test_falls_back_to_the_cached_account_id_when_the_token_is_unreadable(self):
         path = self.write({"tokens": {"account_id": "cached", "id_token": "not-a-jwt"}})
@@ -66,6 +76,36 @@ class CodexAccountTests(unittest.TestCase):
         for payload in ({"OPENAI_API_KEY": "sk-x", "tokens": {}}, {"tokens": {}}, {}):
             with self.subTest(payload=payload):
                 self.assertIsNone(accounts.codex_account(self.write(payload)))
+
+    def test_auth_mode_selects_whether_stored_tokens_describe_active_identity(self):
+        # Expected values follow fixed AuthDotJson.resolved_mode/from_auth_dot_json;
+        # this local JSON is not a valid credential and never reaches a provider.
+        cases = (
+            ({}, "selected"),
+            ({"OPENAI_API_KEY": "synthetic-not-secret"}, None),
+            ({"OPENAI_API_KEY": ""}, None),
+            ({"OPENAI_API_KEY": None}, "selected"),
+            ({"auth_mode": None, "OPENAI_API_KEY": "synthetic-not-secret"}, None),
+            ({"auth_mode": "apikey", "OPENAI_API_KEY": "synthetic-not-secret"}, None),
+            ({"auth_mode": "apikey"}, None),
+            ({"auth_mode": "chatgpt", "OPENAI_API_KEY": "synthetic-not-secret"}, "selected"),
+            ({"auth_mode": "chatgptAuthTokens", "OPENAI_API_KEY": "synthetic-not-secret"}, "selected"),
+            ({"auth_mode": "unknown"}, None),
+            ({"auth_mode": []}, None),
+            ({"personal_access_token": "synthetic-not-secret"}, None),
+            ({"bedrock_api_key": {"api_key": "synthetic-not-secret"}}, None),
+            ({"bedrock_access_keys": {}}, None),
+            ({"auth_mode": "agentIdentity"}, None),
+            ({"auth_mode": "personalAccessToken"}, None),
+            ({"auth_mode": "bedrockApiKey"}, None),
+            ({"auth_mode": "bedrockAccessKeys"}, None),
+            ({"auth_mode": "headers"}, None),
+        )
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                payload = {"tokens": {"account_id": "selected", "id_token": id_token(CODEX_CLAIMS)}, **fields}
+                value = accounts.codex_account(self.write(payload))
+                self.assertEqual(value.account_id if value else None, expected)
 
     def test_a_missing_or_torn_file_is_no_account_not_an_exception(self):
         """`~/.codex/auth.json` is rewritten by the CLI, so a read can land
@@ -86,7 +126,7 @@ class CodexAccountTests(unittest.TestCase):
             "id_token": id_token(CODEX_CLAIMS),
             "account_id": "cached",
         }
-        path = self.write({"OPENAI_API_KEY": "sk-secret", "tokens": secrets})
+        path = self.write({"auth_mode": "chatgpt", "OPENAI_API_KEY": "sk-secret", "tokens": secrets})
 
         rendered = json.dumps(accounts.codex_account(path).__dict__)
 

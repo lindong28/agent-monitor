@@ -8,18 +8,22 @@ import dataclasses
 import json
 import math
 import os
+import select
 import selectors
 import shutil
 import signal
 import subprocess
 import sys
 import time
+import threading
+from contextlib import contextmanager
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 from parsers import RateLimits
+from parsers.codex import select_codex_rate_limit
 import claude_oauth
 
 ROOT = Path(__file__).resolve().parent
@@ -49,17 +53,38 @@ class NotSignedIn(RefreshError):
 def load_rate_limits(provider, account):
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
-    child = subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), provider],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        text=True, start_new_session=True,
-    )
+    deadline = time.monotonic() + TIMEOUT
+    parent_read, parent_write = os.pipe()
+    child = None
     try:
-        output, _ = child.communicate(json.dumps(dataclasses.asdict(account)), timeout=TIMEOUT)
+        child = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), provider, str(parent_read), str(deadline)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, start_new_session=True, pass_fds=(parent_read,),
+        )
+        os.close(parent_read)
+        parent_read = None
+        try:
+            # The child owns the same absolute provider deadline. Two seconds
+            # are reserved for its existing helper terminate/wait cleanup.
+            output, _ = child.communicate(json.dumps(dataclasses.asdict(account)),
+                                          timeout=max(0, deadline - time.monotonic()) + 2)
+        except BaseException:
+            # Only signal while Popen still owns an unreaped leader; an
+            # interrupted communicate may already have collected its status.
+            try:
+                if child.returncode is None:
+                    os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.communicate()
+            raise
     except subprocess.TimeoutExpired:
-        os.killpg(child.pid, signal.SIGKILL)
-        child.communicate()
         raise RefreshError("配额请求超时，请重新刷新。") from None
+    finally:
+        if parent_read is not None:
+            os.close(parent_read)
+        os.close(parent_write)
     try:
         payload = json.loads(output)
         if child.returncode or payload.get("error"):
@@ -71,6 +96,65 @@ def load_rate_limits(provider, account):
         return RateLimits(**payload["reading"])
     except (ValueError, KeyError, TypeError):
         raise RefreshError("配额读取返回了无效结果，请更新 agent-monitor 后重试。") from None
+
+
+@contextmanager
+def _reader_lifetime(parent_fd, deadline):
+    """Child-entry guard; stdin EOF is unrelated to its parent's lifetime.
+
+    The monitor needs Python scheduling. It does not cover SIGSTOP, arbitrary
+    GIL starvation, or descendants that deliberately leave this owned group.
+    """
+    stopped = threading.Event()
+    cancelled = threading.Event()
+    reason = ["配额读取的父进程已退出。"]
+
+    def cancel(_signum, _frame):
+        if not stopped.is_set():
+            cancelled.set()
+            raise RefreshError(reason[0])
+
+    signal.signal(signal.SIGTERM, cancel)
+
+    def watch():
+        try:
+            while not stopped.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    reason[0] = "配额请求超时，请重新刷新。"
+                    break
+                ready, _, _ = select.select([parent_fd], [], [], remaining)
+                if not ready:
+                    reason[0] = "配额请求超时，请重新刷新。"
+                    break
+                if not os.read(parent_fd, 1):
+                    break
+            if stopped.is_set():
+                return
+            os.kill(os.getpid(), signal.SIGTERM)
+            if not stopped.wait(2) and os.getpgrp() == os.getpid():
+                # This live process is the group leader: no reaped PID reuse.
+                os.killpg(os.getpid(), signal.SIGKILL)
+        except OSError:
+            # The normal exit path closes this read end after marking stopped.
+            if not stopped.is_set():
+                os.kill(os.getpid(), signal.SIGTERM)
+
+    watcher = threading.Thread(target=watch, name="quota-parent-lifetime", daemon=True)
+    watcher.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        os.close(parent_fd)
+        if cancelled.is_set() and os.getpgrp() == os.getpid():
+            # The reader normally reaps its helper in finally. Also cover an
+            # interruption during helper creation, before that finally exists.
+            try:
+                print(json.dumps({"error": reason[0]}), flush=True)
+            except (BrokenPipeError, OSError):
+                pass
+            os.killpg(os.getpid(), signal.SIGKILL)
 
 
 def _number(value):
@@ -190,7 +274,7 @@ def _codex(account):
             # A different account really is a sign-in mismatch: whatever this
             # machine is signed in as now, it is not the credential we read.
             raise NotSignedIn("Codex 当前登录的账号与这台机器的凭据不是同一个。")
-        limit = (result.get("rateLimitsByLimitId") or {}).get("codex") or result.get("rateLimits") or {}
+        limit = select_codex_rate_limit(result) or {}
         windows = [limit.get(key) or {} for key in ("primary", "secondary")]
 
         def window(minutes):
@@ -214,7 +298,8 @@ def _codex(account):
 if __name__ == "__main__":
     try:
         reader = {"claude": _claude, "codex": _codex}[sys.argv[1]]
-        reading = reader(json.load(sys.stdin))
+        with _reader_lifetime(int(sys.argv[2]), float(sys.argv[3])):
+            reading = reader(json.load(sys.stdin))
         print(json.dumps({"reading": dataclasses.asdict(reading)}))
     except RefreshError as exc:
         # `signed_out` is the class, carried as data because the parent runs in a

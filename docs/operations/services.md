@@ -4,6 +4,14 @@
 
 Use `./deploy.py --expect <full-release-sha>` from the primary main checkout after publishing and reading back live `origin/main`. Keep one release SHA for each rollout; the entry checks source identity before invoking `install.sh`. On 2026-10-13 MacMini was moved from its temporary deployment worktree back to ~/research/agent-monitor after the approved history reconciliation in 06db5d9. Its CLI and rollup launchd job both reference that main checkout; persistent state is unchanged. See [deployment evidence](../product-boundary-separation.md#macmini-main-deployment-correction-2026-10-13).
 
+## Current upstream-contract rollout
+
+Upgrade the compatible Hub reader before the statistics-v3 exporters. The reader still accepts v1/v2 without rewriting old snapshots; their new evidence fields stay unknown. Preserve state symlinks, persistent locks, generation leases and account profiles. The release SHA and observed fleet results belong in the rollout receipt, separately from source-level correctness arguments in [upstream-contract-repairs.md](../references/upstream-contract-repairs.md).
+
+Explicit statistics refresh, network refresh and restart use POST with the existing same-origin checks and `X-Agent-Monitor: action` header. GET/HEAD requests, including legacy `force=1` forms, do not trigger these explicit actions. Ordinary scheduled collection remains unchanged. Before restart, check active account operations and allow them to finish; shutdown drains owned account and sync children before reexec.
+
+Process ownership uses saved kernel start identity and UID/root, rather than a numeric PID alone. A missing PID alias does not erase a still-live canonical identity. Sync supervisors observe child exit without reaping before cleaning their process group; macOS Python builds without `os.waitid` use Darwin libc's `waitid` with the same `WNOWAIT` contract. No Python upgrade is required for this compatibility path. Detached sessions remain outside the process-group guarantee.
+
 ## 2026-10-13 published-main deployment
 
 Follow-up correction: the personal configuration adapters now route full installations through each project's `deploy.py`; Monitor's explicit `--no-services` staging path and Gateway's `--config-only` path retain their previous behavior. Gateway checks source before materializing runtime configuration, then checks again before invoking the installer. Missing or rejected checks do not fall back to the old production path. Both product preflights reject `assume-unchanged` and `skip-worktree` flags even when content currently matches HEAD. Update the product checkouts before the configuration adapters. This closes the two gaps identified by the subsequent neutral review; the records below describe the earlier rollout, including the then-unfixed flag limit. Follow-up release and MacMini runtime identities are recorded in the private `fix-final-receipt.json` under the evidence directory below.

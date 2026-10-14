@@ -9,15 +9,17 @@ from pathlib import Path
 import sqlite3
 import diagnostics
 
-from parsers import UsageEntry
+from parsers import UsageEntry, USAGE_QUALITIES, usage_quality_counts, validate_usage_metadata
 
 
-VERSION = 2
+VERSION = 3
 TABLES = {"statistics_meta", "statistics_usage"}
 LEGACY_TABLES = TABLES | {"statistics_requests", "statistics_attempts"}
 META_FIELDS = {"version", "observed_at", "history_authoritative_from", "scan_complete",
                "blocked_source_count", "source_error_count"}
 USAGE_FIELDS = {field.name for field in fields(UsageEntry)}
+EVIDENCE_FIELDS = {"usage_quality", "service_context", "cost_provenance"}
+LEGACY_USAGE_FIELDS = USAGE_FIELDS - EVIDENCE_FIELDS
 
 
 
@@ -52,6 +54,7 @@ def read_metadata(path):
         meta = json.loads(rows[0][0])
         _validate_meta(meta)
         meta.pop("gateway", None)
+        meta.setdefault("usage_quality_counts", None)
         return {"state": "available", **meta}
 
 
@@ -73,7 +76,9 @@ def write_snapshot(snapshot_path, loaded_entries, *, observed_at=None):
             "blocked_source_count": len(getattr(loaded_entries, "blocked_sources", ())),
             "source_error_count": len(getattr(loaded_entries, "source_errors", ()))}
     usage = []
-    for entry in list(loaded_entries) + list(getattr(loaded_entries, "unattributed_entries", ())):
+    entries = list(loaded_entries) + list(getattr(loaded_entries, "unattributed_entries", ()))
+    meta["usage_quality_counts"] = usage_quality_counts(entries)
+    for entry in entries:
         row = asdict(entry)
         row["timestamp"] = _timestamp(entry.timestamp)
         _usage_entry(row)
@@ -103,9 +108,11 @@ def _create_usage_indexes(conn):
 
 
 def _validate_meta(meta):
-    if not isinstance(meta, dict) or type(meta.get("version")) is not int or meta["version"] not in (1, VERSION):
+    if not isinstance(meta, dict) or type(meta.get("version")) is not int or meta["version"] not in (1, 2, VERSION):
         raise ValueError("unsupported statistics extension")
     expected = META_FIELDS | ({"gateway"} if meta["version"] == 1 else set())
+    if meta["version"] == VERSION:
+        expected |= {"usage_quality_counts"}
     if set(meta) != expected:
         raise ValueError("invalid statistics metadata fields")
     if not isinstance(meta["observed_at"], str):
@@ -118,10 +125,16 @@ def _validate_meta(meta):
     for key in ("blocked_source_count", "source_error_count"):
         if type(meta[key]) is not int or meta[key] < 0:
             raise ValueError("invalid source count")
+    if meta["version"] == VERSION:
+        counts = meta["usage_quality_counts"]
+        if (not isinstance(counts, dict) or set(counts) != set(USAGE_QUALITIES)
+                or any(type(value) is not int or value < 0 for value in counts.values())):
+            raise ValueError("invalid usage quality counts")
 
 
-def _usage_entry(row):
-    if not isinstance(row, dict) or set(row) != USAGE_FIELDS:
+def _usage_entry(row, version=VERSION):
+    expected = LEGACY_USAGE_FIELDS if version in (1, 2) else USAGE_FIELDS
+    if not isinstance(row, dict) or set(row) != expected:
         raise ValueError("invalid usage entry fields")
     row = dict(row)
     row["timestamp"] = _parse_timestamp(row["timestamp"])
@@ -135,6 +148,7 @@ def _usage_entry(row):
         raise ValueError("one-hour cache tokens exceed total cache creation tokens")
     if row["cost_usd"] is not None and (type(row["cost_usd"]) not in (float, int) or not math.isfinite(row["cost_usd"]) or row["cost_usd"] < 0):
         raise ValueError("invalid usage cost")
+    validate_usage_metadata(row)
     return UsageEntry(**row)
 
 
@@ -172,8 +186,11 @@ def read_snapshot(snapshot_path):
             if {name for name, _ in objects} != expected_tables:
                 raise ValueError("statistics version/table mismatch")
             meta.pop("gateway", None)  # v1 raw Gateway rows are retired; outer digest still binds them.
-            return {**meta, "state": "available",
-                    "usage_entries": [_usage_entry(row) for row in rows["statistics_usage"]]}
+            entries = [_usage_entry(row, version=meta["version"]) for row in rows["statistics_usage"]]
+            if meta["version"] == VERSION and meta["usage_quality_counts"] != usage_quality_counts(entries):
+                raise ValueError("usage quality counts disagree with retained observations")
+            meta.setdefault("usage_quality_counts", None)
+            return {**meta, "state": "available", "usage_entries": entries}
     except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
         raise StatisticsSnapshotError("Statistics snapshot is invalid or unavailable") from exc
 
@@ -216,7 +233,8 @@ def _admitted_meta(conn):
 def read_admitted_usage(current, *, time_range=None, query=None, session_id=None):
     """Decode only usage needed by Sessions; callers retain exact time filtering."""
     with _admitted_connection(current) as conn:
-        if _admitted_meta(conn) is None:
+        meta = _admitted_meta(conn)
+        if meta is None:
             return []
         clauses, parameters = [], []
         if time_range is not None:
@@ -235,5 +253,5 @@ def read_admitted_usage(current, *, time_range=None, query=None, session_id=None
             clauses.append("json_extract(payload, '$.session_id') = ?")
             parameters.append(session_id)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        return [_usage_entry(json.loads(row[0])) for row in conn.execute(
+        return [_usage_entry(json.loads(row[0]), version=meta["version"]) for row in conn.execute(
             "SELECT payload FROM statistics_usage" + where + " ORDER BY position", parameters)]

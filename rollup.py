@@ -2,8 +2,10 @@ import errno
 import fcntl
 import json
 import os
+import shutil
 import sqlite3
 import sys
+import tempfile
 import threading
 import time
 from collections import OrderedDict, defaultdict
@@ -612,7 +614,7 @@ def _check_rollup(
 
 
 def _read_check_rows(db_path):
-    with _read_connection(db_path, immutable=True) as conn:
+    with _read_connection(db_path, private_snapshot=True) as conn:
         if conn is None:
             return "missing", [], None, None, None
         if not _table_exists(conn, "daily_rollup"):
@@ -1031,6 +1033,7 @@ def filter_options(
                     generation.db_path,
                     time_range,
                     calendar_days=calendar_days,
+                    immutable=True,
                 )
                 _canonicalise_projects(
                     generation_project_rows,
@@ -1084,34 +1087,34 @@ def needs_run(max_age_seconds=600, db_path=DEFAULT_DB_PATH, now=None):
     return age > max_age_seconds
 
 
-def latest_rollup_date(db_path=None):
+def latest_rollup_date(db_path=None, *, immutable=False):
     if db_path is None:
         dates = []
         with _admitted_generation_snapshot() as generations:
             for generation in generations:
-                value = latest_rollup_date(generation.db_path)
+                value = latest_rollup_date(generation.db_path, immutable=True)
                 if value is not None:
                     dates.append(value)
         return max(dates) if dates else None
     db_path = Path(db_path)
-    with _read_connection(db_path) as conn:
+    with _read_connection(db_path, immutable=immutable) as conn:
         if conn is None or not _table_exists(conn, "daily_rollup"):
             return None
         row = conn.execute("SELECT MAX(date) FROM daily_rollup").fetchone()
     return row[0] if row and row[0] else None
 
 
-def earliest_rollup_date(db_path=None):
+def earliest_rollup_date(db_path=None, *, immutable=False):
     if db_path is None:
         dates = []
         with _admitted_generation_snapshot() as generations:
             for generation in generations:
-                value = earliest_rollup_date(generation.db_path)
+                value = earliest_rollup_date(generation.db_path, immutable=True)
                 if value is not None:
                     dates.append(value)
         return min(dates) if dates else None
     db_path = Path(db_path)
-    with _read_connection(db_path) as conn:
+    with _read_connection(db_path, immutable=immutable) as conn:
         if conn is None or not _table_exists(conn, "daily_rollup"):
             return None
         row = conn.execute("SELECT MIN(date) FROM daily_rollup").fetchone()
@@ -1699,6 +1702,7 @@ def _daily_rows(
                 time_range,
                 calendar_days,
                 usage=usage,
+                immutable=True,
             )
             if not usage:
                 _canonicalise_projects(
@@ -1745,6 +1749,7 @@ def _daily_rows_from_db(
     time_range,
     calendar_days=None,
     usage=False,
+    immutable=False,
 ):
     clauses = []
     params = []
@@ -1758,13 +1763,13 @@ def _daily_rows_from_db(
         params.append(end.isoformat())
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
     db_path = Path(db_path)
-    with _read_connection(db_path) as conn:
+    with _read_connection(db_path, immutable=immutable) as conn:
         if conn is None or not _table_exists(conn, "daily_rollup"):
             return []
         return _daily_rows_from_connection(conn, where, params, usage=usage)
 
 
-def _filter_rows_from_db(db_path, time_range, calendar_days=None):
+def _filter_rows_from_db(db_path, time_range, calendar_days=None, *, immutable=False):
     clauses = []
     params = []
     if time_range is not None:
@@ -1774,7 +1779,7 @@ def _filter_rows_from_db(db_path, time_range, calendar_days=None):
         clauses.extend(("date >= ?", "date <= ?"))
         params.extend((start.isoformat(), end.isoformat()))
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
-    with _read_connection(Path(db_path)) as conn:
+    with _read_connection(Path(db_path), immutable=immutable) as conn:
         if conn is None or not _table_exists(conn, "daily_rollup"):
             return [], []
         conn.execute("BEGIN")
@@ -1916,13 +1921,32 @@ def _read_connection(
     immutable=False,
     *,
     allow_unmarked_for_marker_probe=False,
+    private_snapshot=False,
 ):
     db_path = Path(db_path)
     if not db_path.is_file():
         yield None
         return
     base_uri = db_path.resolve().as_uri()
-    conn = _open_read_only(base_uri, db_path, immutable)
+    if private_snapshot:
+        with _private_read_copy(db_path) as copy_path:
+            with _read_connection(copy_path, immutable=True, allow_unmarked_for_marker_probe=allow_unmarked_for_marker_probe) as conn:
+                yield conn
+        return
+    try:
+        conn = _open_read_only(base_uri, db_path, immutable)
+    except sqlite3.OperationalError as original_error:
+        if immutable:
+            raise
+        # Missing WAL sidecars can make mode=ro unavailable. Never infer an
+        # immutable lifetime from a momentary filesystem observation.
+        try:
+            with _private_read_copy(db_path) as copy_path:
+                with _read_connection(copy_path, immutable=True, allow_unmarked_for_marker_probe=allow_unmarked_for_marker_probe) as conn:
+                    yield conn
+        except _RollupLockNotInitialized:
+            raise original_error
+        return
     try:
         if not allow_unmarked_for_marker_probe:
             _require_bucket_timezone(conn, db_path)
@@ -1932,32 +1956,34 @@ def _read_connection(
 
 
 def _open_read_only(base_uri, db_path, immutable):
-    """Open a read-only connection, tolerating a WAL database nobody has open.
-
-    A WAL database needs a -shm to be read, and SQLite deletes it when the last
-    connection closes. From 3.51 on, a mode=ro connection will not recreate one,
-    so reading a database whose writer has exited fails outright -- which is the
-    normal state of a machine that is exported from rather than browsed on.
-
-    Falling back to immutable=1 is sound only while no -wal sits beside the file:
-    no frames exist to be missed, so the snapshot is the whole database. Should a
-    writer arrive between the two opens it will have left both siblings behind,
-    and mode=ro then works on the retry."""
+    """Immutable requires a lease or privately owned copy, not a WAL stat."""
     if immutable and _wal_has_frames(db_path):
         raise sqlite3.OperationalError(
-            "cannot take a non-writing snapshot while an uncheckpointed WAL exists"
+            "cannot use immutable mode while a nonempty WAL exists"
         )
     query = "?mode=ro&immutable=1" if immutable else "?mode=ro"
-    try:
-        return _connect_read_only(base_uri + query)
-    except sqlite3.OperationalError:
-        if immutable or _wal_sibling(db_path).exists():
-            raise
-    conn = _connect_read_only(base_uri + "?mode=ro&immutable=1")
-    if not _wal_sibling(db_path).exists():
-        return conn
-    conn.close()
-    return _connect_read_only(base_uri + "?mode=ro")
+    return _connect_read_only(base_uri + query)
+
+
+@contextmanager
+def _private_read_copy(db_path):
+    """Copy a cooperating mutable store without changing its SQLite sidecars.
+
+    All source writers, including connection close/checkpoint, must hold the
+    same existing lock. Recover WAL only in the private copy; SHM is rebuilt.
+    """
+    with tempfile.TemporaryDirectory(prefix="agent-monitor-read-") as tmp:
+        target = Path(tmp) / "snapshot.db"
+        with rollup_lock(db_path, create=False):
+            shutil.copyfile(db_path, target)
+            wal = _wal_sibling(db_path)
+            if wal.exists():
+                shutil.copyfile(wal, _wal_sibling(target))
+        # A writable private connection can recover WAL even when mode=ro
+        # cannot create SHM. Close it before opening the private reader.
+        with closing(sqlite3.connect(target)) as recovery:
+            recovery.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+        yield target
 
 
 def _connect_read_only(uri):
@@ -1979,17 +2005,7 @@ def _wal_sibling(db_path):
 
 
 def _wal_has_frames(db_path):
-    """Whether the WAL holds writes the main file does not.
-
-    The question an immutable read needs answered is whether frames are waiting
-    outside the main database, and the answer is the WAL's length: SQLite
-    truncates it to zero on checkpoint and leaves it at zero while a reader
-    merely holds the database open. Testing the file's existence instead
-    answered a different and much broader question -- any live connection
-    creates the file -- so a running server made every immutable read refuse,
-    which is how the integrity checker came to report `indeterminate` in the
-    one state it is most often run in.
-    """
+    """Conservatively detect nonempty WAL; checkpoint need not truncate it."""
     wal = _wal_sibling(db_path)
     try:
         return wal.stat().st_size > 0

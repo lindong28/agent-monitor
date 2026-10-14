@@ -18,12 +18,14 @@ the e-mail that identifies it to a human, and the plan tier.
 import base64
 import binascii
 import json
+import os
+
+import claude_oauth
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-CODEX_AUTH = Path.home() / ".codex" / "auth.json"
-CLAUDE_CONFIG = Path.home() / ".claude.json"
+CODEX_AUTH = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "auth.json"
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,16 @@ def codex_account(auth_path=None):
     payload = _read_json(auth_path or CODEX_AUTH)
     if not isinstance(payload, dict):
         return None
+    # rust-v0.162.1 AuthDotJson.resolved_mode: explicit mode wins; otherwise
+    # non-null API/PAT/Bedrock material takes precedence over leftover tokens.
+    # Only these two modes obtain their account from the stored token data.
+    mode = payload.get("auth_mode")
+    if mode is None:
+        if any(payload.get(key) is not None for key in (
+                "personal_access_token", "bedrock_api_key", "bedrock_access_keys", "OPENAI_API_KEY")):
+            return None
+    elif mode not in ("chatgpt", "chatgptAuthTokens"):
+        return None
     tokens = payload.get("tokens")
     if not isinstance(tokens, dict):
         return None
@@ -55,22 +67,26 @@ def codex_account(auth_path=None):
     auth = claims.get("https://api.openai.com/auth")
     if not isinstance(auth, dict):
         auth = {}
-    # The id_token is authoritative for the account id when both are present:
-    # account_id is a cached copy beside it.
-    account_id = auth.get("chatgpt_account_id") or account_id
+    # Ordinary CodexAuth.get_account_id selects tokens.account_id. A JWT claim
+    # can describe a different workspace; it must not replace that selection.
     if not isinstance(account_id, str) or not account_id:
         return None
 
+    # Match Codex token_data.rs: top-level email, then the profile claim.
+    profile = claims.get("https://api.openai.com/profile")
+    email = claims.get("email")
+    if email is None and isinstance(profile, dict):
+        email = profile.get("email")
     return Account(
         account_id=account_id,
-        label=_text(claims.get("email")),
+        label=_text(email),
         plan=_text(auth.get("chatgpt_plan_type")),
     )
 
 
 def claude_account(config_path=None):
     """Signed-in Claude account, or None when signed out or unreadable."""
-    payload = _read_json(config_path or CLAUDE_CONFIG)
+    payload = _read_json(config_path or claude_oauth.metadata_path())
     if not isinstance(payload, dict):
         return None
     oauth = payload.get("oauthAccount")

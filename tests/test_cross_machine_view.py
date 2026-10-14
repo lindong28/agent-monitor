@@ -884,8 +884,12 @@ class BackgroundSyncTests(unittest.TestCase):
                 "server.rollup.query_pivot",
                 return_value={"columns": [], "rows": []},
             ), mock.patch("server.rollup.earliest_rollup_date", return_value=None):
-                initial = get_json("/api/overview?force=1")
-                self.assertTrue(initial["sync"]["syncing"])
+                origin = "http://127.0.0.1:%d" % httpd.server_port
+                request = urllib.request.Request(origin + "/api/refresh", method="POST",
+                    headers={"Origin": origin, "X-Agent-Monitor": "action"})
+                with opener.open(request, timeout=2) as response:
+                    initial = json.load(response)
+                self.assertTrue(initial["syncing"])
                 self.release.set()
 
                 deadline = time.monotonic() + 2

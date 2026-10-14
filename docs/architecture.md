@@ -2,7 +2,7 @@
 
 agent-monitor collects local agent usage and publishes read-only machine snapshots for a Web dashboard. It is an independent repository; ai-agent-config may invoke its installer but supplies no implementation at runtime.
 
-The [upstream contract audit](references/upstream-contracts.md) records versioned arguments, counterexamples and unresolved assumptions for account operations, credential identity, snapshots, isolation and process lifecycle. Read the affected section before relying on those guarantees; source review is separate from deployment verification.
+The [upstream contract audit](references/upstream-contracts.md) records versioned arguments and original counterexamples. The [current repair arguments](references/upstream-contract-repairs.md) own the ten-object implementation mapping, conditions and unresolved source facts for account operations, credential identity, snapshots, isolation and process lifecycle. Source review is separate from deployment verification.
 
 ## Backend performance checks
 
@@ -42,7 +42,7 @@ Account RPC children remain owned by their manager through shutdown. Admission c
 
 `claude_oauth.py` owns the extracted read-only credential/date/HTTP helpers. File and keychain candidates are lazy, deduplicated and locally validated; profile/usage requests refuse redirects and carry tokens only as headers. `quota_refresh.py` bounds the complete provider child process. Statusline rendering, statusline cache persistence and model-specific statusline windows remain harness responsibilities.
 
-Monitor has no Gateway runtime dependency. `statistics_snapshot.py` writes agent-only extension v2, accepts agent usage from legacy v1, and ignores retired Gateway payloads while the outer generation digest still binds the entire file. Retention checks continue to reject missing agent events and backward observation times. Existing files are not deleted by this transition. The Gateway page, routes, optional snapshot indexes and call-only query workers have been removed.
+Monitor has no Gateway runtime dependency. `statistics_snapshot.py` writes agent-only extension v3 with usage quality, service context and cost provenance. It reads strict legacy v1/v2 records without rewriting them or assigning evidence they did not contain; retired Gateway payloads remain ignored while the outer digest binds the entire file. Automatic publication rejects older observation times as well as lost retained events; explicit recovery publication retains its separate contract. Existing files are not deleted by this transition. The Gateway page, routes, optional snapshot indexes and call-only query workers have been removed.
 
 Gateway owns its inference ledger and audit UI. Its optional independent archive importer handles historical v1 snapshots as a one-time migration input, without importing Monitor code. Live cutover must preserve all sources and independent collection before removing the old deployed entry; see [product separation](product-boundary-separation.md) and [the decision](adr/20261012-b97e-product-boundary-separation.md).
 

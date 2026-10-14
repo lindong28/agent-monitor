@@ -1,6 +1,5 @@
 import json
 import os
-import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -17,6 +16,35 @@ from machine_config import load_machine_config
 
 
 class SyncTests(unittest.TestCase):
+    def test_installer_rejects_older_export_but_accepts_same_time(self):
+        import exporter
+        import sync
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config_path = base / "machines.json"
+            self.write_config(config_path)
+            machine = load_machine_config(config_path).self_machine
+            root = base / "generations"
+            for index, stamp in enumerate(("2026-08-04T12:01:00Z", "2026-08-04T12:01:00Z", "2026-08-04T12:00:00Z")):
+                source = base / (str(index) + ".db")
+                self.make_db(source, 10 + index)
+                bundle = base / str(index)
+                with mock.patch("exporter.exporter_version", return_value="a" * 40):
+                    exporter.export_bundle(source, bundle, refresh=False, source_host_identity="host-v1:" + "4" * 64, generated_at=stamp, rate_limits={})
+                manifest = self.read_manifest(bundle)
+                if index < 2:
+                    installed = sync.install_export_bundle(machine, bundle, expected_manifest=manifest, root=root, accept_first_use=True)
+                    expected = installed.meta["generation_id"]
+                else:
+                    with self.assertRaisesRegex(generation.GenerationError, "older"):
+                        sync.install_export_bundle(machine, bundle, expected_manifest=manifest, root=root)
+            current = generation.read_current_generation(machine.name, root=root)
+            try:
+                self.assertEqual(current.meta["generation_id"], expected)
+            finally:
+                current.close()
+
     def test_remote_reaper_handles_tmp_symlink_without_following_children(self):
         import sync
 
@@ -33,6 +61,7 @@ class SyncTests(unittest.TestCase):
                 with self.subTest(root=directory.name):
                     old = directory / "agent-monitor-export.old"
                     old.mkdir()
+                    (old / ".lease").touch()
                     old_time = time.time() - 7200
                     os.utime(old, (old_time, old_time))
                     fresh = directory / "agent-monitor-export.fresh"
@@ -42,7 +71,7 @@ class SyncTests(unittest.TestCase):
                     child_link = directory / "agent-monitor-export.link"
                     if not child_link.is_symlink():
                         child_link.symlink_to(outside, target_is_directory=True)
-                    command = sync._REMOTE_REAPER.replace("/tmp", shlex.quote(str(directory)), 1)
+                    command = sync._remote_python(sync._REMOTE_CLEANUP_SCRIPT, "reap", directory)
                     subprocess.run(["/bin/sh", "-c", command], check=True, timeout=5)
                     self.assertFalse(old.exists())
                     self.assertTrue(fresh.is_dir())
@@ -82,7 +111,7 @@ class SyncTests(unittest.TestCase):
                     return subprocess.CompletedProcess(args, 0, "", "")
                 if args[0] == "ssh" and args[-1].startswith("mktemp"):
                     return subprocess.CompletedProcess(args, 0, "/tmp/agent-monitor-export.A1b2C3d4\n", "")
-                if args[0] == "ssh" and "agent-monitor export --out" in args[-1]:
+                if args[0] == "ssh" and " export --out " in args[-1]:
                     return subprocess.CompletedProcess(
                         args, 0, json.dumps(source_manifest) + "\n", ""
                     )
@@ -111,11 +140,12 @@ class SyncTests(unittest.TestCase):
                 calls[1][0][:7],
                 ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "builder"],
             )
-            self.assertIn("~/.local/bin/agent-monitor export --out", calls[2][0][-1])
+            self.assertIn(" export --out ", calls[2][0][-1])
+            self.assertIn("os.fork()", calls[2][0][-1])
             self.assertEqual(calls[3][0][0], "rsync")
             self.assertIn("-rzc", calls[3][0])
             self.assertNotIn("-n", calls[3][0][3].split())
-            self.assertEqual(calls[-1][0][-1], "rm -rf -- /tmp/agent-monitor-export.A1b2C3d4")
+            self.assertEqual(calls[-1][0][-1], sync._remote_python(sync._REMOTE_CLEANUP_SCRIPT, "clean", "/tmp/agent-monitor-export.A1b2C3d4"))
 
             previous_bytes = installed.db_path.read_bytes()
             original_runner = runner
@@ -145,7 +175,7 @@ class SyncTests(unittest.TestCase):
                     return subprocess.CompletedProcess(
                         args, 0, "/tmp/agent-monitor-export.A1b2C3d4\n", ""
                     )
-                if args[0] == "ssh" and "agent-monitor export --out" in args[-1]:
+                if args[0] == "ssh" and " export --out " in args[-1]:
                     raise subprocess.TimeoutExpired(args, kwargs["timeout"])
                 return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -158,7 +188,7 @@ class SyncTests(unittest.TestCase):
                 )
 
             cleanup = calls[-1]
-            self.assertEqual(cleanup[0][-1], "rm -rf -- /tmp/agent-monitor-export.A1b2C3d4")
+            self.assertEqual(cleanup[0][-1], sync._remote_python(sync._REMOTE_CLEANUP_SCRIPT, "clean", "/tmp/agent-monitor-export.A1b2C3d4"))
             self.assertEqual(cleanup[1]["timeout"], 10)
 
     def test_remote_sync_rejects_a_bundle_that_does_not_match_export_stdout(self):
@@ -184,7 +214,7 @@ class SyncTests(unittest.TestCase):
                     return subprocess.CompletedProcess(
                         args, 0, "/tmp/agent-monitor-export.A1b2C3d4\n", ""
                     )
-                if args[0] == "ssh" and "agent-monitor export --out" in args[-1]:
+                if args[0] == "ssh" and " export --out " in args[-1]:
                     return subprocess.CompletedProcess(
                         args, 0, json.dumps(source_manifest) + "\n", ""
                     )

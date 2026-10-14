@@ -18,7 +18,7 @@ class RefreshError(RuntimeError):
 def refresh(get, expected_names, *, timeout, clock=time.monotonic, sleep=time.sleep):
     before = get("/api/sync-status")
     deadline = clock() + timeout
-    initial = get("/api/overview?force=1")["sync"]
+    initial = get("/api/refresh", method="POST")
     instance = initial.get("instance_id")
     started = initial.get("started_at")
     target = initial.get("refresh_requested")
@@ -78,8 +78,10 @@ def main():
             origin = "http://127.0.0.1:%d" % port
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-        def get(path):
-            with opener.open(origin + path, timeout=30) as response:
+        def get(path, method="GET"):
+            request = urllib.request.Request(origin + path, method=method,
+                headers={"Origin": origin, "X-Agent-Monitor": "action"} if method == "POST" else {})
+            with opener.open(request, timeout=30) as response:
                 return json.load(response)
 
         import server

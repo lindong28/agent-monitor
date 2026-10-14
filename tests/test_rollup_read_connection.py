@@ -40,19 +40,18 @@ class ReadConnectionWalTests(unittest.TestCase):
     def test_read_falls_back_when_mode_ro_cannot_open_a_quiet_wal_database(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self.make_quiet_wal_db(Path(tmp) / "rollup.db")
-
+            with rollup.rollup_lock(db_path):
+                pass
             with self.mode_ro_refused() as refusals:
                 with rollup._read_connection(db_path) as conn:
                     rows = conn.execute("SELECT COUNT(*) FROM daily_rollup").fetchone()[0]
 
             self.assertEqual(refusals, ["?mode=ro"])
             self.assertEqual(rows, 2)
-            self.assertEqual(self.siblings(db_path), [])
+            self.assertEqual(self.siblings(db_path), ["rollup.db.lock"])
 
-    def test_read_does_not_fall_back_while_a_wal_sits_beside_the_database(self):
-        """immutable=1 reads the main file and ignores WAL frames. With a -wal
-        present those frames are real committed data, so silently substituting
-        the snapshot would answer from a database that is missing writes."""
+    def test_read_does_not_fall_back_without_an_existing_writer_lock(self):
+        """A sidecar observation does not establish a safe copying protocol."""
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self.make_quiet_wal_db(Path(tmp) / "rollup.db")
             Path(str(db_path) + "-wal").write_bytes(b"")

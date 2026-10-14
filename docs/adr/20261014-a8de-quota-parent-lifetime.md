@@ -1,0 +1,9 @@
+# Give detached quota readers an explicit parent lifetime
+
+Date: 2026-10-14. Status: accepted after independent decision review. Scope: quota_refresh's existing independently sessioned child, within the user's lifecycle repair request.
+
+The parent's communicate timeout cannot run after the parent dies. Keep quota's independent session, but pass a dedicated lifetime pipe read end to the child; only the parent retains the write end. Ordinary JSON stdin EOF is not cancellation. Start the existing 35-second budget before spawn and pass the remaining absolute deadline rather than restarting it in the child. Parent EOF/deadline triggers child cancellation, ordinary helper cleanup and wait; retain the existing two-second cleanup allowance. A still-live group leader provides a final own-group termination fallback for stuck cleanup or the helper-creation window. Do not signal an old PGID after reaping its leader.
+
+This complements the SSH export guardian: export death closes the quota lifetime pipe even though quota is in a different session. It does not add a daemon, provider retry, global process search or arbitrary process-tree containment. Python must be scheduled; SIGSTOP, indefinite GIL starvation and kernel hangs are not a hard-watchdog guarantee. A dead parent cannot reap adopted orphans, so validation distinguishes non-running descendants from direct-child wait/reap.
+
+Alternatives rejected: sharing the normal input pipe, relying only on the dead parent's timeout, resetting the whole budget in the child, or attaching quota to the export group and changing its existing isolation. The accepted packet is the lifecycle section of `accounts-decision.md`, with `quota-lifetime-decision-review.md` in `/Users/lindong/task-artifacts/upstream-contract-repair-20261014/`. Normal, parent-death, deadline, delayed-start and stuck-cleanup states are the discriminating local checks. Production effects remain separately verified.

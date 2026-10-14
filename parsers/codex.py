@@ -667,6 +667,22 @@ def _record_metadata_error(source_errors, path, exc):
     )
 
 
+def _is_codex_limit(snapshot, identity_key="limit_id"):
+    # The fixed producer defaults absent/null IDs to codex; explicit other or
+    # malformed IDs never acquire that legacy default.
+    return isinstance(snapshot, dict) and snapshot.get(identity_key) in (None, "codex")
+
+
+def select_codex_rate_limit(result):
+    """Select the ordinary Codex bucket from the app-server multi-bucket API."""
+    buckets = result.get("rateLimitsByLimitId")
+    if buckets is not None:
+        selected = buckets.get("codex") if isinstance(buckets, dict) else None
+    else:
+        selected = result.get("rateLimits")
+    return selected if _is_codex_limit(selected, "limitId") else None
+
+
 def _extract_rate_limits(path, models):
     session_id = ""
     last_rate_limits = None
@@ -687,7 +703,7 @@ def _extract_rate_limits(path, models):
                 if payload.get("type") != "token_count":
                     continue
                 rate_limits = payload.get("rate_limits")
-                if rate_limits:
+                if rate_limits and _is_codex_limit(rate_limits):
                     last_rate_limits = (rate_limits, data.get("timestamp", ""), session_id)
     except (OSError, PermissionError):
         return None
@@ -715,7 +731,7 @@ def _extract_latest_rate_limits(path, models, *, expire=True):
             if not isinstance(payload, dict) or payload.get("type") != "token_count":
                 continue
             rate_limits = payload.get("rate_limits")
-            if rate_limits:
+            if rate_limits and _is_codex_limit(rate_limits):
                 return _build_rate_limits(rate_limits, data.get("timestamp", ""), session_id, models, expire=expire)
     except (OSError, PermissionError, UnicodeDecodeError):
         return None

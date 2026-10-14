@@ -4,6 +4,8 @@
 
 The follow-up [upstream contract audit](upstream-contracts.md) traces the remaining producer boundaries: Claude sidechain final-usage persistence, Codex fork/revert and model rerouting, quota bucket identity, and tariff provenance. It includes counterexamples that a zero `source_errors` count or successful arithmetic tests do not detect; those results qualify completeness claims below and do not represent product fixes.
 
+The subsequent [repair contract](upstream-contract-repairs.md) specifies current handling: Claude usage quality, supported service-mode nominal pricing, recorded/nominal/unpriced provenance, v3 evidence transport, requested/configured Codex model attribution and target quota-bucket selection. These fields expose uncertainty; they do not recover absent final usage or historical invoice rates. Read that contract together with the formulas below when changing collection or valuation.
+
 This specification was established on 2026-10-14 against baseline `22507ab5fbe1c794cdfb870c386d89f572f1d91e` and the associated metric corrections. Definitions below describe the required behavior; they are not a claim that a running deployment or historical archive has been corrected. Source inspection and isolated counterexamples support the arguments, while release, replay and consumer verification must be recorded separately.
 
 ## Sources, versions and limits

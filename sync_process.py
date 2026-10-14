@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import diagnostics
+import process_identity
 
 
 @dataclass(frozen=True)
@@ -24,25 +25,114 @@ _active = set()
 _stopping = False
 
 
-def _stop(process):
-    # The worker is a session leader; include local export/SSH descendants.
+def _signal_group(pid, value):
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(pid, value)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        if sys.platform != "darwin":
+            raise
+        # Darwin returns EPERM for a group containing only zombies. Do not
+        # mistake that for an unsignalable live child. The unreaped leader still
+        # reserves this PGID; an empty live group cannot create new descendants.
+        if process_identity.darwin_group_has_live_members(pid):
+            raise
+
+
+def _exit_observer():
+    """Return a wait operation that observes a child without consuming its PID."""
+    if all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOWAIT")):
+        def observe(pid, nohang=False):
+            os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | (os.WNOHANG if nohang else 0))
+        return observe
+    if sys.platform != "darwin":
+        raise RuntimeError("safe worker supervision requires waitid WNOWAIT")
+
+    # Older macOS Python builds omit os.waitid although libc provides it.
+    # Darwin sys/wait.h: P_PID=1, WEXITED=4, WNOWAIT=32, WNOHANG=1.
+    import ctypes
+    import errno
+    native = ctypes.CDLL(None, use_errno=True).waitid
+    native.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_void_p, ctypes.c_int]
+    native.restype = ctypes.c_int
+
+    def observe(pid, nohang=False):
+        # sys/signal.h siginfo_t is 104 bytes, aligned to 8 on 64-bit Darwin.
+        # Overallocate aligned storage; no siginfo fields are consumed here.
+        info = (ctypes.c_long * 32)()
+        while native(1, pid, ctypes.byref(info), 4 | 32 | (1 if nohang else 0)) != 0:
+            error = ctypes.get_errno()
+            if error != errno.EINTR:
+                raise OSError(error, os.strerror(error))
+    return observe
+
+
+class _OwnedWorker:
+    """Observe exit without reaping, so the group ID cannot be recycled."""
+    def __init__(self, process, observe_exit=None):
+        self._wait_for_exit = observe_exit or _exit_observer()
+        self._process = process
+        self.pid, self.stdin, self.stdout = process.pid, process.stdin, process.stdout
+        self._guard = threading.Lock()
+        self._done = threading.Event()
+        self._error = None
+        # A descendant can inherit stdout after its leader exits. Waiting for
+        # stdout EOF before cleanup would leave both reader and descendant stuck.
+        self._observer = threading.Thread(target=self._observe_exit, daemon=True,
+                                          name="agent-monitor-worker-reaper")
+        self._observer.start()
+
+    @property
+    def returncode(self):
+        return self._process.returncode if self._done.is_set() else None
+
+    def _signal(self, value):
+        with self._guard:
+            if self._done.is_set():
+                return
+            # Also refuse if some external waiter violated ownership and reaped
+            # this child. Neither kill(0) nor a remembered numeric PGID suffices.
+            self._wait_for_exit(self.pid, nohang=True)
+            _signal_group(self.pid, value)
+
+    def _observe_exit(self):
+        try:
+            self._wait_for_exit(self.pid)
+            with self._guard:
+                # Leader is still an unreaped child throughout this operation.
+                # No further group signal is allowed after wait() releases it.
+                _signal_group(self.pid, signal.SIGKILL)
+                self._process.wait()
+                self._done.set()
+        except BaseException as exc:
+            self._error = exc
+            self._done.set()
+
+    def poll(self):
+        if self._done.is_set() and self._error:
+            raise RuntimeError("worker cleanup could not be confirmed") from self._error
+        return self.returncode
+
+    def wait(self, timeout=None):
+        if not self._done.wait(timeout):
+            raise subprocess.TimeoutExpired(self._process.args, timeout)
+        return self.poll()
+
+
+def _stop(process):
+    # Raw Popen is supported for callers that explicitly hand over their child;
+    # a previously reaped child never authorizes a signal to its old group.
+    if not isinstance(process, _OwnedWorker):
+        if process.returncode is not None:
+            return
+        process = _OwnedWorker(process)
+    process._signal(signal.SIGTERM)
     try:
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait()
-    finally:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        process._signal(signal.SIGKILL)
+        process.wait(timeout=2)
 
 
 def shutdown():
@@ -63,21 +153,24 @@ def supervised_worker(path, *, text=True):
     with _lock:
         if _stopping:
             raise RuntimeError("worker supervisor is shutting down")
-        process = subprocess.Popen(
+        observe_exit = _exit_observer()
+        process = _OwnedWorker(subprocess.Popen(
             [sys.executable, str(Path(path).resolve()), "--worker"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=text,
             start_new_session=True,
-        )
+        ), observe_exit=observe_exit)
         _active.add(process)
     try:
         yield process
     finally:
-        if process.poll() is None:
-            _stop(process)
-        process.stdin.close()
-        process.stdout.close()
-        with _lock:
-            _active.discard(process)
+        try:
+            if process.poll() is None:
+                _stop(process)
+        finally:
+            process.stdin.close()
+            process.stdout.close()
+            with _lock:
+                _active.discard(process)
 
 
 def watch_parent():

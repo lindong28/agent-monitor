@@ -32,6 +32,7 @@ import statistics_snapshot
 import hub
 import sync
 import sync_process
+import process_identity
 import query_view
 import quota_sync
 import diagnostics
@@ -491,7 +492,6 @@ ROUTES = {
     "/api/pivot": pivot_endpoint,
     "/api/pivot-filters": pivot_filters_endpoint,
     "/api/sync-status": sync_status_endpoint,
-    "/api/refresh": refresh_endpoint,
     "/api/sessions": sessions_endpoint,
     "/api/diagnostics": diagnostics_endpoint,
     "/api/network": network,
@@ -555,6 +555,11 @@ class Handler(BaseHTTPRequestHandler):
         # Some actions have no body; never reuse their unread input as a request.
         self.close_connection = True
         parsed = urlparse(self.path)
+        if (parsed.path.startswith("/api/codex-accounts/") or parsed.path in
+                ("/api/account-memory/remove", "/api/restart", "/api/refresh", "/api/network")):
+            header = "codex-accounts" if parsed.path.startswith("/api/codex-accounts/") else "action"
+            if not self._check_browser_boundary(header, require_origin=True):
+                return
         if parsed.path.startswith("/api/codex-accounts/"):
             self._handle_codex_accounts(parsed.path, post=True)
             return
@@ -564,13 +569,25 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/restart":
             self._handle_restart()
             return
+        if parsed.path in ("/api/refresh", "/api/network"):
+            try:
+                query = parse_qs(parsed.query)
+                action = refresh_endpoint if parsed.path == "/api/refresh" else network
+                self._send_json(action(query))
+            except Exception:
+                logger.exception("refresh action failed")
+                self._send_json({"error": "刷新失败，请检查服务状态。"}, status=500)
+            return
         self.send_error(404)
 
-    def _handle_codex_accounts(self, path, post=False, send_body=True):
+    def _check_browser_boundary(self, header, *, require_origin=False, send_body=True):
         # This remains a trusted personal-network service. These checks stop
         # browser cross-site requests; they do not authenticate LAN clients.
         host = self.headers.get("Host", "")
-        hostname = urlparse("//" + host).hostname
+        try:
+            hostname = urlparse("//" + host).hostname
+        except ValueError:
+            hostname = None
         allowed = {"localhost", socket.gethostname().lower(), socket.getfqdn().lower()}
         allowed.update(name.split(".")[0] for name in tuple(allowed))
         try:
@@ -579,11 +596,16 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             valid_host = (hostname or "").lower() in allowed
         origin = self.headers.get("Origin")
-        if (not valid_host or self.headers.get("X-Agent-Monitor") != "codex-accounts"
+        if (not valid_host or self.headers.get("X-Agent-Monitor") != header
                 or self.headers.get("Sec-Fetch-Site") == "cross-site"
                 or (origin is not None and origin not in ("http://" + host, "https://" + host))
-                or (post and origin is None)):
-            self._send_json({"error": "请从本机地址或服务主机名打开页面操作账号。"}, status=403, send_body=send_body)
+                or (require_origin and origin is None)):
+            self._send_json({"error": "请从本机地址或服务主机名打开页面执行操作。"}, status=403, send_body=send_body)
+            return False
+        return True
+
+    def _handle_codex_accounts(self, path, post=False, send_body=True):
+        if not post and not self._check_browser_boundary("codex-accounts", send_body=send_body):
             return
         try:
             manager = codex_accounts.manager
@@ -637,8 +659,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "账号操作失败，请检查服务主机的状态目录。"}, status=500, send_body=send_body)
 
     def _handle_account_memory_remove(self):
-        # This is input-format validation only. The endpoint deliberately has
-        # the same reachability as the server's existing write endpoints.
+        # Browser admission is shared by every mutation in do_POST.
         if self.headers.get_content_type() != "application/json":
             self._send_json(
                 {"error": "Content-Type 必须是 application/json"}, status=400
@@ -715,6 +736,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_codex_accounts(parsed.path, send_body=send_body)
             return
         query = parse_qs(parsed.query)
+        if parsed.path == "/api/refresh" or (
+                parsed.path.startswith("/api/") and "1" in query.get("force", ())):
+            self._send_json({"error": "显式刷新请使用 POST。"}, status=405, send_body=send_body)
+            return
         try:
             if parsed.path.startswith("/api/session/"):
                 session_id = unquote(parsed.path[len("/api/session/") :])
@@ -1374,7 +1399,7 @@ def _sync_status_from_admission(admission, current_time, runtime):
             detail = details.get(row["name"], {"state": "not_collected"})
             row["statistics"] = {key: detail.get(key) for key in (
                 "state", "observed_at", "history_authoritative_from", "scan_complete",
-                "source_error_count", "blocked_source_count",
+                "source_error_count", "blocked_source_count", "usage_quality_counts",
             )}
     return {
         "instance_id": SERVER_INSTANCE_ID,
@@ -1629,6 +1654,9 @@ def _entry_json(entry):
         "project": entry.project,
         "agent_id": entry.agent_id,
         "usage_event_count": entry.message_count,
+        "usage_quality": entry.usage_quality,
+        "service_context": entry.service_context,
+        "cost_provenance": entry.cost_provenance,
     }
 
 
@@ -2482,6 +2510,8 @@ def main():
     if hub.is_hub():
         state = ROOT / "state"
         state.mkdir(parents=True, exist_ok=True)
+        # launchd bypasses the standalone launcher; register this exact instance.
+        process_identity.record(state, ROOT, os.getpid())
         (state / "port").write_text(str(args.port))
         (state / "pid").write_text(str(os.getpid()))
 

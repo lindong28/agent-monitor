@@ -8,9 +8,8 @@ import rollup
 
 
 class WalFramePredicateTests(unittest.TestCase):
-    """An immutable read must refuse only when the WAL holds frames the main
-    file lacks. Refusing whenever the file exists refuses whenever anything has
-    the database open, which on this machine means whenever the server runs."""
+    """Nonempty WAL conservatively prevents immutable mode, even after FULL
+    checkpoint. Only the caller can guarantee the database lifetime is fixed."""
 
     def test_a_reader_held_wal_with_no_frames_does_not_block_an_immutable_read(self):
         with tempfile.TemporaryDirectory() as tmp:

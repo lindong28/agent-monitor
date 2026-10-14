@@ -126,6 +126,15 @@ class AccountActionsTests(unittest.TestCase):
         self.assertEqual(methods.count("account/login/start"), 1)
         self.assertEqual(methods.count("turn/start"), 2)
 
+    def test_configuration_is_verified_before_any_turn(self):
+        for scenario in ("unsafe_config", "unsafe_sandbox", "wrong_profile", "custom_profile"):
+            with self.subTest(scenario=scenario):
+                result = self.run_case(scenario)
+                methods = [c.get("method") for c in self.calls(result)]
+                expected = 1 if scenario == "custom_profile" else 0
+                self.assertEqual(methods.count("turn/start"), expected)
+                self.assertEqual(result["operation"]["message_status"], "succeeded" if expected else "not_sent")
+
     def test_wrong_email_and_workspace_never_send(self):
         for scenario in ("wrong_email", "wrong_workspace"):
             with self.subTest(scenario=scenario):

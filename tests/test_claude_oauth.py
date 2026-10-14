@@ -74,6 +74,14 @@ class ReadTokenTests(unittest.TestCase):
         self.module.KEYCHAIN_TOOL = str(tool)
         return argv_log
 
+    def test_keychain_selector_includes_service_and_os_account(self):
+        self.module.KEYCHAIN_SERVICE = "Claude Code-credentials-fixture"
+        self.module.KEYCHAIN_ACCOUNT = "fixture-user"
+        argv = self.install_keychain_stub(f"printf '%s' '{blob()}'\n")
+        list(self.module.read_tokens())
+        self.assertEqual(argv.read_text().splitlines(), ["find-generic-password", "-s",
+            "Claude Code-credentials-fixture", "-a", "fixture-user", "-w"])
+
     def test_reads_live_token_from_credentials_file(self):
         """The Linux store still works — this is the path that shipped."""
         self.write_file_store(blob(token="sk-ant-oat01-from-file"))

@@ -95,7 +95,10 @@ def collect(force=False):
     if port is not None:
         url = "http://127.0.0.1:%d/api/network%s" % (port, "?force=1" if force else "")
         try:
-            with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT) as response:
+            request = urllib.request.Request(url, method="POST", headers={
+                "Origin": "http://127.0.0.1:%d" % port, "X-Agent-Monitor": "action",
+            }) if force else url
+            with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT) as response:
                 return json.load(response), "agent-monitor 服务 (:%d) 的缓存快照，与 /network 页面同源" % port
         except (urllib.error.URLError, OSError, ValueError) as exc:
             detour = "agent-monitor 服务在 :%d 但取数失败（%s），已改为本进程直接检测" % (port, exc)

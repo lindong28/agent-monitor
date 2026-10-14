@@ -972,7 +972,7 @@ def _deduped(entries, source_errors=None):
 
 def _with_calculated_costs(entries, read_only=False, diagnostic=False, source_errors=()):
     try:
-        from pricing_fetcher import calculate_cost, get_pricing
+        from pricing_fetcher import with_calculated_cost, get_pricing
     except ImportError:
         return LoadedEntries(
             sorted(entries, key=lambda entry: entry.timestamp),
@@ -1024,12 +1024,12 @@ def _with_calculated_costs(entries, read_only=False, diagnostic=False, source_er
     unattributed = []
     blocked_paths = set(blocked) | set(persisted_by_path)
     for entry in entries:
-        cost = calculate_cost(entry, pricing=pricing)
+        priced_entry = with_calculated_cost(entry, pricing=pricing)
         if entry.project in blocked_paths:
-            unattributed.append(replace(entry, cost_usd=cost))
+            unattributed.append(priced_entry)
             continue
         project = projects.get(entry.project, entry.project)
-        enriched.append(replace(entry, cost_usd=cost, project=project))
+        enriched.append(replace(priced_entry, project=project))
     enriched.sort(key=lambda entry: entry.timestamp)
     unattributed.sort(key=lambda entry: entry.timestamp)
     blockers_by_path = dict(persisted_by_path)

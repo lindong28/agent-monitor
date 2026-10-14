@@ -251,8 +251,12 @@ class GuiQuotaTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, output, "")
             with self.subTest(enabled=enabled, refresh=refresh), mock.patch.object(hub, "enabled", return_value=enabled):
                 sync._pull_remote_export("fixture", self.root / "bundle", timeout=1, runner=runner, quota_refresh=refresh)
-            command = next(command for command in commands if "agent-monitor export" in command)
-            self.assertEqual(command, "~/.local/bin/agent-monitor export --out /tmp/agent-monitor-export.ABC12345/bundle" + expected)
+            import shlex
+            command = next(command for command in commands if shlex.split(command)[2:3] == [sync._REMOTE_EXPORT_SCRIPT])
+            arguments = shlex.split(command)
+            self.assertEqual(arguments[3], "/tmp/agent-monitor-export.ABC12345")
+            self.assertEqual(arguments[5:], ["~/.local/bin/agent-monitor", "export", "--out",
+                                            "/tmp/agent-monitor-export.ABC12345/bundle", *shlex.split(expected)])
 
     def test_cli_forwards_gui_and_cached_quota_flags(self):
         cli = self.root / "agent-monitor"

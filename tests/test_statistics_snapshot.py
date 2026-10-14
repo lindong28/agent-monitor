@@ -171,7 +171,13 @@ class StatisticsSnapshotTests(unittest.TestCase):
         with closing(sqlite3.connect(legacy)) as conn, conn:
             meta = json.loads(conn.execute("SELECT payload FROM statistics_meta").fetchone()[0])
             meta.update(version=1, gateway={"schema_version": "future-schema"})
+            meta.pop("usage_quality_counts", None)
             conn.execute("UPDATE statistics_meta SET payload=?", (json.dumps(meta),))
+            for position, payload in conn.execute("SELECT position, payload FROM statistics_usage").fetchall():
+                row = json.loads(payload)
+                for key in snapshots.EVIDENCE_FIELDS:
+                    row.pop(key, None)
+                conn.execute("UPDATE statistics_usage SET payload=? WHERE position=?", (json.dumps(row), position))
             for table in ("statistics_requests", "statistics_attempts"):
                 conn.execute(f"CREATE TABLE {table} (position INTEGER PRIMARY KEY, payload TEXT NOT NULL)")
                 conn.execute(f"INSERT INTO {table} VALUES (0, 'not JSON')")

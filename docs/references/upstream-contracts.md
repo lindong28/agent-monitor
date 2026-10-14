@@ -1,5 +1,7 @@
 # Upstream contract arguments
 
+历史审计保留页。后续逐对象修复、现行契约与适用前提见 [repaired implementation](upstream-contract-repairs.md)；本页的“未修复”等状态描述的是下面注明的原审计时点。
+
 审查日期：2026-10-14。实现基线：`eb6e797e30413469051eb5b1d7a4020539c0fedf`。本文件逐项论证账号操作、身份、存储、发布、隔离和运行生命周期，并补充 [指标规范](metrics.md) 的四项来源边界；不改变产品契约，不代表修复或生产验收。
 
 证据目录：`/Users/lindong/task-artifacts/upstream-contract-audit-20261014/`，分为 `accounts/`、`storage/`、`history/`、`runtime/`，保存固定源码、上游原文、反例脚本和原始读数。本文件保留可迁移的结论、代码定位和上游链接。隔离实验使用本机解释器和临时数据，没有真实登录、发消息、读取生产凭据、重启服务或重放生产历史。代码定位以基线为准。
@@ -100,7 +102,7 @@ HTTP依据：[RFC9110 §9.2.1](https://www.rfc-editor.org/rfc/rfc9110.html#secti
 | --- | --- | --- |
 | kill -0能否认定PID属于Monitor？ | 只检查存在/权限；CLI is_running/stop只读PID，不核启动身份 | 不能。隔离PID文件指向另建sleeper，真实stop函数令其SIGTERM退出(-15)，却输出stopped/exit0；未操作用户进程。需在signal前验证稳定归属 |
 | group kill是否回收所有后代？ | supervised_worker用start_new_session；_stop对组TERM/wait/KILL；finally只在leader未退出时_stop | 正常leader退出后的后代保证不成立：fixture leader退出0、同组后代仍活。实际worker通常join线程，未证明生产自然遗留，也不覆盖自行setsid的后代 |
-| 同PID exec如何终止worker？ | stdin pipe是生命周期通道，非继承FD在exec关闭，watch_parent遇EOF后signal本组；server先清账号/quota/QueryView | 依赖watcher已启动及写端无外部继承。已读server路径未显式调用sync_process.shutdown，不能以其docstring作证；实际兜底EOF。未证明所有exec/后代时序 |
+| 同PID exec如何终止worker？ | `server._schedule_reexec` → `QUOTA_REFRESH.shutdown` → `quota_sync.Manager.shutdown` → `sync_process.shutdown`，然后关闭QueryView并exec；stdin EOF另作生命周期兜底 | **2026-10-14订正**：原审计只核直接调用，漏掉上述传递清理，撤回“实际仅靠EOF”的判断。独立隔离调用链读数为accounts_close→sync_shutdown→exec；已有reexec回归覆盖此链，不新增重复shutdown。正常leader退出后的同组后代问题独立成立，仍需修复 |
 | SSH超时是否等于远端作业结束？ | sync共享monotonic deadline，BatchMode/ConnectTimeout和严格host/temp形态，finally有界清理；subprocess timeout杀本地直接子进程 | 本地有界不等于远端终止回执；未制造真实远端超时。/tmp age reaper不是活跃作业lease，不能证明全部远端派生进程结束 |
 | rsync完成是否等于业务接受？ | installer进一步核manifest/digest/source binding/schema/retention | 分层成立。传输成功不证明新鲜度；digest不是独立签名认证，源可信仍依赖SSH及配置绑定 |
 | launchd loaded是否可用？ | 核plist/loaded owner后bootout/bootstrap；明确非零最多3次，timeout不盲重试；输出区分loaded/reachability | 输出边界正确，没有自动事务回滚保证。bootstrap失败可已卸旧job；未操作真实launchd，未承诺零停机 |

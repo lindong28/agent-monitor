@@ -234,7 +234,10 @@
         url.searchParams.set(key, value);
       }
     });
-    const response = await fetch(url);
+    const action = path === "/api/refresh" || (path === "/api/network" && query?.force === "1");
+    const response = await fetch(url, action ? {
+      method: "POST", headers: { "X-Agent-Monitor": "action" },
+    } : undefined);
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);
     }
@@ -1415,7 +1418,7 @@
     try {
       const response = await fetch(new URL("/api/account-memory/remove", window.location.origin), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Agent-Monitor": "action" },
         body: JSON.stringify({
           provider: provider.key,
           account_id: account.account_id,
@@ -1968,6 +1971,9 @@
     const facts = [];
     const observedAt = machine.statistics?.observed_at || machine.generated_at;
     facts.push(observedAt ? `数据更新于 ${formatDate(observedAt)} · ${updatedText(observedAt)}` : "尚无数据");
+    const quality = machine.statistics?.usage_quality_counts;
+    facts.push(quality == null ? "Claude usage 完整性未知" :
+      `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}（全部留存，非当前日期范围；结束标记不保证最终 usage）`);
     if (machine.data_start_date) {
       facts.push(`历史自 ${escapeHtml(machine.data_start_date)}`);
     }
@@ -3074,15 +3080,24 @@
     const last = dates.length ? dates.reduce((a, b) => Math.max(a, b)) : null;
     const span = first === null ? "未知" : integer(Math.round((last - first) / 60000)) + " 分钟";
     const field = (name, value) => `<div><dt>${name}</dt><dd>${escapeHtml(value || "—")}</dd></div>`;
+    const costBasis = entry => entry.cost_usd == null ? "费用未知" :
+      ({recorded: "记录金额", nominal: "名义估值"}[entry.cost_provenance?.basis] || "金额依据未知");
+    const qualityText = entry => entry.agent_id !== "claude-code" ? "此质量分类不适用于 Codex" :
+      ({observed: "有结束标记，最终 usage 未获保证", incomplete: "不完整：只计已观测 tokens", unknown: "usage 完整性未知"}[entry.usage_quality] || "usage 完整性未知");
+    const costReason = reason => ({usage_incomplete: "用量记录不完整", unknown_model: "模型价格未知",
+      missing_rates: "缺少适用费率", unsupported_service_context: "服务模式无法定价",
+      conflicting_service_context: "服务模式记录冲突", mode_unreported: "部分服务模式未记录，按标准模式估值",
+      invalid_recorded_cost: "源记录金额无效"}[reason] || "—");
+    const incomplete = entries.filter(e => e.agent_id === "claude-code" && e.usage_quality === "incomplete").length;
     content.innerHTML = `<div class="session-metrics">
       <article><h3>记录成本</h3><strong>${sessionEntryCost(cost)}</strong><p>${unknown ? `${unknown} 条成本未知，未合计为总额` : "按现有定价口径 · 非账单"}</p></article>
-      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>输入、输出与缓存合计</p></article>
+      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>已观测输入、输出与缓存合计${incomplete ? ` · ${incomplete} 条 usage 不完整` : "；不保证最终用量"}</p></article>
       <article><h3>用量条目</h3><strong>${integer(events)}</strong><p>${integer(entries.length)} 条记录 · 非请求次数</p></article>
       <article><h3>观测跨度</h3><strong>${span}</strong><p>首末记录之间 · 非活跃时长</p></article></div>
       <details class="panel session-metadata"><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
         ${field("Agent", distinct("agent_id").join("、"))}${field("会话目录", distinct("project").join("、"))}
         ${field("模型", models.join("、"))}${field("首条记录", first === null ? "" : formatDate(first))}${field("末条记录", last === null ? "" : formatDate(last))}
-      </dl><p class="scope-note">范围为该会话已留存的全部记录，不受列表时间窗口限制。Codex 与部分模型采用推算定价；未知费用不归零。这里不包含对话正文，也未关联 Gateway 尝试链。</p></details>
+      </dl><p class="scope-note">范围为该会话已留存的全部记录，不受列表时间窗口限制。Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。这里不包含对话正文，也未关联 Gateway 尝试链。</p></details>
       <section class="panel"><div class="panel-head"><h2>用量明细</h2><span id="usage-count" class="status-line"></span></div>
       <div class="controls"><div class="field"><label for="usage-model">模型</label><select id="usage-model"><option value="">全部模型</option>${models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select></div><button id="usage-clear" type="button">清除筛选</button></div>
       <div class="table-wrap"><table><thead><tr><th>记录时间</th><th>模型</th><th class="numeric">输入</th><th class="numeric">输出</th><th class="numeric">缓存读取 / 写入</th><th class="numeric">成本</th><th>详情</th></tr></thead><tbody id="usage-body"></tbody></table></div>
@@ -3101,14 +3116,14 @@
       qs("#usage-body").innerHTML = rows.slice(page * 50, (page + 1) * 50).map((e, index) => `<tr>
         <td class="nowrap">${escapeHtml(formatDate(e.timestamp))}</td><td>${escapeHtml(e.model)}</td>
         <td class="numeric">${integer(e.input_tokens)}</td><td class="numeric">${integer(e.output_tokens)}</td>
-        <td class="numeric">${integer(e.cache_read_tokens)} / ${integer(e.cache_creation_tokens)}</td><td class="numeric">${sessionEntryCost(e.cost_usd)}</td>
+        <td class="numeric">${integer(e.cache_read_tokens)} / ${integer(e.cache_creation_tokens)}</td><td class="numeric">${sessionEntryCost(e.cost_usd)}<br><small>${costBasis(e)}</small></td>
         <td><button type="button" data-usage="${index}" aria-expanded="false">查看</button></td></tr>`).join("") || '<tr><td colspan="7">没有符合条件的记录。</td></tr>';
       qsa("[data-usage]").forEach(button => button.addEventListener("click", () => {
         if (button.getAttribute("aria-expanded") === "true") { button.closest("tr").nextElementSibling.remove(); button.setAttribute("aria-expanded", "false"); return; }
         const e = rows[page * 50 + Number(button.dataset.usage)];
         const row = document.createElement("tr");
         row.className = "session-entry-detail";
-        row.innerHTML = `<td colspan="7"><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("用量条目", String(e.usage_event_count ?? "未知"))}</dl><p class="scope-note">ID 来自源日志，不能直接作为 Gateway 请求标识。</p></td>`;
+        row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("用量条目", String(e.usage_event_count ?? "未知"))}${field("usage 证据", qualityText(e))}${field("金额依据", costBasis(e))}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}${field("计价说明", costReason(e.cost_provenance?.reason))}</dl><p class="scope-note">ID 来自源日志，不能直接作为 Gateway 请求标识。</p></div></td>`;
         button.closest("tr").after(row); button.setAttribute("aria-expanded", "true");
       }));
       qs("#usage-status").textContent = rows.length ? `第 ${page * 50 + 1}–${Math.min(rows.length, (page + 1) * 50)} 条，共 ${rows.length} 条` : "没有记录";
@@ -3187,7 +3202,9 @@
     button.disabled = true;
     button.textContent = "重启中…";
     try {
-      const res = await fetch(new URL("/api/restart", window.location.origin), { method: "POST" });
+      const res = await fetch(new URL("/api/restart", window.location.origin), {
+        method: "POST", headers: { "X-Agent-Monitor": "action" },
+      });
       const json = await res.json().catch(() => ({}));
       if (json && json.restarting === false) {
         button.disabled = false;

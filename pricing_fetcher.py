@@ -4,6 +4,7 @@ import math
 import ssl
 import time
 import urllib.request
+from dataclasses import replace
 from pathlib import Path
 
 import token_cost
@@ -33,6 +34,7 @@ def get_pricing(cache_path=CACHE_PATH, fetcher=None, now=None, persist=True):
     fetch = fetcher or _fetch_litellm_pricing
     try:
         data = fetch()
+        data = PricingTable(data, {key: LITELLM_URL if fetcher is None else "configured" for key in data})
         if persist:
             _write_cache(cache_path, data, now_fn())
         return _with_bundled_supplements(data)
@@ -41,42 +43,91 @@ def get_pricing(cache_path=CACHE_PATH, fetcher=None, now=None, persist=True):
         return _fallback_pricing()
 
 
-def calculate_cost(entry, pricing=None):
-    if entry.cost_usd is not None:
-        return entry.cost_usd
+class PricingTable(dict):
+    """Rates with their retrieval origin, without adding fake model keys."""
+    def __init__(self, data=(), sources=None):
+        super().__init__(data)
+        self.sources = sources or {}
 
+
+def _provenance(basis, sources=(), verified_at=None, reason=None):
+    return {"basis": basis, "sources": list(dict.fromkeys(sources)),
+            "verified_at": verified_at,
+            "time_basis": "valuation_time" if basis == "nominal" else "unknown",
+            "reason": reason}
+
+
+def with_calculated_cost(entry, pricing=None):
+    value, provenance = _cost_and_provenance(entry, pricing)
+    return replace(entry, cost_usd=value, cost_provenance=provenance)
+
+
+def calculate_cost(entry, pricing=None):
+    return _cost_and_provenance(entry, pricing)[0]
+
+
+def _cost_and_provenance(entry, pricing):
+    previous = entry.cost_provenance
+    if entry.cost_usd is not None and (previous is None or previous["basis"] == "recorded"):
+        if (isinstance(entry.cost_usd, bool) or not isinstance(entry.cost_usd, (int, float))
+                or not math.isfinite(entry.cost_usd) or entry.cost_usd < 0):
+            return None, _provenance("unpriced", reason="invalid_recorded_cost")
+        return entry.cost_usd, previous or _provenance("recorded", ["recorded"])
+    if entry.usage_quality == "incomplete":
+        return None, _provenance("unpriced", reason="usage_incomplete")
+    context = entry.service_context or {}
+    if context.get("conflicts"):
+        return None, _provenance("unpriced", reason="conflicting_service_context")
+    allowed = {"speed": {"standard", "fast"}, "inference_geo": {"global", "us"},
+               "service_tier": {"standard"}}
+    if any(key not in allowed or not isinstance(value, str) or value not in allowed[key]
+           for key, value in context.items()):
+        return None, _provenance("unpriced", reason="unsupported_service_context")
     table = pricing if pricing is not None else get_pricing()
     model_key = resolve_model_key(entry.model, table)
     if model_key is None:
         _log_unknown(entry.model)
-        return None
-
-    # Keep shared arithmetic unchanged; this adapter only exposes fully known
-    # amounts because UsageEntry has no partial-price provenance field.
+        return None, _provenance("unpriced", reason="unknown_model")
+    rates = table[model_key]
+    source = getattr(table, "sources", {}).get(model_key, "configured")
+    sources = [rates.get("source") or source]
+    verified_at = rates.get("verified_at")
+    if context.get("speed") == "fast":
+        rates = rates.get("service_modes", {}).get("fast")
+        if not isinstance(rates, dict):
+            return None, _provenance("unpriced", reason="unsupported_service_context")
+        sources = [rates["source"]]
+        verified_at = rates.get("verified_at")
+    multiplier = 1
+    if context.get("inference_geo") == "us":
+        geo = table[model_key].get("inference_geo_us")
+        if not isinstance(geo, dict):
+            return None, _provenance("unpriced", reason="unsupported_service_context")
+        multiplier = geo["multiplier"]
+        sources.append(geo["source"])
+        if verified_at != geo.get("verified_at"):
+            verified_at = None
     priced = token_cost.price(
         token_cost.TokenCounts(
-            input_tokens=entry.input_tokens,
-            output_tokens=entry.output_tokens,
+            input_tokens=entry.input_tokens, output_tokens=entry.output_tokens,
             cache_read_tokens=entry.cache_read_tokens,
             cache_creation_tokens=entry.cache_creation_tokens,
             cache_creation_1h_tokens=entry.cache_creation_1h_tokens,
-        ),
-        table[model_key],
+        ), rates,
     )
     if priced is None:
-        return None
+        return None, _provenance("unpriced", sources, verified_at, "missing_rates")
     hour = min(entry.cache_creation_1h_tokens, entry.cache_creation_tokens)
     missing = list(priced.missing_rates)
-    # The shared calculator reports the 5m rate absent even when every write
-    # is explicitly 1h. Only categories actually used make the amount unknown.
     if hour == entry.cache_creation_tokens and "cache_creation" in missing:
         missing.remove("cache_creation")
-    if hour and not _has_rate(table[model_key], token_cost.CACHE_WRITE_1H_RATE, priced.tier):
+    if hour and not _has_rate(rates, token_cost.CACHE_WRITE_1H_RATE, priced.tier):
         missing.append("cache_creation_1h")
     if missing:
         _log_partial_rates(model_key, tuple(missing))
-        return None
-    return priced.value
+        return None, _provenance("unpriced", sources, verified_at, "missing_rates")
+    reason = "mode_unreported" if entry.agent_id == "claude-code" and not all(key in context for key in allowed) else None
+    return priced.value * multiplier, _provenance("nominal", sources, verified_at, reason)
 
 
 def _has_rate(rates, key, tier):
@@ -109,14 +160,15 @@ def _read_fresh_cache(cache_path, now):
 
     if now - float(payload.get("fetched_at", 0)) > TTL_SECONDS:
         return None
-    return payload["data"]
+    data = payload["data"]
+    return PricingTable(data, payload.get("sources") or {key: "cached_catalog" for key in data})
 
 
 def _write_cache(cache_path, data, fetched_at):
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(
-            json.dumps({"fetched_at": fetched_at, "data": data}, sort_keys=True),
+            json.dumps({"fetched_at": fetched_at, "data": data, "sources": getattr(data, "sources", {})}, sort_keys=True),
             encoding="utf-8",
         )
     except OSError:
@@ -132,9 +184,17 @@ def _with_bundled_supplements(data):
     bundled = _fallback_pricing()
     if not bundled:
         return data
-    merged = dict(data)
+    merged = PricingTable(data, dict(getattr(data, "sources", {})))
     for key, value in bundled.items():
-        merged.setdefault(key, value)
+        if key not in merged:
+            merged[key] = value
+            merged.sources[key] = "bundled"
+        elif isinstance(merged[key], dict):
+            # Official mode metadata is independent of catalog standard rates.
+            merged[key] = dict(merged[key])
+            for field in ("service_modes", "inference_geo_us"):
+                if field in value:
+                    merged[key].setdefault(field, value[field])
     return merged
 
 
@@ -153,7 +213,8 @@ def _fetch_litellm_pricing():
 
 def _fallback_pricing():
     try:
-        return json.loads(FALLBACK_PATH.read_text(encoding="utf-8"))
+        data = json.loads(FALLBACK_PATH.read_text(encoding="utf-8"))
+        return PricingTable(data, {key: "bundled" for key in data})
     except (json.JSONDecodeError, OSError):
         logger.warning("Bundled pricing fallback missing or invalid")
         return {}

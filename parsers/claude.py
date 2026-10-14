@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import UsageEntry, complete_usage_observation
+from . import SERVICE_CONTEXT_KEYS, UsageEntry, complete_usage_observation
 
 
 # Ported and dependency-stripped from token-tracker src/adapters/claude.py.
@@ -95,7 +95,12 @@ def _parse_assistant_entry(data, project):
     cache_read = _int(usage.get("cache_read_input_tokens"))
     cache_creation_1h = _cache_creation_1h(usage, cache_creation)
 
-    if input_tokens == 0 and output_tokens == 0 and cache_creation == 0 and cache_read == 0:
+    stop_reason = message.get("stop_reason")
+    quality = ("incomplete" if "stop_reason" in message and stop_reason is None else
+               "observed" if isinstance(stop_reason, str) and stop_reason else "unknown")
+    context = {key: value if isinstance(value, str) and len(value) <= 128 else None
+               for key, value in usage.items() if key in SERVICE_CONTEXT_KEYS}
+    if quality != "incomplete" and input_tokens == 0 and output_tokens == 0 and cache_creation == 0 and cache_read == 0:
         return None
 
     try:
@@ -121,6 +126,8 @@ def _parse_assistant_entry(data, project):
         project=project,
         agent_id="claude-code",
         cache_creation_1h_tokens=cache_creation_1h,
+        usage_quality=quality,
+        service_context=context or None,
     )
 
 

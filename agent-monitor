@@ -35,11 +35,7 @@ usage() {
 }
 
 is_running() {
-  [ -f "$PID_FILE" ] || return 1
-  local pid
-  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null
+  "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/process_identity.py" check "$STATE_DIR" "$ROOT_DIR"
 }
 
 find_port() {
@@ -61,8 +57,13 @@ start() {
   if is_running; then
     local port
     port="$(cat "$PORT_FILE" 2>/dev/null || echo "$BASE_PORT")"
-    echo "agent-monitor already running: http://$CONNECT_HOST:$port (pid $(cat "$PID_FILE"))"
+    local pid
+    pid="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/process_identity.py" pid "$STATE_DIR" "$ROOT_DIR")" || return $?
+    echo "agent-monitor already running: http://$CONNECT_HOST:$port (pid $pid)"
     return 0
+  else
+    local state_result=$?
+    [ "$state_result" -eq 1 ] || return "$state_result"
   fi
 
   local port
@@ -72,10 +73,20 @@ start() {
   pid="$("$AGENT_MONITOR_PYTHON" - "$ROOT_DIR/server.py" "$BIND_HOST" "$port" "$LOG_FILE" <<'PY'
 import os
 import sys
+from pathlib import Path
 
 server, host, port, log_file = sys.argv[1:]
+sys.path.insert(0, str(Path(server).parent))
+import process_identity
 pid = os.fork()
 if pid:
+    try:
+        process_identity.record(Path(log_file).parent, Path(server).parent, pid)
+    except Exception:
+        # This unreaped child belongs to this launcher; its PID cannot recycle.
+        os.kill(pid, 15)
+        os.waitpid(pid, 0)
+        raise
     print(pid)
     raise SystemExit(0)
 
@@ -109,36 +120,33 @@ stop() {
     "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" stop-web
     return
   fi
-  if ! is_running; then
-    rm -f "$PID_FILE" "$PORT_FILE"
+  if is_running; then
+    :
+  else
+    local state_result=$?
+    [ "$state_result" -eq 1 ] || return "$state_result"
+    rm -f "$PID_FILE" "$PORT_FILE" "$STATE_DIR/pid-identity.json"
     echo "agent-monitor not running"
     return 0
   fi
-
-  local pid
-  pid="$(cat "$PID_FILE")"
-  kill "$pid" 2>/dev/null || true
-  # Account shutdown has two bounded drain phases; allow it to reap children.
-  for (( attempt=0; attempt<50; attempt++ )); do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      break
-    fi
-    sleep 0.2
-  done
-  if kill -0 "$pid" 2>/dev/null; then
-    kill -9 "$pid" 2>/dev/null || true
-  fi
-  rm -f "$PID_FILE" "$PORT_FILE"
+  "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/process_identity.py" stop "$STATE_DIR" "$ROOT_DIR" || return $?
+  rm -f "$PID_FILE" "$PORT_FILE" "$STATE_DIR/pid-identity.json"
   echo "agent-monitor stopped"
 }
 
 status() {
-  if ! is_running; then
-    echo "agent-monitor not running"
-    return 0
+  if is_running; then
+    :
+  else
+    local state_result=$?
+    if [ "$state_result" -eq 1 ]; then
+      echo "agent-monitor not running"
+      return 0
+    fi
+    return "$state_result"
   fi
   local pid port uptime
-  pid="$(cat "$PID_FILE")"
+  pid="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/process_identity.py" pid "$STATE_DIR" "$ROOT_DIR")" || return $?
   port="$(cat "$PORT_FILE" 2>/dev/null || echo "$BASE_PORT")"
   uptime="$(ps -o etime= -p "$pid" 2>/dev/null | awk '{$1=$1; print}')"
   echo "agent-monitor running: pid=$pid port=$port uptime=${uptime:-unknown} url=http://$CONNECT_HOST:$port"
@@ -165,7 +173,7 @@ refresh_if_stale() {
   [ "$stale" = "1" ] || return 0
   if compile_ok; then
     echo "agent-monitor: 检测到代码已更新，重启以加载新代码…"
-    stop >/dev/null || true
+    stop >/dev/null || return $?
     start
   else
     echo "agent-monitor: 代码已更新但存在语法错误，未重启；打开当前(旧)版本。" >&2
@@ -175,13 +183,13 @@ refresh_if_stale() {
 request_fresh_generation() {
   local port response pending
   port="$(cat "$PORT_FILE" 2>/dev/null || echo "$BASE_PORT")"
-  if ! response="$(curl --noproxy '*' -fsS "http://$CONNECT_HOST:$port/api/overview?force=1" 2>/dev/null)"; then
+  if ! response="$(curl --noproxy '*' -fsS -X POST -H 'X-Agent-Monitor: action' -H "Origin: http://$CONNECT_HOST:$port" "http://$CONNECT_HOST:$port/api/refresh?ack=1" 2>/dev/null)"; then
     echo "agent-monitor: 未能请求最新用量快照；将打开现有数据。请在页面中点 Refresh 重试。" >&2
     return 0
   fi
   pending="$(
     printf '%s' "$response" \
-      | "$AGENT_MONITOR_PYTHON" -c 'import json,sys; sync=(json.load(sys.stdin).get("sync") or {}); print("1" if sync.get("refresh_pending") is True or sync.get("syncing") is True else "0")' 2>/dev/null \
+      | "$AGENT_MONITOR_PYTHON" -c 'import json,sys; receipt=json.load(sys.stdin); print("1" if receipt.get("refresh_request",0)>0 else "0")' 2>/dev/null \
       || echo 0
   )"
   if [ "$pending" != "1" ]; then
@@ -201,10 +209,12 @@ open_dashboard() {
     fi
     return
   fi
-  if ! is_running; then
-    start
-  else
+  if is_running; then
     refresh_if_stale
+  else
+    local state_result=$?
+    [ "$state_result" -eq 1 ] || return "$state_result"
+    start
   fi
   request_fresh_generation
   local port
@@ -758,7 +768,7 @@ case "${1:-}" in
       "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" stop-web && "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" install-web
       exit $?
     fi
-    stop >/dev/null || true
+    stop >/dev/null || exit $?
     start
     ;;
   status)
@@ -801,6 +811,8 @@ case "${1:-}" in
     if [ -n "$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" url)" ] || is_running; then
       PYTHONPATH="$ROOT_DIR" "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/refresh.py"
     else
+      state_result=$?
+      [ "$state_result" -eq 1 ] || exit "$state_result"
       run_rollup
       echo "agent-monitor refresh: partial — local rollup finished; dashboard is stopped, so cross-machine data and Quota were not refreshed. Run 'agent-monitor start', then 'agent-monitor refresh'." >&2
       exit 1

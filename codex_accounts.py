@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from parsers.accounts import codex_account
+from parsers.codex import select_codex_rate_limit
 
 
 MESSAGE = "Please reply with OK."
@@ -71,6 +72,91 @@ def turn_failure(error):
     return result
 
 
+# Codex rust-v0.162.1 temporary_structured_request.rs plus the independent
+# sleep/environment-advertisement flags. Model-catalog internal tools can remain;
+# this is not a universal "zero tools" switch.
+RESTRICTED_FEATURES = (
+    "apps", "code_mode", "code_mode_only", "code_mode_host", "context_management",
+    "current_time_reminder", "deferred_executor", "enable_fanout", "goals", "hooks",
+    "image_generation", "memories", "multi_agent", "multi_agent_v2", "plugins",
+    "request_permissions_tool", "shell_snapshot", "shell_tool", "standalone_web_search",
+    "token_budget", "tool_suggest", "unified_exec", "view_image", "sleep_tool",
+    "stable_environment_tools", "send_message_to_user_async",
+)
+RESTRICTED_CONFIG = {"features." + name: False for name in RESTRICTED_FEATURES}
+RESTRICTED_CONFIG.update({"cloud.skills.enabled": False, "skills.include_instructions": False,
+                         "tools.experimental_request_user_input.enabled": False,
+                         "tools.update_plan.enabled": False, "web_search": "disabled"})
+
+
+def restricted_thread_options(response):
+    """Verify visible constraints and construct the producer's scoped overlay.
+
+    HOME does not remove system/managed layers. Unverifiable or conflicting
+    constraints stop the action; they are never silently overridden here.
+    """
+    failure = "无法核验 Codex 受限配置，或系统策略与本次操作约束冲突；未发送消息。"
+    config, layers = response.get("config"), response.get("layers")
+    if not isinstance(config, dict) or not isinstance(layers, list) or not layers:
+        raise ActionError(failure, 409)
+    features = config.get("features")
+    def disabled(value):
+        return value is False or isinstance(value, dict) and value.get("enabled") is False
+    if (not isinstance(features, dict) or any(not disabled(features.get(name)) for name in RESTRICTED_FEATURES)
+            or config.get("web_search") != "disabled"):
+        raise ActionError(failure, 409)
+    active_layers = []
+    for layer in layers:
+        if not isinstance(layer, dict) or not isinstance(layer.get("config"), dict):
+            raise ActionError(failure, 409)
+        if not layer.get("disabledReason"):
+            active_layers.append(layer)
+    # ConfigReadResponse.ToolsV2 omits these keys. Its absence is not false;
+    # inspect the high-to-low raw layers supplied by the fixed producer.
+    for tool in ("update_plan", "experimental_request_user_input"):
+        observed = None
+        for layer in active_layers:
+            tools = layer["config"].get("tools", {})
+            if isinstance(tools, dict) and isinstance(tools.get(tool), dict) and "enabled" in tools[tool]:
+                observed = tools[tool]["enabled"]
+                break
+        if observed is not False:
+            raise ActionError(failure, 409)
+    servers = config.get("mcp_servers")
+    if servers is None:
+        servers = {}
+    if not isinstance(servers, dict) or any(not isinstance(value, dict) for value in servers.values()):
+        raise ActionError(failure, 409)
+    managed = {"mdm", "legacyManagedConfigTomlFromFile", "legacyManagedConfigTomlFromMdm", "enterpriseManaged"}
+    for layer in active_layers:
+        if (layer.get("name") or {}).get("type") in managed:
+            declared = layer["config"].get("mcp_servers", {})
+            if not isinstance(declared, dict):
+                raise ActionError(failure, 409)
+            if any(isinstance(value, dict) and value.get("enabled") is True for value in declared.values()):
+                raise ActionError(failure, 409)
+    profile = config.get("default_permissions")
+    if profile is not None and (not isinstance(profile, str) or not profile):
+        raise ActionError(failure, 409)
+    profile = profile if profile and not profile.startswith(":") else None
+    overlay = dict(RESTRICTED_CONFIG)
+    overlay["mcp_servers"] = {name: {"enabled": False} for name in servers}
+    options = {"config": overlay, "environments": [], "dynamicTools": [],
+               "selectedCapabilityRoots": [], "runtimeWorkspaceRoots": []}
+    if profile:
+        options["permissions"] = profile
+    else:
+        overlay["default_permissions"] = ":read-only"
+        options["sandbox"] = "read-only"
+    return options, profile
+
+
+def verify_restricted_thread(response, profile):
+    if (not isinstance(response.get("sandbox"), dict) or response["sandbox"].get("type") != "readOnly"
+            or profile and (response.get("activePermissionProfile") or {}).get("id") != profile):
+        raise ActionError("Codex 未保留所需权限配置与只读限制，未发送消息。", 409)
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -120,7 +206,7 @@ def child_environment(home):
 
 
 class Rpc:
-    """One owned app-server, with bounded waits and no user configuration."""
+    """One owned app-server; private user directories, system policy retained."""
 
     def __init__(self, home, cancelled):
         self.cancelled = cancelled
@@ -149,6 +235,7 @@ class Rpc:
             "features.hooks": "false", "features.apps": "false", "features.plugins": "false",
             "project_doc_max_bytes": "0",
         }
+        config.update({key: json.dumps(value) for key, value in RESTRICTED_CONFIG.items()})
         command = [executable, "app-server", "--listen", "stdio://"]
         for key, value in config.items():
             command.extend(["-c", key + "=" + value])
@@ -267,9 +354,11 @@ class Rpc:
 
 
 def quota_reading(result, account_id):
+    if result.get("accountId") is None:
+        raise ActionError("配额响应未提供账号，无法核验读数归属；请稍后重试。", 502)
     if result.get("accountId") != account_id:
-        raise ActionError("配额响应的账号不匹配或缺失，请更新 CLI 后重试。", 502)
-    limit = (result.get("rateLimitsByLimitId") or {}).get("codex") or result.get("rateLimits") or {}
+        raise ActionError("配额响应的账号与所选账号不匹配。", 502)
+    limit = select_codex_rate_limit(result) or {}
     reading = {"observed_at": now()}
     for minutes, prefix in ((300, "five_hour"), (10080, "seven_day")):
         window = next((limit[key] for key in ("primary", "secondary")
@@ -628,10 +717,14 @@ class Manager:
             except ActionError:
                 if job["cancelled"].is_set():
                     raise Cancelled("操作已取消。")
-            thread = rpc.request("thread/start", {"ephemeral": True, "cwd": str(directory / "work"),
-                                 "approvalPolicy": "never", "sandbox": "read-only", "environments": [],
+            configuration = rpc.request("config/read", {"includeLayers": True, "cwd": str(directory / "work")},
+                                        min(deadline, time.monotonic() + 20))
+            options, profile = restricted_thread_options(configuration)
+            thread = rpc.request("thread/start", {**options, "ephemeral": True, "cwd": str(directory / "work"),
+                                 "approvalPolicy": "never",
                                  "baseInstructions": "Respond briefly to the user's message.",
                                  "developerInstructions": "This is a connectivity check. Reply with OK."}, deadline)
+            verify_restricted_thread(thread, profile)
             thread_id = thread["thread"]["id"]
             # Commit unknown before transmission: lost acknowledgement is not proof of no usage.
             self.update(directory, record, stage="sending", message_status="unknown", detail="正在发送一条短消息；中断后不会自动重发。")

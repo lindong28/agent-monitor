@@ -176,7 +176,7 @@ class RollupCheckTests(unittest.TestCase):
                 self.assertFalse(result["scan_complete"])
                 self.assertEqual(result["source_errors"][0]["stage"], "load")
 
-        with self.subTest("uncheckpointed WAL cannot be read without side effects"):
+        with self.subTest("committed WAL is read through a private copy without source side effects"):
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 db_path = root / "state" / "rollup.db"
@@ -194,9 +194,9 @@ class RollupCheckTests(unittest.TestCase):
                     result = rollup._check_rollup(db_path, lambda: current, now=lambda: now)
 
                     self.assertEqual(self.tree_snapshot(root), before)
-                    self.assertEqual(result["status"], "indeterminate")
-                    self.assertEqual(result["db_state"], "unreadable")
-                    self.assertEqual(result["diagnostic_errors"][0]["stage"], "database")
+                    self.assertEqual(result["status"], "safe")
+                    self.assertEqual(result["db_state"], "ready")
+                    self.assertEqual(result["diagnostic_errors"], [])
                 finally:
                     reader.close()
 

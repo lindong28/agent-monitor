@@ -260,6 +260,7 @@ class AggregatorTests(unittest.TestCase):
             # read mode; it delegates only the opening itself, so this is the
             # same chokepoint rather than a second way in.
             ("rollup.py", "_connect_read_only", "rollup_read_chokepoint"),
+            ("rollup.py", "_private_read_copy", "locked_source_private_copy_recovery"),
             ("usage_archive.py", "read", "retained_usage_read_only"),
             ("usage_archive.py", "collect", "retained_usage_transaction_write"),
             ("statistics_snapshot.py", "write_snapshot", "unpublished_statistics_write"),

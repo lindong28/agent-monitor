@@ -10,6 +10,7 @@ Current usage and installation belong in the root README; current architecture a
 | [references/metrics.md](references/metrics.md) | User-visible metric definitions, source versions, derivation arguments, coverage and unknowns; read before changing a statistic |
 | [references/metrics-operations.md](references/metrics-operations.md) | Maintenance CLI, snapshot/export and runtime diagnostic field definitions |
 | [references/upstream-contracts.md](references/upstream-contracts.md) | Versioned correctness arguments and bounded counterexamples for protocol, identity, storage, isolation and lifecycle |
+| [references/upstream-contract-repairs.md](references/upstream-contract-repairs.md) | Current ten-object repair arguments, evidence transport schema, conditions and verification boundaries |
 | [explore-performance.md](explore-performance.md) | Explore performance evidence, improvement scope and implementation results |
 | [performance-20261013.md](performance-20261013.md) | Session indexes, runtime diagnostics and measured performance delivery |
 | [proactive-performance.md](proactive-performance.md) | Proactive performance gaps, implementation, diagnostic commands and verification limits |

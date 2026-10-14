@@ -75,10 +75,23 @@ for line in sys.stdin:
             continue
         result = {"accountId": account_id, "rateLimits": {"secondary": {"windowDurationMins": 10080, "usedPercent": 0,
                   "resetsAt": None if scenario == "no_reset" else 1900000000 + quota_reads}}}
+    elif method == "config/read":
+        # Producer-shaped fixture, frozen to the audited 0.162.1 feature names.
+        flags = "apps code_mode code_mode_only code_mode_host context_management current_time_reminder deferred_executor enable_fanout goals hooks image_generation memories multi_agent multi_agent_v2 plugins request_permissions_tool shell_snapshot shell_tool standalone_web_search token_budget tool_suggest unified_exec view_image sleep_tool stable_environment_tools send_message_to_user_async".split()
+        result = {"config": {"features": dict.fromkeys(flags, False), "web_search": "disabled", "mcp_servers": {"fixture": {"enabled": True}}},
+                  "layers": [{"name": {"type": "sessionFlags"}, "config": {"tools": {"update_plan": {"enabled": False}, "experimental_request_user_input": {"enabled": False}}}}]}
+        if scenario == "unsafe_config":
+            result["config"]["features"]["shell_tool"] = True
+        if scenario in ("custom_profile", "wrong_profile"):
+            result["config"]["default_permissions"] = "managed-fixture"
     elif method == "thread/start":
         assert message["params"]["environments"] == []
         assert message["params"]["ephemeral"] is True
-        result = {"thread": {"id": "thread-fixture"}}
+        result = {"thread": {"id": "thread-fixture"}, "sandbox": {"type": "workspaceWrite" if scenario == "unsafe_sandbox" else "readOnly"}}
+        if scenario in ("custom_profile", "wrong_profile"):
+            assert message["params"]["permissions"] == "managed-fixture"
+            assert "sandbox" not in message["params"]
+            result["activePermissionProfile"] = {"id": "other" if scenario == "wrong_profile" else "managed-fixture"}
     elif method == "turn/start":
         assert message["params"]["environments"] == []
         if scenario == "disconnect":

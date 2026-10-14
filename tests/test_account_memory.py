@@ -589,6 +589,8 @@ class AccountMemoryTests(unittest.TestCase):
             client.sendall(
                 b"POST /api/account-memory/remove HTTP/1.1\r\n"
                 b"Host: 127.0.0.1\r\n"
+                b"Origin: http://127.0.0.1\r\n"
+                b"X-Agent-Monitor: action\r\n"
                 b"Content-Type: application/json\r\n"
                 b"Content-Length: -1\r\n"
                 b"Connection: close\r\n"
@@ -979,6 +981,8 @@ class AccountMemoryTests(unittest.TestCase):
                 }
             ).encode("utf-8"),
             method="POST",
+            headers={"Origin": "http://127.0.0.1:%d" % httpd.server_port,
+                     "X-Agent-Monitor": "action"},
         )
         if content_type is not None:
             request.add_header("Content-Type", content_type)

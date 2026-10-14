@@ -1331,7 +1331,8 @@ td.numeric {
 .session-fields dt { color: var(--ink-muted); font-size: 12px; }
 .session-fields dd { margin: var(--sp-2) 0 0; }
 .session-metadata summary { cursor: pointer; }
-.session-detail .table-wrap { overflow-x: auto; }
+.session-detail .table-wrap { overflow-x: auto; container-type: inline-size; }
+.session-entry-evidence { position: sticky; left: var(--sp-5); width: min(100%, calc(100cqw - var(--sp-8))); }
 .session-detail .table-wrap table { min-width: 760px; }
 .session-detail [hidden], #session-list-panel[hidden] { display: none; }
 

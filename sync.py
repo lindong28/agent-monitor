@@ -1,6 +1,7 @@
 import json
 import copy
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -20,10 +21,109 @@ _SSH_HOST = re.compile(r"^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+$")
 _REMOTE_TEMP = re.compile(r"^/tmp/agent-monitor-export\.[A-Za-z0-9]+$")
 _SSH_PREFIX = ("ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
 _RSYNC_PREFIX = ("rsync", "-rzc", "-e", "ssh -T -o BatchMode=yes -o ConnectTimeout=10")
-_REMOTE_REAPER = (
-    "find -H /tmp -maxdepth 1 -type d -user \"$(id -u)\" "
-    "-name 'agent-monitor-export.*' -mmin +60 -exec rm -rf -- {} +"
-)
+_REMOTE_EXPORT_SCRIPT = r'''
+import fcntl, os, select, signal, subprocess, sys, time
+directory, budget = sys.argv[1:3]
+command = sys.argv[3:]
+command[0] = os.path.expanduser(command[0])
+deadline = time.monotonic() + float(budget)
+lease_path = os.path.join(directory, '.lease')
+lease = os.open(lease_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+held, current = os.fstat(lease), os.stat(lease_path, follow_symlinks=False)
+if (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino):
+    raise RuntimeError('export directory changed before startup')
+alive_read, alive_write = os.pipe()
+status_read, status_write = os.pipe()
+guardian = os.fork()
+if guardian == 0:
+    os.close(alive_write)
+    os.close(status_read)
+    os.setsid()
+    code = 125
+    try:
+        child = subprocess.Popen(command, pass_fds=(lease,))
+        while True:
+            code = child.poll()
+            if code is not None:
+                code = code if code >= 0 else 128 - code
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                code = 124
+                break
+            ready, _, _ = select.select([alive_read], [], [], min(remaining, 0.1))
+            if ready and not os.read(alive_read, 1):
+                code = 125
+                break
+    finally:
+        # This process is the live group leader until the final group signal.
+        # Export retains the same lease if this guardian exits unexpectedly.
+        try:
+            os.write(status_write, str(code if code is not None else 125).encode())
+        finally:
+            os.killpg(os.getpid(), signal.SIGKILL)
+    os._exit(125)
+os.close(alive_read)
+os.close(status_write)
+os.close(lease)  # Never LOCK_UN: the child owns the same open-file-description.
+try:
+    os.waitpid(guardian, 0)
+    result = os.read(status_read, 32)
+    code = int(result) if result else 125
+finally:
+    os.close(alive_write)
+    os.close(status_read)
+sys.exit(code)
+'''
+
+_REMOTE_CLEANUP_SCRIPT = r'''
+import fcntl, os, shutil, sys, time
+from pathlib import Path
+def clean(path):
+    if path.is_symlink() or not path.is_dir() or path.stat().st_uid != os.getuid():
+        return False
+    lease_path = path / '.lease'
+    try:
+        fd = os.open(lease_path, os.O_RDWR | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return False  # Legacy directories have no proof of job lifetime.
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        try:
+            current = os.stat(lease_path, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        held = os.fstat(fd)
+        if (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino):
+            return False
+        shutil.rmtree(path)
+        return True
+    finally:
+        os.close(fd)
+mode, target = sys.argv[1:3]
+if mode == 'reap':
+    for path in Path(target).iterdir():
+        if path.name.startswith('agent-monitor-export.') and not path.is_symlink():
+            try:
+                if time.time() - path.stat().st_mtime > 3600:
+                    clean(path)
+            except FileNotFoundError:
+                pass
+else:
+    path = Path(target)
+    sys.exit(0 if not path.exists() or clean(path) else 75)
+'''
+
+
+def _remote_python(script, *args):
+    return shlex.join(["python3", "-c", script, *map(str, args)])
+
+
+_REMOTE_REAPER = _remote_python(_REMOTE_CLEANUP_SCRIPT, "reap", "/tmp")
 REMOTE_CLEANUP_TIMEOUT = 10
 
 
@@ -252,8 +352,11 @@ def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refres
             [
                 *_SSH_PREFIX,
                 ssh_host,
-                "~/.local/bin/agent-monitor export --out %s/bundle%s" % (
-                    remote_temp, (" --gui-quota" if hub.enabled() else "") if quota_refresh else " --cached-quota"
+                _remote_python(
+                    _REMOTE_EXPORT_SCRIPT, remote_temp,
+                    max(0, deadline - time.monotonic()),
+                    "~/.local/bin/agent-monitor", "export", "--out", remote_temp + "/bundle",
+                    *((["--gui-quota"] if hub.enabled() else []) if quota_refresh else ["--cached-quota"]),
                 ),
             ],
             deadline,
@@ -275,7 +378,7 @@ def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refres
             primary_failed = sys.exc_info()[0] is not None
             try:
                 runner(
-                    [*_SSH_PREFIX, ssh_host, "rm -rf -- %s" % remote_temp],
+                    [*_SSH_PREFIX, ssh_host, _remote_python(_REMOTE_CLEANUP_SCRIPT, "clean", remote_temp)],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -351,4 +454,6 @@ def install_export_bundle(
     ):
         if meta[field] != manifest[field]:
             raise TransferValidationError("%s changed while installing export" % field)
-    return generation.publish_generation(machine.name, snapshot_path, meta, root=root)
+    return generation.publish_generation(
+        machine.name, snapshot_path, meta, root=root, require_fresh=True
+    )

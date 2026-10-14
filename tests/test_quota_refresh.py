@@ -578,11 +578,14 @@ class RefreshRoundTests(unittest.TestCase):
         final = final or initial
         calls = []
 
-        def get(path):
+        def get(path, method="GET"):
             calls.append(path)
             if path == "/api/sync-status":
                 return (before or self.status(started="old")) if len(calls) == 1 else (polled or initial)
-            return {"sync": initial if "force=1" in path else final,
+            if path == "/api/refresh":
+                self.assertEqual(method, "POST")
+                return initial
+            return {"sync": final,
                     "rate_limits": {p: {"refresh_errors": errors or []} for p in ("claude", "codex")}}
 
         kwargs = {"clock": clock} if clock else {}

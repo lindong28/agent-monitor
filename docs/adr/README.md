@@ -2,6 +2,11 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261014-58e1: usage evidence and nominal valuation](20261014-58e1-usage-evidence.md) | Accepted; quality, mode, provenance and strict statistics v3 with legacy readers |
+| [20261014-f20a: account source contracts](20261014-f20a-account-source-contracts.md) | Accepted; selected identities, target quota bucket and restricted external capabilities |
+| [20261014-86ab: runtime ownership](20261014-86ab-runtime-ownership.md) | Accepted; explicit mutation POSTs and process identity/cleanup boundaries |
+| [20261014-97cd: storage and publication](20261014-97cd-storage-publication.md) | Accepted; locked private reads, commit timestamp, automatic freshness and remote leases |
+| [20261014-a8de: quota parent lifetime](20261014-a8de-quota-parent-lifetime.md) | Accepted; dedicated parent pipe and unchanged total budget for detached readers |
 | [20261014-c82a: Ark top-level areas and documentation](20261014-c82a-ark-top-navigation.md) | Accepted; console/guide navigation, local page/help search and copyable guide commands with console context retained |
 | [20261014-7d2f: Ark Console visual style](20261014-7d2f-ark-console-style.md) | Accepted design; independent reusable template and shared Monitor visual layer, product semantics preserved |
 | [20261012-6a92: Web UI workflows](20261012-6a92-ui-workflows.md) | Accepted; explicit scope, calendar comparison, event-filtered session drilldown and quota sorting |

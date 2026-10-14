@@ -6,10 +6,14 @@ The caller quota_refresh bounds the complete child process, including body reads
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import re
 import subprocess
+import unicodedata
+from pathlib import Path
 import time
 import urllib.error
 import urllib.request
@@ -19,11 +23,44 @@ from datetime import datetime, timezone
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 OAUTH_BETA = "oauth-2025-04-20"
 TIMEOUT_S = 10
-CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-CREDENTIALS = os.path.join(CLAUDE_DIR, ".credentials.json")
 KEYCHAIN_TOOL = "/usr/bin/security"
-KEYCHAIN_SERVICE = "Claude Code-credentials"
 KEYCHAIN_TIMEOUT_S = 5
+
+
+def config_directory():
+    return unicodedata.normalize("NFC", os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude"))
+
+
+def metadata_path():
+    # Claude 2.1.296 Tt/txr: legacy config wins; secure storage does not move metadata.
+    legacy = Path(config_directory()) / ".config.json"
+    if legacy.exists():
+        return legacy
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home()) / ".claude.json"
+
+
+def credential_store():
+    # Match the producer's Lw/j$/RR selectors, including an explicitly empty
+    # secure-storage override (which resets credentials to the default store).
+    secure = os.environ.get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+    selected = secure if secure is not None else os.environ.get("CLAUDE_CONFIG_DIR")
+    directory = unicodedata.normalize("NFC", selected or str(Path.home() / ".claude"))
+    suffix = "-" + hashlib.sha256(directory.encode()).hexdigest()[:8] if selected else ""
+    try:
+        import pwd
+        account = os.environ.get("USER") or pwd.getpwuid(os.getuid()).pw_name
+    except (ImportError, KeyError, OSError):
+        account = "claude-code-user"
+    if not re.fullmatch(r"[a-zA-Z0-9._-]+", account):
+        account = "claude-code-user"
+    return {"directory": directory, "service": "Claude Code-credentials" + suffix, "account": account}
+
+
+_STORE = credential_store()
+CLAUDE_DIR = _STORE["directory"]
+CREDENTIALS = os.path.join(CLAUDE_DIR, ".credentials.json")
+KEYCHAIN_SERVICE = _STORE["service"]
+KEYCHAIN_ACCOUNT = _STORE["account"]
 
 
 def to_epoch(value: object) -> int:
@@ -108,12 +145,12 @@ def blob_from_keychain() -> str | None:
     """The login keychain's copy of the same blob, or None when unavailable.
 
     The secret comes back on stdout and is captured, never echoed: `-w` prints
-    the password alone, and the service name is the only thing on the command
-    line, which `ps` shows to every user on the host.
+    the password alone. Only the selected service and OS account appear in
+    the command line; neither is a provider credential.
     """
     try:
         completed = subprocess.run(
-            [KEYCHAIN_TOOL, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+            [KEYCHAIN_TOOL, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"],
             # Nothing to read, and a child inheriting this process's stdin could
             # consume input meant for whoever spawned it.
             stdin=subprocess.DEVNULL,

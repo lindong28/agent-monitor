@@ -243,6 +243,7 @@ def publish_generation(
     root=DEFAULT_GENERATIONS_ROOT,
     now=None,
     phase_hook=None,
+    require_fresh=False,
 ):
     root = Path(root)
     snapshot_path = Path(snapshot_path)
@@ -283,9 +284,15 @@ def publish_generation(
                         continue
                     if _generation_file_signature(staging_dir) != signature:
                         raise GenerationValidationError("prepared generation changed before publication")
+                    if (
+                        require_fresh and previous
+                        and _parse_timestamp(meta["generated_at"], "generated_at")
+                        < _parse_timestamp(previous.meta["generated_at"], "generated_at")
+                    ):
+                        raise GenerationError("automatic sync cannot install an older generation")
                     return _publish_generation_locked(
                         name, staging_dir, published_meta,
-                        machine_dir=machine_dir, phase_hook=phase_hook,
+                        machine_dir=machine_dir, phase_hook=phase_hook, now=now,
                     )
             finally:
                 if previous:
@@ -375,6 +382,7 @@ def _publish_generation_locked(
     *,
     machine_dir,
     phase_hook,
+    now=None,
 ):
     _recover_pending_locked(machine_dir)
     _cleanup_machine_temps_locked(machine_dir)
@@ -386,6 +394,11 @@ def _publish_generation_locked(
 
     final_created = False
     try:
+        # Only this short commit phase represents publication. Preparation and
+        # retention may have waited arbitrarily long; neither is last-sync time.
+        meta = dict(published_meta, published_at=_timestamp(now))
+        _atomic_write_json(staging_dir / "meta.json", meta)
+        _fsync_directory(staging_dir)
         (staging_dir / ".prepare.lock").unlink()
         if final_dir.exists():
             existing = _load_generation(name, final_dir)
@@ -1328,6 +1341,7 @@ def _parse_timestamp(value, field):
         raise GenerationValidationError("%s must be an ISO timestamp" % field) from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise GenerationValidationError("%s must be timezone-aware" % field)
+    return parsed
 
 
 def _file_digest(path):
