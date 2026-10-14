@@ -74,13 +74,14 @@
         <div class="kpi-sections">
           <section class="kpi-group panel overview-cost" aria-labelledby="kpi-spend-title">
             <h2 id="kpi-spend-title" class="kpi-group-title">花费</h2>
-            <p class="scope-note">已记录 / 估算成本，非服务商账单；缺失记录与未知定价不等于零。</p>
+            <p class="scope-note">成本为记录值或按适用配置价格估算，非服务商账单；显示已定价记录小计，未知定价不计入。定价覆盖不代表全量采集。</p>
             <p class="scope-note">顶部范围用于区间成本、成本趋势和周期比较；今日、本周、本月及配额按各自窗口显示。</p>
             <p id="spend-coverage" class="quota-scope" hidden></p>
             <div class="kpi-grid">
               <article class="kpi-card">
                 <div class="kpi-label">今日成本</div>
                 <div id="today-cost" class="kpi-value">—</div>
+                <div id="today-context" class="kpi-sub">定价覆盖未知</div>
               </article>
               <article class="kpi-card">
                 <div class="kpi-label">本周成本</div>

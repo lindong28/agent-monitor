@@ -301,6 +301,17 @@
     return "$" + amount.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
   }
 
+  function costCoverageText(coverage) {
+    if (!coverage || !Number.isInteger(coverage.known) || !Number.isInteger(coverage.unknown)) return "定价覆盖未知";
+    return `已定价 ${integer(coverage.known)} 条 · 未知定价 ${integer(coverage.unknown)} 条`;
+  }
+
+  function costReading(value, coverage) {
+    const empty = coverage && coverage.known === 0 && coverage.unknown === 0;
+    const amount = empty ? "无记录" : value == null ? "— 无已知金额" : `${moneyPrecise(value)}${coverage?.unknown > 0 ? " 已知小计" : ""}`;
+    return `${amount} · ${costCoverageText(coverage)}`;
+  }
+
   function integer(value) {
     return Number(value || 0).toLocaleString();
   }
@@ -542,12 +553,15 @@
 
   function renderOverview(data, selectedRange) {
     qs("#today-cost").textContent = money(data.today.cost_usd);
+    const todayContext = qs("#today-context");
+    if (todayContext) todayContext.textContent = "已知小计 · " + costCoverageText(data.today.cost_coverage);
     qs("#week-cost").textContent = money(data.week.cost_usd);
     const weekContext = qs("#week-context");
     if (weekContext) {
       weekContext.textContent = data.week.window && data.week.window.start
         ? "自周一 00:00 · GMT+8"
         : "本周";
+      weekContext.textContent += " · 已知小计 · " + costCoverageText(data.week.cost_coverage);
     }
     renderQuotaAccounts(data.rate_limits);
     // After the quota table, and guarded: a cached copy of the older HTML has no
@@ -559,7 +573,7 @@
     const costHistory = data.cost_over_time || legacyCostHistory(data.daily_cost_30d || []);
     const costGranularity = data.cost_over_time_granularity || "day";
     renderChartTable("daily-cost-data", ["时间", ...costHistory.columns.map((column) => `${agentLabel(column)} · USD`)],
-      costHistory.rows.map((row) => [row.x, ...costHistory.columns.map((column) => chartReading(row.values[column], "USD"))]));
+      costHistory.rows.map((row) => [row.x, ...costHistory.columns.map((column) => costReading(row.values[column], row.cost_coverage?.[column]))]));
     chart("dailyCost", "daily-cost-chart", {
       type: "line",
       data: {
@@ -572,7 +586,7 @@
         ),
       },
       options: chartOptions({ plugins: { tooltip: { callbacks: {
-        label: (context) => `${context.dataset.label}: ${chartReading(context.raw, "USD")}`,
+        label: (context) => `${context.dataset.label}: ${costReading(context.raw, costHistory.rows[context.dataIndex].cost_coverage?.[costHistory.columns[context.datasetIndex]])}`,
       } } }, scales: { y: { ticks: { callback: (value) => chartMoneyTick(value) } }, x: { ticks: { maxTicksLimit: 7,
         callback(value) {
           const label = String(this.getLabelForValue(value));
@@ -618,7 +632,7 @@
     if (data.comparison) renderComparison(data.comparison);
     const projects = data.top_projects_week.slice();
     renderChartTable("top-projects-data", ["会话目录", "成本 · USD"],
-      projects.map((row) => [row.project, chartReading(row.cost_usd, "USD")]));
+      projects.map((row) => [row.project, costReading(row.cost_usd, row.cost_coverage)]));
     chart("topProjects", "top-projects-chart", {
       type: "bar",
       data: {
@@ -633,7 +647,7 @@
           legend: { display: false },
           tooltip: { callbacks: {
             title: (items) => projects[items[0].dataIndex].project,
-            label: (context) => `${context.dataset.label}: ${chartReading(context.raw, "USD")}`,
+            label: (context) => costReading(context.raw, projects[context.dataIndex].cost_coverage),
           } },
         },
         scales: { x: { beginAtZero: true, ticks: { callback: (value) => "$" + compactNumber(value) } }, y: { ticks: { autoSkip: false, callback: categoryTick } } },
@@ -787,6 +801,8 @@
       contextEl.hidden = true;
       contextEl.textContent = "";
     }
+    contextEl.hidden = false;
+    contextEl.textContent = [contextEl.textContent, "已知小计", costCoverageText(range.cost_coverage)].filter(Boolean).join(" · ");
   }
 
   function resetText(epoch, nowMs = Date.now()) {
@@ -801,12 +817,7 @@
   }
 
   // Provider identity reuses the neutral .pill treatment from session tables.
-  // Each window owns a fixed column for every row, regardless of which windows a
-  // provider reports. Codex has no 5h, so its 5h cell says "n/a" (see
-  // quotaWindowCell — an em dash there would mean something else) rather than
-  // sliding its 7d leftward: a flowed layout did that, putting Codex's 7d and
-  // Claude's 5h in one column and moving the two 7d figures apart, which are the
-  // ones that need comparing.
+  // Fixed columns keep the same quota windows aligned across providers.
   const QUOTA_WINDOW_7D = { key: "7d", used: "seven_day_used_pct", reset: "seven_day_resets_at" };
   const QUOTA_WINDOW_5H = { key: "5h", used: "five_hour_used_pct", reset: "five_hour_resets_at" };
   // Order here IS the column order on the page and must match the header row in
@@ -825,9 +836,7 @@
       // window here, and that tie should break the way the columns read.
       windows: [QUOTA_WINDOW_5H, QUOTA_WINDOW_7D],
     },
-    // Codex reports no 5h window in current sessions, so its 5h cell says so
-    // rather than carrying a value.
-    { key: "codex", label: "Codex", pill: "agent-codex", windows: [QUOTA_WINDOW_7D] },
+    { key: "codex", label: "Codex", pill: "agent-codex", windows: [QUOTA_WINDOW_5H, QUOTA_WINDOW_7D] },
   ];
   let renderedQuotaRateLimits = null;
   let codexQuotaReadings = [];
@@ -2186,8 +2195,11 @@
     const banner = qs("#network-banner");
     const verdict = qs("#network-verdict");
     const updated = qs("#network-updated");
+    const coverage = data.coverage;
+    const missing = coverage?.missing;
+    const incomplete = !Array.isArray(missing) || missing.length > 0;
     const level = data.verdict || "unknown";
-    banner.className = `verdict-banner ${level === "high" ? "high" : level === "low" ? "low" : level === "proxy-in-use" ? "proxy-in-use" : "unknown"}`;
+    banner.className = `verdict-banner ${level === "high" ? "high" : incomplete ? "unknown" : level === "low" ? "low" : level === "proxy-in-use" ? "proxy-in-use" : "unknown"}`;
     if (data.installed === false) {
       verdict.textContent = "—";
       updated.textContent = "原因：ip-check 未安装";
@@ -2199,13 +2211,16 @@
     } else if (level === "high") {
       verdict.textContent = "Claude 使用风险高";
     } else if (level === "proxy-in-use") {
-      verdict.textContent = "可用，但正在走代理";
+      verdict.textContent = incomplete ? "部分检测 · 检出代理" : "检出代理 · 本地规则评估";
     } else if (level === "low") {
-      verdict.textContent = "Claude 使用风险低";
+      verdict.textContent = incomplete ? "部分检测 · 未发现已知高风险信号" : "未发现已知高风险信号 · 本地规则评估";
     } else {
       verdict.textContent = "网络状态未知";
     }
     updated.textContent = data.timestamp ? `更新于 ${formatDate(data.timestamp)}` : "—";
+    const names = {public: "公网", dns: "DNS 地域", risk: "风险分", timezone: "时区"};
+    updated.textContent += !Array.isArray(missing) ? " · 检测覆盖未知" : missing.length ? " · 缺测：" + missing.map(key => names[key] || key).join("、") : "";
+    updated.textContent += " · IPv6 公网泄漏未核实";
   }
 
   function renderNetworkError(error, retry) {
@@ -2249,13 +2264,14 @@
       renderSectionFailure("#network-local", data, "local");
       return;
     }
-    const ipv6 = local.ipv6_leaked ? statusPill("bad", local.ipv6 || "已泄漏") : statusPill("ok", "已关闭");
+    const ipv6 = local.ipv6 ? statusPill("warn", `检出本地地址 ${local.ipv6}；公网泄漏未核实`) : statusPill("warn", "未检出本地地址；公网泄漏未核实");
+    const dnsUnknown = !local.dns?.length || local.dns.some(entry => !entry.country);
     const dns = local.dns && local.dns.length ? local.dns.map(renderDns).join("") : "—";
     qs("#network-local").innerHTML = [
       kvRow("内网 IP", escapeHtml(local.lan_ip || "—")),
       kvRow("IPv6", ipv6),
       kvRow("DNS 服务器", `<div class="dns-list">${dns}</div>`),
-      kvRow("DNS 地域", local.dns_has_cn ? statusPill("bad", "检出国内 DNS 解析器") : statusPill("ok", "无国内 DNS 解析器")),
+      kvRow("DNS 地域", local.dns_has_cn ? statusPill("bad", "检出国内 DNS 解析器") : dnsUnknown ? statusPill("warn", "DNS 地域未知或部分未知") : statusPill("ok", "已知解析器中未检出国内 DNS")),
     ].join("");
   }
 
@@ -2285,7 +2301,8 @@
       ? statusPill(risk.level === "high" ? "bad" : risk.level === "medium" ? "warn" : "ok", `${risk.score}/100 ${risk.level}`)
       : statusPill("warn", sectionMessage(data, "risk") || "未查询");
     const type = risk && risk.type ? escapeHtml(risk.type) : "—";
-    const markedProxy = Boolean(pub.proxy || (risk && risk.marked_proxy));
+    const markedProxy = pub.proxy === true || risk?.marked_proxy === true ? true
+      : pub.proxy === false || risk?.marked_proxy === false ? false : null;
     const spamParsed = spam && (
       spam.score !== null && spam.score !== undefined ||
       spam.frequency !== null && spam.frequency !== undefined ||
@@ -2309,8 +2326,8 @@
     qs("#network-risk").innerHTML = [
       kvRow("风险分", score),
       kvRow("类型", type),
-      kvRow("标记为代理", markedProxy ? statusPill("warn", "是") : statusPill("ok", "否")),
-      kvRow("机房 IP", pub.hosting ? statusPill("warn", "是") : statusPill("ok", "否")),
+      kvRow("标记为代理", markedProxy === true ? statusPill("warn", "是") : markedProxy === false ? statusPill("ok", "否") : statusPill("warn", "未知")),
+      kvRow("机房 IP", pub.hosting === true ? statusPill("warn", "是") : pub.hosting === false ? statusPill("ok", "否") : statusPill("warn", "未知")),
       kvRow("垃圾评分", spamScore),
       kvRow("举报次数", spamReports),
       kvRow("最近举报", lastSpamReport),
@@ -2340,7 +2357,7 @@
 
   function renderConclusions(data) {
     const items = data.conclusions || [];
-    const note = '<p class="conclusion-note">判定：IPv6 泄漏、国内 DNS、风险分 &gt;= 70、时区不一致，任一命中即「风险高」；只检出代理则「走代理」；其余为「风险低」。</p>';
+    const note = '<p class="conclusion-note">本地规则：检出本地 IPv6 地址、国内 DNS、风险分 &gt;= 70 或时区不一致，任一命中即「风险高」。IPv6 地址不证明公网泄漏；公网、DNS 地域或时区缺测且无高风险信号时为未知，风险分缺失只标部分检测。未检出高风险信号不保证服务可用。</p>';
     if (!items.length) {
       qs("#network-conclusion").innerHTML = `<div class="empty-state">—</div>${note}`;
       return;
@@ -2367,7 +2384,7 @@
   }
 
   function renderDns(entry) {
-    const country = entry.country ? ` ${statusPill(entry.country === "CN" ? "bad" : "ok", entry.country)}` : "";
+    const country = entry.country ? ` ${statusPill(entry.country === "CN" ? "bad" : "ok", entry.country)}` : ` ${statusPill("warn", "地域未知")}`;
     const label = entry.label ? ` <span class="muted">${escapeHtml(entry.label)}</span>` : "";
     return `<div class="dns-row"><span>${escapeHtml(entry.ip)}</span>${label}${country}</div>`;
   }
@@ -3489,6 +3506,8 @@
   }
 
   window.AgentMonitor = {
+    costReading,
+    costCoverageText,
     formatQuotaReset,
     latestCodexQuotaReading,
     updateCodexQuotaReadings,

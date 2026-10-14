@@ -169,7 +169,7 @@ const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice"
 nodes["#codex-batch-status"].textContent = "正在读取账号…";
 const root = node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: node};
-global.window = {AgentMonitor: {pageScope: () => () => true, ensureTimezone: async () => {}, onPageCleanup() {}, pageInterval() {}, formatDate: x => x}};
+global.window = {AgentMonitor: {latestCodexQuotaReading: () => undefined, pageScope: () => () => true, ensureTimezone: async () => {}, onPageCleanup() {}, pageInterval() {}, formatDate: x => x}};
 let failure = true;
 global.fetch = async (url, options) => {
   assert.strictEqual(options.method, "GET");
@@ -326,13 +326,8 @@ eval(fs.readFileSync("web/app.js", "utf8"));
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-    def test_overview_shows_only_codex_weekly_quota(self):
-        """Codex reports no 5h window, so no Codex row may offer a value there.
-
-        Every row emits every column so they align; which of them a provider
-        actually has is a membership test, and the cell for one it does not have
-        says so rather than sitting empty like missing data.
-        """
+    def test_overview_supports_reported_codex_five_hour_quota(self):
+        """Both reported windows render; absent observations remain unknown."""
         js = (ROOT / "web" / "app.js").read_text()
 
         claude = self.quota_provider_config(js, "claude")
@@ -340,7 +335,7 @@ eval(fs.readFileSync("web/app.js", "utf8"));
 
         self.assertIn("QUOTA_WINDOW_5H", claude)
         self.assertIn("QUOTA_WINDOW_7D", claude)
-        self.assertNotIn("QUOTA_WINDOW_5H", codex)
+        self.assertIn("QUOTA_WINDOW_5H", codex)
         self.assertIn("QUOTA_WINDOW_7D", codex)
         # The config constrains rendering only if the renderer reads it. Without
         # these, a row that emitted a value for every column would leave the
@@ -538,22 +533,22 @@ process.stdout.write(JSON.stringify({
         # "All history" is the widest claim on the page and the one this host
         # cannot honour: the rollup starts at a collection date. The qualifier
         # travels with the figure rather than living a screen below it.
-        self.assertEqual(payload["allHistory"]["context"], "")
-        self.assertEqual(payload["allHistoryPartial"]["context"], "自 2026-04-21 起")
+        self.assertEqual(payload["allHistory"]["context"], "已知小计 · 定价覆盖未知")
+        self.assertEqual(payload["allHistoryPartial"]["context"], "自 2026-04-21 起 · 已知小计 · 定价覆盖未知")
         self.assertNotIn("tokens", payload["allHistoryPartial"]["context"])
         # Silence about coverage is not a report of full coverage. The branch
         # keys on what coverage said, not on whether the object arrived — the
         # producer returns a full dict even when it knows nothing.
-        self.assertEqual(payload["noCoverage"]["context"], "覆盖范围未知")
-        self.assertEqual(payload["partialNoDate"]["context"], "覆盖范围未知")
-        self.assertEqual(payload["thirtyDays"]["context"], "")
+        self.assertEqual(payload["noCoverage"]["context"], "覆盖范围未知 · 已知小计 · 定价覆盖未知")
+        self.assertEqual(payload["partialNoDate"]["context"], "覆盖范围未知 · 已知小计 · 定价覆盖未知")
+        self.assertEqual(payload["thirtyDays"]["context"], "已知小计 · 定价覆盖未知")
 
         # An empty rollup DB is the case that matters most, because its numbers
         # are zeros: "we collected nothing" must not render as "you spent
         # nothing ever" under the widest heading the page can show.
         self.assertEqual(payload["emptyRollup"]["label"], "全部历史成本")
         self.assertEqual(payload["emptyRollup"]["cost"], "$0.00")
-        self.assertEqual(payload["emptyRollup"]["context"], "覆盖范围未知")
+        self.assertEqual(payload["emptyRollup"]["context"], "覆盖范围未知 · 已知小计 · 定价覆盖未知")
 
         # A server that predates the field must not leave a live-looking heading
         # over a zero or a stale figure.

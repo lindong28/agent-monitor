@@ -16,11 +16,10 @@ class CostTests(unittest.TestCase):
         cost = calculate_cost(entry, pricing=self.pricing())
         self.assertAlmostEqual(cost, 0.00015 + 0.00015 + 0.00001875 + 0.000003, places=10)
 
-    def test_fuzzy_model_match_calculates_cost(self):
+    def test_unlisted_dated_model_is_unpriced(self):
         entry = self.entry("claude-opus-4-7-20251201")
         cost = calculate_cost(entry, pricing=self.pricing())
-        self.assertIsNotNone(cost)
-        self.assertGreater(cost, 0)
+        self.assertIsNone(cost)
 
     def test_one_hour_cache_creation_uses_the_higher_rate(self):
         pricing = self.pricing()
@@ -29,14 +28,13 @@ class CostTests(unittest.TestCase):
         cost = calculate_cost(all_1h, pricing=pricing)
         self.assertAlmostEqual(cost, 10 * 15e-6 + 2 * 75e-6 + 30e-6 + 2 * 1.5e-6, places=12)
 
-    def test_one_hour_cache_creation_falls_back_to_five_minute_rate(self):
+    def test_one_hour_cache_creation_requires_one_hour_rate(self):
         pricing = {"no-1hr-rate": {k: v for k, v in self.pricing()["claude-opus-4-7"].items()}}
         del pricing["no-1hr-rate"]["cache_creation_input_token_cost_above_1hr"]
         base = self.entry("no-1hr-rate")
         all_1h = replace(base, cache_creation_1h_tokens=base.cache_creation_tokens)
-        self.assertEqual(
-            calculate_cost(all_1h, pricing=pricing), calculate_cost(base, pricing=pricing)
-        )
+        self.assertIsNone(calculate_cost(all_1h, pricing=pricing))
+        self.assertIsNotNone(calculate_cost(base, pricing=pricing))
 
     def test_one_hour_split_cannot_exceed_the_cache_creation_total(self):
         pricing = self.pricing()
@@ -107,10 +105,10 @@ class CostTests(unittest.TestCase):
 
             self.assertEqual(pricing["cached-only"]["input_cost_per_token"], 9)
             self.assertEqual(resolve_model_key("glm-5.2", pricing), "glm-5.2")
-            self.assertEqual(resolve_model_key("glm-5.2[1m]", pricing), "glm-5.2")
+            self.assertIsNone(resolve_model_key("glm-5.2[1m]", pricing))
             self.assertEqual(resolve_model_key("glm-5.1", pricing), "glm-5.1")
             self.assertGreater(calculate_cost(self.entry("glm-5.2"), pricing=pricing), 0)
-            self.assertGreater(calculate_cost(self.entry("glm-5.2[1m]"), pricing=pricing), 0)
+            self.assertIsNone(calculate_cost(self.entry("glm-5.2[1m]"), pricing=pricing))
 
     @staticmethod
     def pricing():

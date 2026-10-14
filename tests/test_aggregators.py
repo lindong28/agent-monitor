@@ -304,6 +304,8 @@ class AggregatorTests(unittest.TestCase):
 
     def test_production_daily_rollup_and_attach_sites_match_explicit_census(self):
         expected_daily_rollup = [
+            ("scripts/benchmark_backend.py", "make_snapshot", "isolated_benchmark_fixture"),
+            ("scripts/benchmark_backend.py", "make_snapshot", "isolated_benchmark_fixture"),
             ("aggregators.py", "recover_reviewed_project_identities", "reviewed_identity_preview_read_only"),
             ("aggregators.py", "recover_reviewed_project_identities", "reviewed_identity_preview_read_only"),
             ("aggregators.py", "_legacy_project_identity", "rollup_read_chokepoint"),

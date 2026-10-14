@@ -273,7 +273,7 @@
     AgentMonitor.qs("#pivot-panel").hidden = !showTrend;
     if (showTrend) renderChart(chartData(data, metric), data.dimensions[0] || "none", metric);
     renderRanking(data, metric);
-    AgentMonitor.qs("#pivot-status").textContent = data.rows.length ? "就绪" : "无数据";
+    AgentMonitor.qs("#pivot-status").textContent = (data.rows.length ? "就绪" : "无数据") + (metric === "cost" ? " · " + AgentMonitor.costCoverageText(data.cost_coverage) : "");
   }
 
   function chartData(data, metric) {
@@ -289,8 +289,9 @@
         text: rest.length ? labels.map((label, i) => `${dimLabels[dims[i + 1]]}：${label.text}`).join(" · ") : "合计",
         fullLabel: rest.length ? labels.map((label, i) => `${dimLabels[dims[i + 1]]}：${label.fullLabel}`).join(" · ") : "合计",
       });
-      if (!rows.has(x)) rows.set(x, { x, values: Object.create(null) });
+      if (!rows.has(x)) rows.set(x, { x, values: Object.create(null), cost_coverage: Object.create(null) });
       rows.get(x).values[column] = record.value;
+      rows.get(x).cost_coverage[column] = record.cost_coverage;
     });
     const resultRows = [...rows.values()];
     resultRows.forEach((row) => columns.forEach((_label, column) => {
@@ -399,6 +400,7 @@
         fill: false,
         spanGaps: true,
         fullLabel: label.fullLabel,
+        costCoverage: data.rows.map(row => row.cost_coverage?.[column.key]),
       });
     });
     AgentMonitor.chart("pivot", "pivot-chart", {
@@ -423,7 +425,7 @@
               label(context) {
                 const value = context.raw;
                 const label = context.dataset.fullLabel || context.dataset.label;
-                return `${label}: ${formatValue(value, metric)} ${metric === "cost" ? "USD" : metric === "messages" ? "条" : "tokens"}`;
+                return metric === "cost" ? `${label}: ${AgentMonitor.costReading(value, context.dataset.costCoverage?.[context.dataIndex])}` : `${label}: ${formatValue(value, metric)} ${metric === "messages" ? "条" : "tokens"}`;
               },
             },
           },
@@ -475,10 +477,15 @@
     data.rows.forEach((row) => {
       const key = indices.map((i) => row.key[i]);
       const id = JSON.stringify(key);
-      if (!groups.has(id)) groups.set(id, { key, value: null, periods: [] });
+      if (!groups.has(id)) groups.set(id, { key, value: null, periods: [], cost_coverage: {known: 0, unknown: 0} });
       const group = groups.get(id);
       if (row.value !== null) group.value = (group.value ?? 0) + row.value;
-      if (timeIndex >= 0) group.periods.push({ label: row.key[timeIndex], value: row.value });
+      if (!row.cost_coverage) group.cost_coverage = null;
+      else if (group.cost_coverage) {
+        group.cost_coverage.known += row.cost_coverage.known;
+        group.cost_coverage.unknown += row.cost_coverage.unknown;
+      }
+      if (timeIndex >= 0) group.periods.push({ label: row.key[timeIndex], value: row.value, cost_coverage: row.cost_coverage });
     });
     return { dimensions: indices.map((i) => data.dimensions[i]), rows: [...groups.values()].sort((a, b) =>
       a.value === null ? (b.value === null ? 0 : 1) : b.value === null ? -1 : b.value - a.value) };
@@ -497,13 +504,13 @@
     const max = ranked.rows.reduce((largest, row) => Math.max(largest, row.value || 0), 0);
     AgentMonitor.qs("#group-ranking").innerHTML = ranked.rows.length ? ranked.rows.map((row) => {
       const label = row.key.map((value, i) => dimLabels[ranked.dimensions[i]] + "：" + value).join(" · ");
-      const periods = row.periods.map((period) => `<div><span>${escapeHtml(period.label)}</span><span>${formatValue(period.value, metric)}</span></div>`).join("");
+      const periods = row.periods.map((period) => `<div><span>${escapeHtml(period.label)}</span><span>${metric === "cost" ? AgentMonitor.costReading(period.value, period.cost_coverage) : formatValue(period.value, metric)}</span></div>`).join("");
       const width = max > 0 && row.value !== null ? Math.max(0, row.value / max * 100) : 0;
       const query = new URLSearchParams({ range: AgentMonitor.getRange(), ...dateParams(), sort: metric === "cost" ? "cost" : "tokens" });
       filterNames.forEach(name => { const value = desiredFilterValue(name); if (value) query.set(name, value); });
       ranked.dimensions.forEach((dim, index) => query.set(dim, row.key[index]));
       const follow = `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">查看会话</a>`;
-      return `<li class="ranking-item" tabindex="0"><div class="ranking-heading"><span>${escapeHtml(label)}</span><strong>${formatValue(row.value, metric)}</strong></div><div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${follow}${periods ? `<div class="ranking-periods" aria-label="各期数值">${periods}</div>` : ""}</li>`;
+      return `<li class="ranking-item" tabindex="0"><div class="ranking-heading"><span>${escapeHtml(label)}</span><strong>${formatValue(row.value, metric)}</strong></div>${metric === "cost" ? `<p class="scope-note">${row.value == null ? "无已知金额" : "已知小计"} · ${AgentMonitor.costCoverageText(row.cost_coverage)}</p>` : ""}<div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${follow}${periods ? `<div class="ranking-periods" aria-label="各期数值">${periods}</div>` : ""}</li>`;
     }).join("") : '<li class="empty-state">— 无数据</li>';
   }
   function displayLabel(value, dim) {

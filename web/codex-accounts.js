@@ -155,7 +155,8 @@ export function init() {
       else if (op?.message_status === "failed") statuses.failed++;
       else if (account?.eligible !== false && (!op || op.message_status === "not_sent")) statuses.unsent++;
       const refresh = account?.operation;
-      const reading = refresh?.refresh_only && refresh.after && refresh.started_at >= batch.created_at ? refresh.after : op?.after;
+      const applicableRefresh = refresh?.refresh_only && Date.parse(refresh.started_at) >= Date.parse(batch.created_at) ? refresh : null;
+      const reading = window.AgentMonitor.latestCodexQuotaReading({operation: applicableRefresh, batch_result: op});
       if (typeof reading?.seven_day_resets_at === "number" && reading.seven_day_resets_at * 1000 > Date.now()) resetRead++;
     }
     const parts = [`本轮发送成功 ${statuses.succeeded}/${batch.items.length}`];

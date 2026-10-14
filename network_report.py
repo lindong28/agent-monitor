@@ -35,9 +35,9 @@ FETCH_TIMEOUT = 45
 LABEL_WIDTH = 22
 
 VERDICT_HEADLINES = {
-    "high": "高风险 — 这条出口网络很可能影响 Claude / Codex 使用",
-    "proxy-in-use": "可用，但正在走代理 — Claude 的反爬判定可能误伤",
-    "low": "低风险 — 未发现影响 Claude / Codex 使用的信号",
+    "high": "高风险 — 已观测信号命中本地启发式规则",
+    "proxy-in-use": "检出代理 — 服务可用性未验证",
+    "low": "低风险 — 仅适用于已观测信号；服务可用性未验证",
     "unknown": "未知 — 本轮没有得出结论",
 }
 
@@ -189,6 +189,8 @@ def _gaps(snapshot):
             # dns_has_cn is a verdict signal and it reads False on an empty list,
             # which is what "no resolver found" and "no CN resolver" both produce.
             gaps.append(("DNS 归属", "未取得 DNS 服务器列表，无法判断解析器地域", True))
+        elif any(not entry.get("country") for entry in local["dns"]):
+            gaps.append(("DNS 归属", "部分解析器地域未知，无法完整判断", True))
 
     if not public_ok:
         gaps.append(
@@ -198,7 +200,9 @@ def _gaps(snapshot):
                 True,
             )
         )
-    elif risk.get("score") is None and (public.get("proxy") or public.get("hosting")):
+    if public_ok and (not public.get("ip") or any(not isinstance(public.get(key), bool) for key in ("proxy", "hosting"))):
+        gaps.append((SECTION_NAMES["public"], "公网 IP 或代理/机房标记未知", True))
+    if public_ok and risk.get("score") is None and (public.get("proxy") or public.get("hosting")):
         # The IP carries a proxy/hosting flag, so ip-check does escalate to the
         # risk lookup -- a null score here means that lookup did not answer.
         # (No flag at all is not a gap: ip-api's negative is the observation,
@@ -240,10 +244,12 @@ def _not_queried_reason(public):
     skipped, the other that it could not run -- so the flags have to be checked,
     not just whether the public lookup succeeded.
     """
-    if not public.get("ok"):
+    if not public.get("ok") or not public.get("ip"):
         return "未查询：公网信息缺失，无法发起查询"
     if public.get("proxy") or public.get("hosting"):
         return "已触发查询，但未取得结果"
+    if any(not isinstance(public.get(key), bool) for key in ("proxy", "hosting")):
+        return "未查询：公网代理或机房标记未知"
     return "不适用：公网 IP 无 proxy / hosting 标记，本项无需查询"
 
 
@@ -286,16 +292,8 @@ def _blamed_proxy(snapshot, gaps):
 
 
 def _ipv6_undecidable(snapshot):
-    """Whether the IPv6 signal rests on an absence ip-check cannot account for.
-
-    `get_ipv6()` returns None both when IPv6 is off and when the probe failed, so
-    a False `ipv6_leaked` is not an observation the verdict may lean on. Not a
-    `_gaps` entry: there is no action for the reader to take and no round in which
-    it resolves, so it belongs with the verdict caveat rather than in the list of
-    things that went wrong this round.
-    """
-    local = snapshot.get("local") or {}
-    return bool(local) and not local.get("ipv6_leaked")
+    """A local source address does not measure public IPv6 leakage."""
+    return bool(snapshot.get("local"))
 
 
 def _age(timestamp):
@@ -323,7 +321,14 @@ def render_headline(snapshot, source_note, lines):
     lines.append("")
     gaps = _gaps(snapshot)
     uncovered = [name for name, _, feeds_verdict in gaps if feeds_verdict]
-    if uncovered:
+    if verdict == "high":
+        lines.append("结论  %s" % VERDICT_HEADLINES["high"])
+        if uncovered:
+            lines.append("      部分观测缺失 —— %s；不撤销已观测的高风险信号" % "、".join(uncovered))
+    elif uncovered and all(name == SECTION_NAMES["risk"] for name in uncovered):
+        lines.append("结论  %s（部分观测：风险分未知）" % VERDICT_HEADLINES.get(verdict, VERDICT_HEADLINES["unknown"]))
+        lines.append("      未取得观测的是 —— %s" % "、".join(uncovered))
+    elif uncovered:
         # A risk grade computed from inputs that never answered is not a weaker
         # grade, it is no grade. Qualifying "低风险" is not enough: the headline
         # is what a scanning reader acts on, and it read word-for-word the same
@@ -334,8 +339,8 @@ def render_headline(snapshot, source_note, lines):
         lines.append("结论  %s" % VERDICT_HEADLINES.get(verdict, VERDICT_HEADLINES["unknown"]))
     if _ipv6_undecidable(snapshot):
         lines.append(
-            "      注意：IPv6 一路不在结论覆盖内 —— ip-check 对「确实已关闭」与「探测失败」"
-            "返回相同结果，本轮的「未检出地址」两者都可能"
+            "      注意：IPv6 公网泄漏未核实 —— 本机地址只作为启发式信号；"
+            "检出或未检出本地地址均不能证明公网是否泄漏"
         )
 
     timestamp = snapshot.get("timestamp")
@@ -423,7 +428,7 @@ def render_details(snapshot, gaps, lines):
         # Not "已禁用": ip-check returns no address both when IPv6 is genuinely
         # off and when the probe itself failed, and it does not distinguish them.
         lines.append(
-            _kv("IPv6", "泄漏：%s" % local["ipv6"] if local.get("ipv6_leaked") else "未检出地址")
+            _kv("IPv6", "本地地址：%s" % local["ipv6"] if local.get("ipv6") else "未检出地址")
         )
         lines.append(
             _kv(
@@ -440,7 +445,11 @@ def render_details(snapshot, gaps, lines):
             # report a negative that no resolver lookup ever produced.
             lines.append(_kv("DNS 归属", "未取得解析器列表，无法判断"))
         else:
-            lines.append(_kv("DNS 归属", "检出国内 DNS 解析器" if local.get("dns_has_cn") else "无国内 DNS 解析器"))
+            unknown = sum(not entry.get("country") for entry in dns)
+            observed = "检出已知国内 DNS 解析器" if local.get("dns_has_cn") else "未命中已知国内 DNS 解析器"
+            if unknown:
+                observed += "；%d 个解析器地域未知" % unknown
+            lines.append(_kv("DNS 归属", observed))
     else:
         lines.append(_kv("状态", "查询失败：%s" % errors.get("local", "无数据")))
 
@@ -477,8 +486,8 @@ def render_details(snapshot, gaps, lines):
     # Both flags come from the public lookup; rendering its absence as "否" would
     # report a clean result the lookup never produced.
     if public.get("ok"):
-        lines.append(_kv("标记为代理", "是" if public.get("proxy") or risk.get("marked_proxy") else "否"))
-        lines.append(_kv("标记为机房 IP", "是" if public.get("hosting") else "否"))
+        lines.append(_kv("标记为代理", "是" if public.get("proxy") is True or risk.get("marked_proxy") is True else "否" if public.get("proxy") is False else "未知"))
+        lines.append(_kv("标记为机房 IP", "是" if public.get("hosting") is True else "否" if public.get("hosting") is False else "未知"))
     else:
         lines.append(_kv("标记为代理", "未知：公网查询失败"))
         lines.append(_kv("标记为机房 IP", "未知：公网查询失败"))
@@ -558,8 +567,9 @@ def render(snapshot, source_note):
     render_details(snapshot, gaps, lines)
     lines.append("")
     lines.append(
-        "判定规则  IPv6 泄漏 / 检出国内 DNS 解析器 / 风险分 ≥ 70 / 时区不一致，"
-        "任一命中即判高风险；仅检出代理则判为「走代理但可用」；都没命中才是低风险。"
+        "判定规则  检出本地 IPv6 地址（泄漏未核实）/ 已知国内 DNS 解析器 / 风险分 ≥ 70 / 时区不一致，"
+        "任一命中即判启发式高风险；公网、DNS 或时区缺测且无高风险信号时为未知。"
+        "仅缺风险分保留已观测信号的档位并披露缺项；档位不保证服务可用。"
     )
     footer = "网页版 agent-monitor open → /network    结构化输出 agent-monitor network --json"
     if gaps:

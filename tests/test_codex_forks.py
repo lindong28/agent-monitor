@@ -18,9 +18,15 @@ def event(total, last=None):
 
 
 class CodexForkTests(unittest.TestCase):
-    def parse(self, rows, **kwargs):
+    def parse(self, rows, parent_usage=None, **kwargs):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "child.jsonl"
+            if parent_usage is not None:
+                parent = Path(directory) / "parent.jsonl"
+                parent.write_text(json.dumps({"type": "session_meta", "payload": {"id": "parent"}})
+                                  + "\n" + json.dumps(event(parent_usage)) + "\n")
+                rows[0]["payload"]["history_base"] = {
+                    "thread_id": "parent", "end_byte_offset": parent.stat().st_size}
             path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
             return codex.parse_file(path, **kwargs)
 
@@ -34,7 +40,7 @@ class CodexForkTests(unittest.TestCase):
         rows = [self.meta(), event(usage(1100, 900, 110), usage(100, 0, 10)),
                 event(usage(1100, 900, 110), usage(100, 0, 10)),
                 event(usage(1400, 1100, 140), usage(150, 100, 15))]
-        entries = self.parse(rows)
+        entries = self.parse(rows, parent_usage=usage(1000, 900, 100))
         self.assertEqual([(e.input_tokens, e.cache_read_tokens, e.output_tokens)
                           for e in entries], [(100, 0, 10), (100, 200, 30)])
 
@@ -44,21 +50,22 @@ class CodexForkTests(unittest.TestCase):
             event(usage(100, 20, 10), usage(100, 20, 10))]
         entry, = self.parse(rows, models={"child": "actual-child-model", "parent": "wrong"})
         self.assertEqual((entry.session_id, entry.project, entry.model),
-                         ("child", "/repo/child", "actual-child-model"))
+                         ("child", "/repo/child", "child-model"))
 
     def test_non_fork_keeps_legacy_first_cumulative_count(self):
         entry, = self.parse([self.meta(False), event(usage(1100, 900, 110), usage(100, 0, 10))])
         self.assertEqual(entry.input_tokens + entry.cache_read_tokens + entry.output_tokens, 1210)
 
     def test_zero_first_fork_usage_preserves_key_for_archive_correction(self):
-        entry, = self.parse([self.meta(), event(usage(1000, 900, 100), usage(0, 0, 0))])
+        entry, = self.parse([self.meta(), event(usage(1000, 900, 100), usage(0, 0, 0))],
+                            parent_usage=usage(1000, 900, 100))
         self.assertEqual((entry.input_tokens, entry.cache_read_tokens, entry.output_tokens,
                           entry.message_count), (0, 0, 0, 0))
         self.assertEqual(entry.request_id, "token-count:2")
 
     def test_zero_total_placeholder_does_not_create_a_new_usage_event(self):
         last = dict(usage(0, 0, 0), total_tokens=9142)
-        entries = self.parse([self.meta(), event(usage(0, 0, 0), last),
+        entries = self.parse([self.meta(False), event(usage(0, 0, 0), last),
                               event(usage(100, 20, 10), usage(100, 20, 10))])
         entry, = entries
         self.assertEqual((entry.input_tokens, entry.cache_read_tokens, entry.output_tokens),
@@ -71,7 +78,7 @@ class CodexForkTests(unittest.TestCase):
         self.assertEqual(entries, [])
         self.assertEqual(len(errors), 1)
 
-    def test_invalid_initial_last_sets_baseline_for_following_delta(self):
+    def test_no_last_shape_can_establish_a_missing_fork_boundary(self):
         for last in (None, {}, usage(-1, 0, 0), usage(1100, 900, 110),
                      usage(10, 20, 1), usage("100", 0, 10)):
             with self.subTest(last=last):
@@ -80,9 +87,7 @@ class CodexForkTests(unittest.TestCase):
                                       event(usage(1200, 1000, 120), usage(200, 100, 20))],
                                      source_errors=errors)
                 self.assertEqual(len(errors), 1)
-                entry, = entries
-                self.assertEqual((entry.input_tokens, entry.cache_read_tokens, entry.output_tokens),
-                                 (100, 100, 20))
+                self.assertEqual(entries, [])
 
 
 if __name__ == "__main__":

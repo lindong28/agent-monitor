@@ -695,8 +695,11 @@ def _compare_bucket_sets(existing, buckets, recompute_dates, minimum_date=None, 
         buckets_to_compare.update({key: bucket for key, bucket in buckets.items()
                                    if _history_authorizes(key, history_authoritative_from, history_authoritative_projects)
                                    and (minimum_date is None or key[0] >= minimum_date)})
+    authority = (max(history_authoritative_from, minimum_date or history_authoritative_from)
+                 if history_authoritative_from is not None else None)
     orphan_items = [
-        {"key": list(key), "old": _ordered_bucket(old_bucket)}
+        {"key": list(key), "old": _ordered_bucket(old_bucket),
+         "action": "remove" if _history_authorizes(key, authority, history_authoritative_projects) else "preserve"}
         for key, old_bucket in sorted(existing_by_key.items())
         if key not in buckets
     ]
@@ -851,13 +854,14 @@ def query_pivot(
         columns = column_values
 
     row_keys = OrderedDict()
-    buckets = defaultdict(lambda: {"value": 0, "known": 0})
+    buckets = defaultdict(lambda: {"value": 0, "known": 0, "unknown": 0})
     for row in filtered:
         x_value = _mapped_dim(row, x_dim, x_map)
         column = "value" if group_dim == "none" else _mapped_dim(row, group_dim, group_map)
         row_keys.setdefault(x_value, None)
         bucket = buckets[(x_value, column)]
         if metric == "cost":
+            bucket["unknown"] += row["entry_count"] - row["cost_known_count"]
             if row["cost_known_count"] == 0:
                 continue
             bucket["known"] += row["cost_known_count"]
@@ -872,13 +876,20 @@ def query_pivot(
                 values[column] = None
             else:
                 values[column] = bucket["value"] if bucket else 0
-        result_rows.append({"x": x_value, "values": values})
+        result_row = {"x": x_value, "values": values}
+        if metric == "cost":
+            result_row["cost_coverage"] = {
+                column: {name: buckets.get((x_value, column), {}).get(name, 0)
+                         for name in ("known", "unknown")}
+                for column in columns
+            }
+        result_rows.append(result_row)
 
     if x_dim in TIME_DIMS:
         result_rows.sort(key=lambda row: row["x"])
     else:
         result_rows.sort(key=_row_total, reverse=True)
-    return {
+    result = {
         "columns": columns,
         "rows": result_rows,
         "totals_provenance": _totals_provenance(
@@ -887,6 +898,15 @@ def query_pivot(
             include_machine=db_path is None or source_machine is not None,
         ),
     }
+    if metric == "cost":
+        result["cost_coverage"] = _cost_coverage(filtered)
+    return result
+
+
+def _cost_coverage(rows):
+    """Pricing counts for recorded observations, not collection completeness."""
+    known = sum(row["cost_known_count"] for row in rows)
+    return {"known": known, "unknown": sum(row["entry_count"] for row in rows) - known}
 
 
 def period_summary(time_range):
@@ -927,21 +947,24 @@ def query_grouped(dimensions, metric, agents=None, projects=None, models=None,
     buckets = {}
     for row in filtered:
         key = tuple(_row_dim(row, dim) for dim in dimensions)
-        bucket = buckets.setdefault(key, {"value": 0, "known": 0})
+        bucket = buckets.setdefault(key, {"value": 0, "known": 0, "unknown": 0})
+        bucket["unknown"] += row["entry_count"] - row["cost_known_count"]
         if metric == "cost" and row["cost_known_count"] == 0:
             continue
         bucket["known"] += row["cost_known_count"]
         bucket["value"] += _row_metric(row, metric)
     result = [{"key": list(key), "value": (
         None if metric == "cost" and not bucket["known"] else bucket["value"]
-    )} for key, bucket in buckets.items()]
+    ), **({"cost_coverage": {name: bucket[name] for name in ("known", "unknown")}}
+          if metric == "cost" else {})} for key, bucket in buckets.items()]
     time_index = next((i for i, dim in enumerate(dimensions) if dim in TIME_DIMS), None)
     if time_index is not None:
         result.sort(key=lambda row: (row["key"][time_index], row["key"]))
     else:
         result.sort(key=lambda row: (-(row["value"] or 0), row["key"]))
     return {"dimensions": dimensions, "rows": result, "totals_provenance":
-            _totals_provenance(filtered, usage, db_path is None or source_machine is not None)}
+            _totals_provenance(filtered, usage, db_path is None or source_machine is not None),
+            **({"cost_coverage": _cost_coverage(filtered)} if metric == "cost" else {})}
 
 
 def _totals_provenance(rows, use_usage_rollup, include_machine):

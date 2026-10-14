@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -60,6 +61,8 @@ class HistoryResolver:
         self.headers = {}
         self.prefixes = {}
         self.index = None
+        self.fork_index = None
+        self.copied_prefixes = {}
 
     @classmethod
     def for_path(cls, path):
@@ -157,9 +160,84 @@ class HistoryResolver:
                 raise ValueError("history_base ancestor has no measurable counter")
         return {"input_tokens": 0, "output_tokens": 0}, dependencies
 
+    def fork_parent(self, path, identity):
+        if self.fork_index is None:
+            self.fork_index = {}
+            for candidate in self.paths:
+                try:
+                    owner = self.header(candidate)["id"]
+                except (OSError, ValueError, UnicodeError):
+                    continue
+                self.fork_index.setdefault(owner, []).append(Path(candidate))
+        candidates = self.fork_index.get(identity, [])
+        if len(candidates) != 1 or candidates[0] == Path(path):
+            raise ValueError("copied fork parent missing or ambiguous")
+        parent = candidates[0]
+        return parent, _file_signature(parent)
+
+    def copied_boundary(self, path, header):
+        """Match an explicitly bounded original prefix, not the parent's EOF.
+
+        RolloutLine timestamps are regenerated when copied (Codex recorder);
+        RolloutItem type/payload are the preserved facts. Cache parent digests
+        once per source version, rather than rereading it for every child.
+        """
+        cutoff = header.get("forked_from_ordinal_exclusive")
+        if cutoff is None:
+            raise ValueError("copied fork prefix has no explicit inherited boundary")
+        if type(cutoff) is not int or cutoff < 0:
+            raise ValueError("invalid copied fork ordinal boundary")
+        parent, stamp = self.fork_parent(path, header["forked_from_id"])
+        key = (parent, stamp, cutoff)
+        if key not in self.copied_prefixes:
+            records = []
+            with parent.open(encoding="utf-8") as handle:
+                for number, line in enumerate(handle):
+                    row = json.loads(line)
+                    if not isinstance(row, dict):
+                        raise ValueError("invalid copied fork parent record")
+                    ordinal = row.get("ordinal", number)
+                    if type(ordinal) is not int or ordinal != number:
+                        raise ValueError("copied fork parent ordinal sequence is incomplete")
+                    if cutoff is not None and ordinal >= cutoff:
+                        break
+                    records.append(_rollout_item_digest(row))
+            if cutoff is not None and len(records) < cutoff:
+                raise ValueError("copied fork ordinal boundary exceeds available parent")
+            if _file_signature(parent) != stamp:
+                raise ValueError("copied fork parent changed during read")
+            self.copied_prefixes[key] = records
+        records = self.copied_prefixes[key]
+        if not records:
+            raise ValueError("copied fork parent has no verifiable prefix")
+        position = 0
+        with Path(path).open(encoding="utf-8") as handle:
+            next(handle)  # This rollout's owner, not part of the copied prefix.
+            for line_number, line in enumerate(handle, start=2):
+                row = json.loads(line)
+                if not isinstance(row, dict):
+                    raise ValueError("invalid copied fork record")
+                # Some writers omit the parent's SessionMeta when copying.
+                if position == 0 and row.get("type") != "session_meta":
+                    position = 1
+                if position >= len(records) or _rollout_item_digest(row) != records[position]:
+                    raise ValueError("copied fork prefix cannot be verified")
+                position += 1
+                if position == len(records):
+                    return line_number
+        raise ValueError("copied fork prefix is incomplete")
+
     def signature(self, path):
         try:
-            base = self.header(path).get("history_base")
+            header = self.header(path)
+            base = header.get("history_base")
+            if base is None and header.get("forked_from_id") and header.get("subagent_history_start_ordinal") is None:
+                if header.get("forked_from_ordinal_exclusive") is None:
+                    # The local owner checkpoint, not a mutable parent tail,
+                    # determines which later deltas can be attributed.
+                    return []
+                parent, stamp = self.fork_parent(path, header["forked_from_id"])
+                return [(str(parent), stamp, header.get("forked_from_ordinal_exclusive"))]
             # Dependency discovery reads headers/stat only; a warm archive hit
             # must not rescan all ancestor transcript bodies just to key a cache.
             return [(str(parent), stamp, limit) for parent, stamp, limit in self._parents(path, base)]
@@ -167,13 +245,22 @@ class HistoryResolver:
             return None
 
 
+def _rollout_item_digest(row):
+    item = {key: value for key, value in row.items() if key not in ("timestamp", "ordinal")}
+    return hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":")).encode()).digest()
+
+
 def parse_file(path, models=None, source_errors=None, history=None):
     models = models or {}
     session_id = ""
     session_ts = ""
     project = "unknown"
-    model = DEFAULT_CODEX_MODEL
-    is_fork = False
+    model = "unknown"
+    own_model = "unknown"
+    inherited_ordinal = None
+    copied_end_line = None
+    copied_unknown = False
+    was_inherited = False
     previous_usage = None
     inherited_pending = False
     inherited_unknown = False
@@ -200,7 +287,19 @@ def parse_file(path, models=None, source_errors=None, history=None):
                         continue
                     # Copied parent metadata can follow the real file owner.
                     session_id = payload.get("id", "") or ""
-                    is_fork = bool(payload.get("forked_from_id"))
+                    inherited_ordinal = payload.get("subagent_history_start_ordinal")
+                    if inherited_ordinal is not None and (type(inherited_ordinal) is not int or inherited_ordinal < 0):
+                        _record_source_error(source_errors, path, line_number,
+                                             ValueError("invalid subagent history ordinal"))
+                        inherited_ordinal = None
+                        copied_unknown = True
+                    if payload.get("forked_from_id") and payload.get("history_base") is None and inherited_ordinal is None:
+                        try:
+                            history = history or HistoryResolver.for_path(path)
+                            copied_end_line = history.copied_boundary(path, payload)
+                        except (OSError, ValueError, UnicodeError, StopIteration) as exc:
+                            _record_source_error(source_errors, path, line_number, exc)
+                            copied_unknown = True
                     if payload.get("history_base") is not None:
                         inherited_pending = True
                         try:
@@ -214,14 +313,43 @@ def parse_file(path, models=None, source_errors=None, history=None):
                     cwd = payload.get("cwd", "")
                     if cwd:
                         project = _project_from_cwd(cwd)
-                    model = models.get(session_id) or payload.get("model") or DEFAULT_CODEX_MODEL
+                    # threads.model is mutable current state, not historical attribution.
+                    own_model = payload.get("model") or "unknown"
+                    model = own_model
                     continue
 
+                ordinal = data.get("ordinal", line_number - 1)
+                inherited = ((inherited_ordinal is not None and type(ordinal) is int and ordinal < inherited_ordinal)
+                             or (copied_end_line is not None and line_number <= copied_end_line))
+                if was_inherited and not inherited:
+                    model = own_model
+                    inherited_pending = True
+                    inherited_unknown = False
+                was_inherited = inherited
+                if row_type == "turn_context":
+                    context = data.get("payload")
+                    if not inherited:
+                        model = context.get("model") or "unknown" if isinstance(context, dict) else "unknown"
+                    continue
                 if row_type != "event_msg":
                     continue
 
                 payload = data.get("payload", {})
-                if not isinstance(payload, dict) or payload.get("type") != "token_count":
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("type") == "thread_settings_applied":
+                    # Copied snapshots retain their original thread_id. Both
+                    # fork startup and later resumes persist an own checkpoint,
+                    # so it proves future ownership, not the earlier prefix.
+                    if not inherited and payload.get("thread_id") == session_id:
+                        settings = payload.get("thread_settings")
+                        model = (settings.get("model") or "unknown") if isinstance(settings, dict) else "unknown"
+                        if copied_unknown:
+                            copied_unknown = False
+                            inherited_pending = True
+                            inherited_unknown = previous_usage is None
+                    continue
+                if payload.get("type") != "token_count":
                     continue
                 info = payload.get("info")
                 if not isinstance(info, dict):
@@ -237,29 +365,29 @@ def parse_file(path, models=None, source_errors=None, history=None):
                 )
                 if timestamp is None:
                     continue
-                if inherited_pending:
+                if inherited:
+                    # Keep the old event identity so archive upsert repairs it.
+                    delta = {"input_tokens": 0, "output_tokens": 0,
+                             "cache_creation_tokens": 0, "cache_read_tokens": 0}
+                elif copied_unknown:
+                    # No proven boundary: later copied events are not new calls.
+                    # Emit nothing, so retained archive facts remain with source_errors.
+                    # Keep the observed counter for a later thread-owned checkpoint;
+                    # that checkpoint can recover future deltas without guessing here.
+                    previous_usage = total_usage
+                    continue
+                elif inherited_ordinal is not None and inherited_ordinal > 1 and previous_usage is None:
+                    _record_source_error(source_errors, path, line_number,
+                                         ValueError("inherited subagent history has no measurable counter"))
+                    previous_usage = total_usage
+                    inherited_pending = False
+                    continue
+                elif inherited_pending:
                     inherited_pending = False
                     if inherited_unknown:
                         previous_usage = total_usage
                         continue
                     delta = _usage_delta(previous_usage, total_usage, info.get("last_token_usage")) or {
-                        "input_tokens": 0, "output_tokens": 0,
-                        "cache_creation_tokens": 0, "cache_read_tokens": 0,
-                    }
-                elif is_fork and previous_usage is None:
-                    last = info.get("last_token_usage")
-                    if not _valid_fork_usage(last, total_usage):
-                        _record_source_error(source_errors, path, line_number,
-                                             ValueError("fork initial token_count has no valid last_token_usage"))
-                        previous_usage = total_usage
-                        continue
-                    # total includes the ancestor's billed history; last is the
-                    # first request made by this fork. Preserve a zero-valued
-                    # key so archive upserts also repair an inherited-only row.
-                    if _usage_total(total_usage) == 0:
-                        previous_usage = total_usage
-                        continue
-                    delta = _usage_delta(None, last, last) or {
                         "input_tokens": 0, "output_tokens": 0,
                         "cache_creation_tokens": 0, "cache_read_tokens": 0,
                     }
@@ -279,7 +407,7 @@ def parse_file(path, models=None, source_errors=None, history=None):
                         output_tokens=delta["output_tokens"],
                         cache_creation_tokens=delta["cache_creation_tokens"],
                         cache_read_tokens=delta["cache_read_tokens"],
-                        cost_usd=None,
+                        cost_usd=None if any(delta.values()) else 0.0,
                         project=project,
                         agent_id="codex",
                         message_count=int(any(delta.values())),
@@ -625,11 +753,8 @@ def _build_rate_limits(rate_limits, timestamp, session_id, models, *, expire=Tru
     seven_pct = seven_day.get("used_percent")
     seven_reset = seven_day.get("resets_at")
 
-    now_ts = datetime.now(timezone.utc).timestamp()
-    if expire and five_reset and five_reset < now_ts:
-        five_pct = 0.0
-    if expire and seven_reset and seven_reset < now_ts:
-        seven_pct = 0.0
+    # `expire` remains accepted for callers; an elapsed reset is not a new
+    # provider observation. Consumers can mark the retained reset as expired.
 
     if five_pct is None and seven_pct is None:
         return None
@@ -641,16 +766,7 @@ def _build_rate_limits(rate_limits, timestamp, session_id, models, *, expire=Tru
         seven_day_resets_at=seven_reset,
         model=models.get(session_id, DEFAULT_CODEX_MODEL),
         updated_at=timestamp,
-        # Same event as the percentages above, which is what makes it the one
-        # plan that can be shown beside them without pairing two clocks.
-        #
-        # "Same event" is the honest claim, not "same observation": the two
-        # branches above rewrite a percentage to 0.0 once its own reset time
-        # has passed, so after a reset the figure is derived here and was
-        # never reported at `updated_at`. A plan that changed during that
-        # window would then sit next to a zero it did not produce — the pair
-        # the credential comparison downstream is there to expose, since a
-        # changed plan is exactly what makes the two sources differ.
+        # Plan and percentages belong to this same stored observation.
         plan=_plan_type(rate_limits),
     )
 

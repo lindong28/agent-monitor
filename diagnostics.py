@@ -191,6 +191,7 @@ class Monitor:
             self.last_tick_at = time.time()
         if self.path is None:
             return
+        pending_events = 0
         try:
             self.path.mkdir(parents=True, exist_ok=True)
             if self.event_handler is None:
@@ -203,9 +204,11 @@ class Monitor:
             with self.lock:
                 events = list(self.events)
                 self.events.clear()
+                pending_events = len(events)
             for event in events:
                 self.event_handler.emit(logging.LogRecord("diagnostics", logging.INFO, "", 0,
                                                          json.dumps(event), (), None))
+                pending_events -= 1
             report = self.snapshot()
             report["persistence_error"] = None
             report["last_written_at"] = time.time()
@@ -218,7 +221,9 @@ class Monitor:
         except (OSError, ValueError, TypeError):
             with self.lock:
                 self.persistence_error = "write_failed; inspect state/diagnostics permissions and disk space"
-                self.events_dropped += len(events) if "events" in locals() else 0
+                # Completed emits are not lost when a later emit or snapshot
+                # write fails. This counts unconfirmed emits, not fsync durability.
+                self.events_dropped += pending_events
 
     def start(self, path, interval=5):
         self.path = Path(path)

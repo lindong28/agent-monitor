@@ -89,8 +89,9 @@ process.stdout.write(JSON.stringify(window.AgentMonitorPivot.rankingData({dimens
         self.assertEqual(rollup.query_grouped(["month"], "total")["rows"],
                          [{"key": ["2026-08"], "value": 22}, {"key": ["2026-09"], "value": 88}])
         self.assertEqual(rollup.query_grouped(["model"], "cost", models={"m2"})["rows"],
-                         [{"key": ["m2"], "value": None}])
-        self.assertEqual(rollup.query_grouped([], "cost")["rows"], [{"key": [], "value": 33}])
+                         [{"key": ["m2"], "value": None, "cost_coverage": {"known": 0, "unknown": 2}}])
+        self.assertEqual(rollup.query_grouped([], "cost")["rows"],
+                         [{"key": [], "value": 33, "cost_coverage": {"known": 4, "unknown": 2}}])
 
     def test_project_independent_usage_is_used_until_project_is_requested(self):
         path = self.generations[0].db_path

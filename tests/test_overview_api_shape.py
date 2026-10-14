@@ -389,9 +389,9 @@ class OverviewApiShapeTests(unittest.TestCase):
             payload = server.overview({})
 
         self.assertGreaterEqual(query_pivot.call_count, 8)
-        self.assertEqual(payload["today"]["cost_usd"], 0.0)
+        self.assertIsNone(payload["today"]["cost_usd"])
         self.assertEqual(payload["today"]["tokens"], 0)
-        self.assertEqual(payload["week"]["cost_usd"], 0.0)
+        self.assertIsNone(payload["week"]["cost_usd"])
         self.assertEqual(payload["week"]["tokens"], 0)
 
     def test_overview_week_includes_monday_window_metadata(self):

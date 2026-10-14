@@ -11,7 +11,7 @@ def snapshot(**overrides):
     base = {
         "timestamp": "2026-08-07T09:00:00+08:00",
         "verdict": "low",
-        "local": {"lan_ip": "192.168.1.2", "ipv6_leaked": False, "dns": [{"ip": "1.1.1.1"}], "dns_has_cn": False},
+        "local": {"lan_ip": "192.168.1.2", "ipv6_leaked": False, "dns": [{"ip": "1.1.1.1", "country": "US"}], "dns_has_cn": False},
         "public": {
             "ok": True,
             "ip": "203.0.113.9",
@@ -86,7 +86,7 @@ class GapTests(unittest.TestCase):
 
     def test_failed_lan_probe_is_a_gap_but_feeds_no_verdict(self):
         # get_lan_ip() returns the string "获取失败" instead of raising.
-        data = snapshot(local={"lan_ip": "获取失败", "ipv6_leaked": False, "dns": [{"ip": "1.1.1.1"}], "dns_has_cn": False})
+        data = snapshot(local={"lan_ip": "获取失败", "ipv6_leaked": False, "dns": [{"ip": "1.1.1.1", "country": "US"}], "dns_has_cn": False})
         self.assertIn("局域网 IP", gaps_by_name(data))
         self.assertNotIn("局域网 IP", verdict_gaps(data))
 
@@ -112,16 +112,16 @@ class GapTests(unittest.TestCase):
 
 
 class RenderTests(unittest.TestCase):
-    def test_unobserved_input_replaces_the_risk_grade_entirely(self):
-        # Qualifying "低风险" is not enough: the headline is what a scanning
-        # reader acts on, and it read word-for-word the same as a healthy round.
+    def test_missing_risk_keeps_grade_with_partial_coverage(self):
+        # E1c keeps the observed grade when only reputation is unavailable;
+        # the headline must make the missing input explicit.
         data = snapshot(
             public={"ok": True, "ip": "203.0.113.9", "proxy": False, "hosting": True, "timezone": "Asia/Singapore"},
             risk={"score": None, "display": "查询失败（Read timed out）"},
         )
         text = network_report.render(data, "test")
-        self.assertIn("证据不足", text)
-        self.assertNotIn("低风险", text.split("\n")[2])
+        self.assertIn("部分观测：风险分未知", text.split("\n")[2])
+        self.assertIn("低风险", text.split("\n")[2])
         self.assertIn(network_report.SECTION_NAMES["risk"], text)
 
     def test_healthy_round_still_gets_a_risk_grade(self):
@@ -174,12 +174,13 @@ class RenderTests(unittest.TestCase):
         text = network_report.render(snapshot(), "test")
         self.assertNotIn("各项检测均已应答且正常", text)
 
-    def test_verified_ipv6_allows_the_unqualified_no_action_claim(self):
+    def test_local_ipv6_still_does_not_measure_public_leakage(self):
         data = snapshot(
-            local={"lan_ip": "192.168.1.2", "ipv6": "2001:db8::1", "ipv6_leaked": True, "dns": [{"ip": "1.1.1.1"}], "dns_has_cn": False},
+            local={"lan_ip": "192.168.1.2", "ipv6": "2001:db8::1", "ipv6_leaked": True, "dns": [{"ip": "1.1.1.1", "country": "US"}], "dns_has_cn": False},
             conclusions=[],
         )
-        self.assertIn("各项检测均已应答且正常", network_report.render(data, "test"))
+        self.assertNotIn("各项检测均已应答且正常", network_report.render(data, "test"))
+        self.assertIn("泄漏未核实", network_report.render(data, "test"))
 
     def test_findings_are_listed_before_the_detail_block(self):
         data = snapshot(conclusions=[{"level": "bad", "text": "IPv6 leak detected"}])
@@ -231,7 +232,7 @@ class RenderTests(unittest.TestCase):
         )
         text = network_report.render(data, "test")
         self.assertIn("未检出地址", text)
-        self.assertIn("IPv6 一路不在结论覆盖内", text)
+        self.assertIn("IPv6 公网泄漏未核实", text)
         # Upstream's ok-conclusions must not be passed through: "no address
         # detected" is not "disabled", which is the whole point of the caveat
         # above. These assert on the *fixture's* strings, which this test owns
@@ -242,16 +243,16 @@ class RenderTests(unittest.TestCase):
         # contains it and network_report has no path that emits it.
         self.assertNotIn("IPv6 is disabled", text)
         self.assertNotIn("No CN DNS resolver detected", text)
-        self.assertIn("无国内 DNS 解析器", text)
+        self.assertIn("未命中已知国内 DNS 解析器", text)
 
-    def test_leaked_ipv6_keeps_its_conclusion_and_drops_the_caveat(self):
+    def test_local_ipv6_address_keeps_public_leakage_caveat(self):
         data = snapshot(
-            local={"lan_ip": "192.168.1.2", "ipv6": "2001:db8::1", "ipv6_leaked": True, "dns": [{"ip": "1.1.1.1"}], "dns_has_cn": False},
+            local={"lan_ip": "192.168.1.2", "ipv6": "2001:db8::1", "ipv6_leaked": True, "dns": [{"ip": "1.1.1.1", "country": "US"}], "dns_has_cn": False},
             conclusions=[{"level": "bad", "text": "IPv6 leak detected; real address is exposed"}],
         )
         text = network_report.render(data, "test")
-        self.assertIn("泄漏：2001:db8::1", text)
-        self.assertNotIn("IPv6 一路不在结论覆盖内", text)
+        self.assertIn("本地地址：2001:db8::1", text)
+        self.assertIn("IPv6 公网泄漏未核实", text)
 
     def test_empty_dns_list_is_not_rendered_as_no_cn_resolver(self):
         data = snapshot(local={"lan_ip": "192.168.1.2", "ipv6_leaked": False, "dns": [], "dns_has_cn": False})

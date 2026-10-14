@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -44,12 +43,6 @@ def load_rate_limits(status_file: Optional[str] = None) -> Optional[RateLimits]:
 
     if five_pct is None and seven_pct is None:
         return None
-
-    now_ts = datetime.now(timezone.utc).timestamp()
-    if five_reset and five_reset < now_ts:
-        five_pct = 0.0
-    if seven_reset and seven_reset < now_ts:
-        seven_pct = 0.0
 
     model = data.get("model") or {}
     if not isinstance(model, dict):

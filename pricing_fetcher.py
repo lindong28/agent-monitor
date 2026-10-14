@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import ssl
 import time
 import urllib.request
@@ -18,7 +19,6 @@ FALLBACK_PATH = ROOT / "pricing.json"
 ESTIMATED_PRICING_MODELS = {"glm-5.1", "glm-5.2"}
 
 logger = logging.getLogger(__name__)
-_FUZZY_LOGGED = set()
 _PARTIAL_LOGGED = set()
 _UNKNOWN_LOGGED = set()
 
@@ -51,11 +51,8 @@ def calculate_cost(entry, pricing=None):
         _log_unknown(entry.model)
         return None
 
-    # Arithmetic lives in token_cost, a module kept byte-identical with
-    # llm-gateway's copy so both price the same usage the same way. A missing
-    # cache rate is priced at zero there rather than guessed from the input
-    # rate: providers that publish no cache-write price mostly do not charge
-    # for cache writes at all, so deriving one invents a charge.
+    # Keep shared arithmetic unchanged; this adapter only exposes fully known
+    # amounts because UsageEntry has no partial-price provenance field.
     priced = token_cost.price(
         token_cost.TokenCounts(
             input_tokens=entry.input_tokens,
@@ -68,27 +65,31 @@ def calculate_cost(entry, pricing=None):
     )
     if priced is None:
         return None
-    if priced.missing_rates:
-        # llm-gateway records the same fact in cost_provenance. This row's
-        # amount has no field to carry it, so the log is the only place a
-        # partially-priced row is distinguishable from a fully-priced one.
-        _log_partial_rates(model_key, priced.missing_rates)
+    hour = min(entry.cache_creation_1h_tokens, entry.cache_creation_tokens)
+    missing = list(priced.missing_rates)
+    # The shared calculator reports the 5m rate absent even when every write
+    # is explicitly 1h. Only categories actually used make the amount unknown.
+    if hour == entry.cache_creation_tokens and "cache_creation" in missing:
+        missing.remove("cache_creation")
+    if hour and not _has_rate(table[model_key], token_cost.CACHE_WRITE_1H_RATE, priced.tier):
+        missing.append("cache_creation_1h")
+    if missing:
+        _log_partial_rates(model_key, tuple(missing))
+        return None
     return priced.value
 
 
-def resolve_model_key(model, pricing):
-    """Exact key, then a provider-prefix strip, then a substring alias.
+def _has_rate(rates, key, tier):
+    keys = [key + "_" + tier, key] if tier else [key]
+    return any(not isinstance(value, bool) and isinstance(value, (int, float))
+               and math.isfinite(value) and value >= 0
+               for value in (rates.get(candidate) for candidate in keys))
 
-    A candidate only counts when its catalog entry carries a base rate. Without
-    that rule an alias can land on a rate-less entry and price the call at
-    exactly $0.00, which is indistinguishable on the page from a free call.
-    """
-    match = token_cost.resolve_model(model, pricing, allow_alias=True)
-    if match is None:
-        return None
-    if match.kind != "exact":
-        _log_fuzzy(model, match.key)
-    return match.key
+
+def resolve_model_key(model, pricing):
+    """Require a priceable exact catalog identity, including its provider."""
+    match = token_cost.resolve_model(model, pricing, allow_alias=False)
+    return match.key if match is not None and match.kind == "exact" else None
 
 
 def is_estimated_pricing_model(model):
@@ -158,20 +159,12 @@ def _fallback_pricing():
         return {}
 
 
-def _log_fuzzy(model, key):
-    pair = (model, key)
-    if pair in _FUZZY_LOGGED:
-        return
-    _FUZZY_LOGGED.add(pair)
-    logger.warning("Fuzzy pricing match: %s -> %s", model, key)
-
-
 def _log_partial_rates(model_key, missing):
     pair = (model_key, missing)
     if pair in _PARTIAL_LOGGED:
         return
     _PARTIAL_LOGGED.add(pair)
-    logger.warning("Priced %s with no rate for: %s", model_key, ", ".join(missing))
+    logger.warning("Unknown cost for %s: no rate for %s", model_key, ", ".join(missing))
 
 
 def _log_unknown(model):

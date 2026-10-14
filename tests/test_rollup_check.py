@@ -584,11 +584,11 @@ class RollupCheckTests(unittest.TestCase):
                 self.assertEqual(diagnostic_keys, normal_keys)
                 self.assertEqual(
                     {entry.model for entry in normal if entry.agent_id == "codex"},
-                    set(expected_models.values()),
+                    {"gpt-5"},  # Historical session model, not mutable threads metadata.
                 )
                 self.assertEqual(
                     {entry.model for entry in diagnostic if entry.agent_id == "codex"},
-                    set(expected_models.values()),
+                    {"gpt-5"},  # Historical session model, not mutable threads metadata.
                 )
                 self.assertEqual(diagnostic.source_errors, [])
                 self.assertTrue(diagnostic.scan_complete)

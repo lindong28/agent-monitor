@@ -46,8 +46,8 @@ class SessionQuotaTests(unittest.TestCase):
         self.assertEqual(result["seven_day_resets_at"], 1)
         self.assertEqual(result["updated_at"], "2026-01-01T00:00:00Z")
         self.assertEqual(result["account_identity"], "unknown")
-        # The legacy global reader keeps its existing expiry semantics.
-        self.assertEqual(codex._extract_latest_rate_limits(self.path, {}).seven_day_pct, 0)
+        # Both readers retain the observed percentage after its reset has elapsed.
+        self.assertEqual(codex._extract_latest_rate_limits(self.path, {}).seven_day_pct, 4)
 
     def test_cli_json_and_human_disclose_stored_scope(self):
         result = self.query(SID, "--json")

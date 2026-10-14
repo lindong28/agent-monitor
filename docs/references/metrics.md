@@ -1,0 +1,147 @@
+# User-visible metric specification
+
+[Developer] This is the reusable definition and correctness reference for Monitor's displayed statistics. Maintenance CLI and diagnostic fields are in [the operations appendix](metrics-operations.md). Read this before changing a metric's producer, aggregation, label or missing-data behavior. Snapshot identity and retention remain governed by [architecture](../architecture.md) and [operations](../operations/services.md).
+
+This specification was established on 2026-10-14 against baseline `22507ab5fbe1c794cdfb870c386d89f572f1d91e` and the associated metric corrections. Definitions below describe the required behavior; they are not a claim that a running deployment or historical archive has been corrected. Source inspection and isolated counterexamples support the arguments, while release, replay and consumer verification must be recorded separately.
+
+## Sources, versions and limits
+
+| ID | Actual producer/interface and version | What it establishes; what it does not |
+| --- | --- | --- |
+| CX | [Codex protocol](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/protocol/src/protocol.rs), official `rust-v0.162.1`, commit `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d` | `TokenUsage`, `TokenCountEvent`, `TurnContextItem`, history boundaries and quota units. This is a versioned producer implementation, not a promise for all old/future rollouts. |
+| CS | [Codex session producer](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/session/mod.rs) and [spawn](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/agent/control/spawn.rs), same SHA | Quota updates can emit unchanged cumulative usage; copied forks can persist parent events; synthetic context-window filling is not measured token consumption. |
+| CA | [Codex app-server account protocol](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/app-server-protocol/src/protocol/v2/account.rs), same SHA | `usedPercent`, nullable `windowDurationMins` and `resetsAt`; account identity may be absent. Missing identity does not establish an old CLI version. |
+| CL | Claude Code local executable `2.1.296`, SHA256 `c9b5341637becbd423ddffc5b254afb645682a3868cb708bbc6cc0e7bb419937`; [SDK cost tracking](https://code.claude.com/docs/en/agent-sdk/cost-tracking), [session storage](https://code.claude.com/docs/en/agent-sdk/session-storage) | Local executable inspection found streaming usage mutation; SDK describes response observations and storage. Neither proves that every JSONL producer path persists the final usage. Do not apply an SDK assistant-placeholder rule directly to persisted JSONL. |
+| CP | [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing), [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching), checked 2026-10-14 | Standard first-party rates and cache TTL categories. These are not subscription charges, negotiated tariffs, historical effective-date guarantees or rates for every serving mode. |
+| CQ | Claude `/api/oauth/usage`, beta `oauth-2025-04-20`; `quota_refresh.py`, `parsers/claude_status.py` | Adapter reads `five_hour`/`seven_day.utilization` and ISO reset times. Complete official schema and all status-file producer versions remain unverified; public Messages API limits do not substitute for this interface. |
+| NET | [ip-api JSON](https://ip-api.com/docs/api:json), [proxycheck](https://proxycheck.io/api/), [StopForumSpam usage](https://www.stopforumspam.com/usage), checked 2026-10-14 | Actual calls use ip-api `/json/`, proxycheck `/v2/{ip}` with `risk=1`, SFS `/api?json=1&ip=…`. Do not apply the newer proxycheck v3 shape to v2. Scores describe their own databases, not provider access guarantees. |
+| M | This document, [UX contract](../contracts/ux-contract.md), [accounting correction](../usage-accounting-correction.md) and [service operations](../operations/services.md) | Product windows, filtering, accounting authority, retention and display rules. Internal contracts cannot establish missing upstream guarantees. |
+
+Audit evidence, including official source snapshots and isolated counterexamples, was retained by the maintainer in `/Users/lindong/task-artifacts/all-metric-spec-20261014/` (`source-evidence/`, `inventory.md`, `source-audit.md`, `quota-network-audit.md`, `operational-metrics-audit.md`). This machine-local evidence is not a portable dependency or a deployment receipt. Fixed upstream links above and the definitions here are the reusable reference.
+
+## Shared accounting and coverage
+
+All aggregate date windows use `Asia/Shanghai` (UTC+8), with inclusive dates; a week starts Monday. Timestamp display in the browser can use local formatting without changing bucket membership. Dimensions are agent, normalized session directory (`project`), model and machine. Session directory means the starting directory/Git identity, not every repository touched by the session.
+
+Let `E` be the normalized observations admitted for a selected window and filters, `K={e in E: cost_usd is known}`, and `U=E−K`. Counts are observation counts, not HTTP attempts. `message_count` is the represented usage-event count and need not equal `len(E)`. An emitted source record can be repeated, missing or corrected; logs are not a complete paid-attempt ledger.
+
+| Metric | Unit and definition | Why the transformation is valid; prerequisites | Update entry |
+| --- | --- | --- | --- |
+| Fresh input `input_tokens` | Tokens newly processed, excluding cache reads/writes | Claude supplies disjoint categories. Codex inclusive input is split as `fresh=Δinput−Δcached−Δcache_write`; requires consistent nonnegative component counters from the same history. | `parsers/claude.py`, `parsers/codex.py`, `token_cost.TokenCounts` |
+| Output `output_tokens` | Generated tokens, including reasoning already included by the producer | Reasoning is a subset, not an extra term. Never add `reasoning_output_tokens` again to output or total. | Same producers; `aggregators.extract_metric` |
+| Cache read `cache_read_tokens` | Reused input tokens | Subtracting this subset from inclusive input prevents double counting; Claude's already-disjoint input must not be subtracted again. | Same producers |
+| Cache creation `cache_creation_tokens` | Input tokens written to cache, all supported TTLs | One-hour writes are a subset of this total; `cache_creation_1h_tokens` is not a fifth additive total category. | Same producers |
+| Total tokens | `input+output+cache_read+cache_creation` | The four normalized classes partition represented use. Codex's synthetic `total_tokens` context-window fill must not become consumption. | `aggregators.extract_metric`, `rollup._row_metric`, session-detail renderer |
+| Usage events (`messages`) | `ΣE message_count`, events | This adds represented usage facts, not chat bubbles, raw JSONL lines, sessions or network requests. | Parser `UsageEntry`, rollup accumulation, session renderers |
+| Entry/observation count | `len(E)` | One per normalized retained observation, independent of its event weight. Repeated snapshots do not each become a new event. | `entry_count`, `cost_known_count`, period summary |
+| Per-entry cost | Recorded amount when present, otherwise estimate at applicable configured rates; USD | A recorded amount takes precedence. For estimated amounts, exact supported model mapping and all rates needed by nonzero categories must exist; otherwise unknown, including missing 1h-write pricing. | `pricing_fetcher.calculate_cost`, `resolve_model_key`, `pricing.json` |
+| Estimated arithmetic | `(I·pI + R·pR + (W−H)·pW + H·pH + O·pO) / 1,000,000` when prices are USD/MTok | `H⊆W`; splitting writes avoids billing them twice. Tier selection uses `I+R+W` and the applicable threshold. Shared `token_cost.py` uses per-token prices internally. | `token_cost.price`; coordinate its byte-identical consumers before changing arithmetic |
+| Known cost subtotal | `ΣK cost_usd`; unknown if `K` is empty | A known zero is a valid amount; no records, no priced records and mixed coverage are distinct. Sum only disjoint selected observations and retain both `len(K)` and `len(U)`. | Rollup cost query, Overview/Explore projections |
+| Pricing coverage | Known observations `len(K)`, unknown observations `len(U)`; if a fraction is shown its denominator is `len(E)` | Coverage describes available prices for observed entries only. It does not prove every call/source/date was captured. | `cost_known_count`, `entry_count−cost_known_count`; API and renderer together |
+| Strict session cost | Sum only when every retained selected entry has known cost; otherwise null | This is deliberately stricter than Overview's known subtotal. An explanatory known subtotal must not be relabeled total. | `server._session_stats`, `web/app.js` session detail |
+
+For example, known amounts `[2, 0]` plus one unknown give known subtotal USD 2, known count 2, unknown count 1; `[unknown]` gives no amount, not USD 0. This follows the set definition independently of any fixture or renderer. Tariff history is not reconstructed by this formula: stored estimates may reflect earlier configuration, while a newly derived amount uses the configuration applicable to that derivation. There is no full historical effective-date provenance, so neither “historical invoice” nor “all history revalued at today's rates” is warranted. The checked standard Sonnet 5 fallback is input/output/read/5m-write/1h-write = 2/10/0.2/2.5/4 USD per million tokens; other models and modes require their own price authority.
+
+Claude observations sharing the response identity are deduplicated. A later observed usage vector can replace an earlier one only when its components do not decrease; incomparable vectors remain a source error, not a fabricated componentwise maximum. Codex cumulative deltas require the previous counter at the actual inherited history boundary. Copied ancestor events contribute no child use; excluding only the first line is insufficient. Matching parent evidence requires an explicit `forked_from_ordinal_exclusive`; a parent's current EOF is not a historical boundary. In the pinned producer, `thread_settings_applied.thread_id` identifies the owning logical thread: an own-thread checkpoint can recover subsequent deltas from the preceding observed counter even when copied history was filtered or the parent grew. A resume also writes this checkpoint, so earlier unknown events cannot all be zeroed. They remain retained with source errors; without a preceding counter, the first subsequent amount remains unknown. Model attribution follows the applicable historical turn context or owned settings snapshot, not the thread's latest model. Missing ancestry/model cannot be replaced with an invented known value. Explicit corrections must update already archived keys (including proven zero corrections) and replay only authorized history; changing the parser alone does not remove prior archived errors.
+
+Aggregate authority is independent of session retention. `daily_usage_rollup` supplies `(date,agent,model)` totals; legacy project-derived fallback is used only for keys absent from that usage authority. Project queries use `daily_rollup`, and identity blockers can prevent project attribution while independent totals remain available. Machine admission validates snapshot identity and retention, not completeness of all underlying provider calls. Keep these separate: pricing coverage, source scan completeness/errors, admitted-machine coverage, retained-date coverage and retained-session coverage.
+
+## Overview and Explore
+
+Sources are `/api/overview` and `/api/pivot`, produced by `server.py` and `rollup.py`, consumed by `web/app.js` and `web/pivot.js`. Each cost value below uses the known subtotal and its corresponding known/unknown observation counts. Count coverage must follow the same filters, buckets and displayed series as the amount. No percentage denominator is implied for USD or token sums.
+
+| Visible metric | Window / population / unit | Derivation and consumer boundary |
+| --- | --- | --- |
+| Today cost | Current UTC+8 date, USD | `today.cost_usd`; fixed window, independent of the selected range. |
+| This-week cost | Monday through today, USD | `week.cost_usd`; fixed window, including today's partial day. |
+| Selected-range cost | Selected preset or inclusive custom dates, USD | `range.cost_usd`; shares its cohort with the selected-range trend. |
+| Cost trend, tooltip and full table | Each day/week/month bucket within range, USD per agent | `cost_over_time.rows[].values`; sums disjoint buckets. Missing cost is not a zero-valued sample. |
+| Earliest retained date / earlier history absent | Date and coverage state | `rollup_coverage.earliest_date/partial_before_range`; earliest stored aggregate date, not proven start of all usage. |
+| This-week top five session directories | Same fixed week, USD per directory | `top_projects_week`; descending known subtotal, at most five groups. It is a truncated ranking, not all directory spending. |
+| This-month model mix | Month start through today, tokens per model | `model_mix_month[].tokens`; partition by model. API `pct` is token fraction, not request/cost share; it is not currently a separate visible KPI. |
+| Comparison current/previous known cost | Latest N complete days excluding today; immediately preceding N days, USD | `comparison.{current,previous}.known_cost_usd`; adjacent non-overlapping equal-day windows. All-history has no automatic preceding period. |
+| Comparison tokens / entries / unknown prices | Same two windows, tokens / observations / observations | `tokens`, `entries`, `unknown_cost_entries`; unknown is entry count minus priced entry count, not weighted messages. |
+| Comparison difference | Current known subtotal minus previous known subtotal, USD | `known_cost_delta_usd`; null if either has no known amount. Different coverage can explain the difference; no savings claim follows. |
+| Comparison dates/day count | Inclusive start/end and N days | `start/end/days`; dates disclose exact cohorts rather than implying equal active time. |
+| Explore cost / total / input / output / cache read / cache creation / usage events | Selected dates and agent/project/model/machine filters; USD / tokens / events | `metric=cost,total,input,output,cache_read,cache_creation,messages`; same formulas as above, up to one time dimension. |
+| Explore rank totals | Same cohort, selected metric unit per non-time group | Add that group's disjoint time buckets. All-unknown cost stays unknown; coverage counts must also add. |
+| Drawn / omitted series count | Number of groups, selected query | Cost draws highest known-subtotal series and discloses omitted groups; other metrics can fold the tail into “Other (N)”. N counts original groups, not events. Do not treat omitted cost groups as zero. |
+
+These are projections of the same observations: reordering/filtering must not create new observations, and only a disjoint partition may be summed. Alias/canonical-project changes affect grouping, so update the source attribution reference as well as the chart. Legacy daily cost fields must preserve unknowns even when the current Web view prefers the new trend payload.
+
+## Sessions
+
+Sources are `/api/sessions` and `/api/session/:id`; normalization is shared with aggregates, but the record population is retained event detail. List filtering occurs on individual events before session grouping (with machine identity retained). Detail opens the entire retained session, not only the list's filtered subset. Therefore neither list-to-detail equality nor detail-to-all-history equality is promised.
+
+| Visible value | Definition, unit and scope | Implementation/update entry |
+| --- | --- | --- |
+| Matching sessions; page rows and position | Count of grouped matching sessions; page is a slice of that list | `sessions_endpoint`, `renderSessions`, `renderSessionPager` |
+| List cost / tokens / usage events | Strict known cost, sum of four token categories, sum of message counts, over matched records only | `_session_stats`; USD / tokens / events |
+| List first/last observation; duration sorting | Min/max matched timestamps; nonnegative integer seconds between them | `_session_stats`; this is observed span, not active work duration |
+| Detail total cost / unknown-cost records | Strict total over all retained entries; count of entries with null cost | `renderSessionDetail`; unknown count uses records, not event weights |
+| Detail tokens / usage events / records | Four-category sum / `Σusage_event_count` / `entries.length` | `renderSessionDetail`; these three counts have different units |
+| Detail filtered records / total / page range | Model-filtered record count versus all retained records; displayed page positions | Detail table pagination; no extrapolation to lost history |
+| Detail model count | Number of distinct retained `model` values | Unknown model remains an explicit identity, not a guessed priced model |
+| Detail first/last time and observed span | Min/max retained timestamp; rounded difference in minutes | Browser detail calculation; can include idle gaps and only one observation |
+| Entry input/output/cache read/cache write | Per-record normalized token categories | `_entry_json` → detail table; see partition proof above |
+| Entry cost; expanded usage count | Recorded/estimated USD or unknown; represented `usage_event_count` | `_entry_json`; one displayed row need not be one network attempt |
+
+## Quota, account actions and sync
+
+A quota percentage's denominator is the provider's allowance for that specific account, bucket and provider window. It is not local token totals, subscription price or a fleet-wide capacity. Never sum or average account percentages. Machine snapshots, account history and Web operations are observation sources; choose one latest complete reading for the same identity rather than mixing each field's maximum. A newer whole reading can contain unknown fields.
+
+| Metric | Definition, unit/window and missing-data rule | Source / update entry / argument |
+| --- | --- | --- |
+| Claude 5h and 7d used | Provider utilization percent for each returned window | CQ → `quota_refresh._claude` / `claude_status` → `_account_entry` → `quotaWindowCell`; not independently certified by a public OAuth schema |
+| Codex 5h and 7d used | Provider used percent; 300 and 10080 minute windows | CX/CA → quota readers → account table. Show reported 5h; absent is unknown. Old “Codex has no 5h” assumption is superseded. Legacy missing-duration positional fallback is an inference, not a current protocol guarantee. |
+| Quota number and meter | Finite percent in [0,100], rounded to integer for table/meter | `quotaUsage`; invalid or absent is unknown, not clamped zero. Account cards can retain original reported precision. |
+| Low-remaining / nearly-used-up | Displayed used percent >75 / >90 | Local display policy; strict inequalities. Historical expired/unknown-reset readings are not current threshold alarms. |
+| Remaining-quota ordering | `100−displayed used`, within provider/current/history groups | `sortQuotaAccounts`; unknown last, using the same final reading as display |
+| Reset time/countdown/expired | Provider Unix seconds (Claude ISO converted to seconds); remaining time is reset−now | `quotaResetState`, `quotaResetText`; reset≤now means previous reset passed, not new observed use=0 or permission to send |
+| Observed-at and stale | Selected reading's time; stale after six hours | `quotaIsStale`, `quotaUpdatedCell`; failed refresh preserves time/value; unknown time is not fresh |
+| Worst unknown-identity warning | Maximum valid displayed used percent among warning-grade unknown machine readings | `quotaWorstUsage`; a max over records, never summed allowance |
+| Matched/all quota records | Filtered row count / all row count | `renderQuotaAccounts`; search/provider filter defines numerator |
+| Current/history account count | Known identities by presence/account_state | Claude identity; Codex workspace+email. Same workspace with different email is not one account. |
+| Unknown machine records / machines in fold | Unknown-identity record count / represented machine-list count | Do not label unknown records as distinct known accounts |
+| Codex card seven-day use/reset/recent success | Latest applicable whole observation from retained/current/batch before/after/last_quota | `latestCodexQuotaReading`, `codex-accounts.js`; successful before remains usable when after fails |
+| Send-eligible accounts | Count of eligible current-directory profiles | `renderBatch`; historical metadata alone is not a usable credential |
+| Batch sent N/M | Number of fixed batch members with message_status=succeeded / fixed member count | Each member counted once; quota-only refresh never adds sends. A successful quota read does not prove a send. |
+| Batch waiting authorization/queued/processing/unsent/unknown/failed | Counts by displayed member operation/eligibility state | These state counts can overlap success or other summaries; do not add them as a disjoint partition without proof |
+| Batch next-reset-known N/M | Members whose latest applicable whole reading reports a future seven-day reset / fixed member count | Include valid before as well as after and applicable newer quota-only readings; expired/missing reset excluded |
+| Stored session weekly use/reset/observation | Historical percent / Unix seconds / timestamp from that UUID's local rollout | `session-quota`, `load_session_rate_limits`; no live provider request, current account quota unverified |
+| Admitted/declared machines | Distinct admitted machines / configured machines | `/api/sync-status coverage`; not online rate or round success rate |
+| Machines needing attention | Machines with non-admission, stale, unreachable/unknown or failed/cleanup_failed/malformed_result state | `renderSyncStatus`; a union of affected machines, not sum of error categories |
+| Data update/age/start | Statistics observed_at, fallback generated_at; elapsed time; earliest aggregate date | `renderMachineStatus`; separate from publication freshness and last contact |
+| Last successful contact / last attempt | Recorded contact/attempt timestamps | A successful SSH contact does not prove new statistics or source completeness |
+| Quota pending/failed machine sets and progress | Current quota round machine sets; requested/completed ticket high-water marks | Failed terminal rounds can advance completed; tickets are not successful-operation counts |
+| Session coverage notice | Source machine and retained-detail date coverage | `sessionCoverageText`; aggregate coverage can be longer |
+
+Guide and the global sync panels reuse the same sync reader; they do not define additional cost/token formulas. Sync stale uses generation publication age, whereas displayed statistics age uses observation/generated time. Preserve this distinction until explicitly changing the product rule. Provider `limit_id` can identify separate quota buckets; a selected single-bucket display must not claim completeness across every provider bucket without verifying the emit/selection path.
+
+## Network report
+
+`/api/network`, `agent-monitor network` and independent `ip-check` share collection logic in `ip_check/cli.py`, but have separate rendering paths (`web/app.js`, `network_report.py`, CLI `main`). Every consumer must preserve the same missing-data meaning. Reports concern `checked_host`, the server performing probes, not the browser device. A cached report retains its collection timestamp; cache age is not a measured network latency. There are no RTT, throughput or p95 speed metrics in this report.
+
+| Metric/readout | Definition and unit | Conditions, limits and update entry |
+| --- | --- | --- |
+| Public IP/country/region/city/ISP/org/timezone/UTC offset | ip-api response for the actual probe route; identifiers and offset | `get_public_info`; require successful response. Geolocation is provider data, not verified physical location. |
+| Proxy/hosting flags and IP type | ip-api booleans plus proxycheck v2 classification | `get_ip_risk`, `collect_all`; unmeasured is unknown, not false. Proxy environment variables describe configuration, not necessarily the observed route. |
+| IP risk score and level | proxycheck v2 risk 0–100; local low <30, medium <70, high otherwise | `risk.score/level`; score is not probability of account ban or request success |
+| Spam score/level | SFS confidence 0–100, same local display bins | `get_stopforumspam`; only explicit successful valid IP results count. Failed/missing result is not “not listed”. |
+| Reports / last seen | SFS frequency count and lastseen timestamp | Count is database reports for that IP, not Monitor requests/users; absent stays unknown |
+| LAN IP | Local route-selected IPv4 address | `get_lan_ip`; not independently the public IP |
+| IPv6 address / legacy ipv6_leaked | Local IPv6 route-selected address / legacy heuristic | `get_ipv6`; neither presence nor absence verifies remote leakage or that IPv6 is disabled. Explicit limitation `ipv6_leak_unverified` remains. |
+| DNS servers / country / CN flag | Local resolver addresses, known dictionary attribution; any known CN match | `get_dns_servers`, `dns_label`; an unknown address or router cannot prove no domestic resolver. Country attribution is not anycast-node geolocation. |
+| Local timezone/offset and match | Local zone versus public zone; named-zone comparison, offset fallback when applicable | `tz_check`; missing side is unknown. Different IANA aliases can refer to the same zone; alias-equivalence correctness is not established. |
+| Verdict | Local heuristic HIGH for configured positive IPv6/DNS/risk≥70/timezone signals; otherwise proxy/low only within observed scope | Preserve existing thresholds. Missing risk does not itself trigger HIGH; missing evidence must not become “network healthy” or provider-access proof. |
+| Coverage / limitations | Missing dimensions `public`, `dns`, `risk`, `timezone`; limitation `ipv6_leak_unverified` | Only missing risk preserves the heuristic verdict while disclosing partial coverage; missing public/DNS/timezone evidence yields unknown unless a measured HIGH signal exists. Risk can be unqueried by design when public proxy/hosting flags are false. |
+| Host / report timestamp / age / cache source | Probe host, collection timestamp, elapsed report age, cache/live origin | `checked_host`, `timestamp`, `source_note`; 60-second cache policy is not a successful-probe guarantee |
+| Route / proxy environment | Selected direct/proxy probe route and sanitized configured proxy values | `resolve_route`, `get_proxy_envs`; metadata, not a usage statistic |
+
+Risk and SFS queries are conditional on the public proxy/hosting findings; unqueried scores must not appear as measured zero. A positive local heuristic can justify the product's HIGH label while still not proving a real IPv6 leak. Conversely, no triggered HIGH rule is not evidence that all relevant checks succeeded.
+
+## Keeping the specification current
+
+For a metric change, update its row, actual producer/version, formula, population/window, null behavior and all consumer paths together. For sum/count changes, state the counted set and why its members are disjoint; for a rate, name the denominator; for a historical change, identify archive/rollup replay authority rather than assuming a forward code fix repairs existing data. New visible fields require a row here or in the operations appendix. Preserve unknowns that cannot be recovered from source evidence.
+
+Verification should distinguish unknown, empty, known zero and mixed cost cohorts; compare inherited/plain/new-child usage; exercise both sides of time and coverage boundaries. These are discriminating examples, not a claim of exhaustive testing. Production source versions, complete Claude final-usage persistence, historical tariff provenance, all fork/revert forms, model fallback attribution, cross-machine identity variants and real provider availability remain bounded by the evidence actually obtained. See the release's execution records for which implementation and consumer checks have run.

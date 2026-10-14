@@ -140,7 +140,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(entry.message_id, "session")
         self.assertEqual(entry.request_id, "token-count:3")
         self.assertEqual(entry.timestamp.isoformat(), "2026-05-19T02:02:00+00:00")
-        self.assertEqual(entry.model, "gpt-5")
+        self.assertEqual(entry.model, "unknown")
         self.assertEqual(entry.input_tokens, 100)
         self.assertEqual(entry.output_tokens, 20)
         self.assertEqual(entry.cache_read_tokens, 30)
@@ -169,7 +169,7 @@ class ParserTests(unittest.TestCase):
 
         self.assertEqual(len(entries), 1)
         self.assertIsNone(entries[0].cost_usd)
-        self.assertEqual(entries[0].model, "gpt-5")
+        self.assertEqual(entries[0].model, "unknown")
 
     @staticmethod
     def _write_codex_state(path: Path, session_id: str, model: str) -> None:

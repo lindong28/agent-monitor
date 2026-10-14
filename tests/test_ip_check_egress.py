@@ -220,7 +220,7 @@ class EgressSessionTests(unittest.TestCase):
         class Response:
             @staticmethod
             def json():
-                return {"ip": {"appears": 0}}
+                return {"success": 1, "ip": {"appears": 0}}
 
         class Session:
             @staticmethod

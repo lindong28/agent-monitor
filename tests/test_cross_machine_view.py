@@ -124,7 +124,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
                 payload[key]["by_agent"],
                 {"claude-code": 2.0, "codex": 3.0},
             )
-        self.assertEqual(payload["top_projects_week"], [{"project": "repo", "cost_usd": 5.0}])
+        self.assertEqual(payload["top_projects_week"], [{"project": "repo", "cost_usd": 5.0, "cost_coverage": None}])
         self.assertEqual(
             payload["model_mix_month"],
             [{"model": "gpt-5", "tokens": 50, "pct": 1.0}],
@@ -1854,6 +1854,7 @@ global.AgentMonitor = {
   watchPageData() {},
   integer(value) { return String(value); },
   moneyPrecise(value) { return String(value); },
+  costCoverageText() { return "定价覆盖未知"; },
   dataset(label, data) { return { label, data }; },
   chart(_key, _id, config) { rendered.push(config.data.labels[0]); },
   chartOptions(value) { return value; },

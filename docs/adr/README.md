@@ -34,3 +34,17 @@ Earlier decisions remain in the source repository at the immutable commit linked
 - [20261013-42b6 — Usage observation correction](20261013-42b6-usage-observation-correction.md): preserve actual usage across pagination and streaming, with retained observations and visible unknowns.
 
 - [20261013-b4d8 — Session indexes and runtime observations](20261013-b4d8-runtime-performance.md): accepted; bounded process-local diagnostics and preserved query semantics.
+
+- [20261014-a7c2 — Known-cost subtotals with pricing coverage](20261014-a7c2-known-cost-coverage.md): accepted; implementation and production verification tracked separately.
+
+- [20261014-b8d3 — Attribute Codex usage to its actual history and turn](20261014-b8d3-codex-history-attribution.md): accepted; implementation and production verification tracked separately.
+
+- [20261014-c9e4 — Require applicable rates before declaring cost known](20261014-c9e4-complete-pricing.md): accepted; implementation and production verification tracked separately.
+
+- [20261014-da15 — Preserve quota observations and display reported windows](20261014-da15-reported-quota-windows.md): accepted; implementation and production verification tracked separately.
+
+- [20261014-eb26 — Separate network heuristics from missing evidence](20261014-eb26-network-evidence-coverage.md): accepted; implementation and production verification tracked separately.
+
+- [20261014-fc37 — Count only events not successfully emitted](20261014-fc37-diagnostic-event-loss.md): accepted; implementation and production verification tracked separately.
+
+- [20261014-0d48 — Report orphan disposition using replay authority](20261014-0d48-authoritative-orphan-disposition.md): accepted; implementation and production verification tracked separately.

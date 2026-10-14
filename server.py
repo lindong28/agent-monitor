@@ -1484,24 +1484,27 @@ def _summary(entries):
 
 
 def _rollup_summary(time_range):
-    cost_rows = rollup.query_pivot(
+    cost_pivot = rollup.query_pivot(
         "agent", "none", "cost", time_range=time_range
-    )["rows"]
+    )
+    cost_rows = cost_pivot["rows"]
     token_rows = rollup.query_pivot(
         "agent", "none", "total", time_range=time_range
     )["rows"]
-    by_agent = {"claude-code": 0.0, "codex": 0.0}
+    by_agent = {"claude-code": None, "codex": None}
     for row in cost_rows:
         value = row["values"].get("value")
         if value is not None:
             by_agent[row["x"]] = value
     return {
-        "cost_usd": sum(by_agent.values()),
+        "cost_usd": (sum(value for value in by_agent.values() if value is not None)
+                     if any(value is not None for value in by_agent.values()) else None),
         "tokens": sum(
             row["values"].get("value") or 0
             for row in token_rows
         ),
         "by_agent": by_agent,
+        "cost_coverage": cost_pivot.get("cost_coverage"),
     }
 
 
@@ -1509,8 +1512,8 @@ def _daily_cost_from_pivot(pivot):
     return [
         {
             "date": row["x"],
-            "claude_cost": row["values"].get("claude-code") or 0.0,
-            "codex_cost": row["values"].get("codex") or 0.0,
+            "claude_cost": row["values"].get("claude-code"),
+            "codex_cost": row["values"].get("codex"),
         }
         for row in pivot["rows"]
     ]
@@ -1521,7 +1524,8 @@ def _top_projects_from_rollup(time_range, limit):
         "project", "none", "cost", time_range=time_range
     )
     return [
-        {"project": row["x"], "cost_usd": row["values"].get("value")}
+        {"project": row["x"], "cost_usd": row["values"].get("value"),
+         "cost_coverage": row.get("cost_coverage", {}).get("value")}
         for row in pivot["rows"]
         if row["values"].get("value") is not None
     ][:limit]

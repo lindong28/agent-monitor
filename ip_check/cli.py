@@ -14,6 +14,7 @@ import concurrent.futures
 import datetime
 import re
 import platform
+import math
 
 import requests
 from urllib.parse import urlsplit as _urlsplit
@@ -413,11 +414,21 @@ def get_stopforumspam(ip, route=None):
             params={"json": 1, "ip": ip},
             timeout=(6, 10),
         )
-        data = resp.json().get("ip", {})
-        if not data.get("appears"):
+        payload = resp.json()
+        if not isinstance(payload, dict) or payload.get("success") != 1:
+            raise ValueError("信誉库未返回成功结果")
+        data = payload.get("ip")
+        if not isinstance(data, dict) or data.get("appears") not in (0, 1):
+            raise ValueError("信誉库未返回明确收录状态")
+        if data["appears"] == 0:
             return [ok("未收录  低风险 ✓")]
-        confidence = float(data.get("confidence", 0))
-        frequency  = int(data.get("frequency", 0))
+        confidence = data.get("confidence")
+        frequency = data.get("frequency")
+        if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+                or not math.isfinite(confidence) or not 0 <= confidence <= 100
+                or isinstance(frequency, bool) or not isinstance(frequency, int)
+                or frequency < 0):
+            raise ValueError("信誉库未返回有效置信度或举报次数")
         last_seen  = (data.get("lastseen") or "")[:10]
         color, level = risk_color(confidence)
         lines = [f"{color}{confidence:.1f}/100 {level}{C.RESET}  举报 {frequency} 次"]
@@ -461,6 +472,43 @@ def get_proxy_envs():
         if val and val not in seen.values():
             seen[key.upper()] = val
     return seen
+
+
+def _dns_entries(addresses):
+    entries = []
+    for address in addresses:
+        label = KNOWN_DNS.get(address, "")
+        country = next((code for code in ("CN", "US", "CY") if f"({code})" in label), None)
+        entries.append({"ip": address, "label": label or None, "country": country})
+    return entries
+
+
+def _network_assessment(local, public, risk, tz):
+    """Missing reputation alone keeps E1c's grade; missing critical inputs do not."""
+    missing = []
+    if (not public.get("ok") or not public.get("ip") or not isinstance(public.get("proxy"), bool)
+            or not isinstance(public.get("hosting"), bool)):
+        missing.append("public")
+    dns = local.get("dns") or []
+    if not dns or any(not entry.get("country") for entry in dns):
+        missing.append("dns")
+    if (public.get("ok") and (public.get("proxy") or public.get("hosting"))
+            and risk.get("score") is None):
+        missing.append("risk")
+    if not isinstance(tz.get("matched"), bool):
+        missing.append("timezone")
+    high = (bool(local.get("ipv6")) or local.get("dns_has_cn")
+            or (risk.get("score") is not None and risk["score"] >= 70)
+            or tz.get("matched") is False)
+    if high:
+        verdict = "high"
+    elif any(key in missing for key in ("public", "dns", "timezone")):
+        verdict = "unknown"
+    elif public.get("proxy") or risk.get("marked_proxy"):
+        verdict = "proxy-in-use"
+    else:
+        verdict = "low"
+    return verdict, {"missing": missing, "limitations": ["ipv6_leak_unverified"]}
 
 
 def collect_all() -> dict:
@@ -558,21 +606,11 @@ def collect_all() -> dict:
         lan = get_lan_ip()
         ipv6 = get_ipv6()
         dns_raw = get_dns_servers()
-        dns_entries = []
-        for ip in dns_raw:
-            label = KNOWN_DNS.get(ip, "")
-            country = None
-            if label:
-                if "(CN)" in label:
-                    country = "CN"
-                elif "(US)" in label:
-                    country = "US"
-                elif "(CY)" in label:
-                    country = "CY"
-            dns_entries.append({"ip": ip, "label": label or None, "country": country})
+        dns_entries = _dns_entries(dns_raw)
         out["local"] = {
             "lan_ip": _strip(lan),
             "ipv6": ipv6,
+            # Deprecated: local address presence, not a public leak observation.
             "ipv6_leaked": ipv6 is not None,
             "dns": dns_entries,
             "dns_has_cn": any(e["country"] == "CN" for e in dns_entries),
@@ -612,8 +650,8 @@ def collect_all() -> dict:
                 "org": pub.get("org"),
                 "timezone": tz_name,
                 "tz_offset": tz_off,
-                "proxy": bool(pub.get("proxy")),
-                "hosting": bool(pub.get("hosting")),
+                "proxy": pub.get("proxy") if isinstance(pub.get("proxy"), bool) else None,
+                "hosting": pub.get("hosting") if isinstance(pub.get("hosting"), bool) else None,
             }
         else:
             message = pub.get("message", "unknown")
@@ -625,7 +663,7 @@ def collect_all() -> dict:
     # Match upstream main() gating: only call proxycheck and stopforumspam when
     # ip-api marks the public IP as proxy or hosting, preserving free quotas.
     pub_data = out.get("public") or {}
-    if pub_data.get("ok") and (pub_data.get("proxy") or pub_data.get("hosting")):
+    if pub_data.get("ok") and pub_data.get("ip") and (pub_data.get("proxy") or pub_data.get("hosting")):
         ip = pub_data.get("ip")
         probes = _collect_risk_probes(ip, route)
         risk_result, risk_error = probes["risk"]
@@ -680,22 +718,19 @@ def collect_all() -> dict:
     local = out.get("local") or {}
     risk = out.get("risk") or {}
     tz = out.get("tz_check") or {}
-    hard_high = {
-        "ipv6": bool(local.get("ipv6_leaked")),
-        "dns": bool(local.get("dns_has_cn")),
-        "risk": bool(risk.get("score") is not None and risk.get("score") >= 70),
-        "tz": bool(tz.get("matched") is False),
-    }
+    out["verdict"], out["coverage"] = _network_assessment(local, pub_data, risk, tz)
     proxy_detected = bool(pub_data.get("proxy") or risk.get("marked_proxy"))
 
     if local.get("ipv6_leaked"):
-        conclusions.append({"level": "bad", "text": "检出 IPv6 泄漏，真实地址已暴露"})
+        conclusions.append({"level": "bad", "text": "检出本地 IPv6 地址；公网泄漏未核实"})
     elif local:
-        conclusions.append({"level": "ok", "text": "IPv6 已关闭，无泄漏"})
+        conclusions.append({"level": "warn", "text": "未检出本地 IPv6 地址；公网泄漏未核实"})
     if local.get("dns_has_cn"):
-        conclusions.append({"level": "bad", "text": "检出国内 DNS 解析器，位置可能暴露"})
-    elif local.get("dns"):
-        conclusions.append({"level": "ok", "text": "无国内 DNS 解析器"})
+        conclusions.append({"level": "bad", "text": "检出已知国内 DNS 解析器"})
+    elif "dns" in out["coverage"]["missing"]:
+        conclusions.append({"level": "warn", "text": "DNS 解析器地域未知或列表缺失，无法完整判断"})
+    else:
+        conclusions.append({"level": "ok", "text": "未命中已知国内 DNS 解析器"})
     if pub_data.get("ok"):
         score = risk.get("score")
         if score is not None:
@@ -705,9 +740,9 @@ def collect_all() -> dict:
                 conclusions.append({"level": "warn", "text": f"IP 风险中等（{score}/100）"})
             else:
                 conclusions.append({"level": "bad", "text": f"IP 风险高（{score}/100）"})
-        elif not (pub_data.get("proxy") or pub_data.get("hosting")):
+        elif pub_data.get("proxy") is False and pub_data.get("hosting") is False:
             conclusions.append({"level": "ok", "text": "IP 无代理或机房标记"})
-        if proxy_detected and not any(hard_high.values()):
+        if proxy_detected and out["verdict"] != "high":
             conclusions.append({
                 "level": "warn",
                 "text": "IP 被标记为代理/VPN——走隧道时属正常，但 Claude 的反爬可能误判",
@@ -717,12 +752,6 @@ def collect_all() -> dict:
     elif tz.get("matched") is False:
         conclusions.append({"level": "bad", "text": "时区不一致"})
     out["conclusions"] = conclusions
-    if any(hard_high.values()):
-        out["verdict"] = "high"
-    elif proxy_detected:
-        out["verdict"] = "proxy-in-use"
-    else:
-        out["verdict"] = "low"
     return out
 
 
@@ -780,7 +809,7 @@ def main():
     tbl_row("局域网 IP", get_lan_ip())
     ipv6_addr = get_ipv6()
     ipv6_leaked = ipv6_addr is not None
-    tbl_row("IPv6 地址", ipv6_addr if ipv6_leaked else warn("已禁用"))
+    tbl_row("IPv6 地址", ipv6_addr if ipv6_leaked else warn("未检出地址"))
     dns = get_dns_servers()
     if dns:
         tbl_row("DNS 服务器", dns_label(dns[0]))
@@ -788,7 +817,8 @@ def main():
             tbl_row("", dns_label(d))
     else:
         tbl_row("DNS 服务器", warn("获取失败"))
-    dns_cn = any("(CN)" in KNOWN_DNS.get(d, "") for d in dns)
+    dns_entries = _dns_entries(dns)
+    dns_cn = any(entry["country"] == "CN" for entry in dns_entries)
 
     tbl_sep()
 
@@ -824,8 +854,9 @@ def main():
     else:
         tbl_row("环境变量代理", ok("未设置"))
     if pub_ok:
-        tbl_row("IP 标记为代理", bad("是 ✗") if pub.get("proxy")   else ok("否 ✓"))
-        tbl_row("机房 / 托管",   bad("是 ✗") if pub.get("hosting") else ok("否 ✓"))
+        for label, key in (("IP 标记为代理", "proxy"), ("机房 / 托管", "hosting")):
+            flag = pub.get(key)
+            tbl_row(label, bad("是 ✗") if flag is True else ok("否 ✓") if flag is False else warn("未知"))
         if (pub.get("hosting") or pub.get("proxy")) and pub_ip:
             probes = _collect_risk_probes(pub_ip, route)
             risk_result, risk_error = probes["risk"]
@@ -871,15 +902,17 @@ def main():
     tbl_sep()
     conclusions = []
     if ipv6_leaked:
-        conclusions.append(bad("✗ IPv6 泄露，暴露真实地址"))
+        conclusions.append(bad("✗ 检出本地 IPv6 地址；公网泄漏未核实"))
     else:
-        conclusions.append(ok("✓ IPv6 已禁用，无泄露风险"))
+        conclusions.append(warn("- 未检出本地 IPv6 地址；公网泄漏未核实"))
     if dns_cn:
-        conclusions.append(bad("✗ DNS 使用国内服务商，暴露真实位置"))
+        conclusions.append(bad("✗ 检出已知国内 DNS 解析器"))
     elif not dns:
         conclusions.append(warn("- DNS 获取失败，无法评估"))
+    elif any(not entry["country"] for entry in dns_entries):
+        conclusions.append(warn("- 部分 DNS 解析器地域未知，无法完整判断"))
     else:
-        conclusions.append(ok("✓ DNS 未检测到国内服务商"))
+        conclusions.append(ok("✓ 未命中已知国内 DNS 解析器"))
     if not pub_ok:
         conclusions.append(warn("- IP 信息获取失败，无法评估风险"))
     elif pub.get("proxy") or pub.get("hosting"):
@@ -892,25 +925,36 @@ def main():
                 conclusions.append(bad(f"✗ IP 风险高（{risk_score}/100），建议更换节点"))
         else:
             conclusions.append(warn("! IP 为机房/代理，未查到风险分数"))
+    elif pub.get("proxy") is False and pub.get("hosting") is False:
+        conclusions.append(ok("✓ IP 无代理或机房标记"))
     else:
-        conclusions.append(ok("✓ IP 正常，无风险标记"))
+        conclusions.append(warn("- 公网代理或机房标记未知"))
     if tz_matched is True:
         conclusions.append(ok("✓ 时区一致"))
     elif tz_matched is False:
         conclusions.append(bad("✗ 时区不一致，建议调整"))
     else:
         conclusions.append(warn("- 时区无法比对"))
-    has_bad = (ipv6_leaked or dns_cn
-               or (risk_score is not None and risk_score >= 70)
-               or tz_matched is False)
+    verdict, coverage = _network_assessment(
+        {"ipv6": ipv6_addr, "dns": dns_entries, "dns_has_cn": dns_cn},
+        {"ok": pub_ok, "ip": pub.get("query"), "proxy": pub.get("proxy"), "hosting": pub.get("hosting")},
+        {"score": risk_score}, {"matched": tz_matched},
+    )
     tbl_row("结论分析", conclusions[0])
     for c in conclusions[1:]:
         tbl_row("", c)
     tbl_sep()
-    if has_bad:
-        tbl_row("综合结论", bad("⚠ 当前环境 Claude 使用高风险"))
+    if verdict == "high":
+        tbl_row("综合结论", bad("⚠ 已观测信号命中启发式高风险"))
+    elif verdict == "unknown":
+        tbl_row("综合结论", warn("观测不足，网络状态未知"))
+    elif verdict == "proxy-in-use":
+        tbl_row("综合结论", warn("检出代理；服务可用性未验证"))
     else:
-        tbl_row("综合结论", ok("✓ 当前环境 Claude 使用低风险"))
+        tbl_row("综合结论", ok("已观测信号低风险；服务可用性未验证"))
+    if coverage["missing"]:
+        labels = {"public": "公网信息", "dns": "DNS 归属", "risk": "风险分", "timezone": "时区"}
+        tbl_row("观测缺项", warn("、".join(labels[key] for key in coverage["missing"])))
 
     tbl_bot()
 

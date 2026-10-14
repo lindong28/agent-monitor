@@ -184,10 +184,8 @@ def _codex(account):
         result = receive(2)
         reported_account = result.get("accountId")
         if reported_account is None:
-            # No account field at all is a CLI that predates it, not a machine
-            # that is signed out. The two want opposite things from the reader:
-            # one needs an update, the other needs nothing.
-            raise RefreshError("Codex 没有随配额返回账号，请更新这台机器上的 CLI 后重试。")
+            # A null accountId is permitted by the current protocol.
+            raise RefreshError("Codex 配额响应未提供账号，无法核验读数归属；请稍后重试。")
         if reported_account != account["account_id"]:
             # A different account really is a sign-in mismatch: whatever this
             # machine is signed in as now, it is not the credential we read.

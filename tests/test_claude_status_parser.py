@@ -78,7 +78,7 @@ class ClaudeStatusParserTests(unittest.TestCase):
 
         self.assertEqual(limits.model, "")
 
-    def test_expired_reset_zeroes_percentage(self):
+    def test_expired_reset_preserves_percentage(self):
         with tempfile.TemporaryDirectory() as tmp:
             status_file = Path(tmp) / "tt-status.json"
             self._write_status(
@@ -95,7 +95,7 @@ class ClaudeStatusParserTests(unittest.TestCase):
 
             limits = claude_status.load_rate_limits(status_file)
 
-        self.assertEqual(limits.five_hour_pct, 0.0)
+        self.assertEqual(limits.five_hour_pct, 88)
         self.assertEqual(limits.seven_day_pct, 30)
 
     def test_missing_rate_limits_returns_none(self):

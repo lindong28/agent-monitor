@@ -360,7 +360,7 @@ class AccountMemoryTests(unittest.TestCase):
         def admission_snapshot():
             return real_admission_snapshot(config_path=config_path, root=generations_root)
 
-        def sync_all():
+        def sync_all(*, quota_refresh=False, progressive=False, on_statistics=None, on_complete=None):
             round_number = len(published_ids) + 1
             source = Path(self.temporary.name) / f"source-{round_number}.db"
             self.make_generation_db(source, round_number)

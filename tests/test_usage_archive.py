@@ -113,21 +113,23 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         for name, last in (("positive", usage(100, 0, 10)), ("zero", usage(0, 0, 0))):
             path = self.sessions / (name + ".jsonl")
             rows = [{"type": "session_meta", "payload": {
-                "id": name, "forked_from_id": "parent", "cwd": "project"}},
-                {"type": "session_meta", "payload": {"id": "parent", "cwd": "project"}},
+                "id": name, "forked_from_id": "parent", "cwd": "project",
+                "subagent_history_start_ordinal": 2}},
+                event(usage(1100 - last["input_tokens"], 900 - last["cached_input_tokens"],
+                            110 - last["output_tokens"])),
                 event(usage(1100, 900, 110), last)]
             path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
             old = replace(retained, session_id="parent", message_id=name,
                           request_id="token-count:3", input_tokens=200,
                           cache_read_tokens=900, output_tokens=110)
             UsageArchive(self.archive_path).collect(
-                [path], lambda _: [old, retained], lambda _: "old-parser", [],
+                [path], lambda _: [old, replace(old, request_id="token-count:2"), retained], lambda _: "old-parser", [],
                 aggregators.USAGE_TIMEZONE)
         before = {e.dedup_key for e in UsageArchive(self.archive_path).read()[0]}
         self.run_rollup()
         repaired = UsageArchive(self.archive_path).read()[0]
         self.assertEqual({e.dedup_key for e in repaired}, before)
-        by_session = {e.session_id: e for e in repaired}
+        by_session = {e.session_id: e for e in repaired if e.session_id == "missing" or e.request_id == "token-count:3"}
         self.assertEqual(set(by_session), {"missing", "positive", "zero"})
         self.assertEqual(by_session["missing"], retained)
         self.assertEqual(by_session["positive"].input_tokens, 100)
@@ -154,7 +156,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.assertEqual(self.rows(), [("2026-02-10", "gpt-5", 170)])
         self.assertEqual(self.rows("daily_rollup"), [("2026-02-10", "gpt-5", 170)])
 
-    def test_db_and_wal_changes_reparse_and_replace_models(self):
+    def test_db_and_wal_changes_do_not_replace_historical_models(self):
         self.seed()
         self.session()
         for wal in (False, True):
@@ -170,8 +172,8 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                     after = aggregators.codex._metadata_signature(self.metadata)
                     self.assertNotEqual(before, after)
                     self.run_rollup()
-                    self.assertEqual(self.rows(), [("2026-02-10", "model-b", 100)])
-                    self.assertEqual(self.rows("daily_rollup"), [("2026-02-10", "model-b", 100)])
+                    self.assertEqual(self.rows(), [("2026-02-10", "gpt-5", 100)])
+                    self.assertEqual(self.rows("daily_rollup"), [("2026-02-10", "gpt-5", 100)])
                 finally:
                     conn.close()
 
@@ -217,16 +219,16 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         conn = self.models_db("mapped-one")
         self.addCleanup(conn.close)
         with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
-            self.assertEqual({entry.model for entry in self.load()}, {"mapped-one", "gpt-5"})
+            self.assertEqual({entry.model for entry in self.load()}, {"gpt-5"})
             conn.execute("INSERT INTO threads VALUES ('two', 'mapped-two')")
             conn.commit()
-            self.assertEqual({entry.model for entry in self.load()}, {"mapped-one", "mapped-two"})
+            self.assertEqual({entry.model for entry in self.load()}, {"gpt-5"})
             conn.execute("UPDATE threads SET model='updated-two' WHERE id='two'")
             conn.commit()
-            self.assertEqual({entry.model for entry in self.load()}, {"mapped-one", "updated-two"})
+            self.assertEqual({entry.model for entry in self.load()}, {"gpt-5"})
             conn.execute("DELETE FROM threads WHERE id='one'")
             conn.commit()
-            self.assertEqual({entry.model for entry in self.load()}, {"gpt-5", "updated-two"})
+            self.assertEqual({entry.model for entry in self.load()}, {"gpt-5"})
             self.assertEqual(parse.call_count, 8)
 
     def test_valid_empty_mapping_is_cacheable_but_missing_is_not(self):
@@ -244,7 +246,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
             self.load()
             self.assertEqual(parse.call_count, 3)
             self.models_db("restored-model").close()
-            self.assertEqual(self.load()[0].model, "restored-model")
+            self.assertEqual(self.load()[0].model, "gpt-5")
             self.assertEqual(parse.call_count, 4)
 
     def test_source_change_reparses_with_unchanged_mapping(self):
@@ -291,11 +293,11 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                         return entries
 
                     with mock.patch.object(aggregators, "_parse_usage_file", side_effect=parse_then_update):
-                        self.assertEqual(self.load(force_reload=True)[0].model, "model-a")
+                        self.assertEqual(self.load(force_reload=True)[0].model, "gpt-5")
                     with sqlite3.connect(self.archive_path) as archive:
                         self.assertEqual(archive.execute("SELECT count(*) FROM parsed_files WHERE signature IS NULL").fetchone()[0], 0)
                     with mock.patch.object(aggregators, "_parse_usage_file", wraps=original_parse) as parse:
-                        self.assertEqual(self.load()[0].model, "model-b" if change_model else "model-a")
+                        self.assertEqual(self.load()[0].model, "gpt-5")
                         self.assertEqual(parse.call_count, 1 if change_model else 0)
                 finally:
                     conn.close()
@@ -346,7 +348,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.models_db("model-b").close()
         recovered = self.load()
         self.assertTrue(recovered.scan_complete)
-        self.assertEqual([(e.model, e.input_tokens) for e in recovered], [("model-b", 200)])
+        self.assertEqual([(e.model, e.input_tokens) for e in recovered], [("gpt-5", 200)])
 
     def test_missing_and_broken_metadata_retry_existing_source(self):
         self.session()
@@ -360,7 +362,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
             self.assertEqual(parse.call_count, 2)
             self.metadata.unlink()
             self.models_db("resolved-model").close()
-            self.assertEqual(self.load()[0].model, "resolved-model")
+            self.assertEqual(self.load()[0].model, "gpt-5")
             self.assertEqual(parse.call_count, 3)
 
     def test_read_only_and_diagnostic_do_not_write_archive(self):
@@ -385,7 +387,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         conn.execute("UPDATE threads SET model='model-b'")
         conn.commit()
         conn.close()
-        self.assertEqual(self.load()[0].model, "model-a")
+        self.assertEqual(self.load()[0].model, "gpt-5")
 
     def test_explicit_archive_path_and_injected_cache_are_isolated(self):
         path = self.session()

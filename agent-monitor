@@ -332,18 +332,25 @@ for error in result["diagnostic_errors"]:
     print("Diagnostic error ({stage}): {error}".format(**error))
 window = result["window"]
 print("Recompute window: {start}..{end} ({days} days, inclusive)".format(**window))
+def orphan_disposition(rows):
+    removed = sum(item.get("action") == "remove" for item in rows["items"])
+    return "{preserved} preserved; {removed} removed by authoritative replay".format(
+        preserved=rows["count"] - removed, removed=removed)
+
 print(
-    "Project dry run: orphan_rows={orphan} (preserved; no action), would_skip={skip}, would_write={write}".format(
+    "Project dry run: orphan_rows={orphan} ({disposition}), would_skip={skip}, would_write={write}".format(
         orphan=result["orphan_rows"]["count"],
+        disposition=orphan_disposition(result["orphan_rows"]),
         skip=result["would_skip"]["count"],
         write=result["would_write"]["count"],
     )
 )
 if result.get("usage_rollup_schema") == 2:
     print(
-        "Total-usage dry run: orphan_rows={orphan} (preserved; no action), "
+        "Total-usage dry run: orphan_rows={orphan} ({disposition}), "
         "would_skip={skip}, would_write={write}".format(
             orphan=result["usage_orphan_rows"]["count"],
+            disposition=orphan_disposition(result["usage_orphan_rows"]),
             skip=result["usage_would_skip"]["count"],
             write=result["usage_would_write"]["count"],
         )
@@ -351,7 +358,9 @@ if result.get("usage_rollup_schema") == 2:
 else:
     print("Total-usage dry run: not available in legacy schema 1.")
 for item in result["orphan_rows"]["items"]:
-    print("  orphan_row {key}: preserved because current source no longer produces it".format(key="/".join(item["key"])))
+    print("  orphan_row {key}: {action}".format(key="/".join(item["key"]),
+          action="would remove within authoritative history" if item.get("action") == "remove"
+          else "preserved outside authoritative history"))
 for item in result["would_skip"]["items"]:
     changes = ", ".join(
         "{field} {old}->{new}".format(
@@ -369,8 +378,10 @@ for item in result["would_skip"]["items"]:
     )
 for item in result["usage_orphan_rows"]["items"]:
     print(
-        "  total_usage_orphan {key}: preserved because current source no longer produces it".format(
-            key="/".join(item["key"])
+        "  total_usage_orphan {key}: {action}".format(
+            key="/".join(item["key"]),
+            action="would remove within authoritative history" if item.get("action") == "remove"
+            else "preserved outside authoritative history"
         )
     )
 for item in result["usage_would_skip"]["items"]:

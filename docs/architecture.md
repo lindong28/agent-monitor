@@ -48,6 +48,8 @@ Publication checks history retention against the prepared copy outside the machi
 
 ## Web workflow queries
 
+The [metric specification](references/metrics.md) owns units, windows, source versions and derivation arguments; its [operations appendix](references/metrics-operations.md) covers maintenance and diagnostic counters. Known-cost projections carry priced/unpriced observation counts through the same aggregation as amounts; pricing coverage is separate from scan completeness, snapshot admission and retained history. Sessions keep strict unknown totals, and recorded historical amounts are not automatically current-price valuations. Quota whole-reading selection and network coverage preserve unknowns instead of deriving a zero or healthy state from missing evidence.
+
 Overview adds `attribution_windows` from the same date windows used by its fixed charts. Only `compare=1` computes period comparison: two non-overlapping complete-day windows share the admitted generations, and usage rollup rows retain known/unknown cost counts instead of folding missing prices to zero. `token_cost.py` and snapshot accounting are unchanged.
 
 `/api/sessions` retains its default list response. The UI requests `with_filters=1` for an envelope of `sessions` and time-scoped `filters`, using one event read per source. Date and dimension matching precede grouping; filter choices come from the date-window events before dimension filtering. The UI no longer tests a session's representative first model to decide membership. Detail queries still read all retained records. This preserves the existing full-window scan and front-end pagination cost; it does not introduce a sessions query cache or claim constant-time reads.

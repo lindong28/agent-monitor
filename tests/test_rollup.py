@@ -925,7 +925,8 @@ class RollupTests(unittest.TestCase):
             monthly = rollup.query_pivot("month", "none", "input", db_path=db_path)
 
             week_key = first.astimezone().date() - timedelta(days=first.astimezone().weekday())
-            self.assertEqual(weekly["rows"], [{"x": week_key.isoformat(), "values": {"codex": 3.0}}])
+            self.assertEqual(weekly["rows"], [{"x": week_key.isoformat(), "values": {"codex": 3.0},
+                                              "cost_coverage": {"codex": {"known": 2, "unknown": 0}}}])
             self.assertEqual(monthly["rows"], [{"x": "2026-06", "values": {"value": 30}}])
 
     def test_query_pivot_folds_large_group_dimension_into_top_12_and_other(self):
