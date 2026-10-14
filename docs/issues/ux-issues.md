@@ -2,6 +2,13 @@
 
 基于真实产品入口观察、但不在发现当轮修复范围内的用户体验问题。条目只记录真实页面读数，不用源码推断冒充端到端证据。
 
+## [open] ISSUE-UX-20261014-6c31 — 会话后台刷新收起已展开的记录
+
+- **Observed**: 2026-10-14，`7f9fed0` 的 MacStudio 真实会话详情中，点击记录后 usage 证据与金额依据实际可读；后台数据更新后，URL 与 50 条记录仍在，但 `.session-entry-detail` 从 1 变成 0，需要再次展开。390px 再展开后的文字可见，问题是阅读状态没有保留。
+- **Attribution / Scope**: 基线独立。`initSessionDetail` 既有数据 watcher 重新调用 `renderSessionDetail`，其整表重建不保存展开状态；本轮增加证据文字的 diff 未改变该机制。这不是金额或 token 算术错误，亦不据此否定已取得的展开内容读数。
+- **Owner / Next**: agent-monitor Web 维护者；单独保留相同记录在后台数据更新时的展开状态，按稳定记录身份关联，显式换会话/筛选时另核重置语义。本轮十类上游契约修复不扩大为整个页面状态管理改造。
+- **Evidence**: `/Users/lindong/task-artifacts/upstream-contract-repair-20261014/live-detail-evidence.json`、`live-detail-narrow.png` 及同轮实际浏览器读数；未进行长期发生率测量。
+
 ## [open] ISSUE-UX-20261007-31c8 — 采集错误缺少面向用户的处置摘要
 
 - **Observed**: 2026-10-07，macbook 本地 39001 的真实 `/sessions` 显示 `macmini` 刷新失败、保留四小时前数据，原因直接为 `sqlite3.OperationalError: database or disk is full`；`macstudio` 保留 28 天前数据，原因直接为 `ValueError: unsupported gateway snapshot`。页面已经说明旧数据仍在使用，但没有相应的可读处置摘要。这是中心记录的源侧错误，未独立诊断远端根因。
