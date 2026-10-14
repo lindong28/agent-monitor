@@ -70,7 +70,7 @@ The [known-account extension](adr/20261007-d2af-codex-known-accounts.md) reads a
 
 Extraction changes names, installation ownership and source paths. It does not change bucket timezone, snapshot schemas, host/account identity, retention or arithmetic. `token_cost.py` is byte-identical to its extraction source. The source commit and historical docs are recorded in the [extraction ADR](adr/20261004-a902-standalone-project.md).
 
-The console application retains Prompt Planet `usage-observability-console`, `record-explorer`, and `request-diagnostics` v2 task structures, with their console design profile v1 visual defaults overridden by the product-wide `style:vercel-gateway-console` v1 recorded in [design.md](design.md). Project overrides retain brand blue, distinct cost windows, and on-demand full analysis/filter enumeration. Template rules guide layout and review; commercial-site access is not part of this application path.
+The console shares the `style:volcengine-ark-console` visual layer recorded in [design.md](design.md) across Overview, Explore, Sessions and detail, Network, and Guide. Page-specific task structures and data contracts remain owned by Monitor. Project overrides retain brand blue, chart series colors and distinct cost windows. The persistent header/navigation and shared CSS add no UI framework, data requests or template runtime dependency. Ark source access is used to author the template; ordinary product use does not require it.
 
 Large session-detail JSON responses negotiate gzip with accepting clients; other responses keep their existing transport. Compression preserves the complete record list and default identity response for clients that do not accept gzip. This addresses transfer volume, not snapshot query work.
 

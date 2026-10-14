@@ -1,4 +1,4 @@
-/* Product visual design: style:vercel-gateway-console (current definition).
+/* Product visual design: style:volcengine-ark-console.
    Shared by every route; scope and project overrides: docs/design.md. */
 
 :root {
@@ -14,13 +14,12 @@
   --sp-7: 24px;
   --sp-8: 32px;
 
-  --h-control: 36px;
+  --h-control: 32px;
   --pad-cell: 12px 16px;
-  --pad-card: var(--sp-5) var(--sp-6);
+  --pad-card: var(--sp-7);
 
-  /* Navigation rail. Sized to the longest label ("LLM Calls") plus its padding,
-     rounded up so the width does not change if a label is added. */
-  --sidebar-w: 180px;
+  --sidebar-w: 220px;
+  --header-h: 56px;
   /* Measure for running text. Everything else on this page is a table or a
      chart and takes the full column; this is the cap for the paragraphs that
      explain them, applied per element rather than to their container. */
@@ -29,8 +28,8 @@
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --r-sm: 8px;
-  --r-md: 8px;
+  --r-sm: 6px;
+  --r-md: 6px;
   --r-lg: 8px;
   --r-pill: 999px;
 
@@ -45,17 +44,19 @@
     border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
     opacity var(--dur) var(--ease);
 
-  --canvas: #fafafa;
+  --canvas: #f6f6fc;
   --surface: #ffffff;
-  --surface-sunken: #f5f5f5;
-  --ink: #171717;
-  --ink-muted: #616161;
-  --ink-subtle: #616161;
-  --line: #e5e5e5;
-  --line-soft: #eeeeee;
-  --line-strong: #b3b3b3;
-  --bg-hover: #f5f5f5;
-  --bg-active: #ebebeb;
+  --surface-sunken: #f7f7fa;
+  --ink: #0b0b0f;
+  --ink-muted: #5d5d70;
+  --ink-subtle: #68687b;
+  --line: #e7e7ef;
+  --line-soft: #f0f0f5;
+  --line-strong: #b9b9cc;
+  --bg-hover: #efeff7;
+  --bg-active: #ebebf5;
+  --primary: #5252ff;
+  --primary-hover: #4242df;
   --accent: #0b66c3;
   --accent-ink: #0a559f;
   --accent-bg: #dcecfb;
@@ -111,33 +112,39 @@ a:hover {
   }
 }
 
-/* Shell: a fixed rail of navigation, and everything else.
-
-   The rail replaces a full-width top bar. Navigation is the one thing on the
-   page that never changes between tabs, so it is also the one thing that should
-   not be rebuilt when they change — sitting outside <main>, it survives the
-   swap that client navigation performs, and the tab change stops looking like a
-   page load. Horizontally it costs 180px of a wide screen and gives back the
-   45px of height the bar used to take across the full width. */
+/* The brand bar and navigation survive SPA swaps; page controls stay in main. */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-soft);
+}
+.header-section { color: var(--ink-muted); border-left: 1px solid var(--line); padding-left: 24px; }
+.header-help { margin-left: auto; font-size: 13px; color: var(--ink-muted); }
 .app-shell {
   display: flex;
   align-items: flex-start;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--header-h));
 }
 
 .sidebar {
   position: sticky;
-  top: 0;
+  top: var(--header-h);
   z-index: 5;
   flex: 0 0 var(--sidebar-w);
   width: var(--sidebar-w);
-  height: 100vh;
+  height: calc(100vh - var(--header-h));
   display: flex;
   flex-direction: column;
   gap: var(--sp-5);
-  padding: var(--sp-6) var(--sp-5);
-  border-right: 1px solid var(--line);
-  background: var(--surface);
+  padding: 24px 12px;
+  background: var(--canvas);
   overflow-y: auto;
 }
 
@@ -212,7 +219,24 @@ button:active:not(:disabled) {
   background: transparent;
   color: var(--ink-muted);
   text-decoration: none;
+  min-height: 40px;
+  border-radius: 8px;
+  gap: 12px;
 }
+
+.nav a::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  background: currentColor;
+  mask: var(--nav-icon) center / 16px 16px no-repeat;
+}
+.nav a[href^="/?"], .nav a[href="/"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 7 8 2l6 5v7H9v-4H7v4H2Z' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.nav a[href^="/explore"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2v12h12M5 11V8m4 3V4m4 7V6' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E"); }
+.nav a[href^="/sessions"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 2h10v12H3ZM5 5h6M5 8h6M5 11h3' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.nav a[href^="/network"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 10V8h10v2M8 6v4' fill='none' stroke='black' stroke-width='1.4'/%3E%3Cpath d='M6 2h4v4H6ZM1 10h4v4H1Zm5 0h4v4H6Zm5 0h4v4h-4Z' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.nav a[href^="/guide"] { margin-top: 16px; --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 3C6 2 4 2 2 3v10c2-1 4-1 6 0 2-1 4-1 6 0V3c-2-1-4-1-6 0Zm0 0v10' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 
 .nav a:hover {
   border-color: transparent;
@@ -338,7 +362,10 @@ button:disabled {
 .main {
   flex: 1;
   min-width: 0;
-  padding: var(--sp-6) var(--sp-7) var(--sp-8);
+  padding: var(--sp-7) var(--sp-7) var(--sp-8);
+  margin: 16px 16px 16px 0;
+  background: var(--surface);
+  border-radius: 12px;
 }
 
 /* Per-page controls, inside <main> because that is what they belong to: the
@@ -356,7 +383,7 @@ button:disabled {
 
 .page-title {
   margin: 0;
-  font: 600 24px/32px var(--font-sans);
+  font: 600 20px/28px var(--font-sans);
   letter-spacing: -0.01em;
 }
 
@@ -405,9 +432,9 @@ button:disabled {
 
 .overview-cost .kpi-card {
   min-height: 0;
-  padding: 0;
+  padding: 16px 20px;
   border: 0;
-  background: transparent;
+  background: var(--surface-sunken);
   box-shadow: none;
 }
 
@@ -437,8 +464,8 @@ button:disabled {
 .codex-account-actions > summary { cursor: pointer; font-weight: 600; }
 .codex-account-actions > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .codex-account-actions [hidden] { display: none; }
-.btn.btn-primary { background: var(--ink); border-color: var(--ink); color: var(--surface); }
-.btn.btn-primary:hover:not(:disabled) { background: #333; }
+.btn.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--surface); }
+.btn.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
 .btn.btn-danger, .quota-account-remove { color: var(--danger); }
 .btn.btn-danger:hover:not(:disabled), .quota-account-remove:hover { background: #fbe3e1; }
 .codex-batch-result { color: var(--ink-muted); font-size: 12px; line-height: 16px; font-weight: 400; }
@@ -810,10 +837,10 @@ button:disabled {
 
 .sync-panel {
   margin-bottom: var(--sp-6);
-  padding: var(--pad-card);
+  padding: 12px 16px;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  background: var(--surface);
+  background: var(--surface-sunken);
   box-shadow: var(--e-raised);
 }
 
@@ -918,7 +945,10 @@ button:disabled {
 
 .kpi-card {
   min-height: 100px;
-  padding: var(--pad-card);
+  padding: 16px 20px;
+  background: var(--surface-sunken);
+  border-color: transparent;
+  border-radius: 8px;
 }
 
 .kpi-label {
@@ -1335,7 +1365,7 @@ td.numeric {
 }
 
 .network-main {
-  width: min(1800px, 100%);
+  max-width: 1800px;
 }
 
 /* Track counts divide the four evidence cards evenly — 4, then 2, then 1.
@@ -1352,7 +1382,7 @@ td.numeric {
   align-items: start;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1480px) {
   .network-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1669,10 +1699,7 @@ td.numeric {
   min-width: 1040px;
 }
 
-/* Below this the rail costs more than it gives: 180px out of a phone's 390px
-   is half the reading width, for navigation that is used once per visit. It
-   becomes a bar across the top, scrollable sideways rather than wrapped, so
-   the five destinations stay on one predictable line. */
+/* Narrow-screen adaptation: retain all destinations in a horizontal rail. */
 @media (max-width: 900px) {
   .app-shell {
     display: block;
@@ -1690,6 +1717,10 @@ td.numeric {
     overflow-x: auto;
     overflow-y: visible;
   }
+
+  .app-header { padding: 0 16px; }
+  .header-section { display: none; }
+  .nav a[href^="/guide"] { margin-top: 0; }
 
   .nav {
     flex-direction: row;
@@ -1725,6 +1756,7 @@ td.numeric {
 
   .main {
     padding: var(--sp-6);
+    margin: 12px;
   }
 
   .verdict-banner {
@@ -1753,8 +1785,8 @@ td.numeric {
 
 
 /* Shared product typography: new pages inherit without a page-specific class. */
-.main { min-height: 100vh; }
-.page-title { font-size: 24px; line-height: 32px; }
+.main { min-height: calc(100vh - var(--header-h) - 32px); }
+.page-title { font-size: 20px; line-height: 28px; }
 .panel-head h2, .kpi-group-title, .network-card h2 {
   font-size: 16px; line-height: 24px; color: var(--ink);
   letter-spacing: 0; text-transform: none;
@@ -1762,16 +1794,16 @@ td.numeric {
 button, select, input, .field label { font-size: 14px; line-height: 22px; }
 .scope-note, .quota-scope, .status-line, .kpi-sub { font-size: 12px; line-height: 20px; }
 .kpi-label { font-size: 14px; line-height: 22px; }
-.kpi-value, .session-metrics strong { font-size: 28px; line-height: 36px; }
+.kpi-value, .session-metrics strong { font-size: 32px; line-height: 40px; }
 table th { font-size: 12px; line-height: 20px; letter-spacing: 0; text-transform: none; }
 table td { font-size: 14px; line-height: 22px; }
-.nav a[aria-current="page"] { background: var(--surface-sunken); color: var(--ink); }
+.nav a[aria-current="page"] { background: var(--bg-active); color: var(--ink); }
 .toolbar { flex-wrap: wrap; }
 .session-identity, .panel-head { overflow-wrap: anywhere; }
 /* Refresh is the common primary action; account and destructive actions retain
    their explicit labels and existing semantic states. */
-#refresh { background: var(--ink); color: var(--surface); border-color: var(--ink); }
-#refresh:hover:not(:disabled) { background: #333; }
+#refresh { background: var(--primary); color: var(--surface); border-color: var(--primary); }
+#refresh:hover:not(:disabled) { background: var(--primary-hover); }
 #refresh:disabled { opacity: .45; }
 .overview-main .kpi-sections { gap: 24px; }
 .overview-main .panel-grid { margin: 0; }

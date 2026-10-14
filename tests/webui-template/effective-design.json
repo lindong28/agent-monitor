@@ -1,88 +1,88 @@
 {
   "schema_version": 1,
   "template": {
-    "id": "style:vercel-gateway-console",
-    "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json",
-    "sha256": "47797c957b4e0b3388031885bac495beb84998e099a6d0184d5de8cde7c2e921"
+    "id": "style:volcengine-ark-console",
+    "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console",
+    "sha256": "e10cdc6a26a278652f6402d2bca97ea0ffdab88b3e847ce46ac4a0311cf7f5e7"
   },
   "rules": [
     {
-      "id": "VG-V01",
+      "id": "ARK-V01",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V01",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V01",
       "description": "字体层级：实际文字角色采用 theme 的字号、行高与字体；项目例外写明对象和用途。"
     },
     {
-      "id": "VG-V02",
+      "id": "ARK-V02",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V02",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V02",
       "description": "颜色角色：画布、表面、文字、已有状态与品牌角色按有效设计用色，已有文字区别保持可辨。"
     },
     {
-      "id": "VG-V03",
+      "id": "ARK-V03",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V03",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V03",
       "description": "间距与密度：组件采用约定间距及内距，内容换行后仍完整可读。"
     },
     {
-      "id": "VG-V04",
+      "id": "ARK-V04",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V04",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V04",
       "description": "边框与表面：轻边线、圆角及浮层阴影按组件角色一致使用。"
     },
     {
-      "id": "VG-V05",
+      "id": "ARK-V05",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V05",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V05",
       "description": "图标：同类图标的尺寸、笔画、间距与展开方向一致，保留动作名称和操作区域。"
     },
     {
-      "id": "VG-V06",
+      "id": "ARK-V06",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V06",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V06",
       "description": "标签值关联：标签、对应值及已有补充说明在分组、对齐和跨宽度重排后仍能正确对应。"
     },
     {
-      "id": "VG-V07",
+      "id": "ARK-V07",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V07",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V07",
       "description": "操作回归：本次样式改变涉及的现有控件、导航、展开与返回仍可操作，焦点与状态可见。"
     },
     {
-      "id": "VG-V08",
+      "id": "ARK-V08",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V08",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V08",
       "description": "既有意义保留：本次视觉调整没有隐藏、截断或重新强调内容而改变已有业务含义；基线语义问题单列，不自动整改或阻断纯风格任务。"
     },
     {
-      "id": "VG-V09",
+      "id": "ARK-V09",
       "role": "visual-page",
       "kind": "manual",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V09",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V09",
       "description": "跨页一致性：适用页面及详情使用同一视觉规则，共享入口、具体例外与未核实范围有记录。"
     },
     {
       "id": "canvas",
       "role": "body",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.canvas",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.canvas",
       "description": "background-color follows template token",
       "property": "background-color",
-      "expected": "rgb(250, 250, 250)"
+      "expected": "rgb(246, 246, 252)"
     },
     {
       "id": "body-font",
       "role": "body",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.body_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.body_font_px",
       "description": "font-size follows template token",
       "property": "font-size",
       "expected": "14px"
@@ -91,7 +91,7 @@
       "id": "body-line",
       "role": "body",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.body_line_height_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.body_line_height_px",
       "description": "line-height follows template token",
       "property": "line-height",
       "expected": "22px"
@@ -100,25 +100,25 @@
       "id": "body-ink",
       "role": "body",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.ink",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.ink",
       "description": "color follows template token",
       "property": "color",
-      "expected": "rgb(23, 23, 23)"
+      "expected": "rgb(11, 11, 15)"
     },
     {
       "id": "page-title",
       "role": "page-title",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.page_title_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.page_title_font_px",
       "description": "font-size follows template token",
       "property": "font-size",
-      "expected": "24px"
+      "expected": "20px"
     },
     {
       "id": "section-title",
       "role": "section-title",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.section_title_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.section_title_font_px",
       "description": "font-size follows template token",
       "property": "font-size",
       "expected": "16px"
@@ -127,7 +127,7 @@
       "id": "control-font",
       "role": "controls",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.body_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.body_font_px",
       "description": "font-size follows template token",
       "property": "font-size",
       "expected": "14px"
@@ -136,25 +136,25 @@
       "id": "control-height",
       "role": "controls",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.control_height_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.control_height_px",
       "description": "height follows template token",
       "property": "height",
-      "expected": "36px"
+      "expected": "32px"
     },
     {
       "id": "control-radius",
       "role": "controls",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.radius_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.radius_px",
       "description": "border-radius follows template token",
       "property": "border-radius",
-      "expected": "8px"
+      "expected": "6px"
     },
     {
       "id": "panel-surface",
       "role": "panels",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.surface",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.surface",
       "description": "background-color follows template token",
       "property": "background-color",
       "expected": "rgb(255, 255, 255)"
@@ -163,7 +163,7 @@
       "id": "panel-radius",
       "role": "panels",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.radius_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.radius_px",
       "description": "border-radius follows template token",
       "property": "border-radius",
       "expected": "8px"
@@ -172,7 +172,7 @@
       "id": "panel-shadow",
       "role": "panels",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.description",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.description",
       "description": "box-shadow follows template token",
       "property": "box-shadow",
       "expected": "none"
@@ -181,7 +181,7 @@
       "id": "table-heading",
       "role": "table-heading",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.supporting_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.supporting_font_px",
       "description": "font-size follows template token",
       "property": "font-size",
       "expected": "12px"
@@ -190,7 +190,7 @@
       "id": "detail-label",
       "role": "detail-label",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.supporting_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.supporting_font_px",
       "description": "font-size follows template token",
       "property": "font-size",
       "expected": "12px"
@@ -199,7 +199,7 @@
       "id": "detail-value",
       "role": "detail-value",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.body_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.body_font_px",
       "description": "font-size follows template token",
       "property": "font-size",
       "expected": "14px"
@@ -208,7 +208,7 @@
       "id": "badge-font",
       "role": "badges",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.supporting_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.supporting_font_px",
       "description": "font-size follows template token",
       "property": "font-size",
       "expected": "12px"
@@ -217,7 +217,7 @@
       "id": "page-overflow",
       "role": "document",
       "kind": "no-horizontal-overflow",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#components[2]",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[2]",
       "description": "宽表局部滚动，文档本身不溢出"
     },
     {
@@ -243,19 +243,19 @@
       "description": "Preserved existing regression check; product behavior, not a new visual template requirement. 不适用配额的原因在同一单元格内常显，不依赖title"
     },
     {
-      "id": "VG-V01.metric",
+      "id": "ARK-V01.metric",
       "role": "session-metric",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#theme.tokens.metric_font_px",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.metric_font_px",
       "description": "Session primary readings share the 28px metric role",
       "property": "font-size",
-      "expected": "28px"
+      "expected": "32px"
     },
     {
-      "id": "VG-V06.tabular",
+      "id": "ARK-V06.tabular",
       "role": "numeric-detail-value",
       "kind": "style",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#components[9]",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[9]",
       "description": "Detail values keep tabular numerals",
       "property": "font-variant-numeric",
       "expected": "tabular-nums"
@@ -271,7 +271,7 @@
       "id": "history-context",
       "role": "history-context",
       "kind": "predicate",
-      "source": "https://prompts.aiplanet.live/api/webui/v1/templates/vercel-gateway-console.json#VG-V06",
+      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V06",
       "description": "历史组标题和既有观测说明在局部横滚后仍与身份关联；读数口径归产品。"
     }
   ]
