@@ -6,6 +6,7 @@ Current usage and installation belong in the root README; current architecture a
 | --- | --- |
 | [product-spec.md](product-spec.md) | Product spec (`docs/product-spec.md`): target users, tasks, outcomes, capabilities and boundaries for human alignment |
 | [references/product-capability-review-20261015.md](references/product-capability-review-20261015.md) | Dated Web capability review against the product spec, live evidence, gaps and coverage limits |
+| [references/ui-reading-review-20261015.md](references/ui-reading-review-20261015.md) | Live reading-experience review across pages and expanded content, with desktop/mobile evidence and prioritized recommendations |
 | [product-boundary-separation.md](product-boundary-separation.md) | Authorized product separation, gaps, migration constraints and execution evidence |
 | [usage-accounting-correction.md](usage-accounting-correction.md) | Pagination and streaming usage correction, bounded validation and recovery |
 | [architecture.md](architecture.md) | Runtime ownership, data flow and independent dependencies |
