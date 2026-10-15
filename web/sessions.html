@@ -103,7 +103,12 @@
               <label for="filter-model">模型</label>
               <select id="filter-model" disabled><option value="">全部模型</option></select>
             </div>
+            <div class="field">
+              <label for="filter-cost-status">成本状态</label>
+              <select id="filter-cost-status" disabled><option value="">全部成本状态</option><option value="unknown">仅未知成本条目</option></select>
+            </div>
           </div>
+          <p class="scope-note">列表只统计符合筛选条件的条目；打开会话后显示完整保留记录。未知成本可能来自缺少价格或用量不完整；历史汇总与保留明细的覆盖范围可能不同。</p>
           <div class="table-wrap sticky-head">
             <table>
               <thead>

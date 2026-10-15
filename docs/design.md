@@ -16,9 +16,13 @@ The effective style is `style:volcengine-ark-console`, prepared in Prompt Planet
 | Layout | Keep the query builder, session list/detail, quota matrix and network cards. The top brand bar and navigation survive SPA page swaps; controls remain within their page. Network evidence cards use two columns up to 1480px and one below 560px to leave room for their label/value pairs. |
 | Density | Metadata, table headings and compact supporting labels use 12px; search and primary controls use 14px. Monospace identifiers and tabular numerals remain distinct from prose. Small badges and chips may be shorter than primary 32px controls. |
 | Large values | Session metrics choose columns with a 260px minimum where space permits, falling back to the available width; long values can wrap. Overview cost metrics stack below 481px. Values and cost windows are unchanged. |
-| Responsive navigation and tables | Below 901px the top bar uses two rows totaling 104px; local navigation remains horizontally scrollable. Wide tables scroll inside their own containers. Guide anchors clear the sticky top and local navigation. |
+| Responsive navigation and tables | Below 901px the top bar uses two rows totaling 104px; local navigation remains horizontally scrollable. Wide tables scroll inside their own containers; the quota table instead becomes labeled account blocks at ≤900 CSS px, retaining all seven fields and both history/unknown disclosures. Guide anchors clear the sticky top and local navigation. |
 | Theme | The project currently declares light color scheme only. This change introduces no dark/system theme selector. |
 | Behavior | Cost definitions, unknown values, machine identity, account actions and loading/error meanings are unchanged. Batch instructions and technical account fields use disclosures; last successful observations, timestamps, failures and required actions remain visible. This visual change does not add data requests, background work or runtime dependencies. Account writes are excluded from its validation. |
+
+## Product handoffs, 2026-10-15
+
+[9e31](adr/20261015-9e31-product-ui-handoffs.md) retains the visual tokens and desktop quota columns. Narrow account blocks reuse 12px labels and 14px values. The sync disclosure stays closed until opened by the reader; its summary names attention machines, and technical errors live inside each machine card. Unknown-cost and comparison links reuse the existing panel-link treatment.
 
 ## Expanded template application, 2026-10-14
 

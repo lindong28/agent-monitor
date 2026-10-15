@@ -111,6 +111,16 @@ process.stdout.write(JSON.stringify(window.AgentMonitorPivot.rankingData({dimens
             with self.subTest(dimensions=dims), self.assertRaises(ValueError):
                 rollup.query_grouped(dims, "total")
 
+    def test_unknown_cost_counts_entries_not_tokens_or_known_zero(self):
+        for generation in self.generations:
+            with contextlib.closing(sqlite3.connect(generation.db_path)) as db, db:
+                db.execute("UPDATE daily_rollup SET cost_usd=0 WHERE model='m1'")
+        result = server.pivot_endpoint(parse_qs("group_by=model&metric=unknown_cost&range=all&sync=0"))
+        self.assertEqual({row["key"][0]: row["value"] for row in result["rows"]}, {"m1": 0, "m2": 2})
+        result = server.pivot_endpoint(parse_qs("group_by=project,machine&metric=unknown_cost&range=custom&start=2026-09-01&end=2026-09-01&machine=mac-b&sync=0"))
+        self.assertEqual(result["rows"], [{"key": ["a", "mac-b"], "value": 1}])
+        self.assertEqual(rollup.query_grouped([], "unknown_cost", models={"missing"})["rows"], [])
+
     def test_custom_dates_include_both_ends_and_scope_filter_options(self):
         query = parse_qs("group_by=day&metric=total&range=custom&start=2026-08-31&end=2026-09-01&sync=0")
         self.assertEqual(server.pivot_endpoint(query)["rows"], [

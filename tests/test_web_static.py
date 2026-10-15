@@ -312,6 +312,18 @@ global.fetch = async u => {
 eval(fs.readFileSync("web/app.js", "utf8"));
 (async () => {
   await window.AgentMonitor.initSessions(); calls.length = 0;
+  Object.defineProperty(globalThis, "navigator", {value: {}, configurable: true});
+  let clipboard, field;
+  document.body = {appendChild(el) { field = el; }};
+  document.createElement = () => ({style: {}, select() {}, remove() {}});
+  document.execCommand = () => { clipboard = field.value; return true; };
+  nodes["#session-copy"].focus = () => {};
+  await nodes["#session-copy"].click({currentTarget: nodes["#session-copy"], target: nodes["#session-copy"]});
+  assert.equal(clipboard, "s1", "HTTP detail must copy the actual session ID");
+  assert.equal(nodes["#session-copy"].textContent, "已复制");
+  document.execCommand = () => false;
+  await nodes["#session-copy"].click({currentTarget: nodes["#session-copy"], target: nodes["#session-copy"]});
+  assert.equal(nodes["#session-copy"].textContent, "复制失败，请选中 ID 复制");
   await nodes["#refresh"].click();
   assert.deepStrictEqual(calls, ["http://example.test/api/refresh",
     "http://example.test/api/session/s1?machine=macbook"]);
@@ -355,6 +367,7 @@ eval(fs.readFileSync("web/app.js", "utf8"));
         script = r'''
 const fs = require("fs");
 const nodes = {
+  "#sync-panel": { open: false },
   "#sync-coverage": { textContent: "" },
   "#sync-summary": { textContent: "" },
   "#sync-machines": { innerHTML: "" },
@@ -378,6 +391,10 @@ function status(machines) {
 const behind = Object.assign(base("macbook"), { availability: "unreachable", stale: true, reason: "Export refused" });
 const excluded = Object.assign(base("dgx0023"), { admitted: false, availability: "never", generated_at: null });
 window.AgentMonitor.renderSyncStatus(status([behind, base("macmini"), excluded]));
+require("assert").equal(nodes["#sync-panel"].open, false, "failure summary must not push the KPI below the fold");
+require("assert").match(nodes["#sync-summary"].textContent, /macbook/);
+require("assert").match(nodes["#sync-machines"].innerHTML, /技术详情/);
+require("assert").match(nodes["#sync-machines"].innerHTML, /检查.*采集/);
 const shown = { text: nodes["#spend-coverage"].textContent, hidden: nodes["#spend-coverage"].hidden };
 // Stale after a server restart: reachable is unknown and nothing has failed,
 // so the note must not claim a refresh failure.

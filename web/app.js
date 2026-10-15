@@ -200,16 +200,14 @@
     qs("#clear-page-search").addEventListener("click", () => { input.value = ""; render(); input.focus(); });
   }
 
-  async function copyGuideCode(button) {
-    const code = document.getElementById(button.dataset.copyCode);
-    if (!code) return;
+  async function copyText(button, text, failure = "复制失败，请手动选择") {
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(code.textContent);
+        await navigator.clipboard.writeText(text);
       } else {
         // Personal-network HTTP deployments do not expose Clipboard API.
         const field = document.createElement("textarea");
-        field.value = code.textContent;
+        field.value = text;
         field.style.cssText = "position:fixed;opacity:0;pointer-events:none";
         document.body.appendChild(field);
         field.select();
@@ -220,8 +218,13 @@
       }
       button.textContent = "已复制";
     } catch (_) {
-      button.textContent = "复制失败，请手动选择";
+      button.textContent = failure;
     }
+  }
+
+  async function copyGuideCode(button) {
+    const code = document.getElementById(button.dataset.copyCode);
+    if (code) await copyText(button, code.textContent);
   }
 
   async function api(path, query) {
@@ -572,6 +575,17 @@
     // charts and sync panel rendered — turning "one card is missing" into a
     // blank page, which is exactly the skew initOverview already handles.
     renderRangeCost(data.range, selectedRange || getRange(), data.rollup_coverage);
+    const today = data.attribution_windows?.month?.end;
+    const week = data.attribution_windows?.week;
+    for (const [key, dates] of [["today", today ? {start: today, end: today} : null], ["week", week], ["range", null]]) {
+      const link = qs(`#${key}-unknown-cost`);
+      if (!link) continue;
+      const count = data[key]?.cost_coverage?.unknown;
+      link.hidden = !(count > 0) || (key !== "range" && !dates);
+      const query = new URLSearchParams({range: dates ? "custom" : selectedRange || getRange(), group_by: "model", metric: "unknown_cost", ...dates});
+      link.href = `/explore?${query}`;
+      link.textContent = `追查 ${integer(count)} 条未知成本`;
+    }
 
     const costHistory = data.cost_over_time || legacyCostHistory(data.daily_cost_30d || []);
     const costGranularity = data.cost_over_time_granularity || "day";
@@ -691,7 +705,10 @@
     const target = qs("#comparison-result");
     if (!target) return;
     if (!data.available) { target.textContent = data.reason; return; }
-    const period = (label, p) => `<tr><th>${label}<br>${p.start} — ${p.end}</th><td>${p.entries ? money(p.known_cost_usd) : "无记录"}</td><td>${p.entries ? integer(p.tokens) : "无记录"}</td><td>${integer(p.unknown_cost_entries)} / ${integer(p.entries)}</td></tr>`;
+    const period = (label, p) => {
+      const query = new URLSearchParams({range: "custom", start: p.start, end: p.end, group_by: "model", metric: "cost"});
+      return `<tr><th>${label}<br>${p.start} — ${p.end}<br><a class="panel-link" href="/explore?${escapeHtml(query.toString())}">透视此周期</a></th><td>${p.entries ? money(p.known_cost_usd) : "无记录"}</td><td>${p.entries ? integer(p.tokens) : "无记录"}</td><td>${integer(p.unknown_cost_entries)} / ${integer(p.entries)}</td></tr>`;
+    };
     target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>周期 · ${data.days} 天</th><th>已知成本 · USD</th><th>已记录 token</th><th>未知定价 / 使用条目</th></tr></thead><tbody>${period("最近完整周期", data.current)}${period("前一周期", data.previous)}</tbody></table></div><p>已知成本差额：${data.known_cost_delta_usd === null ? "无法计算（一期无已知金额）" : money(data.known_cost_delta_usd)}。— 表示没有已知金额；$0.00 表示已知零成本。数据源的新鲜度与采集缺口见上方采集状态。</p>`;
   }
 
@@ -884,10 +901,15 @@
         const observed = Date.parse(reading.updated_at);
         return Number.isFinite(observed) ? -observed : null;
       }
-      const key = quotaFilter.window + (quotaFilter.sort === "remaining" ? "_used_pct" : "_resets_at");
+      const remaining = ["remaining", "remaining_desc"].includes(quotaFilter.sort);
+      const key = quotaFilter.window + (remaining ? "_used_pct" : "_resets_at");
       const value = reading[key];
       if (typeof value !== "number" || !Number.isFinite(value)) return null;
-      return quotaFilter.sort === "remaining" ? 100 - value : value > now ? value : null;
+      if (remaining) {
+        if (!quotaUsage(value).known) return null;
+        return quotaFilter.sort === "remaining_desc" ? value - 100 : 100 - value;
+      }
+      return value > now ? value : null;
     };
     return accounts.map((account, index) => ({ account, index, value: readingValue(account) }))
       .sort((a,b) => a.value === null ? (b.value === null ? a.index-b.index : 1)
@@ -1201,6 +1223,9 @@
     row.appendChild(quotaMachinesCell(account));
     row.appendChild(quotaUpdatedCell(display, stale, display.quota_source === "account_action"
       ? null : quotaRefreshNotice(provider, account)));
+    Array.from(row.children).forEach((cell, index) => {
+      cell.dataset.label = ["账号", "服务商", "套餐", "5h 已用", "7d 已用", "机器", "更新于"][index];
+    });
     return row;
   }
 
@@ -1760,6 +1785,7 @@
       const cell = document.createElement("td");
       cell.className = "numeric";
       if (worst && worst.spec === spec) {
+        cell.dataset.label = `${spec.key} 已用`;
         cell.appendChild(quotaBandPill(worst.band, `${worst.machine} 已用 ${worst.used}%`));
       }
       summary.appendChild(cell);
@@ -1853,24 +1879,24 @@
     pageServerInstance = status.instance_id || pageServerInstance;
     const coverage = status.coverage || { admitted: 0, declared: 0 };
     coverageElement.textContent = `已纳入 ${coverage.admitted}/${coverage.declared} 台`;
-    const warnings = (status.machines || []).filter(
+    const attention = (status.machines || []).filter(
       (machine) =>
         !machine.admitted ||
         machine.stale ||
         machine.availability === "unreachable" ||
         machine.availability === "unknown" ||
         ["failure", "cleanup_failed", "malformed_result"].includes(machine.last_attempt_outcome)
-    ).length;
+    );
+    const warningSummary = attention.length ? `${attention.length} 台需要关注：${attention.map(machine => machine.name).join("、")}` : "";
     summaryElement.textContent = status.polling_error
       ? `${status.polling_error} · 页面保留上次渲染的数据`
       : status.syncing
-      ? (status.phase === "quota" ? "统计轮已结束 · 后台查询配额" : "后台更新统计与配额 · 新数据陆续显示")
-      : warnings
-      ? `${warnings} 台需要关注`
+      ? (status.phase === "quota" ? "统计轮已结束 · 后台查询配额" : "后台更新统计与配额 · 新数据陆续显示") + (warningSummary ? ` · ${warningSummary}` : "")
+      : attention.length
+      ? warningSummary
       : "使用已采集数据 · 自动更新";
     machineList.innerHTML = (status.machines || []).map(renderMachineStatus).join("");
     renderSpendCoverage(status.machines || []);
-    revealSyncDetailOnTrouble(Boolean(warnings || status.polling_error));
   }
 
   function renderQuotaRefreshStatus(status) {
@@ -1928,22 +1954,6 @@
       `${listed}的较新用量尚未计入，下面的合计可能低于实际花费。`;
   }
 
-  // The panel opens itself the moment something needs attention, and stays
-  // wherever the reader last put it for as long as that condition holds — so a
-  // poll every few seconds cannot keep reopening a panel they just closed.
-  let syncTroubleLatch = false;
-
-  function revealSyncDetailOnTrouble(inTrouble) {
-    const panel = qs("#sync-panel");
-    if (!panel) {
-      return;
-    }
-    if (inTrouble && !syncTroubleLatch) {
-      panel.open = true;
-    }
-    syncTroubleLatch = inTrouble;
-  }
-
   function renderMachineStatus(machine) {
     const chips = [];
     const refreshAttemptFailed = ["failure", "malformed_result"].includes(machine.last_attempt_outcome);
@@ -1987,28 +1997,23 @@
     let consequence = "";
     if (!machine.admitted) {
       const exclusion = exclusionText(machine);
-      consequence = machine.reason
-        ? machine.availability === "never" ? machine.reason : `${exclusion}. ${machine.reason}`
-        : exclusion;
+      consequence = `${exclusion}；该机数据未计入合计。检查这台机器的接入配置和采集状态。`;
     } else if (machine.availability === "unreachable") {
       const age = machine.stale ? "（已过期）" : "";
-      consequence = `用的是上次的数据${age}。刷新失败：${machine.reason || "联系不上"}`;
+      consequence = `用的是上次的数据${age}。检查这台机器的连接和采集状态，恢复后点击刷新。`;
     } else if (refreshAttemptFailed) {
       const age = machine.stale ? "（已过期）" : "";
-      consequence = `用的是上次的数据${age}。最近一次刷新失败：${machine.reason || "未知错误"}`;
+      consequence = `用的是上次的数据${age}。检查这台机器的采集状态和技术详情，处理后点击刷新。`;
     } else if (machine.availability === "unknown") {
-      consequence = "用的是上次的数据；本服务启动后还没检查过这台机器。";
+      consequence = machine.syncing ? "正在进行首次检查，暂用上次的数据；完成后会自动更新。" : "用的是上次的数据；本服务启动后还没检查过这台机器，可点击刷新。";
     } else if (machine.stale) {
-      const attemptContext = machine.reason ? `最近一次刷新失败：${machine.reason}` : "";
-      consequence = `用的是较旧的数据。${attemptContext}`;
+      consequence = "用的是较旧的数据。点击刷新；若仍未更新，请检查这台机器的采集状态。";
     } else if (machine.last_attempt_outcome === "cleanup_failed") {
-      consequence = machine.reason
-        ? `数据已更新，但刷新后的清理失败：${machine.reason}`
-        : "数据已更新，但刷新后的清理失败，未报告原因。";
+      consequence = "数据已更新，但刷新后的清理未完成；请查看技术详情和该机采集日志。";
     } else if (machine.syncing) {
       consequence = "刷新中，现有数据仍可用。";
     } else if (machine.reason) {
-      consequence = `数据已更新，但刷新报告：${machine.reason}`;
+      consequence = "数据已更新，采集另有提示，见技术详情。";
     }
     const consequenceElement = consequence
       ? `<div class="sync-machine-reason">${escapeHtml(consequence)}</div>`
@@ -2017,6 +2022,7 @@
       <div class="sync-machine-title"><strong>${escapeHtml(machine.name)}</strong>${marker}<span class="sync-chips">${chips.join("")}</span></div>
       <div class="sync-machine-time">${facts.join(" · ")}</div>
       ${consequenceElement}
+      ${machine.reason ? `<details class="note-disclosure"><summary>技术详情</summary><p>${escapeHtml(machine.reason)}</p></details>` : ""}
     </article>`;
   }
 
@@ -2597,7 +2603,7 @@
     rows: [],
     page: 0,
     status: "loading",
-    filters: { agent: "", project: "", model: "", machine: "" },
+    filters: { agent: "", project: "", model: "", machine: "", cost_status: "" },
   };
   let sessionsGeneration = 0;
   const SESSION_FILTERS = [
@@ -2605,6 +2611,7 @@
     { key: "agent", select: "#filter-agent", field: "agent_id" },
     { key: "project", select: "#filter-project", field: "project" },
     { key: "model", select: "#filter-model", field: "model" },
+    { key: "cost_status", select: "#filter-cost-status", values: ["unknown"] },
   ];
 
   async function initSessions() {
@@ -2784,10 +2791,10 @@
         return;
       }
       const previous = sessionsView.filters[filter.key];
-      const values = Array.from(new Set([...(available?.[filter.key] || rows.map(row => row[filter.field])), previous].filter(Boolean))).sort();
+      const values = Array.from(new Set([...(filter.values || available?.[filter.key] || rows.map(row => row[filter.field])), previous].filter(Boolean))).sort();
       const keep = previous;
       const label = select.options[0] ? select.options[0].textContent : "All";
-      const labels = optionLabels(filter.key, values);
+      const labels = filter.key === "cost_status" ? values.map(value => value === "unknown" ? "仅未知成本条目" : value) : optionLabels(filter.key, values);
       select.innerHTML =
         `<option value="">${escapeHtml(label)}</option>` +
         values
@@ -3027,8 +3034,7 @@
     qs("main").appendChild(panel);
     qs("#session-identity").textContent = id;
     qs("#session-copy").addEventListener("click", async (event) => {
-      try { await navigator.clipboard.writeText(id); event.target.textContent = "已复制"; }
-      catch { event.target.textContent = "复制失败，请选中 ID 复制"; }
+      await copyText(event.currentTarget, id, "复制失败，请选中 ID 复制");
     });
     let generation = 0;
     let activeLoads = 0;

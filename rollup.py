@@ -28,7 +28,7 @@ BUCKET_TIMEZONE = ZoneInfo(BUCKET_TIMEZONE_NAME)
 RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "6m": 180, "1y": 365, "2y": 730}
 TIME_DIMS = {"day", "week", "month"}
 ALL_DIMS = TIME_DIMS | {"project", "model", "agent", "machine"}
-METRICS = {"cost", "input", "output", "cache_read", "cache_creation", "total", "messages"}
+METRICS = {"cost", "input", "output", "cache_read", "cache_creation", "total", "messages", "unknown_cost"}
 TOP_DIMENSION_THRESHOLD = 15
 TOP_DIMENSION_LIMIT = 12
 OTHER_BUCKET = "Other"
@@ -2314,6 +2314,8 @@ def _row_dim(row, dim):
 
 
 def _row_metric(row, metric):
+    if metric == "unknown_cost":
+        return row["entry_count"] - row["cost_known_count"]
     if metric == "cost":
         return row["cost_usd"]
     if metric == "input":

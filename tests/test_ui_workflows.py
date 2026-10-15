@@ -97,6 +97,24 @@ class QueryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 server._session_window({"range":["custom"],"start":[start],"end":[end]}, datetime.now(timezone.utc))
 
+    def test_unknown_cost_filter_matches_entries_and_keeps_full_detail(self):
+        entry = UsageEntry(datetime(2026, 1, 2, tzinfo=timezone.utc), "mixed", "a", "a", "M", 10, 2, 0, 0, None, "repo", "codex")
+        records = [entry, dataclasses.replace(entry, message_id="b", request_id="b", cost_usd=0., input_tokens=20),
+                   dataclasses.replace(entry, session_id="priced", message_id="c", request_id="c", cost_usd=3.)]
+        query = {"range": ["custom"], "start": ["2026-01-02"], "end": ["2026-01-02"], "cost_status": ["unknown"], "with_filters": ["1"]}
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=records):
+            result = server.sessions_endpoint(query)
+            self.assertEqual([(r["session_id"], r["tokens"], r["cost_usd"]) for r in result["sessions"]], [("mixed", 12, None)])
+            self.assertEqual(len(server.session_detail("mixed")["entries"]), 2)
+            self.assertEqual(len(server.sessions_endpoint({**query, "cost_status": [""]})["sessions"]), 2)
+            self.assertEqual(server.sessions_endpoint({**query, "model": ["missing"]})["sessions"], [])
+        current = SimpleNamespace(host="fixture")
+        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server._maybe_sync_remotes"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=[current]))), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=records):
+            self.assertEqual(server.sessions_endpoint(query)["sessions"][0]["tokens"], 12)
+            self.assertEqual(len(server.session_detail("mixed", "fixture")["entries"]), 2)
+        with self.assertRaises(ValueError):
+            server.sessions_endpoint({"cost_status": ["bad"]})
+
     def test_session_project_drilldown_uses_source_aliases_without_mutating_entries(self):
         from project_alias import make_alias_proof
         raw = "/Users/fixture/no-remote-project"
@@ -148,6 +166,9 @@ const records=[{account_id:'unknown',five_hour_used_pct:null}, {account_id:'zero
 ui.updateCodexQuotaReadings([{account_id:'updated',email:'a@test',last_quota:{observed_at:'2026-01-02',five_hour_used_pct:99}}]);
 ui.quotaFilter.sort='remaining';
 assert.deepEqual(ui.sortQuotaAccounts(provider,records,now).map(r=>r.account_id),['full','updated','zero','unknown']);
+ui.quotaFilter.sort='remaining_desc';
+assert.deepEqual(ui.sortQuotaAccounts(provider,records,now).map(r=>r.account_id),['zero','updated','full','unknown']);
+assert.deepEqual(ui.sortQuotaAccounts(provider,[{account_id:'invalid',five_hour_used_pct:101},...records],now).map(r=>r.account_id),['zero','updated','full','invalid','unknown']);
 ui.quotaFilter.sort='reset';
 assert.deepEqual(ui.sortQuotaAccounts(provider,[{account_id:'past',five_hour_resets_at:999},{account_id:'later',five_hour_resets_at:1100},{account_id:'soon',five_hour_resets_at:1001}],now).map(r=>r.account_id),['soon','later','past']);
 ui.quotaFilter.window='seven_day';ui.quotaFilter.sort='remaining';

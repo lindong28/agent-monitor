@@ -76,6 +76,7 @@
               <option value="cache_read">缓存读取</option>
               <option value="cache_creation">缓存创建</option>
               <option value="messages">用量条目</option>
+              <option value="unknown_cost">未知成本条目数</option>
             </select>
             </div>
           </div>
@@ -151,6 +152,7 @@
           </div>
         </section>
         <p id="date-error" class="error" role="alert" hidden></p>
+        <p id="unknown-cost-note" class="scope-note" hidden>未知成本包含缺少价格或用量不完整的已观测记录；已知零成本不在其中。历史汇总可能早于保留会话明细，追查到的条目数不保证与汇总相同。</p>
         <div class="preset-row" aria-label="预设">
           <button class="preset-btn" type="button" data-preset="daily-cost">每日成本</button>
           <button class="preset-btn" type="button" data-preset="project-cost">会话目录成本</button>

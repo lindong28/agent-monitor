@@ -1923,3 +1923,21 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   .page-search { padding: 16px; }
 }
 #session-dates:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Keep each account's seven fields together when columns no longer fit. */
+@media (max-width: 900px) {
+  #quota-accounts { display: block; min-width: 0; width: 100%; overflow: visible; }
+  #quota-accounts thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #quota-accounts tbody:not([hidden]) { display: block; }
+  #quota-accounts tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border-top: 1px solid var(--line); }
+  #quota-accounts .quota-unknown:not(.open) .quota-row:not(.quota-summary) { display: none; }
+  #quota-accounts td { display: block; min-width: 0; padding: 12px; border-top: 0; overflow-wrap: anywhere; }
+  #quota-accounts td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--ink-muted); font-size: 12px; }
+  #quota-accounts .quota-identity { position: static; width: auto; min-width: 0; max-width: none; box-shadow: none; }
+  #quota-accounts td:first-child, #quota-accounts td:last-child, #quota-accounts td[colspan] { grid-column: 1 / -1; }
+  #quota-accounts td:nth-child(6) { grid-column: 1 / -1; }
+  #quota-accounts .quota-account-label { white-space: normal; overflow-wrap: anywhere; }
+  #quota-accounts .quota-window { min-width: 0; }
+  #quota-accounts .quota-window-reason { max-width: none; }
+  #sync-summary { overflow-wrap: anywhere; }
+}

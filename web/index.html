@@ -82,11 +82,13 @@
                 <div class="kpi-label">今日成本</div>
                 <div id="today-cost" class="kpi-value">—</div>
                 <div id="today-context" class="kpi-sub">定价覆盖未知</div>
+                <a id="today-unknown-cost" class="panel-link" hidden></a>
               </article>
               <article class="kpi-card">
                 <div class="kpi-label">本周成本</div>
                 <div id="week-cost" class="kpi-value">—</div>
                 <div id="week-context" class="kpi-sub">自周一 00:00 · GMT+8</div>
+                <a id="week-unknown-cost" class="panel-link" hidden></a>
               </article>
               <!-- The third figure is the one the range selector controls, so the
                    label names the window rather than saying "区间": a card headed
@@ -96,6 +98,7 @@
                 <div id="range-label" class="kpi-label">区间成本</div>
                 <div id="range-cost" class="kpi-value">—</div>
                 <div id="range-context" class="kpi-sub" hidden></div>
+                <a id="range-unknown-cost" class="panel-link" hidden></a>
               </article>
             </div>
             <div class="panel-head">
@@ -178,7 +181,7 @@
                 <input id="quota-search" type="search" autocomplete="off" placeholder="邮箱、Pro、机器名…">
               </label>
               <label for="quota-window">排序窗口 <select id="quota-window"><option value="five_hour">5h</option><option value="seven_day">7d</option></select></label>
-              <label for="quota-sort">排序 <select id="quota-sort"><option value="default">默认顺序</option><option value="remaining">剩余额度少优先</option><option value="reset">即将重置优先</option><option value="observed">最近观测优先</option></select></label>
+              <label for="quota-sort">排序 <select id="quota-sort"><option value="default">默认顺序</option><option value="remaining_desc">剩余额度多优先</option><option value="remaining">剩余额度少优先</option><option value="reset">即将重置优先</option><option value="observed">最近观测优先</option></select></label>
               <button id="quota-clear" type="button" class="btn">清空筛选</button>
             </div>
             <p id="quota-match-count" class="quota-scope" role="status" aria-live="polite"></p>

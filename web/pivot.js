@@ -260,6 +260,8 @@
   async function loadPivot(force, allowSync, generation, filters = selectedFilters()) {
     const group_by = dimensions.join(",") || "none";
     const metric = AgentMonitor.qs("#metric").value;
+    const unknownNote = AgentMonitor.qs("#unknown-cost-note");
+    if (unknownNote) unknownNote.hidden = metric !== "unknown_cost";
     const range = AgentMonitor.getRange();
     AgentMonitor.qs("#pivot-status").textContent = "加载中…";
     const data = await AgentMonitor.api(
@@ -425,7 +427,7 @@
               label(context) {
                 const value = context.raw;
                 const label = context.dataset.fullLabel || context.dataset.label;
-                return metric === "cost" ? `${label}: ${AgentMonitor.costReading(value, context.dataset.costCoverage?.[context.dataIndex])}` : `${label}: ${formatValue(value, metric)} ${metric === "messages" ? "条" : "tokens"}`;
+                return metric === "cost" ? `${label}: ${AgentMonitor.costReading(value, context.dataset.costCoverage?.[context.dataIndex])}` : `${label}: ${formatValue(value, metric)} ${["messages", "unknown_cost"].includes(metric) ? "条" : "tokens"}`;
               },
             },
           },
@@ -509,7 +511,8 @@
       const query = new URLSearchParams({ range: AgentMonitor.getRange(), ...dateParams(), sort: metric === "cost" ? "cost" : "tokens" });
       filterNames.forEach(name => { const value = desiredFilterValue(name); if (value) query.set(name, value); });
       ranked.dimensions.forEach((dim, index) => query.set(dim, row.key[index]));
-      const follow = `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">查看会话</a>`;
+      if (metric === "unknown_cost") query.set("cost_status", "unknown");
+      const follow = `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">${metric === "unknown_cost" ? "查看含未知成本的会话" : "查看会话"}</a>`;
       return `<li class="ranking-item" tabindex="0"><div class="ranking-heading"><span>${escapeHtml(label)}</span><strong>${formatValue(row.value, metric)}</strong></div>${metric === "cost" ? `<p class="scope-note">${row.value == null ? "无已知金额" : "已知小计"} · ${AgentMonitor.costCoverageText(row.cost_coverage)}</p>` : ""}<div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${follow}${periods ? `<div class="ranking-periods" aria-label="各期数值">${periods}</div>` : ""}</li>`;
     }).join("") : '<li class="empty-state">— 无数据</li>';
   }

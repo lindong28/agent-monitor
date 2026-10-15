@@ -1,13 +1,5 @@
 # tt-web Issues
 
-## [open] ISSUE-PRODUCT-20261015-4c28: Web capability handoffs need fewer manual steps
-
-- Owner / Scope: product and Web maintainers; enhancements proposed by the 2026-10-15 [product capability review](../references/product-capability-review-20261015.md), not newly approved requirements or implementation.
-- Unknown pricing: Overview shows unknown-entry counts but Explore has no unknown-pricing filter or direct distribution/drill-through entry. Connect the count to model/project attribution and retained detail while preserving the aggregate/detail retention boundary.
-- Period comparison: the two explicit date ranges and deltas have no direct Explore links. Start with date-preserving links; richer attribution is a separate increment.
-- Account selection: existing sort choices favor low remaining quota, upcoming resets or recent observations; add a high-remaining direction if implementing this selection improvement. Keep identity and freshness visible; observations do not guarantee usability.
-- Disposition: recorded only. Six core tasks already have support; these reduce manual work rather than establish missing whole-product capabilities. No product changes or deployment in this audit.
-
 ## [resolved] ISSUE-IDENTITY-20261014-7a62: producer identity and credential selectors diverge
 
 - Owner / Priority: identity/account maintainer / high for Codex workspace selection, medium for missing labels or unavailable custom stores.

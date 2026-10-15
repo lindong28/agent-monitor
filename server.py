@@ -303,6 +303,9 @@ def refresh_endpoint(query):
 
 
 def sessions_endpoint(query):
+    cost_status = _first(query, "cost_status", "")
+    if cost_status not in ("", "unknown"):
+        raise ValueError("Unsupported cost_status: %s" % cost_status)
     now = datetime.now().astimezone()
     time_range = _session_window(query, now)
     sessions = []
@@ -327,6 +330,8 @@ def sessions_endpoint(query):
         if _first(query, "machine", "") not in ("", machine):
             return
         visible = _filter_values(in_window, display_query)
+        if cost_status == "unknown":
+            visible = [entry for entry in visible if entry.cost_usd is None]
         for items in _group_sessions(visible).values():
             row = _session_stats(items)
             if machine:
