@@ -4,6 +4,10 @@
 
 Use `./deploy.py --expect <full-release-sha>` from the primary main checkout after publishing and reading back live `origin/main`. Keep one release SHA for each rollout; the entry checks source identity before invoking `install.sh`. On 2026-10-13 MacMini was moved from its temporary deployment worktree back to ~/research/agent-monitor after the approved history reconciliation in 06db5d9. Its CLI and rollup launchd job both reference that main checkout; persistent state is unchanged. See [deployment evidence](../product-boundary-separation.md#macmini-main-deployment-correction-2026-10-13).
 
+## Product UI rollout, 2026-10-15
+
+The six product-review improvements were published in `b525bfb` and installed with `deploy.py --expect` on MacBook and MacStudio primary main checkouts. The installer kept the existing web processes; the subsequent stale-health observation was resolved through the existing restart endpoint after checking for busy accounts. Both health responses became non-stale. The real HTTP Hub completed unknown-cost drilldown, narrow quota reading and copy-button feedback; clipboard contents and a complete warm-cache transition trace remain unverified. The [delivery record](../../plans/20261015-product-ui-improvements/plan.md) separates synthetic and production evidence; the final documentation release SHA is in its external receipt to avoid embedding a commit's own identity. Other exporters were not redeployed for this UI/query change.
+
 ## Current upstream-contract rollout
 
 The 2026-10-14 implementation release `7f9fed0` was published and installed from primary main on MacBook, MacMini, MacStudio and Tencent. MacStudio's restarted process reported healthy/non-stale; the real browser expanded a Claude entry and read its usage evidence and unknown-pricing reason at desktop and 390px widths. All four actual exporters produced v3. The Hub subsequently reported four admitted/reachable machines with successful latest attempts and non-null quality counts. These are separate source, installation, export and consumer observations; no real login/send or fresh-provider quota request was performed by this verification.

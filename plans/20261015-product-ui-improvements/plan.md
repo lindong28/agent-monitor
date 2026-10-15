@@ -1,6 +1,6 @@
 # 产品 Web UI 改进 · 2026-10-15
 
-状态：实现与隔离验证完成，准备发布。用户要求“现在就按照以上建议进行改进”，允许按需要建 plan。输入为 docs/product-spec.md 与 docs/references/product-capability-review-20261015.md；六项建议全部纳入，状态摘要同时覆盖同步面板占屏和原始异常。排除项用户未另外明确给出；项目既有边界仍生效，不修改计费算术、账号动作或采集节奏。
+状态：六项实现已发布并完成下述生产抽样验证。用户要求“现在就按照以上建议进行改进”，允许按需要建 plan。输入为 docs/product-spec.md 与 docs/references/product-capability-review-20261015.md；六项建议全部纳入，状态摘要同时覆盖同步面板占屏和原始异常。排除项用户未另外明确给出；项目既有边界仍生效，不修改计费算术、账号动作或采集节奏。
 
 ## 交付与安排
 
@@ -33,7 +33,7 @@
 - 已完成：上轮真实取证、当前源检查、独立树创建。
 - 决策已放行：独立 reviewer 七判据成立；见 docs/adr/20261015-9e31-product-ui-handoffs.md，补充保留 a7c2 的 Sessions 严格总额规则。计划其余安排由主线程自查，不增加计划外审轮。
 - 已验证：HTTP复制回归 RED（实际值 undefined）→共用回退后 GREEN；guide成功/失败兼容测试通过。余额多优先及未知末尾定向测试通过。同步自动展开新回归先取到 RED。
-- 下一步：未知成本链路、同步与窄屏实现，然后相关测试及真实浏览器。
+- 六项实现与生产抽样验证已完成，具体范围及保留边界见下方交付记录。
 
 ## 实现与验收记录
 
@@ -54,4 +54,12 @@
 
 可见性与关系层：390px账号块的身份、双窗口、机器与时间按纵向完整呈现，1440px保持跨账号列对齐；截图人工自评未见文字遮挡。小屏账户块比桌面占更多纵向空间，换得无需横滑的字段关联。截图和原始辅助 fixture 在 `/Users/lindong/task-artifacts/agent-monitor-ui-improvements-20261015/`，不包含生产凭据。fixture 只用于验收、30分钟自停，收尾由本session回收。
 
-发布状态：待本地commit、主线整合、push、./deploy.py及真实Hub验证；不得把以上隔离结果当生产效果。
+发布状态：实现提交 `b525bfb2940f37a60d88d9b62323f78efbf2002d` 已快进整合主线并推送，发布区间包含此前完成的产品spec与能力审查文档。MacBook、MacStudio均从主checkout按实时origin/main执行 `./deploy.py --expect`，退出0，原state symlink保留。安装器保留现有web进程，现场发现stale=true后在无busy账号时通过既有restart入口完成重启；两端health均ok=true/stale=false。未改MacMini/Tencent部署，它们的exporter协议不受本轮UI派生改变影响。
+
+生产消费者读数（2026-10-15）：同一自有浏览器普通刷新，实际出现新排序、未知成本链接及新的紧凑状态；HTTP详情 `isSecureContext=false` / `navigator.clipboard=undefined` 点击复制后显示“已复制”。30d总览15544条未知→Explore按模型列出10136/5321/77/8/1/1→首模型会话筛选unknown、列表48个会话→详情可打开。数量是当时快照，不承诺刷新后恒定。390px实测配额client/scroll/table均334px、七标签可读，同步仍closed；真实账号发送/授权/移除未执行。
+
+缓存升级读数：发布前同浏览器普通reload的app.js/styles.css transferSize均300（重验证），发布后观察到新CSS decodedBodySize=58115及新控件/行为。发布时既有asset watcher也可能触发重载，缺少逐响应完整网络记录，严格N-1→N缓存链条标为uncovered；实际消费新版已核实，不以全新冷浏览器冒称暖缓存升级通过。
+
+收尾：本轮相关代码71项最终复验通过；此前后端与投影合计106项读数适用于未再改动的计算实现。review阻塞已消除，无未处置产品finding；系统剪贴板内容与上述严格缓存链条保持未核实。截图、部署原始日志及最终SHA回执保存在 `/Users/lindong/task-artifacts/agent-monitor-ui-improvements-20261015/`，本文件后续仅文档同步的提交也按origin/main重新部署。
+
+工具侧另发现CLI 0.39.1与daemon 0.27.0不一致，采用已安装0.27.0绝对路径完成验证；正式记录为harness仓 `HARNESS-20261015-8d24`，提交 `96f19bcac561f6b9a3ab3d2cd1aeb04c134a1d1e`，该问题不在本轮产品修复范围。其主树39行既有WIP已三路合并恢复，保全证据在上述目录的harness-wip中。
