@@ -2,6 +2,12 @@
 
 基于真实产品入口观察、但不在发现当轮修复范围内的用户体验问题。条目只记录真实页面读数，不用源码推断冒充端到端证据。
 
+## [open] ISSUE-UX-20261015-7e42 — HTTP Hub 会话详情复制 ID 失败
+
+- **Observed / Priority**: 2026-10-15，MacStudio HTTP Hub 的两个独立浏览器、两个不同会话详情点击“复制 ID”，均显示“复制失败，请选中 ID 复制”；Medium，有手动选中绕行路径。
+- **Evidence**: 页面 `isSecureContext=false`、`navigator.clipboard=undefined`；同环境 guide 复制命令显示“已复制”，但未回读系统剪贴板内容。线上 `26150c3` 与本地 `cfcf0aa` 的运行代码一致。原始证据在 `/Users/lindong/task-artifacts/agent-monitor-capabilities-20261015/` 的 `root-copy-id.txt`、`evidence/copy-id-after.txt`、`evidence/guide-copy.txt`；[能力复查](../references/product-capability-review-20261015.md) 保留版本与范围。
+- **Owner / Next**: agent-monitor Web 维护者；详情复制复用已支持 HTTP 的兼容路径，并在同一入口验证复制结果。本轮仅审查，不实施。
+
 ## [open] ISSUE-UX-20261014-6c31 — 会话后台刷新收起已展开的记录
 
 - **Observed**: 2026-10-14，`7f9fed0` 的 MacStudio 真实会话详情中，点击记录后 usage 证据与金额依据实际可读；后台数据更新后，URL 与 50 条记录仍在，但 `.session-entry-detail` 从 1 变成 0，需要再次展开。390px 再展开后的文字可见，问题是阅读状态没有保留。
@@ -14,6 +20,8 @@
 - **Observed**: 2026-10-07，macbook 本地 39001 的真实 `/sessions` 显示 `macmini` 刷新失败、保留四小时前数据，原因直接为 `sqlite3.OperationalError: database or disk is full`；`macstudio` 保留 28 天前数据，原因直接为 `ValueError: unsupported gateway snapshot`。页面已经说明旧数据仍在使用，但没有相应的可读处置摘要。这是中心记录的源侧错误，未独立诊断远端根因。
 - **Recommendation**: 先给“哪台机器的数据未更新、旧到何时、下一步检查什么”，原异常保留在技术详情。不能只美化错误而声称采集恢复；实际磁盘/快照问题另需服务维护与该环境授权。
 - **Owner / Scope**: agent-monitor 后续内容优化及运维任务；本轮修复 Codex 读数展示，不修改远端服务。
+
+- **Recheck 2026-10-15**: 真实 guide 又显示 rollup lock timeout，已有“使用上次数据”提示但没有可读处置摘要；随后曾观察机器恢复，不据此认定持续故障。证据 `agent-monitor-capabilities-20261015/evidence/guide-content.txt`，本轮仅记录。
 
 ## [open] ISSUE-UX-20261007-95bd — LLM 调用筛选直接显示内部状态名
 
@@ -68,6 +76,8 @@
 - **Reproduce**: 任一远端 export 失败时打开 Overview，不滚动，读 Spend 与 Quota。
 - **Recommended direction**: 三个方向都改变既有契约 G1/G2 的版面承诺，需用户裁决而非 agent 自定：① 面板仍在顶部但只展开出问题的那几张卡片、健康机器折叠成一行；② 面板整体移到 Spend / Quota 之下，顶部只留 `N/M machines included · 2 machines need attention` 一行摘要（点击跳转）；③ 保留位置，但把 totals 口径行移进 hover/title。本轮已把"哪几台没算进来"直接写到 Spend 区（见 ux-contract-issues 2026-09-15 条），部分缓解①的动机，但 Quota 那行仍在一屏之下。
 - **2026-09-15 更新**：③ 已由文案中文化那轮**以更强的方式**执行——`v2 full-history …` 口径行不是移进 hover，而是整块删除（用户裁定）。因此上面 **Observed** 里"四张机器卡片各带一行 `v2 full-history …`"这段描述已不再成立，卡片也随之变矮；但首屏挤占这个本体问题未解，①②仍待裁决。
+
+- **Recheck 2026-10-15**: 同步面板展开时 KPI 顶边约 y847；1600×900、1280×720、1024×576 CSS viewport 三个样本首屏均无完整 KPI。仅为布局读数，不是实际浏览器缩放或全部场景视觉结论；证据 `agent-monitor-capabilities-20261015/evidence/zoom80.txt`、`zoom100.txt`、`zoom125.txt`。本轮复用本条、不另起重复 issue。
 
 ## [open] ISSUE-UX-20260915-b7d4 — 同一台机器的配额刷新失败在 Claude 与 Codex 下各出现一行、文字逐字相同
 
@@ -136,6 +146,7 @@
 - **Reproduce**: 以 768×900 打开 Overview，滚到 Quota Used，在不横向滚动时读取 Machines 与 Updated。
 - **Recommended direction**: 重新评估窄屏列优先级或给出明确的受控滚动提示；必须保留 provider、账号、quota、机器归属与更新时间之间的可关联性，不能仅隐藏列。
 
+- **Recheck 2026-10-15**: 390×844 下配额容器 334px、内容 1040px，5h/7d/机器/更新列分别从 x420/548/676/865 开始，默认不可同时读；真实横滑可达，1440px 桌面七列同时可读。复用本条，不称数据缺失。证据 `agent-monitor-capabilities-20261015/evidence/narrow-layout.txt`、`agent-monitor-capabilities-20261015/root-quota-narrow-left.png`；本轮仅审查。
 
 ## [open] ISSUE-UX-20261012-e6a9 — 调用筛选更新期间旧请求仍可作为当前结果打开
 
