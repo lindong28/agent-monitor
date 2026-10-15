@@ -4,6 +4,7 @@ Current usage and installation belong in the root README; current architecture a
 
 | Path | Purpose |
 | --- | --- |
+| [product-spec.md](product-spec.md) | Product spec (`docs/product-spec.md`): target users, tasks, outcomes, capabilities and boundaries for human alignment |
 | [product-boundary-separation.md](product-boundary-separation.md) | Authorized product separation, gaps, migration constraints and execution evidence |
 | [usage-accounting-correction.md](usage-accounting-correction.md) | Pagination and streaming usage correction, bounded validation and recovery |
 | [architecture.md](architecture.md) | Runtime ownership, data flow and independent dependencies |

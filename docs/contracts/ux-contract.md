@@ -14,6 +14,8 @@
 
 ## L1 — 产品全貌 + 使用方式
 
+产品层定义统一见 [产品 spec](../product-spec.md)。以下保留既有契约的验收上下文与行为约束，不以产品定义整理变更验收范围；历史固定三机描述与当前可配置机器集合的差异见产品 spec 的待确认项。
+
 **产品形态**：默认仍可作为本机 localhost Web dashboard 运行；三机 hub 模式显式安装后，macbook、macmini、macstudio 的 `agent-monitor open` 均进入 MacStudio 上固定的 `http://macstudio:39001`。中心页面由 Python stdlib HTTP server 在 `0.0.0.0:39001` 提供。
 
 **产品类型**：功能型数据可视化 dashboard（非游戏 / 非 AIGC 生成类）→ 价值来自「数字正确 + 能查到 + 能钻取」。无 registry 列出的 domain 专属验收（见末尾 domain 段）。

@@ -6,27 +6,9 @@ Use it to answer: **How much coding-agent usage accumulated, which sessions cont
 
 Usage accounting follows API-call observations across stored files: Codex pagination subtracts its inherited byte-boundary usage, and repeated Claude streaming observations keep the complete observed counters once. Missing ancestry or conflicting observations mark source coverage incomplete; they are not silently treated as zero. Corrected events replay retained authoritative history; unavailable or pre-authority history is not inferred. See [accounting correction](docs/usage-accounting-correction.md).
 
-## Who it is for
+## Product definition
 
-- Developers who use Claude Code and Codex frequently, especially across multiple models, accounts and computers.
-- Engineers maintaining a personal AI development environment who need one place to inspect collection status, usage history, quotas and connectivity.
-
-The current product is a personal monitoring console. Organization permissions, team budget enforcement and enterprise governance are outside its documented capabilities.
-
-## Use cases and capabilities
-
-| Use case | Question | Available capability |
-| --- | --- | --- |
-| Review daily or weekly usage | How much did I use, and how is it changing? | Overview totals, token usage, estimated cost, trends and model mix |
-| Attribute consumption | Which model, machine or session directory accounts for the usage? | Explore filters and pivots, plus retained Claude/Codex sessions and their usage |
-| Monitor several computers | How do laptop, desktop and server activity add up? | Local collection and SSH snapshot aggregation into one Hub dashboard |
-| Manage account quotas | Which account is near its limit, when does it reset, and how old is the reading? | Claude/Codex account quotas, reset times, account history, observation times and refresh failures |
-| Operate Codex accounts | Can I authorize an account, send a message or refresh its quota? | Explicit single-account and batch actions, queued device authorization and retained operation results |
-| Check connectivity | What does the current network diagnostic report show? | Shared Web and CLI diagnostics through `agent-monitor network` and `ip-check` |
-
-The CLI also manages start, stop, status and refresh. Periodic collection and manual refresh retain usable history when a machine is offline, with source times and failures visible. See [Dashboard behavior](#dashboard-behavior) for the page workflows and [Codex account actions](#codex-account-actions) for action semantics.
-
-Cost is a recorded amount or an estimate at applicable configured model rates, not a subscription charge or an invoice. Overview and Explore show known-cost subtotals with known/unknown pricing observation counts; no priced observations is unknown, while an observed zero remains zero. Session totals remain unknown if any retained selected record is unpriced. Stored historical amounts are not guaranteed to be revalued at current prices. The [metric specification](docs/references/metrics.md) records every displayed statistic's units, windows, sources, formulas and evidence limits. Data comes from collection rounds and snapshots; check observation times before treating a reading as current. The “session directory” dimension follows the session's starting directory and Git identity, not every repository touched later. Agent session records support usage review and tracing prior work; they are not API request/attempt ledgers.
+The independent [product spec](docs/product-spec.md) records target users, user tasks, expected outcomes, capabilities and product boundaries. It consolidates the existing definition for human alignment; it is not a new deployment acceptance result. See [Dashboard behavior](#dashboard-behavior) and [Codex account actions](#codex-account-actions) for usage details, and the [metric specification](docs/references/metrics.md) for cost, coverage and attribution semantics.
 
 ## Project status
 
