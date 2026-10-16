@@ -138,7 +138,7 @@ export function init() {
     batchNext.disabled = submittingBatch || busy || !count;
     batchRetry.hidden = true;
     if (!batch) {
-      batchStatus.textContent = count ? `已自动发现 ${count} 个登录账号。点击一次即可开始。` : "尚未发现可发送的 Codex 登录账号。";
+      batchStatus.textContent = count ? `发现 ${count} 个有登录记录的账号；发送前会检查登录状态。` : "尚未发现可发送的 Codex 登录账号。";
       batchHelp.replaceChildren(
         element("p", "账号来自当前及历史登录记录，无需手动添加。"),
         element("p", "系统会检查并复用已保存的登录状态。需要授权时，系统逐个显示账号的设备码；完成或取消后，再处理下一个账号。")
@@ -166,7 +166,7 @@ export function init() {
     for (const [key, label] of Object.entries({ waiting: "等待授权", queued: "授权排队", running: "处理中", unsent: "未发送", unknown: "结果未知", failed: "发送失败" })) {
       if (statuses[key]) parts.push(`${label} ${statuses[key]}`);
     }
-    parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`, `当前可发送 ${count} 个账号`);
+    parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`, `新一轮候选 ${count} 个账号`);
     batchStatus.textContent = parts.join(" · ");
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch;
@@ -175,7 +175,7 @@ export function init() {
       `本轮开始于 ${timestamp(batch.created_at)}。`,
       "授权：系统会检查并复用已保存的登录状态。需要授权时，系统逐个显示账号的设备码。遇到登录限流时，系统停止后续授权。",
       statuses.unsent
-        ? `继续发送：如需继续，请点击「${batchRetry.textContent}」。如果遇到登录限流，请在限流解除后操作。系统只处理仍在登录记录中且确定未发送的账号。`
+        ? `继续发送：如果遇到登录限流，先等限流解除。如需继续，再点击「${batchRetry.textContent}」。系统只处理仍在登录记录中且确定未发送的账号。`
         : "继续发送：本轮没有可以继续发送的账号。",
       "刷新：刷新页面或仅查询配额不会重发消息。",
       ...(statuses.unknown || statuses.failed ? ["结果未知或发送失败的账号可能已消耗额度，系统不会自动重试。"] : []),
@@ -230,7 +230,7 @@ export function init() {
       if (account.eligible === false) card.append(element("p", "已不在当前登录记录中；保留本轮结果，不纳入下一轮或继续发送。", "quota-scope"));
       const duplicateEmail = accounts.some((other) => other.id !== account.id && other.email.toLowerCase() === account.email.toLowerCase());
       if (account.account_id) (duplicateEmail ? card : details).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
-      details.append(element("p", account.has_credentials ? "登录态：已保存" : "登录态：需要官方授权", "quota-scope"));
+      details.append(element("p", account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
       if (batchItem) heading.append(element("span", `本轮：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
       if (op) {
         if (op.stage !== "succeeded") card.append(element("p", op.detail));
@@ -248,7 +248,7 @@ export function init() {
           const reading = element("dl", undefined, "codex-account-reading");
           reading.append(element("dt", "7 天配额窗口重置"), element("dd", `${resetLabel || "重置时间未知"} · ${timestamp(latestReading.seven_day_resets_at, true)}`));
           const used = latestReading.seven_day_used_pct;
-          reading.append(element("dt", "七天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
+          reading.append(element("dt", "7 天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
           reading.append(element("dt", "最近成功查询"), element("dd", timestamp(latestReading.observed_at)));
           if (op.before?.seven_day_resets_at != null) details.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
           const summary = element("p", undefined, "codex-account-summary");

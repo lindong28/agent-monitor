@@ -47,7 +47,7 @@
       </aside>
       <main class="main guide-main">
         <div class="page-toolbar"><h1 class="page-title">使用与接入</h1><button id="refresh" type="button" class="btn">重新检查状态</button></div>
-        <p class="guide-intro">了解数据来源，连接你的开发环境，再从用量追溯到具体会话。</p>
+        <p class="guide-intro">首次使用从「首次接入」开始；已有数据时，按「查找证据」中的问题进入对应页面。</p>
         <div class="guide-layout">
           <aside class="guide-toc" aria-label="本页目录"><span class="nav-caption">本页目录</span><a href="#sources">数据来源</a><a href="#collection">采集状态</a><a href="#setup">首次接入</a><a href="#questions">查找证据</a></aside>
           <article class="guide-article">
@@ -69,12 +69,13 @@
         <section class="panel" id="setup">
           <h2>首次接入</h2>
           <h3>单机使用</h3>
-          <p>开始前，准备 Python、Git 和 curl，并进入自己的 agent-monitor 代码目录。</p>
+          <p>开始前，准备 Python 3（含 venv 和 pip）、Git 和 curl，并进入自己的 agent-monitor 代码目录。</p>
           <ol>
             <li>配置 <code>machines.json</code>。如果是新单机安装，只保留自己的本机条目，见下方示例。如果是已有安装，须保留机器身份和退休记录。</li>
             <li>运行 <code>./install.sh</code> 安装 Monitor。</li>
             <li>运行 <code>agent-monitor start</code> 启动服务。</li>
             <li>运行 <code>agent-monitor refresh</code> 进行首次采集。</li>
+            <li>运行 <code>agent-monitor open</code> 打开页面。在总览展开「全部机器」，确认机器名称、快照是否可读及数据更新时间。</li>
           </ol>
           <p>macOS 安装器会设置定时采集。Linux 用户需另行配置定时任务。</p>
           <div class="code-card"><div class="code-card-head"><span>新单机 machines.json 示例</span><button type="button" data-copy-code="machine-config">复制配置</button></div><pre><code id="machine-config">{
@@ -83,18 +84,20 @@
 }</code></pre></div>
           <div class="code-card"><div class="code-card-head"><span>单机安装与首次采集</span><button type="button" data-copy-code="install-commands">复制命令</button></div><pre><code id="install-commands">./install.sh
 agent-monitor start
-agent-monitor refresh</code></pre></div>
-          <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>Hub 负责拉取快照；采集器独立保存各机数据。</p><ol><li>在自己的 <code>hub.json</code> 中配置机器角色、URL 和 SSH 目标。</li><li>在每台机器的代码目录中运行以下命令。将占位符替换为该机器在配置中的名称。</li></ol>
-          <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div></details>
+agent-monitor refresh
+agent-monitor open</code></pre></div>
+          <p>页面能打开不表示采集已完成。若快照不可读或更新时间未变化，先查看采集详情中的错误，再检查对应配置与连接。没有匹配记录也不等于安装失败。</p>
+          <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>Hub 负责拉取快照；采集器独立保存各机数据。开始前，确认 Hub 能通过 SSH 连接各采集器。</p><ol><li>在 <code>machines.json</code> 中配置机器名称与 SSH 目标，在 <code>hub.json</code> 中配置 Hub、URL 和采集机器。已有安装须保留机器身份和退休记录。</li><li>在每台机器的代码目录中运行以下命令。将占位符替换为该机器在配置中的名称。</li></ol>
+          <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div><p>安装后，在 Hub 的总览展开「全部机器」，逐台核对机器名称、纳入状态与数据更新时间。显示旧快照时，按该机器的错误继续排查。</p></details>
           <p>完整命令、依赖与已有服务迁移见代码目录中的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。本页只说明与检查状态，不修改配置或登录账号。</p>
         </section>
         <section class="panel" id="questions">
           <h2>从问题找到证据</h2>
           <ul>
-            <li>想知道成本变化：总览展开周期比较，核对两个周期的日期和金额未知的记录数，再进入透视定位目录、模型或机器。</li>
-            <li>想追溯某组用量：点击透视排行的“查看会话”。列表只计匹配记录；打开详情可看全部留存记录。汇总比明细更完整时，差额不能当成查询错误或零成本。</li>
-            <li>想挑选账号：在总览按配额窗口和剩余额度排序，同时核对更新时间。历史账号读数不代表当前可用。</li>
-            <li>页面为空：先检查日期和筛选，再看机器采集状态与采集器版本。连接失败会保留最后成功快照；修复接入后再刷新。</li>
+            <li><strong>查看成本变化：</strong>在总览展开<a href="/#period-comparison">周期比较</a>，核对两个周期的日期和金额未知的记录数，再进入透视定位目录、模型或机器。</li>
+            <li><strong>追溯某组用量：</strong>点击<a href="/explore">透视</a>排行的“查看会话”。列表只计匹配记录；打开详情可看全部留存记录。汇总比明细更完整时，差额不能当成查询错误或零成本。</li>
+            <li><strong>挑选账号：</strong>在总览的<a href="/#quota-explorer">配额与账号</a>中按配额窗口和剩余额度排序，同时核对更新时间。历史账号读数不代表当前可用。</li>
+            <li><strong>页面为空：</strong>先检查日期和筛选，再看机器采集状态与采集器版本。连接失败会保留最后成功快照；修复接入后再刷新。</li>
           </ul>
           <p class="scope-note">请在可信个人网络使用；账号操作的来源检查不等于用户认证。开源代码与公开运行中的仪表盘是两件事。</p>
         </section>

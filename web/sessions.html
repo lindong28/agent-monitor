@@ -76,18 +76,18 @@
           </div>
           <details id="sync-panel" class="sync-panel" aria-label="机器同步状态">
             <summary class="sync-panel-head"><strong>采集详情 <span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span></strong><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></summary>
-            <p class="scope-note">hub 模式下含全部已纳入机器的已采会话；联系不上的机器保留上次成功的数据。</p>
+            <p class="scope-note">Hub 模式汇集已纳入机器的会话。机器暂时联系不上时，仍显示上次成功采集的数据。</p>
             <div id="sync-machines" class="sync-machines"></div>
             <p id="session-source-coverage" class="scope-note"></p>
           </details>
           <details class="note-disclosure">
-            <summary>这张表包含什么</summary>
-            <p>这里只统计已采集的用量记录，不保证包含最终用量。明细可查看用量记录完整性及金额依据。</p>
-            <p>Codex 模型名来自请求或配置，实际处理请求的模型未知。估算使用计算时的配置价格，不代表历史实际费率。</p>
-            <p>会话目录按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
-            <p>金额未知的行显示 —。标 <em>推算</em> 的 Codex 与 GLM-5.1/5.2 行按程序配置的价格估算，不是服务商账单。</p>
-            <p>用量事件数是记录中包含的用量事件合计。一条记录可能包含多个事件；事件数不是请求次数。</p>
-            <p>已采集的会话统计不随本地日志清理而丢失，但采集前就删掉的历史找不回来。未升级采集器的机器不在其中。</p>
+            <summary>会话范围、金额与事件数怎么读</summary>
+            <p><strong>记录范围：</strong>这里只统计已采集的用量记录，不保证包含最终用量。明细可查看用量记录完整性及金额依据。</p>
+            <p><strong>模型与估算：</strong>Codex 模型名来自请求或配置，实际处理请求的模型未知。估算使用计算时的配置价格，不代表历史实际费率。</p>
+            <p><strong>会话目录：</strong>按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
+            <p><strong>金额：</strong>金额未知的行显示 —。标 <em>推算</em> 的 Codex 与 GLM-5.1/5.2 行按程序配置的价格估算，不是服务商账单。</p>
+            <p><strong>用量事件数：</strong>记录中包含的用量事件合计。一条记录可能包含多个事件；事件数不是请求次数。</p>
+            <p><strong>历史留存：</strong>已采集的会话统计不随本地日志清理而丢失，但采集前就删掉的历史找不回来。未升级采集器的机器不在其中。</p>
           </details>
           <div class="controls sessions-controls">
             <div class="field">
@@ -148,7 +148,7 @@
       AgentMonitor.initSessions().catch((error) => {
         console.error(error);
         document.querySelector("main").insertAdjacentHTML("beforeend",
-          '<p class="error">此页面加载失败，刷新重试。</p>');
+          '<p class="error">页面未能完整加载，请重新加载页面。</p>');
       });
     </script>
   </body>

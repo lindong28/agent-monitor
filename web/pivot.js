@@ -288,7 +288,7 @@
       const dates = dateParams();
       summary.textContent = `${metricName} · ${dates.start ? dates.start + " 至 " + dates.end : rangeName} · ${dimensions.length ? "按 " + dimensions.map(dim => dimLabels[dim]).join(" × ") : "不分组"}${filters.length ? " · 筛选：" + filters.join("、") : " · 全部来源"}`;
     }
-    AgentMonitor.qs("#pivot-status").textContent = (data.rows.length ? "就绪" : "无数据") + (metric === "cost" ? " · " + AgentMonitor.costCoverageText(data.cost_coverage) : "");
+    AgentMonitor.qs("#pivot-status").textContent = (data.rows.length ? `已加载 ${data.rows.length} 条分组结果` : "当前日期与筛选范围内无记录") + (metric === "cost" ? " · " + AgentMonitor.costCoverageText(data.cost_coverage) : "");
   }
 
   function chartData(data, metric) {
@@ -339,7 +339,7 @@
       // null is either no activity or an unknown price. A series nobody could
       // price therefore ranks at the bottom whatever it actually cost, so the
       // note states the basis instead of asserting a size order it cannot know.
-      note.textContent = `趋势图显示按已知成本排名靠前的 ${AgentMonitor.SERIES_LIMIT} 个组合，另 ${plotted.dropped} 个未绘制。下方排名保留全部组合，悬浮可看各期数值；未知成本显示 —。`;
+      note.textContent = `趋势图显示按已知成本排名靠前的 ${AgentMonitor.SERIES_LIMIT} 个组合，另 ${plotted.dropped} 个未绘制。下方排名保留全部组合，展开分期明细可看各期数值；未知成本显示 —。`;
       return;
     }
     note.hidden = true;
@@ -478,7 +478,7 @@
       empty = document.createElement("div");
       empty.id = "pivot-chart-empty";
       empty.className = "empty-state chart-empty-state";
-      empty.textContent = "— 无数据";
+      empty.textContent = "当前范围内无记录，请检查日期与筛选条件。";
       box.appendChild(empty);
     }
     empty.hidden = !show;
@@ -533,7 +533,7 @@
       if (metric === "unknown_cost") query.set("cost_status", "unknown");
       const follow = metric === "unknown_cost" && row.value === 0 ? '<span class="scope-note">没有未知成本记录</span>' : `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">${metric === "unknown_cost" ? "查看含未知成本的会话" : "查看会话"}</a>`;
       return `<li class="ranking-item"><div class="ranking-heading"><div class="ranking-dimensions">${label}</div><strong>${formatValue(row.value, metric)}</strong></div>${metric === "cost" ? `<p class="scope-note">${row.value == null ? "无已知金额" : "已知小计"} · ${AgentMonitor.costCoverageText(row.cost_coverage)}</p>` : ""}<div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${follow}${periods ? `<details class="ranking-periods" data-key="${escapeHtml(key)}" ${expanded.has(key) ? "open" : ""}><summary>${periodLabel} · ${row.periods.length} 期</summary>${periods}</details>` : ""}</li>`;
-    }).join("") : '<li class="empty-state">— 无数据</li>';
+    }).join("") : '<li class="empty-state">当前范围内无记录，请检查日期与筛选条件。</li>';
     AgentMonitor.qsa("#group-ranking .ranking-periods[open]").forEach(element => {
       element.scrollTop = expanded.get(element.dataset.key) || 0;
     });

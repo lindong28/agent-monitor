@@ -2045,7 +2045,7 @@
     } else if (machine.last_attempt_outcome === "cleanup_failed") {
       consequence = "数据已更新，但刷新后的清理未完成；请查看技术详情和该机采集日志。";
     } else if (machine.syncing) {
-      consequence = "刷新中，现有数据仍可用。";
+      consequence = "刷新中，仍显示上次已采集的数据。";
     } else if (machine.reason) {
       consequence = "数据已更新，采集另有提示，见技术详情。";
     }
@@ -3129,7 +3129,7 @@
       <details class="panel session-metadata" ${readingState.metadata ? "open" : ""}><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
         ${field("Agent", distinct("agent_id").join("、"))}${field("会话目录", distinct("project").join("、"))}
         ${field("模型", models.join("、"))}${field("首条记录", first === null ? "" : formatDate(first))}${field("末条记录", last === null ? "" : formatDate(last))}
-      </dl><p class="scope-note">范围为该会话已留存的全部记录，不受列表时间窗口限制。Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。这里不包含对话正文，也未关联 Gateway 尝试链。</p></details>
+      </dl><p class="scope-note"><strong>记录范围：</strong>该会话已留存的全部记录，不受列表时间窗口限制。</p><p class="scope-note"><strong>模型与计价：</strong>Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。</p><p class="scope-note"><strong>记录内容：</strong>这里不包含对话正文，也未关联 Gateway 尝试链。</p></details>
       <section class="panel"><div class="panel-head"><h2>用量明细</h2><span id="usage-count" class="status-line"></span></div>
       <div class="controls"><div class="field"><label for="usage-model">模型</label><select id="usage-model"><option value="">全部模型</option>${models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select></div><button id="usage-clear" type="button">清除筛选</button></div>
       <div class="table-wrap"><table><thead><tr><th>记录时间</th><th>模型</th><th class="numeric">输入</th><th class="numeric">输出</th><th class="numeric">缓存读取 / 写入</th><th class="numeric">成本</th><th>详情</th></tr></thead><tbody id="usage-body"></tbody></table></div>
@@ -3158,7 +3158,7 @@
         function expand() {
           const row = document.createElement("tr");
           row.className = "session-entry-detail";
-          row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><dl class="session-fields">${field("计价说明", costReason(e.cost_provenance?.reason))}${field("金额依据", costBasis(e))}${field("用量记录完整性", qualityText(e))}${field("用量事件数", String(e.usage_event_count ?? "未知"))}</dl><details class="entry-technical" ${readingState.technical.has(key) ? "open" : ""}><summary>技术证据 · ID、服务模式与价格来源</summary><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}</dl><p class="scope-note">ID 来自源日志，不能直接作为 Gateway 请求标识。</p></details></div></td>`;
+          row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><p class="scope-note">${escapeHtml(formatDate(e.timestamp))} · ${escapeHtml(e.model || "模型未记录")}</p><dl class="session-fields">${field("计价说明", costReason(e.cost_provenance?.reason))}${field("金额依据", costBasis(e))}${field("用量记录完整性", qualityText(e))}${field("用量事件数", String(e.usage_event_count ?? "未知"))}</dl><details class="entry-technical" ${readingState.technical.has(key) ? "open" : ""}><summary>技术证据 · ID、服务模式与价格来源</summary><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}</dl><p class="scope-note">ID 来自源日志，不能直接作为 Gateway 请求标识。</p></details></div></td>`;
           row.querySelector("details").addEventListener("toggle", event => {
             if (event.currentTarget.open) readingState.technical.add(key); else readingState.technical.delete(key);
           });
@@ -3491,7 +3491,7 @@
       if (main) {
         main.insertAdjacentHTML(
           "beforeend",
-          '<p class="error">此页面加载失败，刷新重试。</p>',
+          '<p class="error">页面未能完整加载，请重新加载页面。</p>',
         );
       }
     }

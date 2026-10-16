@@ -68,15 +68,15 @@
             <div id="network-timezone" class="network-card-body"></div>
           </article>
           <article class="network-card">
-            <h2>本机</h2>
+            <h2>服务端本机</h2>
             <div id="network-local" class="network-card-body"></div>
           </article>
           <article class="network-card">
-            <h2>公网</h2>
+            <h2>公网出口</h2>
             <div id="network-public" class="network-card-body"></div>
           </article>
           <article class="network-card">
-            <h2>风险</h2>
+            <h2>第三方风险信息</h2>
             <div id="network-risk" class="network-card-body"></div>
           </article>
         </section>
@@ -87,7 +87,7 @@
       AgentMonitor.initNetwork().catch((error) => {
         console.error(error);
         document.querySelector("main").insertAdjacentHTML("beforeend",
-          '<p class="error">此页面加载失败，刷新重试。</p>');
+          '<p class="error">页面未能完整加载，请重新加载页面。</p>');
       });
     </script>
   </body>

@@ -1857,7 +1857,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
                 self.assertIn("服务端主机", html)
                 self.assertIn("不检测浏览器所在设备", html)
         sessions = (ROOT / "web" / "sessions.html").read_text()
-        self.assertIn("全部已纳入机器", sessions)
+        self.assertIn("汇集已纳入机器的会话", sessions)
         self.assertIn('id="filter-machine"', sessions)
 
     def test_pivot_js_shortens_project_labels_but_keeps_full_title(self):
@@ -1880,7 +1880,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn("hasNoPivotData(data)", js)
         self.assertIn("renderEmptyChart()", js)
         self.assertIn("renderRanking(data, metric)", js)
-        self.assertIn("无数据", js)
+        self.assertIn("当前范围内无记录，请检查日期与筛选条件。", js)
         self.assertIn('class="empty-state"', js)
 
     def test_usage_event_labels_do_not_call_codex_events_messages(self):

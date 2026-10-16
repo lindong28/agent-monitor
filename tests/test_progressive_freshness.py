@@ -48,7 +48,7 @@ eval(fs.readFileSync("web/pivot.js", "utf8"));
                          ["/api/sync-status", "/api/pivot-filters", "/api/pivot"])
         self.assertEqual(result["first"][2]["query"]["machine"], "selected")
         self.assertEqual(result["selected"], "selected")
-        self.assertEqual(result["ready"], "无数据 · 定价覆盖未知")
+        self.assertEqual(result["ready"], "当前日期与筛选范围内无记录 · 定价覆盖未知")
 
     def test_statistics_polling_ignores_quota_only_but_default_observes_it(self):
         result = self.run_browser(r'''

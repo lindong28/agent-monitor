@@ -110,7 +110,7 @@
       "id": "explore",
       "path": "/explore?range=30d",
       "state": "默认透视及分组排名加载",
-      "ready": "document.querySelector('#pivot-status')?.textContent === '就绪' && document.querySelector('#group-ranking li')",
+      "ready": "document.querySelector('#pivot-status')?.textContent.startsWith('已加载 ') && document.querySelector('#group-ranking li')",
       "exclude": {
         "task-density": "Account operation/quota component is on Overview; this route covers shared consumers.",
         "snapshot-time": "Account operation/quota component is on Overview; this route covers shared consumers.",
