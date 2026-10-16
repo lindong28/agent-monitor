@@ -201,6 +201,34 @@ eval(source); init();
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_session_snapshot_summary_links_to_overview_with_dates(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+const nodes = Object.fromEntries(["#sync-coverage", "#sync-summary", "#sync-machines", "#sync-overview-link"].map(id => [id, {textContent: "", innerHTML: ""}]));
+global.window = {location: {origin: "http://example.test", pathname: "/sessions", search: "?range=custom&start=2026-10-01&end=2026-10-12&model=fixture", hash: ""}};
+global.document = {readyState: "loading", addEventListener() {}, querySelector: key => nodes[key] || null, querySelectorAll: () => []};
+eval(fs.readFileSync("web/app.js", "utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { updateSyncOverviewLink,"));
+const healthy = {name: "healthy", admitted: true, availability: "reachable", statistics: {usage_quality_counts: {observed: 12, incomplete: 0, unknown: 0}}};
+const failed = {...healthy, name: "failed", availability: "unreachable", generated_at: "2026-10-12T00:00:00Z"};
+window.AgentMonitor.renderSyncStatus({coverage: {admitted: 2, declared: 2}, machines: [healthy, failed]});
+assert.equal(nodes["#sync-coverage"].textContent, "机器快照可读：2/2 台");
+assert(nodes["#sync-machines"].innerHTML.includes("failed"));
+assert(!nodes["#sync-machines"].innerHTML.includes("healthy"), "healthy machine cards belong in overview");
+assert(!nodes["#sync-machines"].innerHTML.includes("sync-machine-title"));
+assert.equal(nodes["#sync-overview-link"].href, "/?range=custom&start=2026-10-01&end=2026-10-12#sync-panel");
+window.location.search = "?range=7d";
+window.AgentMonitor.updateSyncOverviewLink();
+assert.equal(nodes["#sync-overview-link"].href, "/?range=7d#sync-panel");
+delete nodes["#sync-overview-link"];
+window.AgentMonitor.renderSyncStatus({coverage: {admitted: 2, declared: 2}, machines: [healthy, {...failed, syncing: true}]});
+assert(nodes["#sync-machines"].innerHTML.includes("healthy"), "overview and guide retain machine detail");
+assert(nodes["#sync-machines"].innerHTML.includes("刷新中 · 显示上次快照"));
+assert(!nodes["#sync-machines"].innerHTML.includes("刷新中，仍显示"));
+assert(nodes["#sync-machines"].innerHTML.includes("质量、历史范围与技术详情"));
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_account_rows_keep_snapshot_time_errors_and_disclosure_state(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");
@@ -230,10 +258,10 @@ const text = n => n.textContent + n.children.map(text).join(" ");
 const visible = n => n.tag === "details" && !n.open ? text(n.children[0]) : n.textContent + n.children.map(visible).join(" ");
 window.testRender(values);
 const list = nodes["#codex-account-list"], card = list.children[0];
-assert(visible(card).includes("上次查询 · 7 天已用 8%"));
-assert(visible(card).includes(oldTime), "snapshot observation time is visible without opening details");
+assert(!visible(card).includes("7 天"), "quota comparison belongs in the table");
+assert(text(card.querySelector("details")).includes(oldTime), "operation observation time remains in details");
 assert(visible(list.children[1]).includes("失败；结果未知"));
-assert(visible(list.children[1]).includes("7 天已用 未知"));
+assert(text(list.children[1].querySelector("details")).includes("服务端未返回"));
 assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
 card.querySelector("details").open = true;
 window.testRender(values);
@@ -241,7 +269,7 @@ assert.strictEqual(list.children[0], card, "unchanged poll must preserve the foc
 values[0].operation.after.seven_day_used_pct = 9;
 window.testRender(values);
 assert(list.children[0].querySelector("details").open, "changed result must preserve detail expansion");
-assert(visible(list.children[0]).includes("7 天已用 9%"));
+assert(visible(list.children[0]).includes("7 天窗口已用") && visible(list.children[0]).includes("9%"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -587,7 +615,7 @@ process.stdout.write(JSON.stringify({
         header = re.search(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", prose).group(1)
         self.assertEqual(
             re.findall(r">([^<]+)</th>", header),
-            ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "更新于"],
+            ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "读数来源"],
         )
         # Two files decide one thing. The header row is static markup; the cells
         # under it are emitted in QUOTA_COLUMNS order. Reorder one and every
@@ -947,7 +975,7 @@ function reading(row) {
       .filter((node) => node.textContent === "可能早于一次登录变更").length,
     historyMarkerCount: descendants(row).filter((node) => node.textContent === "已登出").length,
     historyNoteCount: descendants(row)
-      .filter((node) => node.textContent === "最后观测值，不代表当前状态").length,
+      .filter((node) => node.className.includes("quota-account-observation") && node.textContent.includes("最后观测值，不代表当前状态")).length,
     observedTexts: byClass(row, "quota-window-observed").map((node) => node.textContent),
     amounts: windows.map((cell) => byClass(cell, "quota-window-value")[0]?.textContent || null),
     fills: windows.map((cell) => byClass(cell, "quota-meter-fill")[0]?.style.values["--quota-fill"] || null),
@@ -1055,7 +1083,7 @@ process.stdout.write(JSON.stringify({
                 "F1 unknown reset": {
                     "warnings": [],
                     "reset_texts": ["重置时间未知", "重置时间未知"],
-                    "observed_count": 2,
+                    "observed_count": 0,
                 },
                 "F2 boundary reset": {
                     "warnings": ["即将用尽"],
@@ -1098,13 +1126,15 @@ process.stdout.write(JSON.stringify({
             [reset["title"] for reset in past["resets"]],
             [payload["pastTitle"], payload["pastTitle"]],
         )
-        self.assertEqual(len(past["observedTexts"]), 2)
+        self.assertEqual(past["observedTexts"], [])
+        self.assertIn("最后观测", past["accountText"])
         self.assertTrue(all(text.startswith("观测于 ") for text in past["observedTexts"]))
 
         self.assertEqual(unknown["warningTexts"], [])
         self.assertEqual([reset["text"] for reset in unknown["resets"]], ["重置时间未知"] * 2)
         self.assertEqual([reset["title"] for reset in unknown["resets"]], [""] * 2)
-        self.assertEqual(len(unknown["observedTexts"]), 2)
+        self.assertEqual(unknown["observedTexts"], [])
+        self.assertIn("最后观测", unknown["accountText"])
         self.assertTrue(all(text.startswith("观测于 ") for text in unknown["observedTexts"]))
 
         self.assertEqual(boundary["warningTexts"], ["即将用尽"])

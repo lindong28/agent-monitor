@@ -251,11 +251,8 @@ export function init() {
           reading.append(element("dt", "7 天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
           reading.append(element("dt", "最近成功查询"), element("dd", timestamp(latestReading.observed_at)));
           if (op.before?.seven_day_resets_at != null) details.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
-          const summary = element("p", undefined, "codex-account-summary");
-          summary.append(element("span", `上次查询 · 7 天已用 ${used == null ? "未知" : used + "%"} · ${resetLabel || "重置时间未知"}`), element("span", `查询于 ${timestamp(latestReading.observed_at)}`, "codex-reading-time"));
-          card.append(summary);
           details.append(reading);
-          if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) card.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
+          if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) details.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
         }
       }
       const controls = element("div", undefined, "codex-account-controls");

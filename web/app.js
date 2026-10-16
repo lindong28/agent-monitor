@@ -95,6 +95,7 @@
   }
 
   function updateNavLinks() {
+    updateSyncOverviewLink();
     const range = getRange();
     function setLinkRange(url) {
       const custom = range === "custom" && ["/explore", "/sessions"].includes(url.pathname);
@@ -1247,7 +1248,7 @@
     row.appendChild(quotaUpdatedCell(display, stale, display.quota_source === "account_action"
       ? null : quotaRefreshNotice(provider, account)));
     Array.from(row.children).forEach((cell, index) => {
-      cell.dataset.label = ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "更新于"][index];
+      cell.dataset.label = ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "读数来源"][index];
     });
     return row;
   }
@@ -1348,9 +1349,9 @@
       observation.className = "quota-history-note quota-account-observation";
       const invalidSource = display.quota_source !== "account_action" &&
         (renderedQuotaRateLimits?.[provider.key]?.signed_out_machines || []).includes(account.reading_from);
-      observation.textContent = account.account_state !== "known" ? "账号身份未确认" :
-        invalidSource ? `读数来源 ${account.reading_from} 的登录已失效；保留旧值` :
-        `${display.quota_source === "account_action" ? "本页查询" : "观测于"} ${formatDate(display.updated_at)}`;
+      observation.textContent = `${display.quota_source === "account_action" ? "本页查询" : "观测于"} ${formatDate(display.updated_at)}`;
+      if (account.account_state !== "known") observation.textContent += " · 账号身份未确认";
+      else if (invalidSource) observation.textContent += ` · 读数来源 ${account.reading_from} 的登录已失效；保留旧值`;
       wrap.appendChild(observation);
     }
     const actions = document.createElement("div");
@@ -1559,6 +1560,13 @@
     const resetState = quotaResetState(resetEpoch, renderedAtMs);
     const rememberedHistoricalWindow =
       quotaPresence(account) === "remembered" && resetState !== "future";
+    if (!known && resetState === "unknown") {
+      const missing = document.createElement("span");
+      missing.className = "quota-window-reason";
+      missing.textContent = "用量与重置时间未知";
+      cell.appendChild(missing);
+      return cell;
+    }
     if (band) {
       cell.classList.add(band);
     }
@@ -1597,12 +1605,6 @@
       reset.title = resetText(resetEpoch, renderedAtMs);
     }
     cell.appendChild(reset);
-    if (rememberedHistoricalWindow) {
-      const observed = document.createElement("div");
-      observed.className = "quota-window-observed";
-      observed.textContent = `观测于 ${formatDate(account.updated_at)}`;
-      cell.appendChild(observed);
-    }
     return cell;
   }
 
@@ -1688,23 +1690,19 @@
     const cell = document.createElement("td");
     cell.className = "quota-updated-cell";
     if (account.quota_source === "account_action") {
-      cell.appendChild(document.createTextNode(`本页查询 · ${updatedText(account.updated_at)}`));
+      cell.appendChild(document.createTextNode(stale ? "本页查询 · 读数较旧" : "本页查询"));
       cell.title = formatDate(account.updated_at);
       const note = document.createElement("span");
       note.className = "quota-history-note";
-      note.textContent = stale ? "查询读数较旧，可在账号操作中仅刷新配额" : "机器归属与套餐仍按采集记录显示";
+      note.textContent = "机器归属与套餐仍按采集记录显示";
       cell.appendChild(note);
       return cell;
     }
     if (quotaPresence(account) === "remembered") {
-      cell.appendChild(document.createTextNode(`最后观测 ${formatDate(account.updated_at)}`));
-      const note = document.createElement("span");
-      note.className = "quota-history-note";
-      note.textContent = "最后观测值，不代表当前状态";
-      cell.appendChild(note);
+      cell.appendChild(document.createTextNode("机器采集 · 历史读数"));
       return cell;
     }
-    cell.appendChild(document.createTextNode(updatedText(account.updated_at)));
+    cell.appendChild(document.createTextNode(account.reading_from ? `机器采集 · ${account.reading_from}` : "机器采集"));
     if (refreshNotice) {
       const note = document.createElement("span");
       note.className = "quota-history-note";
@@ -1901,6 +1899,18 @@
     return body;
   }
 
+  function updateSyncOverviewLink() {
+    const link = qs("#sync-overview-link");
+    if (!link) return;
+    const url = new URL("/", window.location.origin);
+    const current = new URLSearchParams(window.location.search);
+    for (const key of ["range", "start", "end"]) {
+      if (current.has(key)) url.searchParams.set(key, current.get(key));
+    }
+    url.hash = "sync-panel";
+    link.href = url.pathname + url.search + url.hash;
+  }
+
   function renderSyncStatus(status) {
     renderQuotaRefreshStatus(status?.quota_refresh);
     const coverageElement = qs("#sync-coverage");
@@ -1928,6 +1938,12 @@
       : attention.length
       ? warningSummary
       : "使用已采集数据 · 自动更新";
+    const overviewLink = qs("#sync-overview-link");
+    if (overviewLink) {
+      updateSyncOverviewLink();
+      machineList.innerHTML = attention.map(machine => `<p class="scope-note"><strong>${escapeHtml(machine.name)}</strong>：${escapeHtml(!machine.admitted ? exclusionText(machine) + "；未纳入" : machine.availability === "unreachable" ? "暂时无法联系，保留上次快照" : machine.stale ? "快照较旧" : machine.availability === "unknown" ? "本次服务尚未检查" : "最近刷新未完成；查看总览详情")}</p>`).join("");
+      return;
+    }
     const expandedMachines = new Set(qsa("#sync-machines details[open]").map(detail => detail.dataset.machine));
     machineList.innerHTML = (status.machines || []).map(machine => renderMachineStatus(machine, expandedMachines.has(machine.name))).join("");
     renderSpendCoverage(status.machines || []);
@@ -1995,7 +2011,7 @@
       chips.push(statusChip("bad", "未纳入"));
     }
     if (machine.syncing) {
-      chips.push(statusChip("info", machine.statistics_syncing === false ? "统计已更新 · 查询配额中" : "刷新中"));
+      chips.push(statusChip("info", machine.statistics_syncing === false ? "统计已更新 · 查询配额中" : (machine.statistics?.observed_at || machine.generated_at ? "刷新中 · 显示上次快照" : "刷新中 · 等待首份快照")));
     }
     if (machine.availability === "unreachable" || refreshAttemptFailed) {
       chips.push(statusChip("warn", "刷新失败"));
@@ -2016,10 +2032,10 @@
     const observedAt = machine.statistics?.observed_at || machine.generated_at;
     facts.push(observedAt ? `数据更新于 ${formatDate(observedAt)} · ${updatedText(observedAt)}` : "尚无数据");
     const quality = machine.statistics?.usage_quality_counts;
-    facts.push(quality == null ? "Claude 用量记录完整性未知" :
-      `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}（全部留存，非当前日期范围；结束标记不保证最终用量完整）`);
-    if (machine.data_start_date) {
-      facts.push(`历史自 ${escapeHtml(machine.data_start_date)}`);
+    const qualityDetail = quality == null ? "Claude 用量记录完整性未知" :
+      `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}（全部留存，非当前日期范围；结束标记不保证最终用量完整）`;
+    if (quality == null || quality.incomplete || quality.unknown) {
+      facts.push(quality == null ? "Claude 用量记录完整性未知" : `Claude 留存记录：${integer(quality.incomplete)} 条不完整 · ${integer(quality.unknown)} 条完整性未知`);
     }
     if (["unreachable", "unknown"].includes(machine.availability) && machine.last_successful_contact_ts) {
       facts.push(`最后联系 ${formatDate(machine.last_successful_contact_ts)}`);
@@ -2044,9 +2060,7 @@
       consequence = "用的是较旧的数据。点击刷新；若仍未更新，请检查这台机器的采集状态。";
     } else if (machine.last_attempt_outcome === "cleanup_failed") {
       consequence = "数据已更新，但刷新后的清理未完成；请查看技术详情和该机采集日志。";
-    } else if (machine.syncing) {
-      consequence = "刷新中，仍显示上次已采集的数据。";
-    } else if (machine.reason) {
+    } else if (machine.reason && !machine.syncing) {
       consequence = "数据已更新，采集另有提示，见技术详情。";
     }
     const consequenceElement = consequence
@@ -2056,7 +2070,7 @@
       <div class="sync-machine-title"><strong>${escapeHtml(machine.name)}</strong>${marker}<span class="sync-chips">${chips.join("")}</span></div>
       <div class="sync-machine-time">${facts.join(" · ")}</div>
       ${consequenceElement}
-      ${machine.reason ? `<details class="note-disclosure" data-machine="${escapeHtml(machine.name)}" ${expanded ? "open" : ""}><summary>技术详情</summary><p>${escapeHtml(machine.reason)}</p></details>` : ""}
+      <details class="note-disclosure" data-machine="${escapeHtml(machine.name)}" ${expanded ? "open" : ""}><summary>质量、历史范围与技术详情</summary><p>${qualityDetail}</p>${machine.data_start_date ? `<p>历史自 ${escapeHtml(machine.data_start_date)}</p>` : ""}${machine.reason ? `<p>${escapeHtml(machine.reason)}</p>` : ""}</details>
     </article>`;
   }
 
@@ -2481,6 +2495,10 @@
   }
 
   async function initOverview() {
+    if (window.location.hash === "#sync-panel") {
+      const panel = qs("#sync-panel");
+      if (panel) panel.open = true;
+    }
     codexQuotaReadings = [];
     renderedQuotaRateLimits = null;
     pageCleanups.push(() => { codexQuotaReadings = []; renderedQuotaRateLimits = null; });

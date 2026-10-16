@@ -511,8 +511,6 @@ button:disabled {
 .codex-account-card > p { margin: 0; }
 .codex-account-heading { justify-content: flex-start; gap: 8px; }
 .codex-account-heading strong { min-width: 0; overflow-wrap: anywhere; }
-.codex-account-summary { display: flex; flex-wrap: wrap; gap: 0 12px; color: var(--ink); font-size: 12px; line-height: 20px; }
-.codex-reading-time { color: var(--ink-muted); }
 .codex-account-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .codex-account-card .codex-account-controls, .codex-account-card .note-disclosure { margin: 0; }
 .codex-account-footer > details { min-width: 0; }
@@ -586,8 +584,10 @@ button:disabled {
 }
 
 .quota-search-label {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  white-space: nowrap;
   flex: 1 1 220px;
   font-size: 12px;
 }
@@ -710,8 +710,7 @@ button:disabled {
   border-bottom: 1px dashed var(--line-soft);
 }
 
-.quota-history-note,
-.quota-window-observed {
+.quota-history-note {
   display: block;
   margin-top: var(--sp-2);
   color: var(--ink-muted);
@@ -912,13 +911,13 @@ button:disabled {
 .sync-machines { display: block; margin-top: var(--sp-5); }
 .sync-machine {
   min-width: 0;
-  padding: 12px 0;
+  padding: 12px var(--sp-4);
   border-top: 1px solid var(--line-soft);
   background: var(--surface);
 }
 .sync-machine.excluded {
   border-left: 3px solid var(--danger);
-  padding-left: 12px;
+  padding-left: calc(var(--sp-4) - 3px);
 }
 
 .sync-machine-title { justify-content: flex-start; }
@@ -939,6 +938,8 @@ button:disabled {
   font: 400 12px/16px var(--font-sans);
   overflow-wrap: anywhere;
 }
+
+.sync-machine-time { max-width: none; }
 
 .sync-machine-reason {
   color: var(--ink);
@@ -1882,15 +1883,14 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   .sync-panel-head > #sync-summary { grid-column: 2; margin-left: 0; }
 }
 .panel-link::before { mask-image: var(--icon-arrow); }
-@media (max-width: 600px) {
-  #quota-accounts { overflow: visible; }
-  #quota-accounts .quota-identity {
-    position: sticky; left: 0; z-index: 1; min-width: 156px; width: 156px; max-width: 156px; background: var(--surface);
-    box-shadow: 1px 0 var(--line);
-  }
-  #quota-accounts th.quota-identity { z-index: 2; }
-  #quota-accounts .quota-account-label { overflow-wrap: anywhere; white-space: normal; }
+/* Keep the row's identity and observation beside horizontally scrolled windows. */
+#quota-accounts { overflow: visible; }
+#quota-accounts .quota-identity {
+  position: sticky; left: 0; z-index: 1; min-width: 220px; width: 240px; max-width: 240px; background: var(--surface);
+  box-shadow: 1px 0 var(--line);
 }
+#quota-accounts th.quota-identity { z-index: 2; }
+#quota-accounts .quota-account-label { overflow-wrap: anywhere; white-space: normal; }
 
 .session-back { display: inline-flex; align-items: center; gap: 8px; }
 .pager button{ gap: 8px; }

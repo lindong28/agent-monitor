@@ -99,7 +99,9 @@ for (const source of ['operation','batch_result']) {
   assert(rows()[0].cells[4].textContent.includes('重置时间未知'),'new null reset is preserved');
 }
 ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:observed,seven_day_used_pct:null,seven_day_resets_at:null}}} ]);
-assert(rows()[0].cells[4].textContent.includes('重置时间未知'));
+assert.equal(rows()[0].cells[4].textContent,'用量与重置时间未知');
+assert.equal(descendants(rows()[0]).filter(n=>n.className.includes('quota-account-observation')).length,1);
+assert(!rows()[0].cells[6].textContent.includes(ui.formatDate(observed)), 'row observation time belongs beside identity');
 assert(!rows()[0].cells[4].textContent.includes('91%'),'unknown new reading never borrows old percentage');
 ui.updateCodexQuotaReadings([]);
 assert(rows()[0].cells[4].textContent.includes('91%'),'page cleanup can clear observations');

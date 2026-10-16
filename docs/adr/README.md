@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261016-6b21: reader information](20261016-6b21-reader-information.md) | Accepted; task-specific regions, shared observation context and compact machine coverage |
 | [20261016-4e72: reading hierarchy](20261016-4e72-reading-hierarchy.md) | Accepted; task-first reading, explicit disclosures and responsive session records |
 | [20261015-9e31: product UI handoffs](20261015-9e31-product-ui-handoffs.md) | Accepted; unknown-cost drilldown, calendar links, quota sorting/readability and compact collection status |
 | [20261014-58e1: usage evidence and nominal valuation](20261014-58e1-usage-evidence.md) | Accepted; quality, mode, provenance and strict statistics v3 with legacy readers |
