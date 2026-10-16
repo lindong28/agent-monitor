@@ -517,11 +517,13 @@
     AgentMonitor.qs("#ranking-description").textContent = "所选时间范围内合计 · 按" + (metric === "cost" ? "已知成本" : metricLabel) + "降序" +
       (data.dimensions.some((dim) => timeDims.has(dim)) ? " · 展开逐期读数查看明细" : "");
     const max = ranked.rows.reduce((largest, row) => Math.max(largest, row.value || 0), 0);
-    const expanded = new Set(AgentMonitor.qsa("#group-ranking .ranking-periods[open]").map(element => element.dataset.key));
+    const ranking = AgentMonitor.qs("#group-ranking");
+    const rankingScroll = ranking.scrollTop;
+    const expanded = new Map(AgentMonitor.qsa("#group-ranking .ranking-periods[open]").map(element => [element.dataset.key, element.scrollTop]));
     AgentMonitor.qs("#group-ranking").innerHTML = ranked.rows.length ? ranked.rows.map((row) => {
       const key = JSON.stringify([ranked.dimensions, row.key, metric]);
       const label = row.key.map((value, i) => `<span><small>${escapeHtml(dimLabels[ranked.dimensions[i]])}</small>${escapeHtml(value)}</span>`).join("");
-      const periods = row.periods.map((period) => `<div><span>${escapeHtml(period.label)}</span><span>${metric === "cost" ? AgentMonitor.costReading(period.value, period.cost_coverage) : formatValue(period.value, metric)}</span></div>`).join("");
+      const periods = row.periods.map((period) => `<div class="ranking-period"><span>${escapeHtml(period.label)}</span><span class="reading-amount">${metric === "cost" ? AgentMonitor.costReading(period.value, period.cost_coverage).split(" · ")[0] : formatValue(period.value, metric)}</span>${metric === "cost" ? `<small class="reading-coverage">${AgentMonitor.costCoverageText(period.cost_coverage)}</small>` : ""}</div>`).join("");
       const width = max > 0 && row.value !== null ? Math.max(0, row.value / max * 100) : 0;
       const query = new URLSearchParams({ range: AgentMonitor.getRange(), ...dateParams(), sort: metric === "cost" ? "cost" : "tokens" });
       filterNames.forEach(name => { const value = desiredFilterValue(name); if (value) query.set(name, value); });
@@ -530,6 +532,10 @@
       const follow = metric === "unknown_cost" && row.value === 0 ? '<span class="scope-note">没有未知成本记录</span>' : `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">${metric === "unknown_cost" ? "查看含未知成本的会话" : "查看会话"}</a>`;
       return `<li class="ranking-item"><div class="ranking-heading"><div class="ranking-dimensions">${label}</div><strong>${formatValue(row.value, metric)}</strong></div>${metric === "cost" ? `<p class="scope-note">${row.value == null ? "无已知金额" : "已知小计"} · ${AgentMonitor.costCoverageText(row.cost_coverage)}</p>` : ""}<div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${follow}${periods ? `<details class="ranking-periods" data-key="${escapeHtml(key)}" ${expanded.has(key) ? "open" : ""}><summary>逐期读数 · ${row.periods.length} 期</summary>${periods}</details>` : ""}</li>`;
     }).join("") : '<li class="empty-state">— 无数据</li>';
+    AgentMonitor.qsa("#group-ranking .ranking-periods[open]").forEach(element => {
+      element.scrollTop = expanded.get(element.dataset.key) || 0;
+    });
+    ranking.scrollTop = rankingScroll;
   }
   function displayLabel(value, dim) {
     const fullLabel = String(value || "");

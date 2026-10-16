@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-16
+
+- Keep machine technical details open and preserve expanded period scroll positions across data redraws.
+- Make session directory and observation times the primary identity, and separate period amounts from pricing coverage for narrow-screen reading.
+
 ## 2026-10-14
 
 - Apply the expanded Ark Console template with console/guide top-level navigation, local page/help search, guide chapters and copyable installation commands.

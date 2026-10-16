@@ -12,6 +12,8 @@ The effective style is `style:volcengine-ark-console`, prepared in Prompt Planet
 
 Reading hierarchy (2026-10-16): keep collection coverage and anomalies visible while folding machine details; put presets and the current query ahead of advanced Explore controls. Numeric chart tables separate amounts from pricing coverage without changing their precision. Period readings require an explicit disclosure, including on touch screens. Session evidence starts with pricing and usage explanations; IDs and source details remain in a nested disclosure. Below 760px, session usage records become labelled cards retaining all seven table fields. Session record/technical disclosures and metadata remain open across background data refreshes within the same detail page. Guide retains the shared chapter navigation and separates single-machine setup from multi-machine instructions. See [decision](adr/20261016-4e72-reading-hierarchy.md) and the dated follow-up in [reading review](references/ui-reading-review-20261015.md).
 
+Second reading pass (2026-10-16): session identity uses the directory as its heading, followed by observation times and machine, with the full ID and copy action secondary. Period rows align date and amount above the coverage explanation. Same-group ranking redraws preserve expanded-period and list scroll positions; machine technical disclosures preserve their current open state by machine identity, while resolved errors remove the obsolete disclosure.
+
 | Rule | Effective application and reason |
 | --- | --- |
 | Brand | Retain the blue brand mark, links and focus treatment; preserve existing agent chart series and semantic status colors. |

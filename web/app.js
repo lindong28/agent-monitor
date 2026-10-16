@@ -1928,7 +1928,8 @@
       : attention.length
       ? warningSummary
       : "使用已采集数据 · 自动更新";
-    machineList.innerHTML = (status.machines || []).map(renderMachineStatus).join("");
+    const expandedMachines = new Set(qsa("#sync-machines details[open]").map(detail => detail.dataset.machine));
+    machineList.innerHTML = (status.machines || []).map(machine => renderMachineStatus(machine, expandedMachines.has(machine.name))).join("");
     renderSpendCoverage(status.machines || []);
   }
 
@@ -1987,7 +1988,7 @@
       `${listed}的较新用量尚未计入，下面的合计可能低于实际花费。`;
   }
 
-  function renderMachineStatus(machine) {
+  function renderMachineStatus(machine, expanded = false) {
     const chips = [];
     const refreshAttemptFailed = ["failure", "malformed_result"].includes(machine.last_attempt_outcome);
     if (!machine.admitted) {
@@ -2055,7 +2056,7 @@
       <div class="sync-machine-title"><strong>${escapeHtml(machine.name)}</strong>${marker}<span class="sync-chips">${chips.join("")}</span></div>
       <div class="sync-machine-time">${facts.join(" · ")}</div>
       ${consequenceElement}
-      ${machine.reason ? `<details class="note-disclosure"><summary>技术详情</summary><p>${escapeHtml(machine.reason)}</p></details>` : ""}
+      ${machine.reason ? `<details class="note-disclosure" data-machine="${escapeHtml(machine.name)}" ${expanded ? "open" : ""}><summary>技术详情</summary><p>${escapeHtml(machine.reason)}</p></details>` : ""}
     </article>`;
   }
 
@@ -3051,7 +3052,7 @@
     const panel = document.createElement("section");
     panel.className = "session-detail";
     panel.innerHTML = `<a class="session-back" href="/sessions?${escapeHtml(back.toString())}">返回会话列表</a>
-      <div class="panel session-identity"><div><h2>会话</h2><code id="session-identity"></code><p>${escapeHtml(machine || "本机")} · 已留存的完整会话</p></div><button id="session-copy" type="button">复制 ID</button></div>
+      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p>${escapeHtml(machine || "本机")} · 已留存的完整会话</p><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div></div></div>
       <div id="session-detail-content" aria-live="polite"></div>`;
     qs("main").appendChild(panel);
     qs("#session-identity").textContent = id;
@@ -3118,11 +3119,13 @@
       conflicting_service_context: "服务模式记录冲突", mode_unreported: "部分服务模式未记录，按标准模式估值",
       invalid_recorded_cost: "源记录金额无效"}[reason] || "—");
     const incomplete = entries.filter(e => e.agent_id === "claude-code" && e.usage_quality === "incomplete").length;
-    content.innerHTML = `<p class="session-context">${escapeHtml(distinct("project").join("、"))}<br><span class="scope-note">${first === null ? "时间未知" : escapeHtml(formatDate(first))} — ${last === null ? "时间未知" : escapeHtml(formatDate(last))}</span></p><div class="session-metrics">
+    qs("#session-project").textContent = distinct("project").join("、") || "会话目录未记录";
+    qs("#session-times").textContent = `${first === null ? "时间未知" : formatDate(first)} — ${last === null ? "时间未知" : formatDate(last)}`;
+    content.innerHTML = `<div class="session-metrics">
       <article><h3>记录成本</h3><strong>${sessionEntryCost(cost)}</strong><p>${unknown ? `${unknown} 条成本未知，未合计为总额` : "按现有定价口径 · 非账单"}</p></article>
       <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>已观测输入、输出与缓存合计${incomplete ? ` · ${incomplete} 条 usage 不完整` : "；不保证最终用量"}</p></article>
       <article><h3>用量条目</h3><strong>${integer(events)}</strong><p>${integer(entries.length)} 条记录 · 非请求次数</p></article>
-      <article><h3>观测跨度</h3><strong>${span}</strong><p>首末记录之间 · 非活跃时长</p></article></div>
+      <article><h3>观测跨度</h3><strong class="session-span">${span}</strong><p>首末记录之间 · 非活跃时长</p></article></div>
       <details class="panel session-metadata" ${readingState.metadata ? "open" : ""}><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
         ${field("Agent", distinct("agent_id").join("、"))}${field("会话目录", distinct("project").join("、"))}
         ${field("模型", models.join("、"))}${field("首条记录", first === null ? "" : formatDate(first))}${field("末条记录", last === null ? "" : formatDate(last))}

@@ -302,8 +302,11 @@ button:active:not(:disabled) {
 .ranking-track { height: 8px; margin-top: var(--sp-3); background: var(--line-soft); border-radius: 4px; overflow: hidden; }
 .ranking-track > span { display: block; height: 100%; background: var(--accent); }
 .ranking-periods { max-height: 240px; overflow-y: auto; margin-top: var(--sp-4); padding: var(--sp-3); background: var(--surface-sunken); font-variant-numeric: tabular-nums; }
-.ranking-periods > div { display: flex; justify-content: space-between; gap: var(--sp-5); }
+.ranking-periods > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 var(--sp-4); padding: 8px 0; }
+.ranking-periods > div + div { border-top: 1px solid var(--line); }
 .ranking-periods > div > span:first-child { flex-shrink: 0; white-space: nowrap; }
+.ranking-periods .reading-amount { text-align: right; white-space: normal; overflow-wrap: anywhere; }
+.ranking-periods .reading-coverage { grid-column: 1 / -1; font-size: 12px; line-height: 20px; }
 .ranking-periods summary { cursor: pointer; }
 .ranking-dimensions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px 16px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ranking-dimensions small { display: block; color: var(--ink-muted); font-weight: 400; }
@@ -316,7 +319,6 @@ button:active:not(:disabled) {
 .page-jumps { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 16px; }
 .scope-tag { font-size: 11px; font-weight: 400; color: var(--ink-muted); margin-left: 6px; }
 .pager-top { margin: 16px 0; }
-.session-context { margin: 0; overflow-wrap: anywhere; }
 .main [id] { scroll-margin-top: calc(var(--header-h) + 56px); }
 @media (max-width: 1100px) {
   .query-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1305,6 +1307,11 @@ td.numeric {
 .session-identity code, .session-fields dd {
   overflow-wrap: anywhere;
 }
+.session-identity > div { min-width: 0; width: 100%; }
+.session-identity h2 { overflow-wrap: anywhere; }
+.session-id-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; color: var(--ink-muted); font-size: 12px; }
+.session-id-line code { min-width: 0; }
+.session-id-line button { margin-left: auto; flex-shrink: 0; }
 
 .session-identity p, .session-metrics p {
   color: var(--ink-muted);
@@ -1354,6 +1361,7 @@ td.numeric {
   .session-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .session-metrics article { padding: 12px; }
   .session-metrics strong { font-size: 20px; line-height: 28px; }
+  .session-metrics .session-span { font-size: 18px; line-height: 28px; }
   .session-metrics article:nth-child(2) { border-right: 0; }
   .session-metrics article:nth-child(-n+2) { border-bottom: 1px solid var(--line-soft); }
   .session-fields { grid-template-columns: 1fr; }
