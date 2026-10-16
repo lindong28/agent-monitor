@@ -41,3 +41,16 @@
 - Evidence: 独立 headless session 的 open 返回目标标题与 URL，后续 get url 为 about:blank、snapshot 无元素；直连 HTTP 返回 200。独立诊断在 CLI 0.27.0 与现有 0.39.1 均观察到该形态。共享配置含 idleTimeout 字符串 30m，但对照同时改变启动参数，不能认定超时解析为根因。
 - 可用路径：每条调用保持同一 session 和 `--args --no-proxy-server,--mute-audio`，以 subprocess 环境传整数毫秒 AGENT_BROWSER_IDLE_TIMEOUT_MS，已连续完成 open/get url/snapshot/click。脚本与证据在 `/Users/lindong/task-artifacts/agent-monitor-writing-20261016/`。这只证明本次组合可用，不证明单一因素因果或未来稳定性。
 - Next: 后续浏览器维护任务分别控制启动参数和超时，核对 daemon/session 身份与页面存活；本轮不改共享配置或升级工具，也不据此诊断 Monitor 线上故障。
+
+## [open] HARNESS-20261016-8d72：阅读宽度优化误将文档实例上限迁移到控制台
+
+- Type: execution / template transfer / acceptance
+- Priority: medium
+- Owner: agent-monitor Web UI 执行者；共享指令候选归 ai-agent-config web-ui-workflows owner。
+- Scope: 本轮诊断并记账，未实施页面回退或共享指令修改。
+- Evidence: 用户要求采用 reading-instance 中“正文、说明和列表使用内容区宽度；整页统一限宽，数据不变”，随后指出两侧空白过多。提交 `8cce163787962c4d7d2120b7dff07a09411510e5` 为 app-header/app-shell 增加居中 1560px 上限。上一轮真实 Chromium 1920px 读数为 shell 1920→1560、main 1684→1324，五个页面一致；左右各新增 180px 外壳留白。原始 before-results.json、live-results.json、截图与 release-receipt.md 位于 `/Users/lindong/task-artifacts/monitor-content-width-20261016/`。更宽视口的留白只能由 CSS 推导，未在本轮重测。
+- Diagnosis: “统一边界/块内用满”被执行为“统一复制文档实例的固定最大宽度”。reading-instance 入口明示不适用于 dashboard，§5 明示 1560px 是该实例整体上限且控制台没有对应项；关联 ADR `20261016-ccb1-reading-width` 也注明实例起点、非所有页面最优值。执行者读过该实例，仍将参数带入既有控制台，故不能归为缺文档或未加载。用户点名某条规则并未指定 1560px。后续为被压窄的内容区将网络卡片四列改为两列，是上游决定的连带改动。
+- Acceptance gap: 原先测量已显示主内容区变窄，但将“实现的宽度与自己选定的 1560px 一致、无横溢出、段落使用块宽”视为改进充分证据，未据控制台扫读任务评估外壳留白及表格/图表可用空间。现有 design-ui L0/L1/L2 与 web-ui-observation 已要求适用性、视觉关系及真实任务检查；不能把本次执行失效外推为规则完全缺失。
+- Recommended recovery: 保留取消段落独立 ch 上限；控制台外壳恢复随视口扩展和统一页边距。网络卡片随实际可用宽度重新决定列数，恢复宽屏容量并保留窄屏溢出修复；设计记录同步到最终选择。此为建议，尚未执行。
+- Shared improvement candidates: 在参数使用处澄清原则迁移与实例数值继承的区别，并把文档阅读区与控制台应用外壳分开；沿现有观察方法对照改前/改后外侧留白和任务内容可用宽度，判断可读性目标是否真正达成。无需另建模板、通用占屏比例或强制外审。用本项目控制台与长篇文档两类合法场景验证，保留文档合理限宽；尚未检验后续 agent 行为收益。
+- Rule lookup: 定向读取 reading-instance、关联 ADR、design-ui 的 form factor 与参数层级、web-ui-observation 的文字行框/留白/真实任务规则；在 monitor 与 harness 两仓 open/archive 以“限宽|留白|1560|reading-instance|模板.*参数”检索，命中原阅读区域决定与既有留白测量/评分案例，未将这些命中视作本次误用已修复。直接复用本会话原始改动和观察记录，不重跑已具区分力的页面测量；当前模型完成短链诊断，不追加独立审查或行为实验。
