@@ -2,6 +2,8 @@
 
 ## 2026-10-16
 
+- Omit the repeated quota source machine when the machine column already identifies it uniquely; preserve multi-machine and differing-source details.
+
 - Keep source descriptions and destination links together on narrow guide pages; simplify query labels, pricing coverage and expanded session details. Group network readings by source while retaining unknowns and diagnostics.
 
 - Clarify known and unknown amounts, retained session scope, readable snapshots and usage-event counts. Split expanded help, network rules and setup steps into shorter sections; use consistent Chinese time-window labels.

@@ -1702,7 +1702,10 @@
       cell.appendChild(document.createTextNode("机器采集 · 历史读数"));
       return cell;
     }
-    cell.appendChild(document.createTextNode(account.reading_from ? `机器采集 · ${account.reading_from}` : "机器采集"));
+    const machines = account.machines || [];
+    const sourceIsUnambiguous = machines.length === 1 && machines[0] === account.reading_from;
+    const source = account.reading_from && !sourceIsUnambiguous ? ` · ${account.reading_from}` : "";
+    cell.appendChild(document.createTextNode(`机器采集${source}`));
     if (refreshNotice) {
       const note = document.createElement("span");
       note.className = "quota-history-note";

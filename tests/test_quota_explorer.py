@@ -46,6 +46,21 @@ function account(id,state='known',presence='in_use',machine='alpha') {
 const data={claude:{accounts:[account('alice'),account('past','known','remembered'),account('u1','unstamped','in_use','old-a'),account('u2','unstamped','in_use','old-b')],
   refresh_errors:[{machine:'alpha',reason:'fixture failure'}],signed_out_machines:['signedout']},
   codex:{accounts:[account('bob')],refresh_errors:[]}};
+// The machine cell supplies context only when it identifies the reading source uniquely.
+// Cases come from the reading review: removing a duplicate must not remove a distinction.
+for (const [machines, source, expected] of [
+  [['alpha'], 'alpha', '机器采集'],
+  [['alpha','beta'], 'beta', '机器采集 · beta'],
+  [['alpha'], 'beta', '机器采集 · beta'],
+  [[], 'beta', '机器采集 · beta'],
+  [['alpha'], null, '机器采集'],
+]) {
+  const sample={...account('source-context'), machines, reading_from:source, updated_at:new Date().toISOString()};
+  ui.renderQuotaAccounts({codex:{accounts:[sample]}});
+  const row=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='source-context');
+  assert.equal(row.cells[6].textContent,expected,JSON.stringify({machines,source}));
+  for (const machine of machines) assert(row.cells[5].textContent.includes(machine));
+}
 const original=JSON.stringify(data);
 const rows=()=>table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId);
 const count=()=>nodes['#quota-match-count'].textContent;
