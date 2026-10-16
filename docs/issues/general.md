@@ -1,5 +1,11 @@
 # tt-web Issues
 
+## [open] ISSUE-TEST-20261016-ae72: cross-machine assertions lag current metrics and status text
+
+- Owner / Next: agent-monitor test maintainer; update the expected metric set and status-text assertions in a separate test-maintenance change, preserving the exclusion and coverage checks.
+- Evidence: the reading-UI run executed 986 tests and reported 9 failures. One new Explore test-stub failure was corrected; the other 8 were independently reproduced by archiving baseline `1cd19c64c9f6c7851af59efaaf9b4677b7c256e8` and running 5 methods with isolated HOME (0.312s, exit 1, 8 failures).
+- Scope: `tests/test_cross_machine_view.py` lines 1067, 1117 and 1170 omit the existing `unknown_cost` key (6 failed assertions including four subtests); lines 2004 and 2142 expect sync summaries without the existing machine names (2 failures). These are baseline-independent from the reading change and outside its behavior boundary. They were not silently rewritten to make the full-suite result green. Raw current log: `/Users/lindong/task-artifacts/agent-monitor-reading-20261016/tests-all.log`.
+
 ## [resolved] ISSUE-IDENTITY-20261014-7a62: producer identity and credential selectors diverge
 
 - Owner / Priority: identity/account maintainer / high for Codex workspace selection, medium for missing labels or unavailable custom stores.

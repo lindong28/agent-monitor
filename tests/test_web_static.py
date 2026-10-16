@@ -1866,7 +1866,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn("displayLabel(value, dim)", js)
         self.assertIn("projectDisplayLabel(value)", js)
         self.assertIn("fullLabel", js)
-        self.assertIn("escapeHtml(label)", js)
+        self.assertIn("escapeHtml(value)", js)
 
     def test_explore_explains_codex_cost_estimates(self):
         html = (ROOT / "web" / "explore.html").read_text()

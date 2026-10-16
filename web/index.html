@@ -71,21 +71,21 @@
           </summary>
           <div id="sync-machines" class="sync-machines"></div>
         </details>
+        <nav class="page-jumps" aria-label="总览内容"><a href="#kpi-spend-title">成本与趋势</a><a href="#period-comparison">周期比较</a><a href="#kpi-quota-title">配额与账号</a></nav>
         <div class="kpi-sections">
           <section class="kpi-group panel overview-cost" aria-labelledby="kpi-spend-title">
-            <h2 id="kpi-spend-title" class="kpi-group-title">花费</h2>
-            <p class="scope-note">成本为记录金额或计算时价格的名义估值，非服务商账单；仅计已观测用量，未落盘的最终 usage 无法还原。显示已定价记录小计，未知费用不计入。Codex 模型为请求或配置值，实际路由模型未知。</p>
-            <p class="scope-note">顶部范围用于区间成本、成本趋势和周期比较；今日、本周、本月及配额按各自窗口显示。</p>
+            <h2 id="kpi-spend-title" class="kpi-group-title">成本概况</h2>
+            <p class="scope-note">已观测用量的已知成本小计，未知费用不计入；记录金额或名义估值，非服务商账单。</p>
             <p id="spend-coverage" class="quota-scope" hidden></p>
             <div class="kpi-grid">
               <article class="kpi-card">
-                <div class="kpi-label">今日成本</div>
+                <div class="kpi-label">今日成本 <span class="scope-tag">固定窗口 · GMT+8</span></div>
                 <div id="today-cost" class="kpi-value">—</div>
                 <div id="today-context" class="kpi-sub">定价覆盖未知</div>
                 <a id="today-unknown-cost" class="panel-link" hidden></a>
               </article>
               <article class="kpi-card">
-                <div class="kpi-label">本周成本</div>
+                <div class="kpi-label">本周成本 <span class="scope-tag">固定窗口</span></div>
                 <div id="week-cost" class="kpi-value">—</div>
                 <div id="week-context" class="kpi-sub">自周一 00:00 · GMT+8</div>
                 <a id="week-unknown-cost" class="panel-link" hidden></a>
@@ -101,6 +101,7 @@
                 <a id="range-unknown-cost" class="panel-link" hidden></a>
               </article>
             </div>
+            <p class="scope-note">所选区间：顶部日期范围控制第三项成本、下方趋势与周期比较。今日、本周、本月与配额各有固定窗口。</p>
             <div class="panel-head">
               <h2>成本趋势</h2>
               <span id="cost-over-time-meta" class="status-line">—</span>
@@ -108,8 +109,9 @@
             </div>
             <details class="note-disclosure">
               <summary>成本口径</summary>
+              <p>仅计已观测用量，未落盘的最终 usage 无法还原。Codex 模型为请求或配置值，实际路由模型未知；估值使用计算时价格，非历史实际费率。</p>
               <p>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按 bundled GLM-5 定价推算。</p>
-              <p>近 28 天的数据每次按当前可读的源重算：已有记录金额的保持原值，其余用 agent-monitor 当前的定价推算；源缺失或计数变小的保持上次可信值，其余照常更新——所以之前看到的合计仍可能变。28 天以外的不再变动。</p>
+              <details class="note-disclosure"><summary>维护说明：历史数值为什么会变化</summary><p>近 28 天的数据每次按当前可读的源重算：已有记录金额的保持原值，其余用 agent-monitor 当前的定价推算；源缺失或计数变小的保持上次可信值，其余照常更新——所以之前看到的合计仍可能变。28 天以外的不再变动。</p></details>
             </details>
             <div class="chart-box"><canvas id="daily-cost-chart" role="img" aria-label="成本趋势；完整读数见下方数据表"></canvas></div>
             <details id="daily-cost-data" class="chart-data-disclosure">
@@ -138,10 +140,10 @@
             </article>
             <article class="panel">
               <div class="panel-head">
-                <h2>本月模型构成</h2>
+                <h2>本月模型 token 占比</h2>
                 <a id="model-mix-link" class="panel-link" href="/explore?x=model&group=agent&metric=total">透视</a>
               </div>
-              <div class="chart-box short"><canvas id="model-mix-chart" role="img" aria-label="本月模型构成；完整读数见下方数据表"></canvas></div>
+              <div class="chart-box short"><canvas id="model-mix-chart" role="img" aria-label="本月模型 token 占比；完整读数见下方数据表"></canvas></div>
             <details id="model-mix-data" class="chart-data-disclosure">
               <summary>查看本月模型构成数据表</summary>
               <div class="chart-data-scroll" tabindex="0" role="region" aria-label="本月模型构成数据"><table class="chart-data-table"></table></div>

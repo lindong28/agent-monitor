@@ -58,7 +58,11 @@ ui.renderNetworkBanner({verdict:"low",coverage:{missing:["risk"],limitations:["i
 assert(nodes["#network-verdict"].textContent.includes("部分"));
 assert(!nodes["#network-verdict"].textContent.includes("风险低"));
 ui.renderNetworkBanner({verdict:"high",coverage:{missing:["risk"]}});
-assert(nodes["#network-verdict"].textContent.includes("风险高"));
+assert.equal(nodes["#network-verdict"].textContent, "本地规则提示异常");
+ui.renderNetworkBanner({verdict:"high",coverage:{missing:["risk"]},conclusions:[{level:"bad",text:"时区不一致"},{level:"warn",text:"DNS 未知"}]});
+assert.equal(nodes["#network-verdict"].textContent, "本地规则检出 1 项异常");
+assert(nodes["#network-updated"].textContent.includes("缺测：风险分"));
+assert(nodes["#network-updated"].textContent.includes("IPv6 公网泄漏未核实"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

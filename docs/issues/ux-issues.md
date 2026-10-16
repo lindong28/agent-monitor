@@ -9,6 +9,8 @@
 - **Owner / Next**: agent-monitor Web 维护者；单独保留相同记录在后台数据更新时的展开状态，按稳定记录身份关联，显式换会话/筛选时另核重置语义。本轮十类上游契约修复不扩大为整个页面状态管理改造。
 - **Evidence**: `/Users/lindong/task-artifacts/upstream-contract-repair-20261014/live-detail-evidence.json`、`live-detail-narrow.png` 及同轮实际浏览器读数；未进行长期发生率测量。
 
+- **Repair 2026-10-16**: 同一详情页以记录身份保存记录与技术证据展开状态，并保存会话信息展开状态。真实旧页面触发 focus 数据更新后，DOM 已更新且展开从 true 变 false；隔离预览改后保持 true。生产复验与发布身份单独保存在 `/Users/lindong/task-artifacts/agent-monitor-reading-20261016/release-receipt.md`，本条不将源码或预览当作部署证据。
+
 ## [open] ISSUE-UX-20261007-95bd — LLM 调用筛选直接显示内部状态名
 
 - **Observed**: 2026-10-07，macbook 本地 39001 的真实 `/llm-calls` 中，请求结果选项包括 `local_rejected`、`unknown`；尝试结果包含 `http_error`、`transport_error`。顶部摘要已有“拒绝、失败、中断或未知”等中文，筛选仍需读者自行映射。
@@ -129,3 +131,5 @@
 - **Observed / Impact**: 会话首条记录约在桌面 1,189px / 窄屏 1,782px；旧配额与登录失效分区呈现；批次 9/11 与新一轮 9 个账号缺少就地关联；网络主要异常证据排在末尾。其他逐页读数与建议见报告 R01–R12。
 - **Evidence / Scope**: [全页阅读审查](../references/ui-reading-review-20261015.md)。覆盖 6 种页面形态，历史记录按状态抽样；未触发发送、登录、移除或主动刷新作业，未固定线上部署 SHA。
 - **Disposition / Owner**: 本轮只分析，全部建议尚未实施；agent-monitor 产品与 Web 维护者按报告第一至第三批迭代并在对应真实入口复验。历史 issue 不在本轮批量关闭。
+
+- **Follow-up 2026-10-16**: 已实施阅读层级优化；逐项采用范围、保留项和预览读数见原报告的同日续记。旧观察保持不变，发布与真实入口读数见该续记指向的 release receipt；不批量关闭其他 UX issue。

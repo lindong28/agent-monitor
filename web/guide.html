@@ -64,20 +64,25 @@
           <h2>当前采集状态</h2>
           <p class="scope-note">“已纳入”表示机器快照可读，不保证每种来源都存在或历史完整。无匹配记录不等于尚未接入。</p>
           <div class="panel-head"><span id="sync-coverage" class="status-line">已纳入 —/—</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
-          <div id="sync-machines" class="sync-machines"></div>
+          <details class="note-disclosure"><summary>查看各机器的采集详情</summary><div id="sync-machines" class="sync-machines"></div></details>
         </section>
         <section class="panel" id="setup">
           <h2>首次接入</h2>
+          <h3>单机使用</h3>
           <ol>
-            <li>在自己的 agent-monitor checkout 中配置 <code>machines.json</code>；新单机安装只保留自己的本机条目，例如 <code>{"machines":[{"name":"local","ssh_host":"localhost","self":true}],"retired_names":[]}</code>。已有安装须保留机器身份和退休记录。</li>
+            <li>在自己的 agent-monitor checkout 中配置 <code>machines.json</code>；新单机安装只保留自己的本机条目，见下方示例。已有安装须保留机器身份和退休记录。</li>
             <li>准备 Python、Git 和 curl。Monitor 可独立安装和运行，监控 Claude Code / Codex 的用量与会话。</li>
             <li>运行 <code>./install.sh</code>，再运行 <code>agent-monitor start</code>。首次采集可运行 <code>agent-monitor refresh</code>；macOS 定时采集由安装器设置，Linux 需自行安排调度。</li>
-            <li>多机使用需配置自己的 <code>hub.json</code> 角色、URL、SSH 目标，在各机运行 <code>./install.sh hub &lt;机器名&gt;</code>。Hub 拉取快照，采集器独立保存本机数据。</li>
           </ol>
+          <div class="code-card"><div class="code-card-head"><span>新单机 machines.json 示例</span><button type="button" data-copy-code="machine-config">复制配置</button></div><pre><code id="machine-config">{
+  "machines": [{"name": "local", "ssh_host": "localhost", "self": true}],
+  "retired_names": []
+}</code></pre></div>
           <div class="code-card"><div class="code-card-head"><span>单机安装与首次采集</span><button type="button" data-copy-code="install-commands">复制命令</button></div><pre><code id="install-commands">./install.sh
 agent-monitor start
 agent-monitor refresh</code></pre></div>
-          <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div>
+          <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>配置自己的 <code>hub.json</code> 角色、URL、SSH 目标，再在各机运行以下命令。Hub 拉取快照，采集器独立保存本机数据。</p>
+          <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div></details>
           <p>完整命令、依赖与已有服务迁移见 checkout 的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。本页只说明与检查状态，不修改配置或登录账号。</p>
         </section>
         <section class="panel" id="questions">

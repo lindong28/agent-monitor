@@ -159,11 +159,11 @@ export function init() {
       const reading = window.AgentMonitor.latestCodexQuotaReading({operation: applicableRefresh, batch_result: op});
       if (typeof reading?.seven_day_resets_at === "number" && reading.seven_day_resets_at * 1000 > Date.now()) resetRead++;
     }
-    const parts = [`本轮发送成功 ${statuses.succeeded}/${batch.items.length}`];
+    const parts = [`${timestamp(batch.created_at)} 开始的批次`, `本轮发送成功 ${statuses.succeeded}/${batch.items.length}`];
     for (const [key, label] of Object.entries({ waiting: "等待授权", queued: "授权排队", running: "处理中", unsent: "未发送", unknown: "结果未知", failed: "发送失败" })) {
       if (statuses[key]) parts.push(`${label} ${statuses[key]}`);
     }
-    parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`);
+    parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`, `当前可发送 ${count} 个账号`);
     batchStatus.textContent = parts.join(" · ");
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch;

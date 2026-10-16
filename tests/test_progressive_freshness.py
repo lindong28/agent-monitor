@@ -16,6 +16,7 @@ class ProgressiveFreshnessTests(unittest.TestCase):
         result = self.run_browser(BROWSER_NODES + r'''
 const pending = [], requested = [];
 qs("#metric").selectedOptions = [{textContent: "成本"}];
+qs("#range").selectedOptions = [{textContent: "近 30 天"}];
 const params = new URLSearchParams("range=30d&group_by=project&machine=selected");
 const status = {machines: [{name: "selected", admitted: true, generation_id: "one"}], syncing: false};
 global.AgentMonitor = {

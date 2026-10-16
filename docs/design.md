@@ -10,6 +10,8 @@ The effective style is `style:volcengine-ark-console`, prepared in Prompt Planet
 
 ## Project adaptations
 
+Reading hierarchy (2026-10-16): keep collection coverage and anomalies visible while folding machine details; put presets and the current query ahead of advanced Explore controls. Numeric chart tables separate amounts from pricing coverage without changing their precision. Period readings require an explicit disclosure, including on touch screens. Session evidence starts with pricing and usage explanations; IDs and source details remain in a nested disclosure. Below 760px, session usage records become labelled cards retaining all seven table fields. Session record/technical disclosures and metadata remain open across background data refreshes within the same detail page. Guide retains the shared chapter navigation and separates single-machine setup from multi-machine instructions. See [decision](adr/20261016-4e72-reading-hierarchy.md) and the dated follow-up in [reading review](references/ui-reading-review-20261015.md).
+
 | Rule | Effective application and reason |
 | --- | --- |
 | Brand | Retain the blue brand mark, links and focus treatment; preserve existing agent chart series and semantic status colors. |

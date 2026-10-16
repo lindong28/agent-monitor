@@ -63,9 +63,18 @@
           </summary>
           <div id="sync-machines" class="sync-machines"></div>
         </details>
+        <div class="preset-row" aria-label="预设">
+          <button class="preset-btn" type="button" data-preset="daily-cost">每日成本</button>
+          <button class="preset-btn" type="button" data-preset="project-cost">会话目录成本</button>
+          <button class="preset-btn" type="button" data-preset="model-tokens">模型 token</button>
+          <button class="preset-btn" type="button" data-preset="agent-project">Agent × 会话目录</button>
+          <button class="preset-btn" type="button" data-preset="cache">缓存读取</button>
+        </div>
+        <p id="query-summary" class="query-summary" role="status">正在读取查询…</p>
+        <details class="query-options"><summary>调整指标、筛选与分组</summary>
         <section class="query-builder" aria-label="透视控件">
           <div class="query-clause">
-            <div class="clause-label"><strong>SELECT</strong><span>看什么</span></div>
+            <div class="clause-label"><strong>看什么</strong><span>SELECT</span></div>
             <div class="field">
             <label for="metric">统计指标</label>
             <select id="metric">
@@ -81,7 +90,7 @@
             </div>
           </div>
           <div class="query-clause">
-            <div class="clause-label"><strong>WHERE</strong><span>筛选哪些</span></div>
+            <div class="clause-label"><strong>筛选哪些</strong><span>WHERE</span></div>
             <div class="query-filters">
           <div class="field">
             <label for="range">时间范围</label>
@@ -112,6 +121,7 @@
           </div>
           <div class="field">
             <label for="project-filter">会话目录</label>
+            <input id="project-search" type="search" aria-label="查找会话目录选项" placeholder="输入目录关键词…" autocomplete="off">
             <select id="project-filter" data-filter-control="project" aria-label="会话目录">
               <option value="">全部会话目录</option>
             </select>
@@ -131,7 +141,7 @@
             </div>
           </div>
           <div class="query-clause">
-            <div class="clause-label"><strong>GROUP BY</strong><span>按什么拆分</span></div>
+            <div class="clause-label"><strong>按什么拆分</strong><span>GROUP BY</span></div>
             <div class="query-grouping">
               <div class="group-options" role="group" aria-label="分组维度（可多选）">
                 <label class="group-option"><input type="checkbox" data-group-dim="agent">Agent 类型</label>
@@ -151,19 +161,14 @@
             </div>
           </div>
         </section>
+        </details>
         <p id="date-error" class="error" role="alert" hidden></p>
         <p id="unknown-cost-note" class="scope-note" hidden>未知成本包含缺少价格或用量不完整的已观测记录；已知零成本不在其中。历史汇总可能早于保留会话明细，追查到的条目数不保证与汇总相同。</p>
-        <div class="preset-row" aria-label="预设">
-          <button class="preset-btn" type="button" data-preset="daily-cost">每日成本</button>
-          <button class="preset-btn" type="button" data-preset="project-cost">会话目录成本</button>
-          <button class="preset-btn" type="button" data-preset="model-tokens">模型 token</button>
-          <button class="preset-btn" type="button" data-preset="agent-project">Agent × 会话目录</button>
-          <button class="preset-btn" type="button" data-preset="cache">缓存读取</button>
-        </div>
-        <p class="scope-note">会话目录按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
-        <p class="scope-note">仅计已观测用量，不保证最终 usage。Codex 模型为请求或配置值，实际路由模型未知；估值使用计算时价格，非历史实际费率。</p>
+        <p class="scope-note">仅计已观测用量；成本为已知小计、非账单，未知费用不计入。</p>
           <details class="note-disclosure">
-            <summary>成本口径</summary>
+            <summary>统计范围与成本口径</summary>
+            <p>会话目录按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
+            <p>仅计已观测用量，不保证最终 usage。Codex 模型为请求或配置值，实际路由模型未知；估值使用计算时价格，非历史实际费率。</p>
             <p>成本为记录值或按适用配置价格估算，显示已定价记录小计；未知定价不计入，定价覆盖不代表全量采集。</p>
             <p>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按 bundled GLM-5 定价推算。模型定价未知时成本显示 —。</p>
           </details>
