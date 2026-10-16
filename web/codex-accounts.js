@@ -134,12 +134,15 @@ export function init() {
     batchStart.textContent = `给${unavailable.length ? "可确认身份的" : "全部"} ${count} 个账号发送`;
     batchStart.disabled = submittingBatch || busy || !count;
     batchNext.hidden = !batch;
-    batchNext.textContent = `开始新一轮 · ${unavailable.length ? "可确认身份的" : "全部"} ${count} 个账号`;
+    batchNext.textContent = `开始新一轮发送 · ${unavailable.length ? "可确认身份的" : "全部"} ${count} 个账号`;
     batchNext.disabled = submittingBatch || busy || !count;
     batchRetry.hidden = true;
     if (!batch) {
       batchStatus.textContent = count ? `已自动发现 ${count} 个登录账号。点击一次即可开始。` : "尚未发现可发送的 Codex 登录账号。";
-      batchHelp.textContent = "账号来自当前及历史登录记录，无需手动添加。已有登录态自动复用；需要登录的账号逐个显示设备码，完成或取消后轮到下一个。";
+      batchHelp.replaceChildren(
+        element("p", "账号来自当前及历史登录记录，无需手动添加。"),
+        element("p", "系统会检查并复用已保存的登录状态。需要授权时，系统逐个显示账号的设备码；完成或取消后，再处理下一个账号。")
+      );
       return;
     }
     const statuses = { succeeded: 0, unknown: 0, failed: 0, waiting: 0, queued: 0, running: 0, unsent: 0 };
@@ -168,7 +171,17 @@ export function init() {
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch;
     batchRetry.textContent = `继续 ${statuses.unsent} 个未发送账号`;
-    batchHelp.textContent = `本轮开始于 ${timestamp(batch.created_at)}。已有登录态自动复用；需要登录的账号逐个显示设备码。遇到登录限流时停止后续授权，请稍后点击「继续」。刷新不会重发；「继续」只处理仍在登录记录中且确定未发送的账号。${statuses.unknown || statuses.failed ? "结果未知或发送失败的账号可能已消耗额度，不会自动重试。" : ""}下次 reset 后点「开始新一轮」，会给当前及历史登录记录中的账号发送，不自动判断重置周期。`;
+    const help = [
+      `本轮开始于 ${timestamp(batch.created_at)}。`,
+      "授权：系统会检查并复用已保存的登录状态。需要授权时，系统逐个显示账号的设备码。遇到登录限流时，系统停止后续授权。",
+      statuses.unsent
+        ? `继续发送：如需继续，请点击「${batchRetry.textContent}」。如果遇到登录限流，请在限流解除后操作。系统只处理仍在登录记录中且确定未发送的账号。`
+        : "继续发送：本轮没有可以继续发送的账号。",
+      "刷新：刷新页面或仅查询配额不会重发消息。",
+      ...(statuses.unknown || statuses.failed ? ["结果未知或发送失败的账号可能已消耗额度，系统不会自动重试。"] : []),
+      `再次发送：确认配额已重置后，如需再次发送，请点击「${batchNext.textContent}」。系统会向当前及历史登录记录中的账号发送消息，不会自动判断配额是否已重置。`,
+    ];
+    batchHelp.replaceChildren(...help.map(text => element("p", text)));
   }
 
   batchStart.addEventListener("click", () => performBatch("batch-start"));
@@ -233,13 +246,13 @@ export function init() {
         }
         if (latestReading) {
           const reading = element("dl", undefined, "codex-account-reading");
-          reading.append(element("dt", "七天窗口重置"), element("dd", `${resetLabel || "重置时间未知"} · ${timestamp(latestReading.seven_day_resets_at, true)}`));
+          reading.append(element("dt", "7 天配额窗口重置"), element("dd", `${resetLabel || "重置时间未知"} · ${timestamp(latestReading.seven_day_resets_at, true)}`));
           const used = latestReading.seven_day_used_pct;
           reading.append(element("dt", "七天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
           reading.append(element("dt", "最近成功查询"), element("dd", timestamp(latestReading.observed_at)));
           if (op.before?.seven_day_resets_at != null) details.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
           const summary = element("p", undefined, "codex-account-summary");
-          summary.append(element("span", `上次查询 · 七天已用 ${used == null ? "未知" : used + "%"} · ${resetLabel || "重置时间未知"}`), element("span", `查询于 ${timestamp(latestReading.observed_at)}`, "codex-reading-time"));
+          summary.append(element("span", `上次查询 · 7 天已用 ${used == null ? "未知" : used + "%"} · ${resetLabel || "重置时间未知"}`), element("span", `查询于 ${timestamp(latestReading.observed_at)}`, "codex-reading-time"));
           card.append(summary);
           details.append(reading);
           if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) card.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));

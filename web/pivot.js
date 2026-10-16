@@ -512,10 +512,12 @@
     panel.hidden = !ranked.dimensions.length;
     if (panel.hidden) return;
     const metricLabel = AgentMonitor.qs("#metric").selectedOptions[0].textContent;
+    const timeDim = data.dimensions.find((dim) => timeDims.has(dim));
+    const periodLabel = { day: "每日明细", week: "每周明细", month: "每月明细" }[timeDim] || "分期明细";
     AgentMonitor.qs("#ranking-title").textContent = ranked.dimensions.map((dim) => dimLabels[dim]).join(" × ") + " · " + metricLabel;
     AgentMonitor.qs("#ranking-count").textContent = AgentMonitor.integer(ranked.rows.length) + " 个组合";
     AgentMonitor.qs("#ranking-description").textContent = "所选时间范围内合计 · 按" + (metric === "cost" ? "已知成本" : metricLabel) + "降序" +
-      (data.dimensions.some((dim) => timeDims.has(dim)) ? " · 展开逐期读数查看明细" : "");
+      (timeDim ? ` · 展开${periodLabel}` : "");
     const max = ranked.rows.reduce((largest, row) => Math.max(largest, row.value || 0), 0);
     const ranking = AgentMonitor.qs("#group-ranking");
     const rankingScroll = ranking.scrollTop;
@@ -530,7 +532,7 @@
       ranked.dimensions.forEach((dim, index) => query.set(dim, row.key[index]));
       if (metric === "unknown_cost") query.set("cost_status", "unknown");
       const follow = metric === "unknown_cost" && row.value === 0 ? '<span class="scope-note">没有未知成本记录</span>' : `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">${metric === "unknown_cost" ? "查看含未知成本的会话" : "查看会话"}</a>`;
-      return `<li class="ranking-item"><div class="ranking-heading"><div class="ranking-dimensions">${label}</div><strong>${formatValue(row.value, metric)}</strong></div>${metric === "cost" ? `<p class="scope-note">${row.value == null ? "无已知金额" : "已知小计"} · ${AgentMonitor.costCoverageText(row.cost_coverage)}</p>` : ""}<div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${follow}${periods ? `<details class="ranking-periods" data-key="${escapeHtml(key)}" ${expanded.has(key) ? "open" : ""}><summary>逐期读数 · ${row.periods.length} 期</summary>${periods}</details>` : ""}</li>`;
+      return `<li class="ranking-item"><div class="ranking-heading"><div class="ranking-dimensions">${label}</div><strong>${formatValue(row.value, metric)}</strong></div>${metric === "cost" ? `<p class="scope-note">${row.value == null ? "无已知金额" : "已知小计"} · ${AgentMonitor.costCoverageText(row.cost_coverage)}</p>` : ""}<div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div>${follow}${periods ? `<details class="ranking-periods" data-key="${escapeHtml(key)}" ${expanded.has(key) ? "open" : ""}><summary>${periodLabel} · ${row.periods.length} 期</summary>${periods}</details>` : ""}</li>`;
     }).join("") : '<li class="empty-state">— 无数据</li>';
     AgentMonitor.qsa("#group-ranking .ranking-periods[open]").forEach(element => {
       element.scrollTop = expanded.get(element.dataset.key) || 0;

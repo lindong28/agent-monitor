@@ -50,12 +50,12 @@
           <h1 class="page-title">会话</h1>
           <div class="toolbar">
             <select id="range" aria-label="时间范围">
-              <option value="7d">7d</option>
-              <option value="30d" selected>30d</option>
-              <option value="90d">90d</option>
-              <option value="6m">6m</option>
-              <option value="1y">1y</option>
-              <option value="2y">2y</option>
+              <option value="7d">近 7 天</option>
+              <option value="30d" selected>近 30 天</option>
+              <option value="90d">近 90 天</option>
+              <option value="6m">近半年</option>
+              <option value="1y">近 1 年</option>
+              <option value="2y">近 2 年</option>
               <option value="all">全部</option>
               <option value="custom">自定义</option>
             </select>
@@ -75,17 +75,19 @@
             <span id="session-count" class="status-line">加载中…</span>
           </div>
           <details id="sync-panel" class="sync-panel" aria-label="机器同步状态">
-            <summary class="sync-panel-head"><strong>采集详情 <span id="sync-coverage" class="status-line">已纳入 —/—</span></strong><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></summary>
+            <summary class="sync-panel-head"><strong>采集详情 <span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span></strong><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></summary>
             <p class="scope-note">hub 模式下含全部已纳入机器的已采会话；联系不上的机器保留上次成功的数据。</p>
             <div id="sync-machines" class="sync-machines"></div>
             <p id="session-source-coverage" class="scope-note"></p>
           </details>
           <details class="note-disclosure">
             <summary>这张表包含什么</summary>
-            <p>仅计已观测用量，不保证最终 usage。Codex 模型为请求或配置值，实际路由模型未知；估值使用计算时价格，非历史实际费率。明细可查看 usage 证据及金额依据。</p>
+            <p>这里只统计已采集的用量记录，不保证包含最终用量。明细可查看用量记录完整性及金额依据。</p>
+            <p>Codex 模型名来自请求或配置，实际处理请求的模型未知。估算使用计算时的配置价格，不代表历史实际费率。</p>
             <p>会话目录按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
-            <p>定价未知的行显示 —；标 <em>推算</em> 的 Codex 与 GLM-5.1/5.2 行按打包定价推算，不是精确账单。</p>
-            <p>已采集的会话统计不随本地日志清理而丢失，但采集前就删掉的历史找不回来。未升级 exporter 的机器不在其中。</p>
+            <p>金额未知的行显示 —。标 <em>推算</em> 的 Codex 与 GLM-5.1/5.2 行按程序配置的价格估算，不是服务商账单。</p>
+            <p>用量事件数是记录中包含的用量事件合计。一条记录可能包含多个事件；事件数不是请求次数。</p>
+            <p>已采集的会话统计不随本地日志清理而丢失，但采集前就删掉的历史找不回来。未升级采集器的机器不在其中。</p>
           </details>
           <div class="controls sessions-controls">
             <div class="field">
@@ -109,7 +111,7 @@
               <select id="filter-cost-status" disabled><option value="">全部成本状态</option><option value="unknown">仅未知成本条目</option></select>
             </div>
           </div>
-          <p class="scope-note">列表只计日期与筛选匹配的已观测记录；详情含完整留存。成本非账单；未知不归零，汇总与明细可能有覆盖差异。</p>
+          <p class="scope-note">列表只统计符合日期和筛选条件的记录。详情显示此会话的全部已留存记录，可能缺少未采集或未保存的记录。金额不是账单，未知金额不按零计算；汇总与明细的留存范围可能不同。</p>
           <div class="pager pager-top">
             <button id="page-prev-top" type="button" disabled>上一页</button>
             <span id="page-status-top" class="status-line">加载中…</span>
@@ -125,7 +127,7 @@
                   <th>开始时间</th>
                   <th class="numeric">成本</th>
                   <th class="numeric">token</th>
-                  <th class="numeric">用量条目</th>
+                  <th class="numeric">用量事件数</th>
                 </tr>
               </thead>
               <tbody id="sessions-body" aria-busy="true">

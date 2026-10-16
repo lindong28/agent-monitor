@@ -57,7 +57,7 @@
           <summary class="sync-panel-head">
             <div>
               <strong>全部机器</strong>
-              <span id="sync-coverage" class="status-line">已纳入 —/—</span>
+              <span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span>
             </div>
             <span id="sync-summary" class="status-line" aria-live="polite">检查中…</span>
           </summary>
@@ -84,7 +84,7 @@
               <option value="output">输出 token</option>
               <option value="cache_read">缓存读取</option>
               <option value="cache_creation">缓存创建</option>
-              <option value="messages">用量条目</option>
+              <option value="messages">用量事件数</option>
               <option value="unknown_cost">未知成本条目数</option>
             </select>
             </div>
@@ -168,9 +168,11 @@
           <details class="note-disclosure">
             <summary>统计范围与成本口径</summary>
             <p>会话目录按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
-            <p>仅计已观测用量，不保证最终 usage。Codex 模型为请求或配置值，实际路由模型未知；估值使用计算时价格，非历史实际费率。</p>
-            <p>成本为记录值或按适用配置价格估算，显示已定价记录小计；未知定价不计入，定价覆盖不代表全量采集。</p>
-            <p>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按 bundled GLM-5 定价推算。模型定价未知时成本显示 —。</p>
+            <p>这里只统计已采集的用量记录，不保证包含最终用量。Codex 模型名来自请求或配置，实际处理请求的模型未知。</p>
+            <p>金额来自日志记录或按配置价格估算。估算使用计算时的价格，不代表历史实际费率。</p>
+            <p>只合计金额已知的记录。金额未知的记录不计入小计；金额全部已知也不表示采集完整。</p>
+            <p>用量事件数是记录中包含的用量事件合计。一条记录可能包含多个事件；事件数不是请求次数。</p>
+            <p>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算。模型定价未知时成本显示 —。</p>
           </details>
         <section id="pivot-panel" class="panel">
           <div class="panel-head">

@@ -230,10 +230,10 @@ const text = n => n.textContent + n.children.map(text).join(" ");
 const visible = n => n.tag === "details" && !n.open ? text(n.children[0]) : n.textContent + n.children.map(visible).join(" ");
 window.testRender(values);
 const list = nodes["#codex-account-list"], card = list.children[0];
-assert(visible(card).includes("上次查询 · 七天已用 8%"));
+assert(visible(card).includes("上次查询 · 7 天已用 8%"));
 assert(visible(card).includes(oldTime), "snapshot observation time is visible without opening details");
 assert(visible(list.children[1]).includes("失败；结果未知"));
-assert(visible(list.children[1]).includes("七天已用 未知"));
+assert(visible(list.children[1]).includes("7 天已用 未知"));
 assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
 card.querySelector("details").open = true;
 window.testRender(values);
@@ -241,7 +241,7 @@ assert.strictEqual(list.children[0], card, "unchanged poll must preserve the foc
 values[0].operation.after.seven_day_used_pct = 9;
 window.testRender(values);
 assert(list.children[0].querySelector("details").open, "changed result must preserve detail expansion");
-assert(visible(list.children[0]).includes("七天已用 9%"));
+assert(visible(list.children[0]).includes("7 天已用 9%"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -412,7 +412,7 @@ process.stdout.write(JSON.stringify({ shown, staleOnly, healthy }));
         self.assertFalse(payload["shown"]["hidden"])
         self.assertIn("macbook", payload["shown"]["text"])
         self.assertIn("2026", payload["shown"]["text"])
-        self.assertIn("可能低于实际花费", payload["shown"]["text"])
+        self.assertIn("当前金额小计可能不完整", payload["shown"]["text"])
         self.assertFalse(payload["staleOnly"]["hidden"])
         self.assertIn("macmini", payload["staleOnly"]["text"])
         self.assertNotIn("失败", payload["staleOnly"]["text"])
@@ -550,22 +550,22 @@ process.stdout.write(JSON.stringify({
         # "All history" is the widest claim on the page and the one this host
         # cannot honour: the rollup starts at a collection date. The qualifier
         # travels with the figure rather than living a screen below it.
-        self.assertEqual(payload["allHistory"]["context"], "已知小计 · 定价覆盖未知")
-        self.assertEqual(payload["allHistoryPartial"]["context"], "自 2026-04-21 起 · 已知小计 · 定价覆盖未知")
+        self.assertEqual(payload["allHistory"]["context"], "已知小计 · 金额已知与未知的记录数未提供")
+        self.assertEqual(payload["allHistoryPartial"]["context"], "自 2026-04-21 起 · 已知小计 · 金额已知与未知的记录数未提供")
         self.assertNotIn("tokens", payload["allHistoryPartial"]["context"])
         # Silence about coverage is not a report of full coverage. The branch
         # keys on what coverage said, not on whether the object arrived — the
         # producer returns a full dict even when it knows nothing.
-        self.assertEqual(payload["noCoverage"]["context"], "覆盖范围未知 · 已知小计 · 定价覆盖未知")
-        self.assertEqual(payload["partialNoDate"]["context"], "覆盖范围未知 · 已知小计 · 定价覆盖未知")
-        self.assertEqual(payload["thirtyDays"]["context"], "已知小计 · 定价覆盖未知")
+        self.assertEqual(payload["noCoverage"]["context"], "覆盖范围未知 · 已知小计 · 金额已知与未知的记录数未提供")
+        self.assertEqual(payload["partialNoDate"]["context"], "覆盖范围未知 · 已知小计 · 金额已知与未知的记录数未提供")
+        self.assertEqual(payload["thirtyDays"]["context"], "已知小计 · 金额已知与未知的记录数未提供")
 
         # An empty rollup DB is the case that matters most, because its numbers
         # are zeros: "we collected nothing" must not render as "you spent
         # nothing ever" under the widest heading the page can show.
         self.assertEqual(payload["emptyRollup"]["label"], "全部历史成本")
         self.assertEqual(payload["emptyRollup"]["cost"], "$0.00")
-        self.assertEqual(payload["emptyRollup"]["context"], "覆盖范围未知 · 已知小计 · 定价覆盖未知")
+        self.assertEqual(payload["emptyRollup"]["context"], "覆盖范围未知 · 已知小计 · 金额已知与未知的记录数未提供")
 
         # A server that predates the field must not leave a live-looking heading
         # over a zero or a stale figure.
@@ -587,7 +587,7 @@ process.stdout.write(JSON.stringify({
         header = re.search(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", prose).group(1)
         self.assertEqual(
             re.findall(r">([^<]+)</th>", header),
-            ["账号", "服务商", "套餐", "5h 已用", "7d 已用", "机器", "更新于"],
+            ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "更新于"],
         )
         # Two files decide one thing. The header row is static markup; the cells
         # under it are emitted in QUOTA_COLUMNS order. Reorder one and every
@@ -616,8 +616,8 @@ process.stdout.write(JSON.stringify({
         prose = " ".join(html.split())
 
         self.assertIn("配额用量", prose)
-        self.assertIn("5h 已用", prose)
-        self.assertIn("7d 已用", prose)
+        self.assertIn("5 小时已用", prose)
+        self.assertIn("7 天已用", prose)
         # The figure in the cell is the rounded source usage, not its inverse.
         self.assertIn("`${used}%`", js)
         self.assertIn("const used = Math.round(usedPct)", js)
@@ -1655,7 +1655,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         for message in payload["confirmMessages"]:
             self.assertIn("old@example.test", message)
             self.assertIn(payload["formattedObservation"], message)
-            self.assertIn("7d 已用 24%", message)
+            self.assertIn("7 天已用 24%", message)
             self.assertIn("不可恢复", message)
         self.assertEqual(
             payload["request"]["url"],
@@ -1838,12 +1838,12 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
             self.assertIn('id="sync-coverage"', html)
             self.assertIn('id="sync-machines"', html)
         for token in (
-            "coverageElement.textContent = `已纳入 ${coverage.admitted}/${coverage.declared} 台`",
+            "coverageElement.textContent = `机器快照可读：${coverage.admitted}/${coverage.declared} 台`",
             'statusChip("bad", "未纳入")',
             'statusChip("warn", "刷新失败")',
             'statusChip("warn", "数据过期")',
             'statusChip("warn", "未检查")',
-            'statusChip("ok", "可用")',
+            'statusChip("ok", "快照可读")',
             "用的是上次的数据",
             "waitForSyncTerminal",
         ):
@@ -1872,7 +1872,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         html = (ROOT / "web" / "explore.html").read_text()
 
         self.assertIn("Codex 成本按已识别模型的费率估算，不代表实际账单", html)
-        self.assertIn("GLM-5.1/5.2 按 bundled GLM-5 定价推算", html)
+        self.assertIn("GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算", html)
 
     def test_pivot_js_renders_explicit_empty_states(self):
         js = (ROOT / "web" / "pivot.js").read_text()
@@ -1888,8 +1888,8 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         explore = (ROOT / "web" / "explore.html").read_text()
         app = (ROOT / "web" / "app.js").read_text()
 
-        self.assertIn("用量条目", sessions)
-        self.assertIn('<option value="messages">用量条目</option>', explore)
+        self.assertIn("用量事件数", sessions)
+        self.assertIn('<option value="messages">用量事件数</option>', explore)
         self.assertIn('const numberFields = ["tokens", "usage_events"]', app)
         self.assertIn("integer(row.usage_events)", app)
         self.assertNotIn("integer(row.messages)", app)

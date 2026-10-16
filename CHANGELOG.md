@@ -2,6 +2,8 @@
 
 ## 2026-10-16
 
+- Clarify known and unknown amounts, retained session scope, readable snapshots and usage-event counts. Split expanded help, network rules and setup steps into shorter sections; use consistent Chinese time-window labels.
+
 - Keep machine technical details open and preserve expanded period scroll positions across data redraws.
 - Make session directory and observation times the primary identity, and separate period amounts from pricing coverage for narrow-screen reading.
 

@@ -308,8 +308,8 @@
   }
 
   function costCoverageText(coverage) {
-    if (!coverage || !Number.isInteger(coverage.known) || !Number.isInteger(coverage.unknown)) return "定价覆盖未知";
-    return `已定价 ${integer(coverage.known)} 条 · 未知定价 ${integer(coverage.unknown)} 条`;
+    if (!coverage || !Number.isInteger(coverage.known) || !Number.isInteger(coverage.unknown)) return "金额已知与未知的记录数未提供";
+    return `金额已知：${integer(coverage.known)} 条记录 · 金额未知：${integer(coverage.unknown)} 条记录`;
   }
 
   function costReading(value, coverage) {
@@ -398,7 +398,7 @@
 
   const CHART_LIBRARY_MISSING =
     "图表不可用：/web/vendor/chart.umd.min.js 未加载。" +
-    "请在提供服务的 agent-monitor checkout 上运行 ./install.sh，然后重新加载。";
+    "请在提供服务的 agent-monitor 代码目录中运行 ./install.sh，然后重新加载。";
 
   function chart(key, canvasId, config) {
     const canvas = qs("#" + canvasId);
@@ -732,7 +732,7 @@
     };
     const delta = data.known_cost_delta_usd;
     const change = delta === null ? "无法比较（一期无已知金额）" : delta === 0 ? "相同" : `${delta > 0 ? "增加" : "减少"} ${money(Math.abs(delta))}`;
-    target.innerHTML = `<p class="comparison-summary">最近完整周期的已知成本较前一周期${change}。</p><div class="table-wrap"><table><thead><tr><th>周期 · ${data.days} 天</th><th>已知成本 · USD</th><th>已记录 token</th><th>未知定价 / 使用条目</th></tr></thead><tbody>${period("最近完整周期", data.current)}${period("前一周期", data.previous)}</tbody></table></div><p class="scope-note">— 表示没有已知金额；$0.00 表示已知零成本。未知定价未计入差额；数据源的新鲜度与采集缺口见采集状态。</p>`;
+    target.innerHTML = `<p class="comparison-summary">最近完整周期的已知成本较前一周期${change}。</p><div class="table-wrap"><table><thead><tr><th>周期 · ${data.days} 天</th><th>已知成本 · USD</th><th>已记录 token</th><th>金额未知记录 / 全部记录</th></tr></thead><tbody>${period("最近完整周期", data.current)}${period("前一周期", data.previous)}</tbody></table></div><p class="scope-note">— 表示没有已知金额；$0.00 表示已知零成本。金额未知的记录未计入差额；数据源的新鲜度与采集缺口见采集状态。</p>`;
   }
 
   // Project identifiers share a long host-and-owner prefix, so truncating from
@@ -769,15 +769,15 @@
 
   function rangeLabel(value) {
     const labels = {
-      "7d": "7d",
-      "30d": "30d",
-      "90d": "90d",
-      "6m": "6m",
-      "1y": "1y",
-      "2y": "2y",
+      "7d": "近 7 天",
+      "30d": "近 30 天",
+      "90d": "近 90 天",
+      "6m": "近半年",
+      "1y": "近 1 年",
+      "2y": "近 2 年",
       all: "全部历史",
     };
-    return labels[value] || value || "30d";
+    return labels[value] || value || "近 30 天";
   }
 
   function rangeSummaryLabel(value) {
@@ -785,7 +785,7 @@
       "7d": "近 7 天",
       "30d": "近 30 天",
       "90d": "近 90 天",
-      "6m": "近 6 个月",
+      "6m": "近半年",
       "1y": "近 1 年",
       "2y": "近 2 年",
       all: "全部历史",
@@ -1247,7 +1247,7 @@
     row.appendChild(quotaUpdatedCell(display, stale, display.quota_source === "account_action"
       ? null : quotaRefreshNotice(provider, account)));
     Array.from(row.children).forEach((cell, index) => {
-      cell.dataset.label = ["账号", "服务商", "套餐", "5h 已用", "7d 已用", "机器", "更新于"][index];
+      cell.dataset.label = ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "更新于"][index];
     });
     return row;
   }
@@ -1383,11 +1383,11 @@
   function quotaRemovalReading(account) {
     const sevenDay = quotaUsage(account.seven_day_used_pct);
     if (sevenDay.known) {
-      return `7d 已用 ${sevenDay.used}%`;
+      return `7 天已用 ${sevenDay.used}%`;
     }
     const fiveHour = quotaUsage(account.five_hour_used_pct);
     if (fiveHour.known) {
-      return `5h 已用 ${fiveHour.used}%`;
+      return `5 小时已用 ${fiveHour.used}%`;
     }
     return "最后读数不可用";
   }
@@ -1911,7 +1911,7 @@
     }
     pageServerInstance = status.instance_id || pageServerInstance;
     const coverage = status.coverage || { admitted: 0, declared: 0 };
-    coverageElement.textContent = `已纳入 ${coverage.admitted}/${coverage.declared} 台`;
+    coverageElement.textContent = `机器快照可读：${coverage.admitted}/${coverage.declared} 台`;
     const attention = (status.machines || []).filter(
       (machine) =>
         !machine.admitted ||
@@ -1982,10 +1982,10 @@
         : clauses[0];
     // Why the machine is behind (refresh failed, server just restarted, data
     // simply older than 6h) is on its card; the figures only need the fact
-    // that its newer usage is absent, stated as a bound, not a certainty.
+    // that newer records are absent, without comparing estimates with bills.
     note.hidden = false;
     note.textContent =
-      `${listed}的较新用量尚未计入，下面的合计可能低于实际花费。`;
+      `${listed}的较新记录尚未计入，当前金额小计可能不完整。`;
   }
 
   function renderMachineStatus(machine, expanded = false) {
@@ -2009,15 +2009,15 @@
       chips.push(statusChip("warn", "清理失败"));
     }
     if (!chips.length) {
-      chips.push(statusChip("ok", "可用"));
+      chips.push(statusChip("ok", "快照可读"));
     }
     const marker = machine.this_machine ? ' <span class="status-pill identity">本机</span>' : "";
     const facts = [];
     const observedAt = machine.statistics?.observed_at || machine.generated_at;
     facts.push(observedAt ? `数据更新于 ${formatDate(observedAt)} · ${updatedText(observedAt)}` : "尚无数据");
     const quality = machine.statistics?.usage_quality_counts;
-    facts.push(quality == null ? "Claude usage 完整性未知" :
-      `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}（全部留存，非当前日期范围；结束标记不保证最终 usage）`);
+    facts.push(quality == null ? "Claude 用量记录完整性未知" :
+      `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}（全部留存，非当前日期范围；结束标记不保证最终用量完整）`);
     if (machine.data_start_date) {
       facts.push(`历史自 ${escapeHtml(machine.data_start_date)}`);
     }
@@ -2213,7 +2213,7 @@
     renderNetworkBanner(data);
     if (data.installed === false) {
       renderNetworkError({
-        title: "ip-check 未安装，请在 agent-monitor checkout 中运行 ./install.sh。",
+        title: "ip-check 未安装，请在 agent-monitor 代码目录中运行 ./install.sh。",
         message: data.hint || data.error || "使用 /network 前请先安装 ip-check。",
         docs: true,
       }, retry);
@@ -2379,7 +2379,7 @@
       kvRow("举报次数", spamReports),
       kvRow("最近举报", lastSpamReport),
       kvRow("代理环境变量", envs),
-      '<p class="conclusion-note">风险分与类型来自 proxycheck，代理标记与机房判定来自 ip-api，垃圾评分来自 stopforumspam；代理环境变量读自本机 shell。</p>',
+      '<p class="conclusion-note">风险分与类型来自 proxycheck，代理标记与机房判定来自 ip-api，垃圾评分来自 stopforumspam；代理环境变量读自服务端主机 shell。</p>',
     ].join("");
   }
 
@@ -2396,7 +2396,7 @@
         ? statusPill("bad", tz.match_label || "不一致")
         : statusPill("warn", "无法比较");
     qs("#network-timezone").innerHTML = [
-      kvRow("本机时区", `${escapeHtml(tz.cli_tz || "—")} (${escapeHtml(tz.cli_offset || "—")})`),
+      kvRow("服务端主机时区", `${escapeHtml(tz.cli_tz || "—")} (${escapeHtml(tz.cli_offset || "—")})`),
       kvRow("公网时区", pub.timezone ? `${escapeHtml(pub.timezone)} (${escapeHtml(pub.tz_offset || "—")})` : "—"),
       kvRow("是否一致", match),
     ].join("");
@@ -2404,7 +2404,7 @@
 
   function renderConclusions(data) {
     const items = (data.conclusions || []).slice().sort((a, b) => ({bad: 0, warn: 1, ok: 2}[a.level] ?? 3) - ({bad: 0, warn: 1, ok: 2}[b.level] ?? 3));
-    const note = '<details class="note-disclosure"><summary>规则与检测边界</summary><p class="conclusion-note">本地规则：检出本地 IPv6 地址、国内 DNS、风险分 &gt;= 70 或时区不一致，任一命中即「风险高」。IPv6 地址不证明公网泄漏；公网、DNS 地域或时区缺测且无高风险信号时为未知，风险分缺失只标部分检测。未检出高风险信号不保证服务可用。</p></details>';
+    const note = '<details class="note-disclosure"><summary>规则与检测边界</summary><p><strong>高风险条件</strong></p><p>本地规则将以下任一情况判为「风险高」：</p><ul><li>检出本地 IPv6 地址。</li><li>检出国内 DNS 解析器。</li><li>风险分不低于 70。</li><li>服务端主机时区与公网 IP 时区不一致。</li></ul><p><strong>检测不完整</strong></p><ul><li>未检出高风险信号，但缺少公网、DNS 地域或时区结果时，风险状态为未知。</li><li>缺少风险分时，标为部分检测。</li></ul><p><strong>结论范围</strong></p><p>本地 IPv6 地址不证明公网泄漏。未检出高风险信号不保证服务可用。</p></details>';
     if (!items.length) {
       qs("#network-conclusion").innerHTML = `<div class="empty-state">—</div>${note}`;
       return;
@@ -3052,7 +3052,7 @@
     const panel = document.createElement("section");
     panel.className = "session-detail";
     panel.innerHTML = `<a class="session-back" href="/sessions?${escapeHtml(back.toString())}">返回会话列表</a>
-      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p>${escapeHtml(machine || "本机")} · 已留存的完整会话</p><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div></div></div>
+      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p>${escapeHtml(machine || "本机")} · 此会话的全部已留存记录</p><p class="scope-note">可能缺少未采集或未保存的记录。</p><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div></div></div>
       <div id="session-detail-content" aria-live="polite"></div>`;
     qs("main").appendChild(panel);
     qs("#session-identity").textContent = id;
@@ -3110,10 +3110,10 @@
     const last = dates.length ? dates.reduce((a, b) => Math.max(a, b)) : null;
     const span = first === null ? "未知" : last - first < 60000 ? "少于 1 分钟" : integer(Math.round((last - first) / 60000)) + " 分钟";
     const field = (name, value) => `<div><dt>${name}</dt><dd>${escapeHtml(value || "—")}</dd></div>`;
-    const costBasis = entry => entry.cost_usd == null ? "费用未知" :
-      ({recorded: "记录金额", nominal: "名义估值"}[entry.cost_provenance?.basis] || "金额依据未知");
+    const costBasis = entry => entry.cost_usd == null ? "金额未知" :
+      ({recorded: "日志记录金额", nominal: "按配置价格估算"}[entry.cost_provenance?.basis] || "金额依据未知");
     const qualityText = entry => entry.agent_id !== "claude-code" ? "此质量分类不适用于 Codex" :
-      ({observed: "有结束标记，最终 usage 未获保证", incomplete: "不完整：只计已观测 tokens", unknown: "usage 完整性未知"}[entry.usage_quality] || "usage 完整性未知");
+      ({observed: "有结束标记，最终用量仍未确认", incomplete: "不完整：只计已记录 token", unknown: "用量记录完整性未知"}[entry.usage_quality] || "用量记录完整性未知");
     const costReason = reason => ({usage_incomplete: "用量记录不完整", unknown_model: "模型价格未知",
       missing_rates: "缺少适用费率", unsupported_service_context: "服务模式无法定价",
       conflicting_service_context: "服务模式记录冲突", mode_unreported: "部分服务模式未记录，按标准模式估值",
@@ -3122,9 +3122,9 @@
     qs("#session-project").textContent = distinct("project").join("、") || "会话目录未记录";
     qs("#session-times").textContent = `${first === null ? "时间未知" : formatDate(first)} — ${last === null ? "时间未知" : formatDate(last)}`;
     content.innerHTML = `<div class="session-metrics">
-      <article><h3>记录成本</h3><strong>${sessionEntryCost(cost)}</strong><p>${unknown ? `${unknown} 条成本未知，未合计为总额` : "按现有定价口径 · 非账单"}</p></article>
-      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>已观测输入、输出与缓存合计${incomplete ? ` · ${incomplete} 条 usage 不完整` : "；不保证最终用量"}</p></article>
-      <article><h3>用量条目</h3><strong>${integer(events)}</strong><p>${integer(entries.length)} 条记录 · 非请求次数</p></article>
+      <article><h3>记录成本</h3><strong>${sessionEntryCost(cost)}</strong><p>${unknown ? `${unknown} 条记录金额未知，未合计为总额` : "按现有定价口径 · 非账单"}</p></article>
+      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>已观测输入、输出与缓存合计${incomplete ? ` · ${incomplete} 条用量记录不完整` : "；不保证最终用量"}</p></article>
+      <article><h3>用量事件数</h3><strong>${integer(events)}</strong><p>来自 ${integer(entries.length)} 条记录 · 非请求次数</p></article>
       <article><h3>观测跨度</h3><strong class="session-span">${span}</strong><p>首末记录之间 · 非活跃时长</p></article></div>
       <details class="panel session-metadata" ${readingState.metadata ? "open" : ""}><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
         ${field("Agent", distinct("agent_id").join("、"))}${field("会话目录", distinct("project").join("、"))}
@@ -3158,7 +3158,7 @@
         function expand() {
           const row = document.createElement("tr");
           row.className = "session-entry-detail";
-          row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><dl class="session-fields">${field("计价说明", costReason(e.cost_provenance?.reason))}${field("金额依据", costBasis(e))}${field("usage 证据", qualityText(e))}${field("用量条目", String(e.usage_event_count ?? "未知"))}</dl><details class="entry-technical" ${readingState.technical.has(key) ? "open" : ""}><summary>技术证据 · ID、服务模式与价格来源</summary><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}</dl><p class="scope-note">ID 来自源日志，不能直接作为 Gateway 请求标识。</p></details></div></td>`;
+          row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><dl class="session-fields">${field("计价说明", costReason(e.cost_provenance?.reason))}${field("金额依据", costBasis(e))}${field("用量记录完整性", qualityText(e))}${field("用量事件数", String(e.usage_event_count ?? "未知"))}</dl><details class="entry-technical" ${readingState.technical.has(key) ? "open" : ""}><summary>技术证据 · ID、服务模式与价格来源</summary><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}</dl><p class="scope-note">ID 来自源日志，不能直接作为 Gateway 请求标识。</p></details></div></td>`;
           row.querySelector("details").addEventListener("toggle", event => {
             if (event.currentTarget.open) readingState.technical.add(key); else readingState.technical.delete(key);
           });

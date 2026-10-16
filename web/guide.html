@@ -56,24 +56,27 @@
           <p class="scope-note">agent-monitor 面向个人开发者和多机使用者，汇集用量、会话、配额与诊断信息。金额是记录或估算，不是服务商账单。</p>
           <div class="table-wrap" tabindex="0" role="region" aria-label="数据源与查看入口"><table><thead><tr><th>数据源</th><th>提供什么</th><th>查看入口</th></tr></thead><tbody>
             <tr><th>Claude Code / Codex</th><td>本地日志采集出的 token、估算成本和留存会话。采集前已删除的日志无法恢复。</td><td><a href="/explore">透视归因</a> · <a href="/sessions">会话明细</a></td></tr>
-            <tr><th>服务商账号</th><td>账号级 5h / 7d 配额与观测时间。采集失败保留旧读数，页面日期不改变配额窗口。</td><td><a href="/#quota-explorer">配额与账号</a></td></tr>
+            <tr><th>服务商账号</th><td>账号的 5 小时和 7 天配额窗口及查询时间。采集失败保留旧读数，页面日期不改变配额窗口。</td><td><a href="/#quota-explorer">配额与账号</a></td></tr>
             <tr><th>服务端网络</th><td>运行 Web 服务的主机出口与网络诊断，不是浏览器设备的网络。</td><td><a href="/network">检测主机与结果</a></td></tr>
           </tbody></table></div>
         </section>
         <section class="panel" id="collection">
           <h2>当前采集状态</h2>
-          <p class="scope-note">“已纳入”表示机器快照可读，不保证每种来源都存在或历史完整。无匹配记录不等于尚未接入。</p>
-          <div class="panel-head"><span id="sync-coverage" class="status-line">已纳入 —/—</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
+          <p class="scope-note">“机器快照可读”表示能够读取该机器已采集的数据，不表示每种来源都有数据，也不保证历史完整。无匹配记录不等于尚未接入。</p>
+          <div class="panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
           <details class="note-disclosure"><summary>查看各机器的采集详情</summary><div id="sync-machines" class="sync-machines"></div></details>
         </section>
         <section class="panel" id="setup">
           <h2>首次接入</h2>
           <h3>单机使用</h3>
+          <p>开始前，准备 Python、Git 和 curl，并进入自己的 agent-monitor 代码目录。</p>
           <ol>
-            <li>在自己的 agent-monitor checkout 中配置 <code>machines.json</code>；新单机安装只保留自己的本机条目，见下方示例。已有安装须保留机器身份和退休记录。</li>
-            <li>准备 Python、Git 和 curl。Monitor 可独立安装和运行，监控 Claude Code / Codex 的用量与会话。</li>
-            <li>运行 <code>./install.sh</code>，再运行 <code>agent-monitor start</code>。首次采集可运行 <code>agent-monitor refresh</code>；macOS 定时采集由安装器设置，Linux 需自行安排调度。</li>
+            <li>配置 <code>machines.json</code>。如果是新单机安装，只保留自己的本机条目，见下方示例。如果是已有安装，须保留机器身份和退休记录。</li>
+            <li>运行 <code>./install.sh</code> 安装 Monitor。</li>
+            <li>运行 <code>agent-monitor start</code> 启动服务。</li>
+            <li>运行 <code>agent-monitor refresh</code> 进行首次采集。</li>
           </ol>
+          <p>macOS 安装器会设置定时采集。Linux 用户需另行配置定时任务。</p>
           <div class="code-card"><div class="code-card-head"><span>新单机 machines.json 示例</span><button type="button" data-copy-code="machine-config">复制配置</button></div><pre><code id="machine-config">{
   "machines": [{"name": "local", "ssh_host": "localhost", "self": true}],
   "retired_names": []
@@ -81,14 +84,14 @@
           <div class="code-card"><div class="code-card-head"><span>单机安装与首次采集</span><button type="button" data-copy-code="install-commands">复制命令</button></div><pre><code id="install-commands">./install.sh
 agent-monitor start
 agent-monitor refresh</code></pre></div>
-          <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>配置自己的 <code>hub.json</code> 角色、URL、SSH 目标，再在各机运行以下命令。Hub 拉取快照，采集器独立保存本机数据。</p>
+          <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>Hub 负责拉取快照；采集器独立保存各机数据。</p><ol><li>在自己的 <code>hub.json</code> 中配置机器角色、URL 和 SSH 目标。</li><li>在每台机器的代码目录中运行以下命令。将占位符替换为该机器在配置中的名称。</li></ol>
           <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div></details>
-          <p>完整命令、依赖与已有服务迁移见 checkout 的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。本页只说明与检查状态，不修改配置或登录账号。</p>
+          <p>完整命令、依赖与已有服务迁移见代码目录中的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。本页只说明与检查状态，不修改配置或登录账号。</p>
         </section>
         <section class="panel" id="questions">
           <h2>从问题找到证据</h2>
           <ul>
-            <li>想知道成本变化：总览展开周期比较，核对两个周期日期与未知定价，再进入透视定位目录、模型或机器。</li>
+            <li>想知道成本变化：总览展开周期比较，核对两个周期的日期和金额未知的记录数，再进入透视定位目录、模型或机器。</li>
             <li>想追溯某组用量：点击透视排行的“查看会话”。列表只计匹配记录；打开详情可看全部留存记录。汇总比明细更完整时，差额不能当成查询错误或零成本。</li>
             <li>想挑选账号：在总览按配额窗口和剩余额度排序，同时核对更新时间。历史账号读数不代表当前可用。</li>
             <li>页面为空：先检查日期和筛选，再看机器采集状态与采集器版本。连接失败会保留最后成功快照；修复接入后再刷新。</li>
