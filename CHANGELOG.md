@@ -2,6 +2,8 @@
 
 ## 2026-10-16
 
+- Use one shared page-width limit and let body text, notes and lists fill their content regions, including expanded content.
+
 - Replace the quota source column with relative observation age and expandable exact time; keep necessary source context beside machines and preserve visible reading qualifiers.
 
 - Omit the repeated quota source machine when the machine column already identifies it uniquely; preserve multi-machine and differing-source details.

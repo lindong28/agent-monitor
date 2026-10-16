@@ -20,10 +20,8 @@
 
   --sidebar-w: 220px;
   --header-h: 56px;
-  /* Measure for running text. Everything else on this page is a table or a
-     chart and takes the full column; this is the cap for the paragraphs that
-     explain them, applied per element rather than to their container. */
-  --measure: 68ch;
+  /* Limit the shared page once; prose uses its content region. */
+  --page-max-width: 1560px;
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -113,6 +111,11 @@ a:hover {
 }
 
 /* The brand bar and navigation survive SPA swaps; page controls stay in main. */
+.app-header, .app-shell {
+  width: 100%;
+  max-width: var(--page-max-width);
+  margin-inline: auto;
+}
 .app-header {
   position: sticky;
   top: 0;
@@ -371,17 +374,7 @@ button:disabled {
   }
 }
 
-/* Full width, with the cap moved down to the things that need one.
-
-   A centred 1280px column left 640px of empty gutter on each side of a
-   2560px screen — half the window — while the quota table inside it scrolled
-   sideways to show its seventh column and the 30-day cost chart drew a month
-   of points into 1180px. Tables and charts are read by scanning across, so
-   width is what they are short of; running text is read by returning to the
-   next line, so width is what ruins it. Those want opposite things, and one
-   container cap cannot serve both. The cap now lives on the prose
-   (`.note-disclosure p`, `.scope-note`, `.quota-scope`), where the measure is
-   what is actually being limited. */
+/* Tables and prose share the page boundary; wide tables scroll locally. */
 .main {
   flex: 1;
   min-width: 0;
@@ -547,7 +540,6 @@ button:disabled {
 }
 
 .quota-scope {
-  max-width: var(--measure);
   margin: 0 0 var(--sp-4);
   color: var(--ink-muted);
   font: 400 12px/16px var(--font-sans);
@@ -935,14 +927,12 @@ button:disabled {
 .sync-machine-time,
 .sync-machine-reason,
 .scope-note {
-  max-width: var(--measure);
   margin: var(--sp-3) 0 0;
   color: var(--ink-muted);
   font: 400 12px/16px var(--font-sans);
   overflow-wrap: anywhere;
 }
 
-.sync-machine-time { max-width: none; }
 
 .sync-machine-reason {
   color: var(--ink);
@@ -1058,7 +1048,7 @@ button:disabled {
 .chart-data-table th, .chart-data-table td { padding: 12px 16px; }
 .chart-data-table th[scope="row"] { color: var(--ink); font-size: 14px; font-weight: 400; text-align: left; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 #daily-cost-data th[scope="row"] { white-space: nowrap; overflow-wrap: normal; }
-.quota-window-reason { display: block; max-width: 160px; white-space: normal; margin-top: 4px; color: var(--ink-muted); font-size: 12px; line-height: 16px; }
+.quota-window-reason { display: block; white-space: normal; margin-top: 4px; color: var(--ink-muted); font-size: 12px; line-height: 16px; }
 
 .chart-box.short {
   height: 260px;
@@ -1075,8 +1065,7 @@ button:disabled {
   display: none;
 }
 
-/* `.estimate-note` is a sentence and takes the measure; `.status-line` is a
-   fragment that sits inline beside a heading and must not be wrapped early. */
+/* Supporting text uses the available width of its content region. */
 .estimate-note,
 .status-line {
   margin: var(--sp-5) 0 0;
@@ -1084,13 +1073,7 @@ button:disabled {
   font: 400 12px/16px var(--font-sans);
 }
 
-.estimate-note {
-  max-width: var(--measure);
-}
-
-/* Methodology text is read when a figure looks wrong, not on every visit. Kept
-   beside the chart it qualifies, collapsed, and set to a readable measure —
-   as a permanent paragraph it ran the full 1200px panel width. */
+/* Methodology remains beside the chart it qualifies, collapsed until needed. */
 .note-disclosure {
   margin: 0 0 var(--sp-4);
   color: var(--ink-muted);
@@ -1109,7 +1092,6 @@ button:disabled {
 
 
 .note-disclosure p {
-  max-width: var(--measure);
   margin: var(--sp-4) 0 0;
 }
 
@@ -1411,28 +1393,14 @@ td.numeric {
   color: var(--danger);
 }
 
-.network-main {
-  max-width: 1800px;
-}
-
-/* Track counts divide the four evidence cards evenly — 4, then 2, then 1.
-   `auto-fit` picked whatever the width allowed, which meant three tracks
-   anywhere from roughly 1036px to 1371px and Timezone alone on a second row
-   with two thirds of it empty. Adding a fifth evidence card means revisiting
-   these counts. */
+/* Two evidence columns fit the shared page width; narrow screens use one. */
 .network-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-6);
   /* Each card is as tall as its own contents. Stretching them to match the
      tallest left Timezone with 250px of empty card below three rows of text. */
   align-items: start;
-}
-
-@media (max-width: 1480px) {
-  .network-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 /* The synthesised answer leads; the evidence cards support it. As the fifth
@@ -1491,13 +1459,6 @@ td.numeric {
 .network-card-body {
   display: grid;
   gap: var(--sp-2);
-}
-
-/* The other cards hold key/value rows, which want the column. This one holds
-   the written verdict — the longest running text on any of the five pages —
-   and was the last thing still setting prose at the full width. */
-.network-card-conclusion .network-card-body {
-  max-width: var(--measure);
 }
 
 .kv-row {
@@ -1711,7 +1672,6 @@ td.numeric {
 
 
 .conclusion-note {
-  max-width: var(--measure);
   margin: var(--sp-5) 0 0;
   padding-top: var(--sp-4);
   border-top: 1px solid var(--line-soft);
@@ -1809,11 +1769,13 @@ td.numeric {
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 900px) {
   .network-grid {
     grid-template-columns: 1fr;
   }
+}
 
+@media (max-width: 560px) {
   .kv-row {
     grid-template-columns: 1fr;
     gap: var(--sp-1);
@@ -1922,7 +1884,6 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 .guide-article { min-width: 0; grid-column: 1; grid-row: 1; }
 .guide-article > .panel + .panel { margin-top: 24px; }
 .guide-article section { scroll-margin-top: calc(var(--header-h) + 24px); }
-.guide-article p, .guide-article li { max-width: 75ch; }
 .guide-toc { display: none; }
 .guide-toc .nav-caption { padding: 0 0 8px; }
 .guide-toc a { display: block; color: var(--ink-muted); padding: 6px 0; text-decoration: none; }
