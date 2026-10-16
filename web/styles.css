@@ -303,6 +303,7 @@ button:active:not(:disabled) {
 .ranking-track > span { display: block; height: 100%; background: var(--accent); }
 .ranking-periods { max-height: 240px; overflow-y: auto; margin-top: var(--sp-4); padding: var(--sp-3); background: var(--surface-sunken); font-variant-numeric: tabular-nums; }
 .ranking-periods > div { display: flex; justify-content: space-between; gap: var(--sp-5); }
+.ranking-periods > div > span:first-child { flex-shrink: 0; white-space: nowrap; }
 .ranking-periods summary { cursor: pointer; }
 .ranking-dimensions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px 16px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ranking-dimensions small { display: block; color: var(--ink-muted); font-weight: 400; }
