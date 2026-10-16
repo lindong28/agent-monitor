@@ -644,7 +644,7 @@ process.stdout.write(JSON.stringify({
         header = re.search(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", prose).group(1)
         self.assertEqual(
             re.findall(r">([^<]+)</th>", header),
-            ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "读数来源"],
+            ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "配额更新"],
         )
         # Two files decide one thing. The header row is static markup; the cells
         # under it are emitted in QUOTA_COLUMNS order. Reorder one and every
@@ -997,6 +997,7 @@ function reading(row) {
     providerPillClass: byClass(row.cells[1], "pill")[0]?.className || "",
     planText: row.cells[2].textContent,
     accountText: row.cells[0].textContent,
+    updateText: row.cells[6].textContent,
     warningTexts: byClass(row, "status-pill")
       .map((node) => node.textContent)
       .filter((text) => text === "余量偏低" || text === "即将用尽"),
@@ -1004,7 +1005,7 @@ function reading(row) {
       .filter((node) => node.textContent === "可能早于一次登录变更").length,
     historyMarkerCount: descendants(row).filter((node) => node.textContent === "已登出").length,
     historyNoteCount: descendants(row)
-      .filter((node) => node.className.includes("quota-account-observation") && node.textContent.includes("最后观测值，不代表当前状态")).length,
+      .filter((node) => node.className === "quota-history-note" && node.textContent === "历史读数，不代表当前状态").length,
     observedTexts: byClass(row, "quota-window-observed").map((node) => node.textContent),
     amounts: windows.map((cell) => byClass(cell, "quota-window-value")[0]?.textContent || null),
     fills: windows.map((cell) => byClass(cell, "quota-meter-fill")[0]?.style.values["--quota-fill"] || null),
@@ -1156,14 +1157,16 @@ process.stdout.write(JSON.stringify({
             [payload["pastTitle"], payload["pastTitle"]],
         )
         self.assertEqual(past["observedTexts"], [])
-        self.assertIn("最后观测", past["accountText"])
+        self.assertNotIn("观测", past["accountText"])
+        self.assertIn("历史读数，不代表当前状态", past["updateText"])
         self.assertTrue(all(text.startswith("观测于 ") for text in past["observedTexts"]))
 
         self.assertEqual(unknown["warningTexts"], [])
         self.assertEqual([reset["text"] for reset in unknown["resets"]], ["重置时间未知"] * 2)
         self.assertEqual([reset["title"] for reset in unknown["resets"]], [""] * 2)
         self.assertEqual(unknown["observedTexts"], [])
-        self.assertIn("最后观测", unknown["accountText"])
+        self.assertNotIn("观测", unknown["accountText"])
+        self.assertIn("历史读数，不代表当前状态", unknown["updateText"])
         self.assertTrue(all(text.startswith("观测于 ") for text in unknown["observedTexts"]))
 
         self.assertEqual(boundary["warningTexts"], ["即将用尽"])
@@ -2095,7 +2098,7 @@ console.log(JSON.stringify({
   noteText: note.textContent,
   tableText: table.textContent,
   rows: all(table).filter(n => n.dataset.accountId).map(n => n.textContent),
-  details: all(table).filter(n => n.tagName === "DETAILS").map(n => ({text: n.textContent, open: !!n.open})),
+  details: all(table).filter(n => n.tagName === "DETAILS" && n.className !== "quota-observation-details").map(n => ({text: n.textContent, open: !!n.open})),
 }));
 '''
         payload = {

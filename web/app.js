@@ -1008,6 +1008,8 @@
     bindQuotaExplorer();
     const rememberedExpanded = options.rememberedExpanded ?? Boolean(qs("#quota-past-accounts")
       && !qs("#quota-past-accounts").hidden);
+    const openObservations = new Set(Array.from(table.querySelectorAll?.(".quota-observation-details[open]") || [])
+      .filter((node) => node.tagName === "DETAILS").map((node) => node.dataset.observationKey));
     // Only the bodies are ours; the header row is in the markup.
     Array.from(table.tBodies).forEach((body) => body.remove());
 
@@ -1075,6 +1077,9 @@
     QUOTA_PROVIDERS.forEach((provider) => {
       const failures = rateLimits?.[provider.key]?.refresh_errors || [];
       if (failures.length) table.appendChild(quotaFailureDetails(provider, failures));
+    });
+    Array.from(table.querySelectorAll?.(".quota-observation-details") || []).forEach((node) => {
+      if (node.tagName === "DETAILS") node.open = openObservations.has(node.dataset.observationKey);
     });
     renderQuotaSignedOut(rateLimits);
   }
@@ -1227,13 +1232,13 @@
     const display = quotaDisplayReading(provider, account);
     const stale = quotaIsStale(display.updated_at);
     if (stale) {
-      // Deliberately carries no styling — the pill in the Updated cell marks
+      // Deliberately carries no styling — the note in the Updated cell marks
       // staleness where it applies. This is the machine-readable half, which
       // the pill's wording is not: keep it even though no CSS rule selects it.
       row.classList.add("stale");
     }
 
-    row.appendChild(quotaAccountCell(provider, account, display));
+    row.appendChild(quotaAccountCell(provider, account));
     row.appendChild(quotaProviderCell(provider, display));
     const plan = quotaPlanCell(account);
     if (display.quota_source === "account_action") {
@@ -1244,11 +1249,11 @@
     }
     row.appendChild(plan);
     QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell(provider, spec, display)));
-    row.appendChild(quotaMachinesCell(account));
-    row.appendChild(quotaUpdatedCell(display, stale, display.quota_source === "account_action"
+    row.appendChild(quotaMachinesCell(account, display));
+    row.appendChild(quotaUpdatedCell(provider, display, stale, display.quota_source === "account_action"
       ? null : quotaRefreshNotice(provider, account)));
     Array.from(row.children).forEach((cell, index) => {
-      cell.dataset.label = ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "读数来源"][index];
+      cell.dataset.label = ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "配额更新"][index];
     });
     return row;
   }
@@ -1324,7 +1329,7 @@
     return reading !== credential;
   }
 
-  function quotaAccountCell(provider, account, display = account) {
+  function quotaAccountCell(provider, account) {
     const cell = document.createElement("td");
     cell.className = "quota-identity";
     const wrap = document.createElement("div");
@@ -1334,25 +1339,11 @@
     name.className = "quota-account-label";
     name.textContent = quotaAccountName(account);
     wrap.appendChild(name);
-    if (quotaPresence(account) === "remembered") {
-      // Keep the rendered reading's provenance with the frozen identity column.
-      // A newer account-action reading must not inherit the machine's old time.
-      const observation = document.createElement("span");
-      observation.className = "quota-history-note quota-account-observation";
-      observation.textContent = display.quota_source === "account_action"
-        ? `机器历史账号 · 本页查询 ${formatDate(display.updated_at)}`
-        : `最后观测 ${formatDate(display.updated_at)}；最后观测值，不代表当前状态`;
-      wrap.appendChild(observation);
-    }
-    if (quotaPresence(account) !== "remembered") {
-      const observation = document.createElement("span");
-      observation.className = "quota-history-note quota-account-observation";
-      const invalidSource = display.quota_source !== "account_action" &&
-        (renderedQuotaRateLimits?.[provider.key]?.signed_out_machines || []).includes(account.reading_from);
-      observation.textContent = `${display.quota_source === "account_action" ? "本页查询" : "观测于"} ${formatDate(display.updated_at)}`;
-      if (account.account_state !== "known") observation.textContent += " · 账号身份未确认";
-      else if (invalidSource) observation.textContent += ` · 读数来源 ${account.reading_from} 的登录已失效；保留旧值`;
-      wrap.appendChild(observation);
+    if (account.account_state !== "known") {
+      const note = document.createElement("span");
+      note.className = "quota-history-note";
+      note.textContent = "账号身份未确认";
+      wrap.appendChild(note);
     }
     const actions = document.createElement("div");
     actions.className = "quota-account-links";
@@ -1662,63 +1653,81 @@
     return quotaResetText(epoch, quotaResetState(epoch, nowMs), nowMs);
   }
 
-  function quotaMachinesCell(account) {
+  function quotaMachinesCell(account, display = account) {
     const cell = document.createElement("td");
     const names = account.machines || [];
-    if (!names.length) {
-      cell.textContent = "—";
-      return cell;
-    }
+    const source = display.quota_source === "account_action" ? null : display.reading_from;
+    if (!names.length) cell.textContent = "—";
     names.forEach((name, index) => {
-      if (index) {
-        cell.appendChild(document.createTextNode(" · "));
-      }
+      if (index) cell.appendChild(document.createTextNode(" · "));
       const node = document.createElement("span");
       node.textContent = name;
-      // Which of these is the machine in front of the reader. Without it, three
-      // rows of e-mail addresses do not say which account this session spends.
       if (name === account.this_machine) {
         node.className = "quota-machine-self";
         node.appendChild(document.createTextNode("（本机）"));
       }
+      if (names.length > 1 && name === source) {
+        node.appendChild(document.createTextNode("（配额来源）"));
+      }
       cell.appendChild(node);
     });
+    if (source && !names.includes(source)) {
+      cell.appendChild(document.createTextNode(` · 配额来源：${source}`));
+    }
     return cell;
   }
 
-  function quotaUpdatedCell(account, stale, refreshNotice) {
+  function quotaObservationAge(iso, nowMs = Date.now()) {
+    const observed = typeof iso === "string" && iso ? Date.parse(iso) : NaN;
+    if (!Number.isFinite(observed)) return "时间未知";
+    const elapsed = nowMs - observed;
+    if (elapsed < 0) return "时间超前";
+    if (elapsed < 60000) return "刚刚";
+    if (elapsed < 3600000) return `${Math.floor(elapsed / 60000)} 分钟前`;
+    if (elapsed < 86400000) return `${Math.floor(elapsed / 3600000)} 小时前`;
+    return `${Math.floor(elapsed / 86400000)} 天前`;
+  }
+
+  function quotaUpdatedCell(provider, account, stale, refreshNotice) {
     const cell = document.createElement("td");
     cell.className = "quota-updated-cell";
+    const details = document.createElement("details");
+    details.className = "quota-observation-details";
+    details.dataset.observationKey = JSON.stringify([provider.key, account.account_id, account.account_label,
+      account.account_state, account.account_state === "known" ? null : [...(account.machines || [])].sort()]);
+    const summary = document.createElement("summary");
+    summary.textContent = quotaObservationAge(account.updated_at);
+    summary.setAttribute("aria-label", `配额更新：${summary.textContent}，查看完整时间`);
+    details.appendChild(summary);
+    const exact = document.createElement("span");
+    exact.className = "quota-history-note";
+    const knownTime = typeof account.updated_at === "string" && account.updated_at && Number.isFinite(Date.parse(account.updated_at));
+    exact.textContent = knownTime ? `观测时间：${formatDate(account.updated_at)}` : "未取得观测时间";
+    details.appendChild(exact);
+    cell.appendChild(details);
+    const note = (text) => {
+      const node = document.createElement("span");
+      node.className = "quota-history-note";
+      node.textContent = text;
+      cell.appendChild(node);
+    };
     if (account.quota_source === "account_action") {
-      cell.appendChild(document.createTextNode(stale ? "本页查询 · 读数较旧" : "本页查询"));
-      cell.title = formatDate(account.updated_at);
-      const note = document.createElement("span");
-      note.className = "quota-history-note";
-      note.textContent = "机器归属与套餐仍按采集记录显示";
-      cell.appendChild(note);
+      note(stale ? "本页查询 · 读数较旧" : "本页查询");
+      const context = document.createElement("span");
+      context.className = "quota-history-note";
+      context.textContent = "机器归属与套餐仍按采集记录显示";
+      details.appendChild(context);
       return cell;
     }
     if (quotaPresence(account) === "remembered") {
-      cell.appendChild(document.createTextNode("机器采集 · 历史读数"));
-      return cell;
+      note("历史读数，不代表当前状态");
+    } else {
+      const invalidSource = (renderedQuotaRateLimits?.[provider.key]?.signed_out_machines || []).includes(account.reading_from);
+      if (invalidSource) note("配额来源的登录已失效；保留旧值");
+      if (refreshNotice) note(refreshNotice);
+      if (stale && !invalidSource) note("可能早于一次登录变更");
     }
-    const machines = account.machines || [];
-    const sourceIsUnambiguous = machines.length === 1 && machines[0] === account.reading_from;
-    const source = account.reading_from && !sourceIsUnambiguous ? ` · ${account.reading_from}` : "";
-    cell.appendChild(document.createTextNode(`机器采集${source}`));
-    if (refreshNotice) {
-      const note = document.createElement("span");
-      note.className = "quota-history-note";
-      note.textContent = refreshNotice;
-      cell.appendChild(note);
-    }
-    if (stale) {
-      const warn = document.createElement("span");
-      warn.className = "status-pill warn";
-      warn.textContent = "可能早于一次登录变更";
-      cell.appendChild(document.createTextNode(" "));
-      cell.appendChild(warn);
-    }
+    if (!account.reading_from) note("配额来源未知");
     return cell;
   }
 

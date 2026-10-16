@@ -816,6 +816,9 @@ button:disabled {
   margin-top: var(--sp-2);
 }
 
+.quota-observation-details > summary { cursor: pointer; white-space: nowrap; }
+.quota-observation-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
 .quota-machine-self {
   color: var(--ink);
   font-weight: 500;

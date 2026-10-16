@@ -2,6 +2,8 @@
 
 ## 2026-10-16
 
+- Replace the quota source column with relative observation age and expandable exact time; keep necessary source context beside machines and preserve visible reading qualifiers.
+
 - Omit the repeated quota source machine when the machine column already identifies it uniquely; preserve multi-machine and differing-source details.
 
 - Keep source descriptions and destination links together on narrow guide pages; simplify query labels, pricing coverage and expanded session details. Group network readings by source while retaining unknowns and diagnostics.
