@@ -1976,3 +1976,15 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   #quota-accounts .quota-window-reason { max-width: none; }
   #sync-summary { overflow-wrap: anywhere; }
 }
+
+/* Keep each source's explanation and destination together on narrow screens. */
+.network-provider + .network-provider { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
+.network-provider h3 { font-size: 14px; margin: 0 0 8px; }
+@media (max-width: 760px) {
+  .guide-source-table { min-width: 0; width: 100%; }
+  .guide-source-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .guide-source-table, .guide-source-table tbody, .guide-source-table tr, .guide-source-table th, .guide-source-table td { display: block; }
+  .guide-source-table tr { padding: 12px 0; border-top: 1px solid var(--line); }
+  .guide-source-table th, .guide-source-table td { border: 0; padding: 6px 8px; white-space: normal; }
+  .guide-source-table td::before { content: attr(data-label); display: block; color: var(--ink-muted); font-size: 12px; margin-bottom: 4px; }
+}

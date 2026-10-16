@@ -56,3 +56,5 @@ Earlier decisions remain in the source repository at the immutable commit linked
 - [20261014-fc37 — Count only events not successfully emitted](20261014-fc37-diagnostic-event-loss.md): accepted; implementation and production verification tracked separately.
 
 - [20261014-0d48 — Report orphan disposition using replay authority](20261014-0d48-authoritative-orphan-disposition.md): accepted; implementation and production verification tracked separately.
+
+- [20261016-3e7a](20261016-3e7a-full-reading-review.md)：完整全站阅读优化与同一覆盖图接续，独立 L1 放行；实施与未来遵循效果另验。

@@ -310,7 +310,7 @@
 
   function costCoverageText(coverage) {
     if (!coverage || !Number.isInteger(coverage.known) || !Number.isInteger(coverage.unknown)) return "金额已知与未知的记录数未提供";
-    return `金额已知：${integer(coverage.known)} 条记录 · 金额未知：${integer(coverage.unknown)} 条记录`;
+    return `金额记录：已知 ${integer(coverage.known)} · 未知 ${integer(coverage.unknown)}`;
   }
 
   function costReading(value, coverage) {
@@ -2358,42 +2358,35 @@
     const risk = data.risk;
     const spam = data.spam;
     const proxyEnvEntries = Object.entries(data.proxy_envs || {});
-    const score = risk && risk.score !== null && risk.score !== undefined
-      ? statusPill(risk.level === "high" ? "bad" : risk.level === "medium" ? "warn" : "ok", `${risk.score}/100 ${risk.level}`)
-      : statusPill("warn", sectionMessage(data, "risk") || "未查询");
-    const type = risk && risk.type ? escapeHtml(risk.type) : "—";
+    const present = value => value !== null && value !== undefined && value !== "";
+    const score = result => statusPill(result.level === "high" ? "bad" : result.level === "medium" ? "warn" : "ok", `${result.score}/100${result.level ? ` ${result.level}` : ""}`);
     const markedProxy = pub.proxy === true || risk?.marked_proxy === true ? true
       : pub.proxy === false || risk?.marked_proxy === false ? false : null;
-    const spamParsed = spam && (
-      spam.score !== null && spam.score !== undefined ||
-      spam.frequency !== null && spam.frequency !== undefined ||
-      spam.last_seen
-    );
-    const spamFallback = spam && spam.raw_lines && spam.raw_lines.length
-      ? spam.raw_lines.map(escapeHtml).join("<br>")
-      : "";
-    const spamScore = spamParsed && spam.score !== null && spam.score !== undefined
-      ? statusPill(spam.level === "high" ? "bad" : spam.level === "medium" ? "warn" : "ok", `${spam.score}/100 ${spam.level || ""}`.trim())
-      : spamFallback || sectionMessage(data, "spam") || "—";
-    const spamReports = spamParsed && spam.frequency !== null && spam.frequency !== undefined
-      ? escapeHtml(spam.frequency)
-      : "—";
-    const lastSpamReport = spamParsed && spam.last_seen ? escapeHtml(spam.last_seen) : "—";
+    const booleanReading = value => value === true ? statusPill("warn", "是") : value === false ? statusPill("ok", "否") : statusPill("warn", "未知");
+    const provider = (label, section, rows, rawLines = [], missing = []) => {
+      const error = sectionMessage(data, section);
+      return `<div class="network-provider"><h3>${label}</h3>${rows.length ? rows.join("") : error || rawLines.length ? "" : '<p class="scope-note">未取得读数</p>'}${rows.length && missing.length ? `<p class="scope-note">未取得：${missing.join("、")}</p>` : ""}${error ? `<p class="scope-note">${escapeHtml(error)}</p>` : ""}${rawLines.length ? `<p class="scope-note">${rawLines.map(escapeHtml).join("<br>")}</p>` : ""}</div>`;
+    };
+    const riskRows = [];
+    if (present(risk?.score)) riskRows.push(kvRow("风险分", score(risk)));
+    if (present(risk?.type)) riskRows.push(kvRow("类型", escapeHtml(risk.type)));
+    const spamRows = [];
+    if (present(spam?.score)) spamRows.push(kvRow("垃圾评分", score(spam)));
+    if (present(spam?.frequency)) spamRows.push(kvRow("举报次数", escapeHtml(String(spam.frequency))));
+    if (present(spam?.last_seen)) spamRows.push(kvRow("最近举报", escapeHtml(spam.last_seen)));
     const envs = proxyEnvEntries.length
       ? proxyEnvEntries.map(([key, value]) => `${escapeHtml(key)} = ${escapeHtml(value)}`).join("<br>")
-      : "—";
-    // The provider name belongs to the card, not to each row: repeated six
-    // times it filled the label column and wrapped every label onto two lines.
+      : "未记录代理环境变量";
     qs("#network-risk").innerHTML = [
-      kvRow("风险分", score),
-      kvRow("类型", type),
-      kvRow("标记为代理", markedProxy === true ? statusPill("warn", "是") : markedProxy === false ? statusPill("ok", "否") : statusPill("warn", "未知")),
-      kvRow("机房 IP", pub.hosting === true ? statusPill("warn", "是") : pub.hosting === false ? statusPill("ok", "否") : statusPill("warn", "未知")),
-      kvRow("垃圾评分", spamScore),
-      kvRow("举报次数", spamReports),
-      kvRow("最近举报", lastSpamReport),
-      kvRow("代理环境变量", envs),
-      '<p class="conclusion-note">风险分与类型来自 proxycheck，代理标记与机房判定来自 ip-api，垃圾评分来自 stopforumspam；代理环境变量读自服务端主机 shell。</p>',
+      provider("proxycheck · 风险", "risk", riskRows, risk?.raw_lines || (risk?.display && !present(risk?.score) ? [risk.display] : []), [!present(risk?.score) && "风险分", !present(risk?.type) && "类型"].filter(Boolean)),
+      '<div class="network-provider"><h3>代理与机房标记</h3>',
+      kvRow("标记为代理", booleanReading(markedProxy)),
+      kvRow("机房 IP", booleanReading(pub.hosting)),
+      '<p class="scope-note">代理标记与机房判定来自 ip-api。</p></div>',
+      provider("stopforumspam · 举报", "spam", spamRows, spam?.raw_lines || [], [!present(spam?.score) && "垃圾评分", !present(spam?.frequency) && "举报次数", !present(spam?.last_seen) && "最近举报"].filter(Boolean)),
+      '<div class="network-provider"><h3>服务端代理环境</h3>',
+      kvRow("环境变量", envs),
+      '<p class="scope-note">读自服务端主机 shell。</p></div>',
     ].join("");
   }
 
@@ -2418,7 +2411,7 @@
 
   function renderConclusions(data) {
     const items = (data.conclusions || []).slice().sort((a, b) => ({bad: 0, warn: 1, ok: 2}[a.level] ?? 3) - ({bad: 0, warn: 1, ok: 2}[b.level] ?? 3));
-    const note = '<details class="note-disclosure"><summary>规则与检测边界</summary><p><strong>高风险条件</strong></p><p>本地规则将以下任一情况判为「风险高」：</p><ul><li>检出本地 IPv6 地址。</li><li>检出国内 DNS 解析器。</li><li>风险分不低于 70。</li><li>服务端主机时区与公网 IP 时区不一致。</li></ul><p><strong>检测不完整</strong></p><ul><li>未检出高风险信号，但缺少公网、DNS 地域或时区结果时，风险状态为未知。</li><li>缺少风险分时，标为部分检测。</li></ul><p><strong>结论范围</strong></p><p>本地 IPv6 地址不证明公网泄漏。未检出高风险信号不保证服务可用。</p></details>';
+    const note = '<details class="note-disclosure"><summary>规则与检测边界</summary><p><strong>异常条件</strong></p><p>本地规则将以下任一情况标为「异常」：</p><ul><li>检出本地 IPv6 地址。</li><li>检出国内 DNS 解析器。</li><li>风险分不低于 70。</li><li>服务端主机时区与公网 IP 时区不一致。</li></ul><p><strong>检测不完整</strong></p><ul><li>未检出上述异常，但缺少公网、DNS 地域或时区结果时，风险状态为未知。</li><li>缺少风险分时，标为部分检测。</li></ul><p><strong>结论范围</strong></p><p>本地 IPv6 地址不证明公网泄漏。未检出上述异常不保证服务可用。</p></details>';
     if (!items.length) {
       qs("#network-conclusion").innerHTML = `<div class="empty-state">—</div>${note}`;
       return;
@@ -3135,7 +3128,7 @@
     const costReason = reason => ({usage_incomplete: "用量记录不完整", unknown_model: "模型价格未知",
       missing_rates: "缺少适用费率", unsupported_service_context: "服务模式无法定价",
       conflicting_service_context: "服务模式记录冲突", mode_unreported: "部分服务模式未记录，按标准模式估值",
-      invalid_recorded_cost: "源记录金额无效"}[reason] || "—");
+      invalid_recorded_cost: "源记录金额无效"}[reason] || "计价原因未识别");
     const incomplete = entries.filter(e => e.agent_id === "claude-code" && e.usage_quality === "incomplete").length;
     qs("#session-project").textContent = distinct("project").join("、") || "会话目录未记录";
     qs("#session-times").textContent = `${first === null ? "时间未知" : formatDate(first)} — ${last === null ? "时间未知" : formatDate(last)}`;
@@ -3145,9 +3138,9 @@
       <article><h3>用量事件数</h3><strong>${integer(events)}</strong><p>来自 ${integer(entries.length)} 条记录 · 非请求次数</p></article>
       <article><h3>观测跨度</h3><strong class="session-span">${span}</strong><p>首末记录之间 · 非活跃时长</p></article></div>
       <details class="panel session-metadata" ${readingState.metadata ? "open" : ""}><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
-        ${field("Agent", distinct("agent_id").join("、"))}${field("会话目录", distinct("project").join("、"))}
-        ${field("模型", models.join("、"))}${field("首条记录", first === null ? "" : formatDate(first))}${field("末条记录", last === null ? "" : formatDate(last))}
-      </dl><p class="scope-note"><strong>记录范围：</strong>该会话已留存的全部记录，不受列表时间窗口限制。</p><p class="scope-note"><strong>模型与计价：</strong>Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。</p><p class="scope-note"><strong>记录内容：</strong>这里不包含对话正文，也未关联 Gateway 尝试链。</p></details>
+        ${field("Agent", distinct("agent_id").join("、"))}
+        ${field("模型", models.join("、"))}
+      </dl><p class="scope-note"><strong>记录范围：</strong>该会话已留存的全部记录，不受列表时间窗口限制。</p><p class="scope-note"><strong>模型与计价：</strong>Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。</p><p class="scope-note"><strong>记录内容：</strong>这里仅包含用量记录，不包含对话正文。</p></details>
       <section class="panel"><div class="panel-head"><h2>用量明细</h2><span id="usage-count" class="status-line"></span></div>
       <div class="controls"><div class="field"><label for="usage-model">模型</label><select id="usage-model"><option value="">全部模型</option>${models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select></div><button id="usage-clear" type="button">清除筛选</button></div>
       <div class="table-wrap"><table><thead><tr><th>记录时间</th><th>模型</th><th class="numeric">输入</th><th class="numeric">输出</th><th class="numeric">缓存读取 / 写入</th><th class="numeric">成本</th><th>详情</th></tr></thead><tbody id="usage-body"></tbody></table></div>
@@ -3168,7 +3161,7 @@
       qs("#usage-body").innerHTML = rows.slice(page * 50, (page + 1) * 50).map((e, index) => `<tr>
         <td data-label="记录时间" class="nowrap">${escapeHtml(formatDate(e.timestamp))}</td><td data-label="模型">${escapeHtml(e.model)}</td>
         <td data-label="输入" class="numeric">${integer(e.input_tokens)}</td><td data-label="输出" class="numeric">${integer(e.output_tokens)}</td>
-        <td data-label="缓存读取 / 写入" class="numeric">${integer(e.cache_read_tokens)} / ${integer(e.cache_creation_tokens)}</td><td data-label="成本" class="numeric">${sessionEntryCost(e.cost_usd)}<br><small>${costBasis(e)}</small></td>
+        <td data-label="缓存读取 / 写入" class="numeric">${integer(e.cache_read_tokens)} / ${integer(e.cache_creation_tokens)}</td><td data-label="成本" class="numeric">${sessionEntryCost(e.cost_usd)}${e.cost_usd == null ? "" : `<br><small>${({recorded: "日志金额", nominal: "估算"}[e.cost_provenance?.basis] || "依据未知")}</small>`}</td>
         <td><button type="button" data-usage="${index}" aria-expanded="false">查看</button></td></tr>`).join("") || '<tr><td colspan="7">没有符合条件的记录。</td></tr>';
       qsa("[data-usage]").forEach(button => {
         const e = rows[page * 50 + Number(button.dataset.usage)];
@@ -3176,7 +3169,7 @@
         function expand() {
           const row = document.createElement("tr");
           row.className = "session-entry-detail";
-          row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><p class="scope-note">${escapeHtml(formatDate(e.timestamp))} · ${escapeHtml(e.model || "模型未记录")}</p><dl class="session-fields">${field("计价说明", costReason(e.cost_provenance?.reason))}${field("金额依据", costBasis(e))}${field("用量记录完整性", qualityText(e))}${field("用量事件数", String(e.usage_event_count ?? "未知"))}</dl><details class="entry-technical" ${readingState.technical.has(key) ? "open" : ""}><summary>技术证据 · ID、服务模式与价格来源</summary><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}</dl><p class="scope-note">ID 来自源日志，不能直接作为 Gateway 请求标识。</p></details></div></td>`;
+          row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><p class="scope-note">${escapeHtml(formatDate(e.timestamp))} · ${escapeHtml(e.model || "模型未记录")}</p><dl class="session-fields">${e.cost_provenance?.reason ? field("计价说明", costReason(e.cost_provenance.reason)) : ""}${field("金额依据", costBasis(e))}${field("用量记录完整性", qualityText(e))}${field("用量事件数", String(e.usage_event_count ?? "未知"))}</dl><details class="entry-technical" ${readingState.technical.has(key) ? "open" : ""}><summary>技术证据 · ID、服务模式与价格来源</summary><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}</dl><p class="scope-note">ID 来自源日志，用于核对原始记录。</p></details></div></td>`;
           row.querySelector("details").addEventListener("toggle", event => {
             if (event.currentTarget.open) readingState.technical.add(key); else readingState.technical.delete(key);
           });

@@ -309,3 +309,8 @@ MacStudio main reached `eadb0511ba998fadb5eca5f9455b01dcb6fed0d3`, deploying onl
 The actual `http://macstudio:39001/?range=30d` was read at 390×844 and 1440×1000. Seven historical account notes and their group heading stay associated at narrow scroll offsets 0/300/400/682px; desktop has one actual position with no overflow. Actual interactions expanded history and the batch workspace, selected Claude (2/11 quota records while nine batch cards remained), searched to 0/11 and cleared the filter. Five chart rows were visible at each width with the existing 96px padding. The final narrow screenshots were visually read; these checks cover the stated component states, not every page or business action. No API write was attempted, and authorization/send/remove/forced-refresh remain unexecuted. Final evidence: `/Users/lindong/.codex/artifacts/ui-coverage-loop-20261010/monitor-live/result.json` and sibling screenshots; the initial live failure is retained separately. No Git push was performed.
 
 2026-10-12: The read-only guide reuses the shared shell, panels, status cards and typography. Its source table scrolls within its own labeled region; long setup code wraps at 390px. Overview comparison uses the existing disclosure/table treatment; no new visual system was introduced. Synthetic and real 390px guide screenshots are recorded in the Web workflow deployment evidence.
+
+
+### 2026-10-16 全站内容复查
+
+沿用现有 Ark 参数，指南数据源表在 760px 及以下改为逐来源卡片；每卡保留来源、说明和入口，避免依靠横向滚动拼接。网络卡按来源分段；会话行内金额依据简写，完整依据保留在记录展开内容。金额覆盖同时保留已知与未知数量。范围与真实阅读记录见 [全站复查](references/ui-reading-review-20261015.md)。

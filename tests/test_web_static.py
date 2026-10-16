@@ -10,6 +10,35 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebStaticTests(unittest.TestCase):
+    def test_network_provider_readings_preserve_partial_zero_errors_and_raw(self):
+        script = r'''
+const fs=require("fs"), assert=require("assert"), node={innerHTML:""};
+global.document={readyState:"loading",addEventListener(){},querySelector(){return node;}};
+global.window={};
+eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { renderRiskNetwork,"));
+const render=data=>{window.AgentMonitor.renderRiskNetwork(data);return node.innerHTML;};
+let html=render({risk:null,spam:null,public:{},errors:[]});
+assert.equal((html.match(/未取得读数/g)||[]).length,2);
+assert(!html.includes('垃圾评分</div>'));assert(html.includes('未知'));
+html=render({public:{proxy:false,hosting:false},risk:{score:0,level:"low",marked_proxy:true},spam:{frequency:0},errors:[]});
+assert(html.includes('0/100 low'));assert(html.includes('举报次数</div><div class="value">0'));
+assert(html.includes('标记为代理</div><div class="value"><span class="status-pill warn">是'));
+assert(html.includes('机房 IP</div><div class="value"><span class="status-pill ok">否'));
+html=render({risk:{type:'<type>'},spam:{score:12,raw_lines:['<raw>']},errors:[{section:'risk',message:'<failed>'},{section:'spam',message:'partial'}]});
+for(const v of ['&lt;type&gt;','&lt;raw&gt;','&lt;failed&gt;','partial','12/100']) assert(html.includes(v),v);
+assert(!html.includes('<raw>'));assert(!html.includes('<failed>'));
+assert(html.includes('代理标记与机房判定来自 ip-api'));
+html=render({spam:{raw_lines:['未收录 低风险 ✓']},risk:{score:0,type:'住宅'},errors:[]});
+assert(html.includes('未收录 低风险 ✓'));assert(!html.includes('未取得读数'));
+html=render({spam:{raw_lines:['查询失败']},risk:{score:0,type:'住宅'},errors:[]});
+assert(html.includes('查询失败'));assert(!html.includes('未取得读数'));
+
+html=render({risk:null,spam:null,errors:[{section:'risk',message:'timeout'}]});
+assert(html.includes('timeout'));assert.equal((html.match(/未取得读数/g)||[]).length,1);
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_area_navigation_preserves_full_console_context(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");
