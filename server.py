@@ -637,7 +637,17 @@ class Handler(BaseHTTPRequestHandler):
                 if "expected_batch_id" not in payload:
                     raise codex_accounts.ActionError("请先读取当前批次再操作。")
                 ids, unavailable = manager.discover(_codex_action_catalog())
-                manager.start_batch(payload["expected_batch_id"], ids)
+                selected = ids
+                if "profile_ids" in payload:
+                    requested = payload["profile_ids"]
+                    if (not isinstance(requested, list) or not requested
+                            or any(not isinstance(pid, str) or not pid for pid in requested)
+                            or len(set(requested)) != len(requested)):
+                        raise codex_accounts.ActionError("请选择一个或多个不同的账号。")
+                    if not set(requested).issubset(ids):
+                        raise codex_accounts.ActionError("所选账号已不在当前登录记录中，请刷新后重新选择。", 409)
+                    selected = set(requested)
+                manager.start_batch(payload["expected_batch_id"], selected)
                 result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/batch-retry":
                 ids, unavailable = manager.discover(_codex_action_catalog())

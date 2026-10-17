@@ -62,6 +62,8 @@ Overview adds `attribution_windows` from the same date windows used by its fixed
 
 ## Preserved contracts
 
+The [task-oriented action extension](adr/20261017-82cb-task-oriented-web-actions.md) adds optional `profile_ids` to `batch-start`: supplied members must be nonempty, unique and entirely eligible; omission retains the legacy all-eligible behavior. A one-account new round uses the same batch path. Before replacing a manifest, excluded members of its published round retain their operation in the existing `batch_result` slot under the profile lock; a retention failure publishes and dispatches nothing. Existing CAS, global-idle and definitely-unsent-only retry guards remain.
+
 `codex_accounts.py` owns explicit, click-triggered Codex account actions through a dedicated app-server subprocess per active profile. `server.py` exposes same-origin account-action endpoints; `web/codex-accounts.js` renders state within the overview lifecycle. Private profile directories under `state/codex-accounts` contain managed credentials and the last operation, with a persistent per-profile file lock. Isolated HOME/config/work directories keep ordinary CLI credentials and project tools out of these operations. Only pending device authorization information and sanitized account/operation metadata reach the browser. No background weekly scheduler is installed.
 
 Message status and quota observation are separate: an interrupted transmission stays unknown, a successful message survives a quota-query failure, and quota-only refresh sends no message. The server timestamp remains authoritative; action results do not rewrite collected quotas, snapshots or account history. See the [design and acceptance boundary](adr/20261007-c814-codex-account-actions.md).

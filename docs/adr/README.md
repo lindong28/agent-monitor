@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261017-82cb: task-oriented Web actions](20261017-82cb-task-oriented-web-actions.md) | Accepted; selected account rounds, explicit action scopes and reading continuity |
 | [20261016-6b21: reader information](20261016-6b21-reader-information.md) | Accepted; task-specific regions, shared observation context and compact machine coverage |
 | [20261016-4e72: reading hierarchy](20261016-4e72-reading-hierarchy.md) | Accepted; task-first reading, explicit disclosures and responsive session records |
 | [20261015-9e31: product UI handoffs](20261015-9e31-product-ui-handoffs.md) | Accepted; unknown-cost drilldown, calendar links, quota sorting/readability and compact collection status |

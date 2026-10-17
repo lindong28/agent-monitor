@@ -194,7 +194,7 @@ assert.strictEqual(ui.chartReading(null, "USD"), "未知");
         script = r'''
 const fs = require("fs"), assert = require("assert");
 function node() {return {dataset: {}, children: [], textContent: "", addEventListener() {}, replaceChildren(...children) {this.children = children;}};}
-const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable"].map(id => [id, node()]));
+const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count"].map(id => [id, node()]));
 nodes["#codex-batch-status"].textContent = "正在读取账号…";
 const root = node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: node};
@@ -262,21 +262,23 @@ assert(nodes["#sync-machines"].innerHTML.includes("质量、历史范围与技�
         script = r'''
 const fs = require("fs"), assert = require("assert");
 class Node {
-  constructor(tag = "div") {this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; this.open = false;}
+  constructor(tag = "div") {this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; this.open = false; this.listeners = {};}
   append(...nodes) {for (const n of nodes) {n.parent = this; this.children.push(n);}}
+  prepend(n) {n.parent=this;this.children.unshift(n);}
+  setAttribute(k,v) {this[k]=v;}
   replaceChildren(...nodes) {this.children = []; this.append(...nodes);}
-  addEventListener() {}
+  addEventListener(event, listener) {this.listeners[event] = listener;}
   querySelector(tag) {for (const n of this.children) {if (n.tag === tag) return n; const nested = n.querySelector(tag); if (nested) return nested;} return null;}
   replaceWith(n) {const p = this.parent, index = p.children.indexOf(this); p.children[index] = n; n.parent = p;}
   remove() {this.parent.children.splice(this.parent.children.indexOf(this), 1);}
   insertBefore(n, ref) {if (n.parent) n.remove(); const index = ref ? this.children.indexOf(ref) : this.children.length; this.children.splice(index, 0, n); n.parent = this;}
 }
-const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable"].map(id => [id, new Node()]));
+const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count"].map(id => [id, new Node()]));
 const root = new Node(); root.querySelector = id => nodes[id];
-global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag)};
+global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag), createTextNode: text => {const n=new Node();n.textContent=text;return n;}};
 global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x}};
 let source = fs.readFileSync("web/codex-accounts.js", "utf8").replace("export function init()", "function init()");
-source = source.replace("  load();\n  window.AgentMonitor.pageInterval(load, 30000);", "  window.testRender = values => {accounts = values; render();};");
+source = source.replace("  load();\n  window.AgentMonitor.pageInterval(load, 30000);", "  window.testRender = values => {accounts = values; selectedIds = new Set(values.map(a => a.id)); render();};");
 eval(source); init();
 const oldTime = "2026-10-08T02:00:00.000Z";
 const values = [
@@ -299,6 +301,17 @@ values[0].operation.after.seven_day_used_pct = 9;
 window.testRender(values);
 assert(list.children[0].querySelector("details").open, "changed result must preserve detail expansion");
 assert(visible(list.children[0]).includes("7 天窗口已用") && visible(list.children[0]).includes("9%"));
+const selected = () => list.children.map(n => n.querySelector("input").checked);
+const first = list.children[0].querySelector("input");
+first.checked = false; first.listeners.change();
+assert(nodes["#codex-selection-count"].textContent.includes("1 / 2"));
+nodes["#codex-select-all"].listeners.click();
+assert.deepEqual(selected(), [true, true]);
+assert.strictEqual(list.children[0].querySelector("input"), first, "selection changes preserve focused input");
+first.checked = false; first.listeners.change();
+nodes["#codex-select-none"].listeners.click();
+assert.deepEqual(selected(), [false, false]);
+assert(nodes["#codex-selection-count"].textContent.includes("0 / 2"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

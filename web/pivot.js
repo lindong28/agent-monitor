@@ -145,6 +145,9 @@
     if (error) {
       AgentMonitor.qs("#pivot-panel").hidden = true;
       AgentMonitor.qs("#ranking-panel").hidden = true;
+      AgentMonitor.qs("#pivot-status").textContent = "未加载 · 日期无效";
+      const summary = AgentMonitor.qs("#query-summary");
+      if (summary) summary.textContent = AgentMonitor.qs("#metric").selectedOptions[0].textContent + " · " + error;
     }
     return !error;
   }
@@ -237,6 +240,21 @@
     AgentMonitor.setParam("start", dates.start || null);
     AgentMonitor.setParam("end", dates.end || null);
     syncFilterQuery();
+    renderPresetState();
+  }
+
+  function renderPresetState() {
+    const metric = AgentMonitor.qs("#metric").value;
+    let matched = false;
+    AgentMonitor.qsa(".preset-btn").forEach(button => {
+      const preset = presets[button.dataset.preset];
+      const dims = [preset.x, preset.group].filter(dim => dim !== "none");
+      const active = metric === preset.metric && JSON.stringify(dimensions) === JSON.stringify(dims);
+      button.setAttribute("aria-pressed", String(active));
+      matched ||= active;
+    });
+    const state = AgentMonitor.qs("#preset-state");
+    if (state) state.textContent = matched ? "预设只改变指标与分组，保留当前日期和筛选。" : "自定义指标与分组 · 日期和筛选仍适用";
   }
 
   function syncFilterQuery() {
@@ -263,6 +281,7 @@
   }
 
   async function loadPivot(force, allowSync, generation, filters = selectedFilters()) {
+    renderPresetState();
     const group_by = dimensions.join(",") || "none";
     const metric = AgentMonitor.qs("#metric").value;
     const unknownNote = AgentMonitor.qs("#unknown-cost-note");

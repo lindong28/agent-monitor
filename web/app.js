@@ -1001,6 +1001,9 @@
 
   function renderQuotaAccounts(rateLimits, options = {}) {
     const table = qs("#quota-accounts");
+    const reset = qs("#quota-clear");
+    if (reset) reset.hidden = quotaFilter.provider === "all" && !quotaFilter.search
+      && quotaFilter.window === "five_hour" && quotaFilter.sort === "default";
     if (!table) {
       return;
     }
@@ -1352,10 +1355,18 @@
       const action = document.createElement("button");
       action.type = "button";
       action.className = "quota-toggle codex-account-select";
-      action.textContent = "登录 / 发消息";
+      action.textContent = "账号操作";
       action.dataset.codexEmail = account.account_label;
       action.dataset.codexAccountId = account.account_id;
       actions.appendChild(action);
+      const query = document.createElement("button");
+      query.type = "button";
+      query.className = "quota-toggle";
+      query.textContent = "查询配额";
+      query.dataset.codexEmail = account.account_label;
+      query.dataset.codexAccountId = account.account_id;
+      query.dataset.codexAction = "refresh";
+      actions.appendChild(query);
     }
 
     if (quotaPresence(account) === "remembered") {
@@ -3153,7 +3164,7 @@
         ${field("Agent", distinct("agent_id").join("、"))}
         ${field("模型", models.join("、"))}
       </dl><p class="scope-note"><strong>记录范围：</strong>该会话已留存的全部记录，不受列表时间窗口限制。</p><p class="scope-note"><strong>模型与计价：</strong>Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。</p><p class="scope-note"><strong>记录内容：</strong>这里仅包含用量记录，不包含对话正文。</p></details>
-      <section class="panel"><div class="panel-head"><h2>用量明细</h2><span id="usage-count" class="status-line"></span></div>
+      <section class="panel" id="usage-section"><div class="panel-head"><h2 tabindex="-1" id="usage-heading">用量明细</h2><span id="usage-count" class="status-line"></span></div>
       <div class="controls"><div class="field"><label for="usage-model">模型</label><select id="usage-model"><option value="">全部模型</option>${models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select></div><button id="usage-clear" type="button">清除筛选</button></div>
       <div class="table-wrap"><table><thead><tr><th>记录时间</th><th>模型</th><th class="numeric">输入</th><th class="numeric">输出</th><th class="numeric">缓存读取 / 写入</th><th class="numeric">成本</th><th>详情</th></tr></thead><tbody id="usage-body"></tbody></table></div>
       <div class="pager"><button id="usage-prev" type="button">上一页</button><span id="usage-status" role="status"></span><button id="usage-next" type="button">下一页</button></div></section>`;
@@ -3164,6 +3175,7 @@
     select.value = models.includes(params().get("usage_model")) ? params().get("usage_model") : "";
     function render() {
       const rows = entries.filter(e => !select.value || e.model === select.value);
+      qs("#usage-clear").hidden = !select.value;
       page = Math.min(page, Math.max(0, Math.ceil(rows.length / 50) - 1));
       const next = params();
       if (select.value) next.set("usage_model", select.value); else next.delete("usage_model");
@@ -3174,7 +3186,7 @@
         <td data-label="记录时间" class="nowrap">${escapeHtml(formatDate(e.timestamp))}</td><td data-label="模型">${escapeHtml(e.model)}</td>
         <td data-label="输入" class="numeric">${integer(e.input_tokens)}</td><td data-label="输出" class="numeric">${integer(e.output_tokens)}</td>
         <td data-label="缓存读取 / 写入" class="numeric">${integer(e.cache_read_tokens)} / ${integer(e.cache_creation_tokens)}</td><td data-label="成本" class="numeric">${sessionEntryCost(e.cost_usd)}${e.cost_usd == null ? "" : `<br><small>${({recorded: "日志金额", nominal: "估算"}[e.cost_provenance?.basis] || "依据未知")}</small>`}</td>
-        <td><button type="button" data-usage="${index}" aria-expanded="false">查看</button></td></tr>`).join("") || '<tr><td colspan="7">没有符合条件的记录。</td></tr>';
+        <td><button type="button" data-usage="${index}" aria-expanded="false">用量依据</button></td></tr>`).join("") || '<tr><td colspan="7">没有符合条件的记录。</td></tr>';
       qsa("[data-usage]").forEach(button => {
         const e = rows[page * 50 + Number(button.dataset.usage)];
         const key = entryKey(e);
@@ -3194,7 +3206,7 @@
           if (button.getAttribute("aria-expanded") === "true") {
             button.closest("tr").nextElementSibling.remove();
             button.setAttribute("aria-expanded", "false");
-            button.textContent = "查看";
+            button.textContent = "用量依据";
             readingState.expanded.delete(key);
           } else { readingState.expanded.add(key); expand(); }
         });
@@ -3205,8 +3217,14 @@
     }
     select.addEventListener("change", () => { page = 0; render(); });
     qs("#usage-clear").addEventListener("click", () => { select.value = ""; page = 0; render(); });
-    qs("#usage-prev").addEventListener("click", () => { page--; render(); });
-    qs("#usage-next").addEventListener("click", () => { page++; render(); });
+    function turnPage(step) {
+      page += step;
+      render();
+      qs("#usage-heading").focus({preventScroll: true});
+      qs("#usage-section").scrollIntoView({block: "start"});
+    }
+    qs("#usage-prev").addEventListener("click", () => turnPage(-1));
+    qs("#usage-next").addEventListener("click", () => turnPage(1));
     render();
   }
 
@@ -3502,6 +3520,9 @@
       return false;
     }
     renderedRoute = routeKey(url);
+    // Start reading at the new page immediately. Its initializer may keep
+    // observing a background collection after useful data is already visible.
+    window.scrollTo({ top: 0, behavior: "auto" });
 
     try {
       await init();
@@ -3517,9 +3538,6 @@
           '<p class="error">页面未能完整加载，请重新加载页面。</p>',
         );
       }
-    }
-    if (pageIsCurrent(generation)) {
-      window.scrollTo({ top: 0, behavior: "auto" });
     }
     return true;
   }

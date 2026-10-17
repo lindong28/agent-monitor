@@ -75,6 +75,7 @@ eval(fs.readFileSync("web/app.js","utf8"));
 const source=fs.readFileSync("web/codex-accounts.js","utf8");
 const renderSource=source.slice(source.indexOf("  function renderBatch()"),source.indexOf("  batchStart.addEventListener"));
 const batchStart={},batchNext={},batchRetry={},batchStatus={},batchHelp={replaceChildren(...children){this.children=children;}};
+const root={querySelector(){return null;}}, selectedIds=new Set(['p']);
 const element=(tag,text)=>({tag,textContent:text});
 const unavailable=[],submittingBatch=false,timestamp=x=>x;
 const before={observed_at:"2026-10-14T00:00:00Z",seven_day_resets_at:Date.now()/1000+3600};
@@ -104,7 +105,7 @@ const text=n=>n.textContent+n.children.map(text).join(" ");
 const known=text(ui.quotaWindowCell(provider,ui.QUOTA_WINDOW_5H,{five_hour_used_pct:73,five_hour_resets_at:Date.now()/1000+3600}));
 assert(known.includes("73%"));assert(!known.includes("不适用"));
 const absent=text(ui.quotaWindowCell(provider,ui.QUOTA_WINDOW_5H,{}));
-assert(absent.includes("—"));assert(absent.includes("重置时间未知"));assert(!absent.includes("没有"));
+assert(absent.includes("用量与重置时间未知"));assert(!absent.includes("—"));assert(!absent.includes("没有"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

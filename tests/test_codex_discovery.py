@@ -110,6 +110,34 @@ class DiscoveryTests(unittest.TestCase):
         self.request()
         self.assertTrue(all(self.calls(a) == 1 for a in data["accounts"]))
 
+    def test_selected_rounds_send_only_selected_accounts_and_reject_invalid_selection(self):
+        self.source("live", "live@example.com")
+        self.history([("past", "past@example.com")])
+        accounts = self.request()[1]["accounts"]
+        first, second = accounts
+        status, data = self.request("/batch-start", {"expected_batch_id": None, "profile_ids": [first["id"]]})
+        self.assertEqual(status, 200)
+        self.wait()
+        self.assertEqual(self.calls(first), 1)
+        self.assertEqual(self.calls(second), 0)
+        batch_id = data["batch"]["id"]
+        self.assertEqual([item["profile_id"] for item in data["batch"]["items"]], [first["id"]])
+        # A lost-response replay cannot widen or repeat the accepted round.
+        self.request("/batch-start", {"expected_batch_id": None, "profile_ids": [second["id"]]})
+        self.assertEqual(self.calls(second), 0)
+        for selection in ([], None, "all", [first["id"], first["id"]], [123], [{}], ["missing"], [first["id"], "missing"]):
+            with self.subTest(selection=selection):
+                status, _ = self.request("/batch-start", {"expected_batch_id": batch_id, "profile_ids": selection})
+                self.assertIn(status, (400, 409))
+                self.assertEqual(self.manager.read_batch()["id"], batch_id)
+                self.assertEqual(self.calls(first), 1)
+                self.assertEqual(self.calls(second), 0)
+        status, _ = self.request("/batch-start", {"expected_batch_id": batch_id, "profile_ids": [first["id"], second["id"]]})
+        self.assertEqual(status, 200)
+        self.wait()
+        self.assertEqual(self.calls(first), 2)
+        self.assertEqual(self.calls(second), 1)
+
     def test_removal_excludes_next_round_and_retry_but_keeps_results(self):
         self.source("live", "live@example.com")
         self.history([("past", "past@example.com")])

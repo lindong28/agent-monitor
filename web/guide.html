@@ -46,7 +46,7 @@
         </nav>
       </aside>
       <main class="main guide-main">
-        <div class="page-toolbar"><h1 class="page-title">使用与接入</h1><button id="refresh" type="button" class="btn">重新检查状态</button></div>
+        <div class="page-toolbar"><h1 class="page-title">使用与接入</h1></div>
         <p class="guide-intro">首次使用从「首次接入」开始；已有数据时，按「查找证据」中的问题进入对应页面。</p>
         <div class="guide-layout">
           <aside class="guide-toc" aria-label="本页目录"><span class="nav-caption">本页目录</span><a href="#sources">数据来源</a><a href="#collection">采集状态</a><a href="#setup">首次接入</a><a href="#questions">查找证据</a></aside>
@@ -61,7 +61,7 @@
           </tbody></table></div>
         </section>
         <section class="panel" id="collection">
-          <h2>当前采集状态</h2>
+          <div class="panel-head"><h2>当前采集状态</h2><button id="refresh" type="button" class="btn">更新采集状态</button></div>
           <p class="scope-note">“机器快照可读”表示能够读取该机器已采集的数据，不表示每种来源都有数据，也不保证历史完整。无匹配记录不等于尚未接入。</p>
           <div class="panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
           <details class="note-disclosure"><summary>查看各机器的采集详情</summary><div id="sync-machines" class="sync-machines"></div></details>

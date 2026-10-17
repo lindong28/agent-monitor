@@ -32,7 +32,7 @@ function node(tag = 'div') {
   });
   return n;
 }
-const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quota-match-count','quota-signed-out'];
+const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quota-window','quota-sort','quota-match-count','quota-signed-out'];
 const nodes = Object.fromEntries(ids.map(id=>['#'+id,node(id==='quota-accounts'?'table':'div')]));
 const buttons = ['all','claude','codex'].map(p=> {const b=node('button'); b.dataset.quotaProvider=p; return b;});
 nodes['#quota-explorer'].children=buttons;
@@ -164,7 +164,7 @@ assert(table.tBodies.find(b=>b.className==='quota-history').hidden);
 buttons[2].click();
 assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'bob');
 assert(table.textContent.includes('fixture failure')); assert(!nodes['#quota-signed-out'].hidden);
-assert(table.textContent.includes('登录 / 发消息')); assert(table.textContent.includes('37%'));
+assert(table.textContent.includes('账号操作')); assert(table.textContent.includes('查询配额')); assert(table.textContent.includes('37%'));
 ui.renderQuotaAccounts(data); assert.equal(rows().length,1); assert.equal(buttons[2].attributes['aria-pressed'],'true');
 search('nobody'); assert(table.textContent.includes('没有匹配的配额记录')); assert(table.textContent.includes('fixture failure'));
 nodes['#quota-clear'].click(); assert.equal(nodes['#quota-search'].value,''); assert(count().includes('匹配 5 / 5'));
@@ -173,8 +173,14 @@ search('old-b'); assert(count().includes('匹配 1 / 5')); assert(count().includ
 search('past'); assert(table.textContent.includes('移除')); assert.strictEqual(ui.snapshot(),data);
 // The delete request can finish after the user hides its row with a filter.
 search('bob'); assert.equal(rows().length,1);
+nodes['#quota-window'].value='seven_day'; nodes['#quota-window'].listeners.change();
+nodes['#quota-sort'].value='remaining_desc'; nodes['#quota-sort'].listeners.change();
+assert.equal(nodes['#quota-clear'].hidden,false);
 ui.removeRenderedAccount('claude','past','2026-01-01T00:00:00Z');
 nodes['#quota-clear'].click(); assert(count().includes('匹配 4 / 4')); assert(table.textContent.includes('bob@example.test')); assert(table.textContent.includes('alice@example.test'));
+assert.equal(nodes['#quota-window'].value,'five_hour','reset restores the contracted default window');
+assert.equal(nodes['#quota-sort'].value,'default','reset restores the contracted default order');
+assert.equal(nodes['#quota-clear'].hidden,true,'no active filter needs no reset action');
 assert.equal(JSON.stringify(data),original);
 // A client-side route return replaces controls while retaining module state.
 search('bob');

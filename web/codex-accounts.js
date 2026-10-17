@@ -38,6 +38,7 @@ export function init() {
   let batch = null;
   let unavailable = [];
   let submittingBatch = false;
+  let selectedIds = null;
   let lastBatchStatus = "";
   const controller = new AbortController();
 
@@ -67,6 +68,8 @@ export function init() {
       const [data] = await Promise.all([request(), window.AgentMonitor.ensureTimezone()]);
       if (!current()) return;
       accounts = data.accounts;
+      if (selectedIds === null) selectedIds = new Set(accounts.filter(a => a.eligible !== false).map(a => a.id));
+      else selectedIds = new Set([...selectedIds].filter(id => accounts.some(a => a.id === id && a.eligible !== false)));
       batch = data.batch;
       unavailable = data.unavailable_accounts || [];
       window.AgentMonitor.updateCodexQuotaReadings?.(accounts);
@@ -111,34 +114,49 @@ export function init() {
     return node;
   }
 
-  async function performBatch(action) {
+  async function performBatch(action, ids) {
     if (submittingBatch) return;
+    // Confirmation and submission must refer to the same members and CAS.
+    const payload = action === "batch-start"
+      ? { expected_batch_id: batch?.id ?? null, profile_ids: ids || [...selectedIds] }
+      : { batch_id: batch.id };
+    if (action === "batch-start") {
+      const targets = accounts.filter(a => payload.profile_ids.includes(a.id));
+      if (!targets.length) return;
+      const identities = targets.map(a => `${a.email}（${a.account_id}）`).join("\n");
+      if (!window.confirm(`开始新一轮，向以下 ${targets.length} 个账号各发送一条 “Please reply with OK.”？\n\n${identities}\n\n会使用账号额度；这不是继续未发送账号，之前已发送的账号也会再次发送。`)) return;
+    }
     submittingBatch = true;
-    renderBatch();
+    render();
     notice.textContent = "正在提交批次…";
+    let failure = "";
     try {
-      await request(action, action === "batch-start" ? { expected_batch_id: batch?.id ?? null } : { batch_id: batch.id });
+      await request(action, payload);
       if (current()) notice.textContent = "";
     } catch (error) {
-      if (current() && error.name !== "AbortError") notice.textContent = error.message + " 刷新会保留已接收的批次，请先查看结果。";
+      if (current() && error.name !== "AbortError") failure = error.message + " 刷新会保留已接收的批次，请先查看结果。";
     } finally {
       submittingBatch = false;
       if (current()) await load();
+      if (current() && failure) notice.textContent = failure;
     }
   }
 
   function renderBatch() {
     const busy = accounts.some((account) => account.busy);
-    const count = accounts.filter((account) => account.eligible !== false).length;
+    const eligible = accounts.filter((account) => account.eligible !== false);
+    const count = eligible.filter(account => selectedIds?.has(account.id)).length;
+    const selectionCount = root.querySelector("#codex-selection-count");
+    if (selectionCount) selectionCount.textContent = `已选 ${count} / ${eligible.length} 个账号`;
     batchStart.hidden = Boolean(batch);
-    batchStart.textContent = `给${unavailable.length ? "可确认身份的" : "全部"} ${count} 个账号发送`;
+    batchStart.textContent = `给所选 ${count} 个账号发送`;
     batchStart.disabled = submittingBatch || busy || !count;
     batchNext.hidden = !batch;
-    batchNext.textContent = `开始新一轮发送 · ${unavailable.length ? "可确认身份的" : "全部"} ${count} 个账号`;
+    batchNext.textContent = `开始新一轮 · 所选 ${count} 个账号`;
     batchNext.disabled = submittingBatch || busy || !count;
     batchRetry.hidden = true;
     if (!batch) {
-      batchStatus.textContent = count ? `发现 ${count} 个有登录记录的账号；发送前会检查登录状态。` : "尚未发现可发送的 Codex 登录账号。";
+      batchStatus.textContent = eligible.length ? `${eligible.length} 个可操作账号；发送前会检查登录状态。` : "尚未发现可发送的 Codex 登录账号。";
       batchHelp.replaceChildren(
         element("p", "账号来自当前及历史登录记录，无需手动添加。"),
         element("p", "系统会检查并复用已保存的登录状态。需要授权时，系统逐个显示账号的设备码；完成或取消后，再处理下一个账号。")
@@ -166,7 +184,7 @@ export function init() {
     for (const [key, label] of Object.entries({ waiting: "等待授权", queued: "授权排队", running: "处理中", unsent: "未发送", unknown: "结果未知", failed: "发送失败" })) {
       if (statuses[key]) parts.push(`${label} ${statuses[key]}`);
     }
-    parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`, `新一轮候选 ${count} 个账号`);
+    parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`);
     batchStatus.textContent = parts.join(" · ");
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch;
@@ -179,7 +197,7 @@ export function init() {
         : "继续发送：本轮没有可以继续发送的账号。",
       "刷新：刷新页面或仅查询配额不会重发消息。",
       ...(statuses.unknown || statuses.failed ? ["结果未知或发送失败的账号可能已消耗额度，系统不会自动重试。"] : []),
-      `再次发送：确认配额已重置后，如需再次发送，请点击「${batchNext.textContent}」。系统会向当前及历史登录记录中的账号发送消息，不会自动判断配额是否已重置。`,
+      `再次发送：选择账号后，点击「${batchNext.textContent}」。系统不会自动判断配额是否已重置；发送前请核对所选账号。`,
     ];
     batchHelp.replaceChildren(...help.map(text => element("p", text)));
   }
@@ -187,6 +205,14 @@ export function init() {
   batchStart.addEventListener("click", () => performBatch("batch-start"));
   batchNext.addEventListener("click", () => performBatch("batch-start"));
   batchRetry.addEventListener("click", () => performBatch("batch-retry"));
+  root.querySelector("#codex-select-all").addEventListener("click", () => {
+    selectedIds = new Set(accounts.filter(a => a.eligible !== false).map(a => a.id));
+    render();
+  });
+  root.querySelector("#codex-select-none").addEventListener("click", () => {
+    selectedIds.clear();
+    render();
+  });
 
   function render() {
     renderBatch();
@@ -207,10 +233,12 @@ export function init() {
       const batchItem = batch?.items.find((item) => item.profile_id === account.id);
       const latestReading = window.AgentMonitor.latestCodexQuotaReading?.(account) || account.operation?.after;
       const resetLabel = window.AgentMonitor.formatQuotaReset?.(latestReading?.seven_day_resets_at);
-      const signature = JSON.stringify([account, batchItem, resetLabel]);
+      const signature = JSON.stringify([account, batchItem, resetLabel, submittingBatch, accounts.some(a => a.busy)]);
       const old = existing.get(account.id);
       existing.delete(account.id);
       if (old?.dataset.signature === signature) {
+        const checkbox = old.querySelector("input");
+        if (checkbox) checkbox.checked = selectedIds.has(account.id);
         if (list.children[index] !== old) list.insertBefore(old, list.children[index] || null);
         continue;
       }
@@ -224,6 +252,19 @@ export function init() {
         : ["partial", "login", "login_queued"].includes(op?.stage) ? "warn"
         : account.busy ? "info" : "identity";
       heading.append(element("strong", account.email), element("span", op ? STAGES[op.stage] || op.stage : "尚未操作", "status-pill " + tone));
+      if (account.eligible !== false) {
+        const label = element("label", undefined, "codex-select-account");
+        const checkbox = element("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = selectedIds.has(account.id);
+        checkbox.setAttribute("aria-label", `选择 ${account.email}（${account.account_id}）`);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) selectedIds.add(account.id); else selectedIds.delete(account.id);
+          renderBatch();
+        });
+        label.append(checkbox, document.createTextNode("选择"));
+        heading.prepend(label);
+      }
       card.append(heading);
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "账号与操作详情"));
@@ -232,6 +273,8 @@ export function init() {
       if (account.account_id) (duplicateEmail ? card : details).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
       details.append(element("p", account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
       if (batchItem) heading.append(element("span", `本轮：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
+      const retained = account.batch_result;
+      if (retained && retained.batch_id !== batch?.id) details.append(element("p", `保留的批次结果：${MESSAGE_STATUS[retained.message_status] || "状态未知"} · 开始于 ${timestamp(retained.started_at)}`, "quota-scope"));
       if (op) {
         if (op.stage !== "succeeded") card.append(element("p", op.detail));
         details.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
@@ -256,7 +299,13 @@ export function init() {
         }
       }
       const controls = element("div", undefined, "codex-account-controls");
-      if (!batchItem && account.eligible !== false) controls.append(button(account.has_credentials ? "发送一条消息" : "登录并发送一条消息", "start", account));
+      if (account.eligible !== false) {
+        const send = element("button", "向此账号发送一条消息", "btn");
+        send.type = "button";
+        send.disabled = submittingBatch || accounts.some(a => a.busy);
+        send.addEventListener("click", () => performBatch("batch-start", [account.id]));
+        controls.append(send);
+      }
       controls.append(button("仅刷新配额", "refresh", account));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials) {
@@ -282,6 +331,11 @@ export function init() {
     if (!current()) return;
     const account = accounts.find((value) => value.account_id === target.dataset.codexAccountId
       && value.email.toLowerCase() === target.dataset.codexEmail.toLowerCase());
+    if (target.dataset.codexAction === "refresh") {
+      if (!account) { notice.textContent = "未找到这个账号的操作记录，请重新同步后再试。"; }
+      else if (account.busy) { notice.textContent = "这个账号已有操作正在进行，请先查看进度。"; }
+      else await perform("refresh", account.id, target);
+    }
     const card = account && Array.from(list.children).find((node) => node.dataset.id === account.id);
     (card || root).scrollIntoView({ block: "nearest" });
     if (card) { card.tabIndex = -1; card.focus({ preventScroll: true }); }

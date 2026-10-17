@@ -586,6 +586,18 @@ class Manager:
                 batch = {"id": str(uuid.uuid4()), "created_at": now(), "profile_ids": [a["id"] for a in accounts]}
                 prepared = []
                 try:
+                    # A subset round can leave a former member outside the new
+                    # manifest. Preserve its published result before quota-only
+                    # refresh later replaces that member's active operation.
+                    if current:
+                        for pid in set(current["profile_ids"]) - set(batch["profile_ids"]):
+                            directory = self.directory(pid)
+                            with lock_file(directory / ".lock"):
+                                record = self.read(directory)
+                                previous = record.get("operation")
+                                if previous and previous.get("batch_id") == published_id:
+                                    record["batch_result"] = previous
+                                    self.save(directory, record)
                     for pid in batch["profile_ids"]:
                         prepared.append(self.prepare(pid, published_id=published_id, batch_id=batch["id"]))
                     write_record(self.root / "batch.json", batch)

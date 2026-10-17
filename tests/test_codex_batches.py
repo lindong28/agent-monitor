@@ -70,6 +70,36 @@ class BatchTests(unittest.TestCase):
         for pid in ids:
             self.assertEqual(self.calls(pid), 2)
 
+    def test_subset_round_retains_excluded_account_result_through_quota_refresh(self):
+        first, second = self.add(1), self.add(2)
+        old = self.manager.start_batch(None)["batch"]["id"]
+        self.wait()
+        self.manager.start_batch(old, {second})
+        self.wait()
+        self.manager.start(first, refresh_only=True)
+        self.wait()
+        record = self.manager.view(self.manager.directory(first))
+        self.assertEqual(record["batch_result"]["batch_id"], old)
+        self.assertEqual(record["batch_result"]["message_status"], "succeeded")
+        self.assertEqual(self.calls(first), 1)
+        self.assertEqual(self.calls(second), 2)
+
+    def test_subset_preservation_failure_does_not_publish_or_send(self):
+        first, second = self.add(1), self.add(2)
+        old = self.manager.start_batch(None)["batch"]["id"]
+        self.wait()
+        original_save = self.manager.save
+        def fail_preservation(directory, record):
+            if record["id"] == first and record.get("batch_result", {}).get("batch_id") == old:
+                raise OSError("fixture retention failure")
+            return original_save(directory, record)
+        with mock.patch.object(self.manager, "save", side_effect=fail_preservation):
+            with self.assertRaises(OSError):
+                self.manager.start_batch(old, {second})
+        self.assertEqual(self.manager.read_batch()["id"], old)
+        self.assertEqual(self.calls(first), 1)
+        self.assertEqual(self.calls(second), 1)
+
     def test_mixed_outcomes_and_quota_refresh_keep_message_results(self):
         good = self.add(1)
         partial = self.add(2, "quota_failure")

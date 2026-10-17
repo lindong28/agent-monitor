@@ -58,7 +58,7 @@
               <option value="2y">近 2 年</option>
               <option value="all">全部</option>
             </select>
-            <button id="refresh" class="icon-btn" type="button" title="刷新" aria-busy="false">刷新</button>
+            <button id="refresh" class="icon-btn" type="button" title="更新统计与配额" aria-busy="false">更新统计与配额</button>
           </div>
         </div>
         <details id="sync-panel" class="sync-panel" aria-label="机器同步状态">
@@ -105,7 +105,7 @@
             <div class="panel-head">
               <h2>成本趋势</h2>
               <span id="cost-over-time-meta" class="status-line">—</span>
-              <a id="cost-over-time-link" class="panel-link" href="/explore?x=day&group=agent&metric=cost">透视</a>
+              <a id="cost-over-time-link" class="panel-link" href="/explore?x=day&group=agent&metric=cost">按来源分析成本</a>
             </div>
             <details class="note-disclosure">
               <summary>成本怎么算，哪些用量未计入</summary>
@@ -131,7 +131,7 @@
             <article class="panel">
               <div class="panel-head">
                 <h2>本周会话目录成本</h2>
-                <a id="top-projects-link" class="panel-link" href="/explore?x=project&group=none&metric=cost">透视</a>
+                <a id="top-projects-link" class="panel-link" href="/explore?x=project&group=none&metric=cost">查看目录成本</a>
               </div>
               <p class="scope-note">按会话启动目录归类，可能显示其 Git 仓库标识；跨项目工作不拆分费用。</p>
               <div class="chart-box short"><canvas id="top-projects-chart" role="img" aria-label="本周会话目录成本；完整读数见下方数据表"></canvas></div>
@@ -143,7 +143,7 @@
             <article class="panel">
               <div class="panel-head">
                 <h2>本月模型 token 占比</h2>
-                <a id="model-mix-link" class="panel-link" href="/explore?x=model&group=agent&metric=total">透视</a>
+                <a id="model-mix-link" class="panel-link" href="/explore?x=model&group=agent&metric=total">查看模型用量</a>
               </div>
               <div class="chart-box short"><canvas id="model-mix-chart" role="img" aria-label="本月模型 token 占比；完整读数见下方数据表"></canvas></div>
             <details id="model-mix-data" class="chart-data-disclosure">
@@ -155,26 +155,6 @@
           <section class="kpi-group" aria-labelledby="kpi-quota-title">
             <h2 id="kpi-quota-title" class="kpi-group-title">配额用量</h2>
             <p class="quota-scope">配额按账号计量，不跨账号求和。服务商分别使用 5 小时和 7 天配额窗口；页面日期范围不改变这些窗口。</p>
-            <details id="codex-account-actions" class="codex-account-actions">
-              <summary>Codex 账号操作 · 批量发送<span id="codex-batch-status" role="status" aria-live="polite">正在读取账号…</span></summary>
-              <div class="codex-batch-summary">
-                <p class="quota-scope">向当前及历史登录账号各发送一条 “Please reply with OK.”，会使用账号额度；需要授权的账号不阻塞其他账号。</p>
-                <div class="codex-account-controls">
-                  <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
-                  <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
-                  <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
-                </div>
-                <details class="note-disclosure">
-                  <summary>如何授权、继续发送或开始新一轮</summary>
-                  <div id="codex-batch-help" class="quota-scope"></div>
-                  <p class="quota-scope">需要授权时，先在账号安全设置中启用设备码登录，再打开对应账号卡片中的 OpenAI 官方授权页并填写设备码。确认登录账号与卡片邮箱一致后完成授权。</p>
-                </details>
-              </div>
-              <div id="codex-account-unavailable" role="status" aria-live="polite"></div>
-              <p id="codex-account-notice" role="status" aria-live="polite"></p>
-              <div id="codex-account-list"></div>
-              <p class="quota-scope">配额表采用同一账号最新的查询或采集读数，并标明「本页查询」来源；机器归属与套餐仍按机器记录显示。仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>
-            </details>
             <div id="quota-explorer" class="quota-explorer">
               <div class="quota-provider-filter" role="group" aria-label="配额服务商">
                 <button type="button" class="btn" data-quota-provider="all" aria-pressed="true">全部</button>
@@ -186,7 +166,7 @@
               </label>
               <label for="quota-window">排序窗口 <select id="quota-window"><option value="five_hour">5 小时配额窗口</option><option value="seven_day">7 天配额窗口</option></select></label>
               <label for="quota-sort">排序 <select id="quota-sort"><option value="default">默认顺序</option><option value="remaining_desc">剩余额度多优先</option><option value="remaining">剩余额度少优先</option><option value="reset">即将重置优先</option><option value="observed">最近观测优先</option></select></label>
-              <button id="quota-clear" type="button" class="btn">清空筛选</button>
+              <button id="quota-clear" type="button" class="btn" hidden>重置筛选与排序</button>
             </div>
             <p id="quota-match-count" class="quota-scope" role="status" aria-live="polite"></p>
             <p id="quota-signed-out" class="quota-scope" hidden></p>
@@ -208,6 +188,27 @@
               </thead>
             </table>
             </div>
+            <details id="codex-account-actions" class="codex-account-actions">
+              <summary>Codex 账号操作 · 批量发送<span id="codex-batch-status" role="status" aria-live="polite">正在读取账号…</span></summary>
+              <div class="codex-batch-summary">
+                <p class="quota-scope">向选中的账号各发送一条 “Please reply with OK.”，会使用账号额度；需要授权的账号不阻塞其他账号。</p>
+                <div class="codex-account-controls">
+                  <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
+                  <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
+                  <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
+                </div>
+                <details class="note-disclosure">
+                  <summary>如何授权、继续发送或开始新一轮</summary>
+                  <div id="codex-batch-help" class="quota-scope"></div>
+                  <p class="quota-scope">需要授权时，先在账号安全设置中启用设备码登录，再打开对应账号卡片中的 OpenAI 官方授权页并填写设备码。确认登录账号与卡片邮箱一致后完成授权。</p>
+                </details>
+              </div>
+              <div id="codex-account-unavailable" role="status" aria-live="polite"></div>
+              <p id="codex-account-notice" role="status" aria-live="polite"></p>
+              <div class="codex-account-controls"><button id="codex-select-all" type="button" class="btn">全选可发送账号</button><button id="codex-select-none" type="button" class="btn">取消选择</button><span id="codex-selection-count" role="status"></span></div>
+              <div id="codex-account-list"></div>
+              <p class="quota-scope">配额表采用同一账号最新的查询或采集读数，并标明「本页查询」来源；机器归属与套餐仍按机器记录显示。仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>
+            </details>
           </section>
           <div id="codex-five-hour-compat" hidden aria-hidden="true">
             <span id="codex-five-hour"></span>

@@ -311,6 +311,10 @@ button:active:not(:disabled) {
 .ranking-dimensions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px 16px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ranking-dimensions small { display: block; color: var(--ink-muted); font-weight: 400; }
 .query-summary { overflow-wrap: anywhere; line-height: 1.7; }
+.preset-btn[aria-pressed="true"] { background: var(--accent); color: white; border-color: var(--accent); }
+.query-dates { margin-block: var(--sp-5); flex-wrap: wrap; }
+#usage-section { scroll-margin-top: 80px; }
+.codex-select-account { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .query-options { margin-bottom: 16px; }
 .query-options > summary { cursor: pointer; margin-bottom: 12px; color: var(--accent-ink); }
 #project-search { min-width: 0; width: 100%; margin-bottom: 8px; }
@@ -1814,6 +1818,12 @@ button, select, input, .field label { font-size: 14px; line-height: 22px; }
 .scope-note, .quota-scope, .status-line, .kpi-sub { font-size: 12px; line-height: 20px; }
 .kpi-label { font-size: 14px; line-height: 22px; }
 .kpi-value, .session-metrics strong { font-size: 32px; line-height: 40px; }
+@media (max-width: 540px) {
+  .session-metrics { grid-template-columns: 1fr; }
+  .session-metrics article { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  .session-metrics article:last-child { border-bottom: 0; }
+  .session-metrics strong { white-space: nowrap; font-size: 24px; line-height: 32px; }
+}
 table th { font-size: 12px; line-height: 20px; letter-spacing: 0; text-transform: none; }
 table td { font-size: 14px; line-height: 22px; }
 .nav a[aria-current="page"] { background: var(--bg-active); color: var(--ink); }
