@@ -1,5 +1,7 @@
 # Product visual design
 
+2026-10-18：配额比较与账号执行各保留一个区域入口，移除表格行内的账号操作/查询快捷按钮；操作面板标题为“Codex 账号操作”。沿用现有控制台宽度与视觉参数。决定见 [71f2](adr/20261018-71f2-focused-account-actions.md)。
+
 This mutable record describes the shared visual layer and its observed application. Future pages inherit this layer; page-specific task layouts and business contracts remain in their existing owners.
 
 ## Effective design

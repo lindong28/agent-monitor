@@ -1351,24 +1351,6 @@
     const actions = document.createElement("div");
     actions.className = "quota-account-links";
 
-    if (provider.key === "codex" && account.account_state === "known" && account.account_label) {
-      const action = document.createElement("button");
-      action.type = "button";
-      action.className = "quota-toggle codex-account-select";
-      action.textContent = "账号操作";
-      action.dataset.codexEmail = account.account_label;
-      action.dataset.codexAccountId = account.account_id;
-      actions.appendChild(action);
-      const query = document.createElement("button");
-      query.type = "button";
-      query.className = "quota-toggle";
-      query.textContent = "查询配额";
-      query.dataset.codexEmail = account.account_label;
-      query.dataset.codexAccountId = account.account_id;
-      query.dataset.codexAction = "refresh";
-      actions.appendChild(query);
-    }
-
     if (quotaPresence(account) === "remembered") {
       const remove = document.createElement("button");
       remove.type = "button";
@@ -2693,8 +2675,18 @@
     let activeLoads = 0;
     async function load(force, background = false) {
       if (background && activeLoads) return;
-      activeLoads += 1;
       const generation = ++sessionsGeneration;
+      const start = qs("#session-start"), end = qs("#session-end");
+      const dateError = getRange() !== "custom" ? ""
+        : !start.value || !end.value ? "请选择起始和终止日期。"
+        : ![start, end].every(input => /^(?!0000)\d{4}-\d{2}-\d{2}$/.test(input.value) && input.checkValidity()) ? "请选择有效日期（年份 0001–9999）。"
+        : start.value > end.value ? "起始日期不能晚于终止日期。" : "";
+      if (dateError) {
+        sessionsView.status = "error";
+        renderSessionState("error", dateError);
+        return;
+      }
+      activeLoads += 1;
       sessionsView.status = "loading";
       renderSessionState("loading");
       try {
@@ -2755,7 +2747,7 @@
     [["start", "#session-start"], ["end", "#session-end"]].forEach(([key, selector]) => {
       const input = qs(selector);
       if (!input) return;
-      input.value = params().get(key) || new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Shanghai"});
+      input.value = params().get(key) || (params().get("range") === "custom" ? "" : new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Shanghai"}));
       input.addEventListener("change", () => { setParam(key, input.value); load(false); });
     });
     qs("#range")?.addEventListener("change", () => {

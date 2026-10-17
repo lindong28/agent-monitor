@@ -1,5 +1,7 @@
 # Task-oriented Web actions
 
+Status: quota-row navigation/query choice superseded by [71f2](20261018-71f2-focused-account-actions.md); remaining behavior accepted.
+
 The product review follows the existing personal-monitor tasks in `docs/product-spec.md`: compare quota before choosing an account, drill from aggregate usage to retained evidence, and distinguish a refresh from a new send. The definition remains an alignment draft; this change does not add team administration or alter accounting.
 
 Keep the quota comparison before the account panel. Name row navigation “账号操作” and provide an explicit quota query beside it. Retain the panel's batch progress and per-account results. Move the Guide status refresh into its status section, name network refresh “重新检测”, and name Overview, Explore and Sessions refresh “更新统计与配额”: all three force paths also request quota. Keep Explore's five presets, show the matching preset/custom state, and expose dates without opening advanced controls. Chart drilldowns describe their destinations. Session evidence toggles name their content; manual pagination returns to the usage heading, while background refresh does not move the reader.

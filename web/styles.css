@@ -1506,6 +1506,11 @@ td.numeric {
   white-space: normal;
 }
 
+.conclusion-list .status-pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .status-pill.ok {
   background: #dff3e6;
   color: var(--ok);

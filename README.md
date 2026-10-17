@@ -108,7 +108,7 @@ Hub launchd bootstrap retries explicit nonzero failures at most three times, wit
 
 ## Codex account actions
 
-Compare quota before opening the account panel. The quota row now offers **账号操作** to locate its card and **查询配额** for a quota-only request. Select one or more accounts and confirm **给所选 N 个账号发送**; the confirmation lists the fixed message, email/workspace identities and quota use. **开始新一轮 · 所选 N 个账号** deliberately sends again, while **继续未发送账号** retains its existing recovery meaning. Each eligible card can start a one-account new round through the same batch guard. Selection and the expected previous batch are frozen together before confirmation. Accounts excluded from a new round retain their previous batch result and original timestamp, including after a later quota-only query.
+Compare quota in the table, then expand the adjacent **Codex 账号操作** panel and find the account by email (and workspace when names repeat). Use its **仅刷新配额** button for a quota-only request; the comparison table no longer duplicates account-operation shortcuts. Select one or more accounts and confirm **给所选 N 个账号发送**; the confirmation lists the fixed message, email/workspace identities and quota use. **开始新一轮 · 所选 N 个账号** deliberately sends again, while **继续未发送账号** retains its existing recovery meaning. Each eligible card can start a one-account new round through the same batch guard. Selection and the expected previous batch are frozen together before confirmation. Accounts excluded from a new round retain their previous batch result and original timestamp, including after a later quota-only query.
 
 See [the current action decision](docs/adr/20261017-82cb-task-oriented-web-actions.md).
 

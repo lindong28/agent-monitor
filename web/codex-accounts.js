@@ -323,31 +323,12 @@ export function init() {
     for (const node of existing.values()) node.remove();
   }
 
-  async function select(event) {
-    const target = event.target.closest?.("[data-codex-email]");
-    if (!target || !current()) return;
-    root.open = true;
-    await load();
-    if (!current()) return;
-    const account = accounts.find((value) => value.account_id === target.dataset.codexAccountId
-      && value.email.toLowerCase() === target.dataset.codexEmail.toLowerCase());
-    if (target.dataset.codexAction === "refresh") {
-      if (!account) { notice.textContent = "未找到这个账号的操作记录，请重新同步后再试。"; }
-      else if (account.busy) { notice.textContent = "这个账号已有操作正在进行，请先查看进度。"; }
-      else await perform("refresh", account.id, target);
-    }
-    const card = account && Array.from(list.children).find((node) => node.dataset.id === account.id);
-    (card || root).scrollIntoView({ block: "nearest" });
-    if (card) { card.tabIndex = -1; card.focus({ preventScroll: true }); }
-  }
   function visibility() { if (!document.hidden) load(); }
-  document.addEventListener("click", select);
   document.addEventListener("visibilitychange", visibility);
   root.addEventListener("toggle", () => { if (root.open) load(); });
   window.AgentMonitor.onPageCleanup(() => {
     clearTimeout(timer);
     controller.abort();
-    document.removeEventListener("click", select);
     document.removeEventListener("visibilitychange", visibility);
   });
   load();
