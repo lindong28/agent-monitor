@@ -332,3 +332,18 @@ Resolved 2026-10-16：按用户批准实施信息分工与层级，八项呈现�
 ### 2026-10-16 获授权实施后的处置
 
 本条原诊断和未实施描述保留为历史。通用指引已落在 ai-agent-config 的 ui-copy 单一 owner，review-ui 直接引用；按更新正文实跑后，产品完成列职责重组及展开时间交互，50 项受影响测试与四宽度真实数据预览通过。记录见 [阅读复验](../../references/ui-reading-review-20261015.md#2026-10-16-配额列职责重组与-harness-实跑)。产品问题和指引候选已实施；未来泛化收益未测，不由关闭本条推导。
+
+## [closed] HARNESS-20261016-8d72：阅读宽度优化误将文档实例上限迁移到控制台
+
+- Type: execution / template transfer / acceptance
+- Priority: medium
+- Owner: agent-monitor Web UI 执行者；共享指令候选归 ai-agent-config web-ui-workflows owner。
+- Scope: 本轮诊断并记账，未实施页面回退或共享指令修改。
+- Evidence: 用户要求采用 reading-instance 中“正文、说明和列表使用内容区宽度；整页统一限宽，数据不变”，随后指出两侧空白过多。提交 `8cce163787962c4d7d2120b7dff07a09411510e5` 为 app-header/app-shell 增加居中 1560px 上限。上一轮真实 Chromium 1920px 读数为 shell 1920→1560、main 1684→1324，五个页面一致；左右各新增 180px 外壳留白。原始 before-results.json、live-results.json、截图与 release-receipt.md 位于 `/Users/lindong/task-artifacts/monitor-content-width-20261016/`。更宽视口的留白只能由 CSS 推导，未在本轮重测。
+- Diagnosis: “统一边界/块内用满”被执行为“统一复制文档实例的固定最大宽度”。reading-instance 入口明示不适用于 dashboard，§5 明示 1560px 是该实例整体上限且控制台没有对应项；关联 ADR `20261016-ccb1-reading-width` 也注明实例起点、非所有页面最优值。执行者读过该实例，仍将参数带入既有控制台，故不能归为缺文档或未加载。用户点名某条规则并未指定 1560px。后续为被压窄的内容区将网络卡片四列改为两列，是上游决定的连带改动。
+- Acceptance gap: 原先测量已显示主内容区变窄，但将“实现的宽度与自己选定的 1560px 一致、无横溢出、段落使用块宽”视为改进充分证据，未据控制台扫读任务评估外壳留白及表格/图表可用空间。现有 design-ui L0/L1/L2 与 web-ui-observation 已要求适用性、视觉关系及真实任务检查；不能把本次执行失效外推为规则完全缺失。
+- Recommended recovery: 保留取消段落独立 ch 上限；控制台外壳恢复随视口扩展和统一页边距。网络卡片随实际可用宽度重新决定列数，恢复宽屏容量并保留窄屏溢出修复；设计记录同步到最终选择。此为建议，尚未执行。
+- Shared improvement candidates: 在参数使用处澄清原则迁移与实例数值继承的区别，并把文档阅读区与控制台应用外壳分开；沿现有观察方法对照改前/改后外侧留白和任务内容可用宽度，判断可读性目标是否真正达成。无需另建模板、通用占屏比例或强制外审。用本项目控制台与长篇文档两类合法场景验证，保留文档合理限宽；尚未检验后续 agent 行为收益。
+- Rule lookup: 定向读取 reading-instance、关联 ADR、design-ui 的 form factor 与参数层级、web-ui-observation 的文字行框/留白/真实任务规则；在 monitor 与 harness 两仓 open/archive 以“限宽|留白|1560|reading-instance|模板.*参数”检索，命中原阅读区域决定与既有留白测量/评分案例，未将这些命中视作本次误用已修复。直接复用本会话原始改动和观察记录，不重跑已具区分力的页面测量；当前模型完成短链诊断，不追加独立审查或行为实验。
+
+- Resolution (2026-10-17): 用户授权后，先修订 ai-agent-config 的 design-ui、reading-instance 及 web-ui-observation，再显式读取候选版本实施本项目。移除应用外壳上限，保留块内文字规则；网络卡片按实际容器宽度排为一/二/四列。improve-skill 实跑在四列起点发现 12px 的取值区越界，修复长状态换行并补充共享观察规则。5 页面 × 6 视口的预览无整页横溢出；网络内部另核 10 个宽度，含断点两侧。1920px main 1324→1684，2560px main 1324→2324；49 项既有 Web 测试通过。证据：`/Users/lindong/task-artifacts/monitor-width-recovery-20261017/`。这些是已知问题修复读数，未证明未来 agent 自主发现率或阅读速度；生产部署与真实入口回读另见该目录最终 release-receipt.md。

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-17
+
+- Restore available width across the console while keeping body text and expanded notes aligned with their content regions; adapt network evidence columns and long status labels to the space available.
+
 ## 2026-10-16
 
 - Use one shared page-width limit and let body text, notes and lists fill their content regions, including expanded content.
