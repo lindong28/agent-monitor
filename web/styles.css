@@ -558,6 +558,8 @@ button:disabled {
   margin: 16px 0 8px;
 }
 
+#quota-clear[hidden] { display: none; }
+
 .quota-provider-filter {
   display: inline-flex;
   gap: 0;
