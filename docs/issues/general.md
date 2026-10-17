@@ -1,5 +1,11 @@
 # tt-web Issues
 
+## [open] ISSUE-UX-20261017-42df: daily breakdown has no direct day-to-session shortcut
+
+- Observed: 2026-10-17, live MacStudio Explore with `range=30d`, project `github.com/lindong28/agent-monitor` and day grouping. The daily disclosure identifies 2026-10-14 as a higher-cost day, while the group's existing session link retains the whole 30-day range. Evidence: `/Users/lindong/task-artifacts/monitor-ux-improve-20261017/harness-followthrough.md` and `independent/followthrough-daily.png`; this was an additional opportunity from the skill follow-through, not a failed existing contract.
+- Disposition: retain the current date controls and full-period session link in this release. The task is supported by selecting the day's custom date range; a direct shortcut would add convenience. The current release prioritizes the confirmed reading defects and previously identified action gaps; it does not claim this extra shortcut is implemented.
+- Owner / Next: agent-monitor Web maintainer, low-priority capability candidate. Consider linking daily labels to same-day sessions with all applicable filters preserved; keep the full-period link separate and verify date boundaries before adoption.
+
 ## [open] ISSUE-TEST-20261016-ae72: cross-machine assertions lag current metrics and status text
 
 - Owner / Next: agent-monitor test maintainer; update the expected metric set and status-text assertions in a separate test-maintenance change, preserving the exclusion and coverage checks.
