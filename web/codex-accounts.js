@@ -251,7 +251,10 @@ export function init() {
         : ["failed", "interrupted"].includes(op?.stage) ? "bad"
         : ["partial", "login", "login_queued"].includes(op?.stage) ? "warn"
         : account.busy ? "info" : "identity";
-      heading.append(element("strong", account.email), element("span", op ? STAGES[op.stage] || op.stage : "尚未操作", "status-pill " + tone));
+      const operationLabel = op?.stage === "succeeded"
+        ? (op.refresh_only ? "最近查询完成" : "最近发送完成")
+        : op ? STAGES[op.stage] || op.stage : "尚未操作";
+      heading.append(element("strong", account.email), element("span", operationLabel, "status-pill " + tone));
       if (account.eligible !== false) {
         const label = element("label", undefined, "codex-select-account");
         const checkbox = element("input");
@@ -272,7 +275,7 @@ export function init() {
       const duplicateEmail = accounts.some((other) => other.id !== account.id && other.email.toLowerCase() === account.email.toLowerCase());
       if (account.account_id) (duplicateEmail ? card : details).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
       details.append(element("p", account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
-      if (batchItem) heading.append(element("span", `本轮：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
+      if (batchItem) heading.append(element("span", `本批：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
       const retained = account.batch_result;
       if (retained && retained.batch_id !== batch?.id) details.append(element("p", `保留的批次结果：${MESSAGE_STATUS[retained.message_status] || "状态未知"} · 开始于 ${timestamp(retained.started_at)}`, "quota-scope"));
       if (op) {
