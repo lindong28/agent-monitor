@@ -347,3 +347,25 @@ Resolved 2026-10-16：按用户批准实施信息分工与层级，八项呈现�
 - Rule lookup: 定向读取 reading-instance、关联 ADR、design-ui 的 form factor 与参数层级、web-ui-observation 的文字行框/留白/真实任务规则；在 monitor 与 harness 两仓 open/archive 以“限宽|留白|1560|reading-instance|模板.*参数”检索，命中原阅读区域决定与既有留白测量/评分案例，未将这些命中视作本次误用已修复。直接复用本会话原始改动和观察记录，不重跑已具区分力的页面测量；当前模型完成短链诊断，不追加独立审查或行为实验。
 
 - Resolution (2026-10-17): 用户授权后，先修订 ai-agent-config 的 design-ui、reading-instance 及 web-ui-observation，再显式读取候选版本实施本项目。移除应用外壳上限，保留块内文字规则；网络卡片按实际容器宽度排为一/二/四列。improve-skill 实跑在四列起点发现 12px 的取值区越界，修复长状态换行并补充共享观察规则。5 页面 × 6 视口的预览无整页横溢出；网络内部另核 10 个宽度，含断点两侧。1920px main 1324→1684，2560px main 1324→2324；49 项既有 Web 测试通过。证据：`/Users/lindong/task-artifacts/monitor-width-recovery-20261017/`。这些是已知问题修复读数，未证明未来 agent 自主发现率或阅读速度；生产部署与真实入口回读另见该目录最终 release-receipt.md。
+
+## [resolved] HARNESS-20261017-entry-necessity：账号快捷入口审查把用途误当成保留依据
+
+- Type: execution / workflow clarity
+- Priority: medium
+- Discovered: 2026-10-17，用户追问总览“账号操作”“查询配额”是否必要。
+- Owner: agent-monitor UX 任务执行者；通用判据候选归 ai-agent-config 的 product-ux-workflows。
+- Scope: 本轮分析和记账；未修改产品或 skill，未运行新的行为实验。案例依赖本项目行内入口和展开面板，落项目账本。
+- Evidence: 产品版本 `4b6a5d00fe059a617f62a1a76537747fd8404152`；`web/app.js` 的行内按钮及 `web/codex-accounts.js` 的 select/perform 路径。前一问的真实页面检查已从下方面板直接展开，观察到账号卡片上的“仅刷新配额”及发送入口；未执行真实查询、发送或登录。记录在 `/Users/lindong/task-artifacts/monitor-ux-improve-20261017/monitor-button-necessity-commands.jsonl`。
+- Decision evidence: 同目录 `decision.md` 第1项主动增加行内查询，比较了只改名和新增抽屉，却没有比较移除行内入口、保留统一面板；`decision-review.md` 第1判据沿该候选集放行。记录支持候选比较遗漏，不证明执行者从未读过简化规则。
+- Rule evidence: 当前及 harness `c16a66d78865d352ffd61fca146d4820d99ec113^` 的 `review-product-capabilities.md` 已要求比较保留、删除、合并、迁移、更名，且明确不同名可能是重复入口。`review-product-simplification.md` 已要求比较保留与简化的收益和负担。因此不能归因为没有按钮或简化指令。上一轮 `test-ux.md` 修订补的是覆盖判断和委派衔接，不足以证明保留理由已充分。
+- Diagnosis: 关键执行偏差是把减少定位步骤直接当作额外入口值得保留的依据；未在同一用户任务下比较主入口与快捷入口的增量价值和常驻阅读负担。真实交互与实现测试证明可用，不单独证明组织方式值得保留。加载层原因未核实，不据此新增加载门禁。
+- Candidate: 优先在现有简化判断 owner 澄清能力必要性与入口必要性的区别，对重复入口比较移除后的完整任务路径、损失的上下文或效率与保留的阅读选择负担；能力审查消费该判据，不复制多套规则。不默认删除所有快捷入口，不新增 hook、固定评分或整站测试矩阵。
+- Validation proposal: 后续获授权维护时，用本例检查能否主动提出移除快捷入口的完整替代路径，同时用确有上下文或恢复价值的重复入口反例检查是否误删。验证决定是否改变，不能只验引用、点击或控件存在。效果尚未验证。
+- Search: 在项目与 ai-agent-config 的 open/closed harness 账本检索“重复入口|独立用途|行内.*配额|入口.*必要性”；中央旧条目包含全面体验入口与独立用途要求，未将其当作本次遗漏已经修复。只核相关 owner 与决策记录，未做全 harness 普查。
+- Disposition: 本轮诊断完成，产品调整与上述 skill 候选均未实施；由后续获授权的 UX/harness 修复任务承接。
+
+### 2026-10-17 修复记录
+
+用户随后明确要求按建议修复。已在 ai-agent-config 的 product-ux-workflows 简化正文中区分能力、主入口与快捷入口，比较移除后的完整路径和保留负担，并将任务可用与组织取舍分别验证；能力审查引用同一owner，既有test-ux要求复用。范围与决定见该仓 `docs/adr/20261017-a62e-ui-entry-necessity.md`，结果见 `docs/references/web-ui-coverage-loop.md` 同日后续节。
+
+原版与候选各一个独立Codex上下文、各分析同两场景，均比较Monitor额外入口的替代路径并保留上传场景的上下文快捷操作；新版明确列出简化候选，但旧版也通过，未证明检出率提升。完整原始轨迹、冻结输入、版本身份与报告保存在 `/Users/lindong/task-artifacts/ux-entry-rule-20261017/`。关闭的是本条指令判据及其衔接修复，不意味着长期效果得到证明，也不代表Monitor两个按钮已经删除；本轮没有修改产品。
