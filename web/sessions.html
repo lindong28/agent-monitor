@@ -78,15 +78,14 @@
           <section id="sync-panel" class="sync-panel" aria-label="数据覆盖与时效">
           <div class="sync-panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span><a id="sync-overview-link" data-collection-link href="/collection">采集与诊断</a></div>
           <div id="sync-machines"></div>
-          <p class="scope-note">Hub 模式汇集已纳入机器的会话。快照可读不保证当前日期或筛选结果完整；未保存的最终用量无法还原。</p>
+          <p class="scope-note">汇集已纳入机器的会话。快照可读不保证当前日期或筛选结果完整；未保存的最终用量无法还原。</p>
           <p id="session-source-coverage" class="scope-note"></p>
         </section>
           <details class="note-disclosure">
             <summary>会话范围、金额与事件数怎么读</summary>
-            <p><strong>记录范围：</strong>这里只统计已采集的用量记录，不保证包含最终用量。明细可查看用量记录完整性及金额依据。</p>
             <p><strong>模型与估算：</strong>Codex 模型名来自请求或配置，实际处理请求的模型未知。估算使用计算时的配置价格，不代表历史实际费率。</p>
             <p><strong>会话目录：</strong>按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
-            <p><strong>金额：</strong>金额未知的行显示 —。标 <em>推算</em> 的 Codex 与 GLM-5.1/5.2 行按程序配置的价格估算，不是服务商账单。</p>
+            <p><strong>金额：</strong>— 表示金额未知；标 <em>推算</em> 的 Codex 与 GLM-5.1/5.2 行按配置价格估算。记录展开后可查看完整性与金额依据。</p>
             <p><strong>用量事件数：</strong>记录中包含的用量事件合计。一条记录可能包含多个事件；事件数不是请求次数。</p>
             <p><strong>历史留存：</strong>已采集的会话统计不随本地日志清理而丢失，但采集前就删掉的历史找不回来。未升级采集器的机器不在其中。</p>
           </details>
@@ -112,7 +111,7 @@
               <select id="filter-cost-status" disabled><option value="">全部成本状态</option><option value="unknown">仅未知成本条目</option></select>
             </div>
           </div>
-          <p class="scope-note">列表只统计符合日期和筛选条件的记录。详情显示此会话的全部已留存记录，可能缺少未采集或未保存的记录。金额不是账单，未知金额不按零计算；汇总与明细的留存范围可能不同。</p>
+          <p class="scope-note">列表仅计匹配记录，详情显示会话的全部留存记录；汇总与明细的留存范围可能不同。金额非账单，未知金额不按零计算。</p>
           <div class="pager pager-top">
             <button id="page-prev-top" type="button" disabled>上一页</button>
             <span id="page-status-top" class="status-line">加载中…</span>

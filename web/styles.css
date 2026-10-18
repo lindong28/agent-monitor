@@ -244,6 +244,7 @@ button:active:not(:disabled) {
 .nav a[href^="/explore"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2v12h12M5 11V8m4 3V4m4 7V6' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E"); }
 .nav a[href^="/sessions"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 2h10v12H3ZM5 5h6M5 8h6M5 11h3' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 .nav a[href^="/network"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 10V8h10v2M8 6v4' fill='none' stroke='black' stroke-width='1.4'/%3E%3Cpath d='M6 2h4v4H6ZM1 10h4v4H1Zm5 0h4v4H6Zm5 0h4v4h-4Z' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.nav a[href^="/collection"] { --nav-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2h12v4H2Zm0 8h12v4H2ZM5 4h1m-1 8h1M8 6v4' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 
 .nav a:hover {
   border-color: transparent;
@@ -1819,12 +1820,14 @@ td.numeric {
 /* Shared product typography: new pages inherit without a page-specific class. */
 .main { min-height: calc(100vh - var(--header-h) - 32px); }
 .page-title { font-size: 20px; line-height: 28px; }
-.panel-head h2, .kpi-group-title, .network-card h2 {
+.panel-head h2, .panel > h2, .kpi-group-title, .network-card h2 {
   font-size: 16px; line-height: 24px; color: var(--ink);
   letter-spacing: 0; text-transform: none;
 }
 button, select, input, .field label { font-size: 14px; line-height: 22px; }
-.scope-note, .quota-scope, .status-line, .kpi-sub { font-size: 12px; line-height: 20px; }
+.scope-note, .quota-scope, .status-line, .kpi-sub, .note-disclosure { font-size: 12px; line-height: 20px; }
+.query-options > summary, .ranking-periods > summary, .entry-technical > summary { font-size: 12px; line-height: 20px; color: var(--ink-muted); }
+.field label { text-transform: none; letter-spacing: 0; }
 .kpi-label { font-size: 14px; line-height: 22px; }
 .kpi-value, .session-metrics strong { font-size: 32px; line-height: 40px; }
 @media (max-width: 540px) {

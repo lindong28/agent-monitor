@@ -54,7 +54,7 @@
           <article class="guide-article">
         <section class="panel" id="sources">
           <h2>先确认数据来自哪里</h2>
-          <p class="scope-note">agent-monitor 面向个人开发者和多机使用者，汇集用量、会话、配额与诊断信息。金额是记录或估算，不是服务商账单。</p>
+          <p class="scope-note">金额来自日志记录或估算，不是服务商账单。</p>
           <div class="table-wrap" tabindex="0" role="region" aria-label="数据源与查看入口"><table class="guide-source-table"><thead><tr><th>数据源</th><th>提供什么</th><th>查看入口</th></tr></thead><tbody>
             <tr><th>Claude Code / Codex</th><td data-label="提供什么">本地日志采集出的 token、估算成本和留存会话。采集前已删除的日志无法恢复。</td><td data-label="查看入口"><a href="/explore">透视归因</a> · <a href="/sessions">会话明细</a></td></tr>
             <tr><th>服务商账号</th><td data-label="提供什么">账号的 5 小时和 7 天配额窗口及查询时间。采集失败保留旧读数，页面日期不改变配额窗口。</td><td data-label="查看入口"><a href="/#quota-explorer">配额与账号</a></td></tr>
@@ -65,7 +65,7 @@
           <div class="panel-head"><h2>当前采集状态</h2><button id="refresh" type="button" class="btn">更新采集状态</button></div>
           <p class="scope-note">“机器快照可读”表示能够读取该机器已采集的数据，不表示每种来源都有数据，也不保证历史完整。无匹配记录不等于尚未接入。</p>
           <div class="panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
-          <div id="sync-machines"></div><a id="sync-overview-link" data-collection-link href="/collection">打开采集与诊断，查看机器、质量与历史详情</a>
+          <div id="sync-machines"></div><a id="sync-overview-link" data-collection-link href="/collection">查看机器、质量与历史详情</a>
         </section>
         <section class="panel" id="setup">
           <h2>首次接入</h2>
@@ -87,10 +87,10 @@
 agent-monitor start
 agent-monitor refresh
 agent-monitor open</code></pre></div>
-          <p>页面能打开不表示采集已完成。若快照不可读或更新时间未变化，先查看采集详情中的错误，再检查对应配置与连接。没有匹配记录也不等于安装失败。</p>
+          <p>若快照不可读或更新时间未变化，先查看采集详情中的错误，再检查对应配置与连接。</p>
           <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>Hub 负责拉取快照；采集器独立保存各机数据。开始前，确认 Hub 能通过 SSH 连接各采集器。</p><ol><li>在 <code>machines.json</code> 中配置机器名称与 SSH 目标，在 <code>hub.json</code> 中配置 Hub、URL 和采集机器。已有安装须保留机器身份和退休记录。</li><li>在每台机器的代码目录中运行以下命令。将占位符替换为该机器在配置中的名称。</li></ol>
           <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div><p>安装后，进入 Hub 的「采集与诊断」，逐台核对机器名称、纳入状态与数据更新时间。显示旧快照时，按该机器的错误继续排查。</p></details>
-          <p>完整命令、依赖与已有服务迁移见代码目录中的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。本页只说明与检查状态，不修改配置或登录账号。</p>
+          <p>完整命令、依赖与服务迁移见代码目录中的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。</p>
         </section>
         <section class="panel" id="questions">
           <h2>从问题找到证据</h2>

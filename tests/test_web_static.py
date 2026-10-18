@@ -1951,7 +1951,8 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
     def test_explore_explains_codex_cost_estimates(self):
         html = (ROOT / "web" / "explore.html").read_text()
 
-        self.assertIn("Codex 成本按已识别模型的费率估算，不代表实际账单", html)
+        self.assertIn("Codex 按已识别模型估算", html)
+        self.assertIn("成本为已知小计、非账单，未知费用不计入", html)
         self.assertIn("GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算", html)
 
     def test_pivot_js_renders_explicit_empty_states(self):

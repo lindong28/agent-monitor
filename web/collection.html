@@ -50,14 +50,14 @@
         <div class="page-toolbar"><h1 class="page-title">采集与诊断</h1><button id="refresh" class="btn" type="button">重新读取采集状态</button></div>
         <p><a id="collection-return" href="/">返回总览</a></p>
         <p id="collection-context" class="scope-note"></p>
-        <p class="scope-note">这里展示全部声明机器的最新采集状态与全部留存历史质量，不按来源页的日期或筛选裁剪。重新读取不会启动采集；更新统计与配额请返回业务页操作。</p>
+        <p class="scope-note">展示全部机器的最新采集状态与留存历史质量，不受来源页日期或筛选影响。重新读取不会启动采集。</p>
         <section id="sync-panel" class="panel" aria-label="机器采集状态">
           <div class="panel-head"><h2>机器采集</h2><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span></div>
           <p id="sync-summary" class="status-line" aria-live="polite">检查中…</p>
           <div id="sync-machines" class="sync-machines"></div>
         </section>
         <section class="panel" aria-labelledby="machine-quota-title"><h2 id="machine-quota-title">未归属账号的机器观测</h2>
-          <p class="scope-note">未识别账号的观测不能用于选择可用账号；已知账号及其历史读数仍在总览中比较。</p>
+          <p class="scope-note">未识别账号的观测不能用于选择可用账号；已知账号及其历史读数见<a href="/#quota-explorer">总览配额表</a>。</p>
           <p id="quota-signed-out" class="scope-note" hidden></p>
           <p id="collection-quota-empty" class="scope-note" hidden>没有未归属账号的机器观测。</p>
           <details id="quota-machine-records" class="note-disclosure" open hidden></details>

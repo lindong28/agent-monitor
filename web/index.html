@@ -97,7 +97,7 @@
                 <a id="range-unknown-cost" class="panel-link" hidden></a>
               </article>
             </div>
-            <p class="scope-note">所选区间：顶部日期范围控制第三项成本、下方趋势与周期比较。今日、本周、本月与配额各有固定窗口。</p>
+            <p class="scope-note">日期范围仅影响区间成本、趋势与周期比较；其余指标使用各自固定窗口。</p>
             <div class="panel-head">
               <h2>成本趋势</h2>
               <span id="cost-over-time-meta" class="status-line">—</span>
@@ -105,20 +105,19 @@
             </div>
             <details class="note-disclosure">
               <summary>成本怎么算，哪些用量未计入</summary>
-              <p><strong>统计范围：</strong>这里只统计已采集的用量记录。日志未保存的最终用量无法还原。</p>
-              <p><strong>金额来源：</strong>金额来自日志记录或按配置价格估算。估算使用计算时的价格，不代表历史实际费率。</p>
+              <p><strong>估算价格：</strong>使用计算时的配置价格，不代表历史实际费率。</p>
               <p><strong>模型含义：</strong>Codex 模型名来自请求或配置，实际处理请求的模型未知。</p>
-              <p><strong>估算限制：</strong>Codex 成本按已识别模型的费率估算，不代表实际账单；GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算。</p>
+              <p><strong>模型费率：</strong>Codex 按已识别模型估算；GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算。</p>
               <details class="note-disclosure"><summary>维护说明：历史数值为什么会变化</summary><p>最近 28 天的合计可能随新数据和重新估算变化。每次更新按以下规则处理：</p><ul><li>能读取数据源时，重新计算最近 28 天的数据。</li><li>已有日志记录金额的，保留原金额；其他记录按 agent-monitor 当前的配置价格估算。</li><li>数据源缺失或计数减少时，保留上次可信值；其他数据照常更新。</li><li>28 天以外的数据保留历史值，不再重算。</li></ul></details>
             </details>
             <div class="chart-box"><canvas id="daily-cost-chart" role="img" aria-label="成本趋势；完整读数见下方数据表"></canvas></div>
             <details id="daily-cost-data" class="chart-data-disclosure">
-              <summary>查看成本趋势数据表</summary>
+              <summary>趋势数据表</summary>
               <div class="chart-data-scroll" tabindex="0" role="region" aria-label="成本趋势数据"><table class="chart-data-table"></table></div>
             </details>
             <details id="period-comparison" class="note-disclosure">
               <summary>比较前后两个等长周期</summary>
-              <p class="scope-note">N 取自顶部所选范围。比较最近 N 个完整日与此前 N 日，不含今天，日期按 GMT+8 计算。先核对两个周期的日期与金额未知记录数，再读差额。覆盖完整性未知；已知成本差额不代表实际消费变化或优化收益。</p>
+              <p class="scope-note">按所选范围比较两个等长完整周期，不含今天，日期按 GMT+8 计算。采集覆盖完整性未知；已知成本差额不代表实际消费变化或优化收益。</p>
               <div id="comparison-result" aria-live="polite">展开后加载。</div>
             </details>
             <p id="cost-over-time-coverage" class="estimate-note" hidden></p>
@@ -132,7 +131,7 @@
               <p class="scope-note">按会话启动目录归类，可能显示其 Git 仓库标识；跨项目工作不拆分费用。</p>
               <div class="chart-box short"><canvas id="top-projects-chart" role="img" aria-label="本周会话目录成本；完整读数见下方数据表"></canvas></div>
             <details id="top-projects-data" class="chart-data-disclosure">
-              <summary>查看本周会话目录成本数据表</summary>
+              <summary>目录成本数据表</summary>
               <div class="chart-data-scroll" tabindex="0" role="region" aria-label="本周会话目录成本数据"><table class="chart-data-table"></table></div>
             </details>
             </article>
@@ -143,14 +142,14 @@
               </div>
               <div class="chart-box short"><canvas id="model-mix-chart" role="img" aria-label="本月模型 token 占比；完整读数见下方数据表"></canvas></div>
             <details id="model-mix-data" class="chart-data-disclosure">
-              <summary>查看本月模型构成数据表</summary>
+              <summary>模型构成数据表</summary>
               <div class="chart-data-scroll" tabindex="0" role="region" aria-label="本月模型构成数据"><table class="chart-data-table"></table></div>
             </details>
             </article>
           </section>
           <section class="kpi-group" aria-labelledby="kpi-quota-title">
             <h2 id="kpi-quota-title" class="kpi-group-title">配额用量</h2>
-            <p class="quota-scope">配额按账号计量，不跨账号求和。服务商分别使用 5 小时和 7 天配额窗口；页面日期范围不改变这些窗口。</p>
+            <p class="quota-scope">配额按账号计量，不跨账号求和。5 小时与 7 天窗口不受页面日期影响。</p>
             <div id="quota-explorer" class="quota-explorer">
               <div class="quota-provider-filter" role="group" aria-label="配额服务商">
                 <button type="button" class="btn" data-quota-provider="all" aria-pressed="true">全部</button>
@@ -204,7 +203,7 @@
               <p id="codex-account-notice" role="status" aria-live="polite"></p>
               <div class="codex-account-controls"><button id="codex-select-all" type="button" class="btn">全选可发送账号</button><button id="codex-select-none" type="button" class="btn">取消选择</button><span id="codex-selection-count" role="status"></span></div>
               <div id="codex-account-list"></div>
-              <p class="quota-scope">配额表显示同一账号最新的读数，展开“配额更新”可查看时间与来源。仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>
+              <p class="quota-scope">仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>
             </details>
           </section>
           <div id="codex-five-hour-compat" hidden aria-hidden="true">

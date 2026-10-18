@@ -1797,7 +1797,7 @@
     });
     details.appendChild(summary);
     const context = document.createElement("p");
-    context.textContent = "这些读数尚不能归属到具体账号，不计入账号比较和筛选。以下保留采集时的数值与时间。";
+    context.textContent = "以下为采集时读数，不计入账号比较和筛选。";
     details.appendChild(context);
     entries.forEach(({ provider, account }) => {
       const record = document.createElement("div");
@@ -2223,8 +2223,9 @@
     }
     const context = qs("#collection-context");
     context.textContent = params().get("range") === "custom"
-      ? `来源日期：${params().get("start") || "未指定"} 至 ${params().get("end") || "未指定"}，仅用于返回；下方为全部机器与留存历史。`
-      : "下方观测各有自己的时间，来源页日期范围仅用于返回。";
+      ? `来源日期：${params().get("start") || "未指定"} 至 ${params().get("end") || "未指定"}，仅用于返回。`
+      : "";
+    context.hidden = !context.textContent;
     async function load() {
       try {
         const data = await api("/api/collection");
@@ -2278,7 +2279,7 @@
 
   function renderNetwork(data, retry) {
     const target = qs("#network-checked-host");
-    if (target) target.textContent = `检测目标：服务端主机 ${data.checked_host || "身份未取得"}；不检测浏览器所在设备，不跨机合并。`;
+    if (target) target.textContent = `仅检测服务端主机 ${data.checked_host || "身份未取得"}；不检测浏览器所在设备或其他机器。`;
     renderNetworkBanner(data);
     if (data.installed === false) {
       renderNetworkError({
@@ -3225,7 +3226,7 @@
       <details class="panel session-metadata" ${readingState.metadata ? "open" : ""}><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
         ${field("Agent", distinct("agent_id").join("、"))}
         ${field("模型", models.join("、"))}
-      </dl><p class="scope-note"><strong>记录范围：</strong>该会话已留存的全部记录，不受列表时间窗口限制。</p><p class="scope-note"><strong>模型与计价：</strong>Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。</p><p class="scope-note"><strong>记录内容：</strong>这里仅包含用量记录，不包含对话正文。</p></details>
+      </dl><p class="scope-note"><strong>记录范围：</strong>不受列表时间窗口限制；仅含用量记录，不含对话正文。</p><p class="scope-note"><strong>模型与计价：</strong>Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。</p></details>
       <section class="panel" id="usage-section"><div class="panel-head"><h2 tabindex="-1" id="usage-heading">用量明细</h2><span id="usage-count" class="status-line"></span></div>
       <div class="controls"><div class="field"><label for="usage-model">模型</label><select id="usage-model"><option value="">全部模型</option>${models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select></div><button id="usage-clear" type="button">清除筛选</button></div>
       <div class="table-wrap"><table><thead><tr><th>记录时间</th><th>模型</th><th class="numeric">输入</th><th class="numeric">输出</th><th class="numeric">缓存读取 / 写入</th><th class="numeric">成本</th><th>详情</th></tr></thead><tbody id="usage-body"></tbody></table></div>
