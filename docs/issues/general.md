@@ -1,5 +1,15 @@
 # tt-web Issues
 
+## [open] ISSUE-UX-20261018-8e19：配额标签的常驻位置与信息分工
+
+- Owner / Priority: agent-monitor Web maintainer / medium。
+- Evidence: 用户指出总览中的“本页查询”“机器记录”“机器历史账号”“账号身份未确认”。上轮真实页面观察 `/Users/lindong/task-artifacts/monitor-ux-round2-20261017/independent/evidence/commands.jsonl` 第36条包含这些文字；后续只读审查结合 `459bff6` 的 `quotaAccountRow`、`quotaProviderCell`、`quotaAccountCell`、`quotaUpdatedCell` 核对来源与身份含义。新账号查询读数可以与机器旧套餐、旧关联并存，关联历史不等于配额读数过旧。
+- Candidate: “本页查询”的来源事实可进入读数详情，保留需要同层显示的过旧或未知限定；机器套餐来源无需逐行堆放在套餐值下；历史机器关联优先由分组承载；未知账号身份、已登出与机器身份分工呈现，不能把未知当作零或已确认身份。最终取舍按当前产品状态和更新后的 ui-copy / review-ui 检查，不按字符串一律删除。
+- Next: 在独立开发树实施后，以完整行、分组和展开详情复验，保留账号/机器身份与配额选择语义，再按项目流程发布和真实页面复验。
+- Disposition: 本轮只修对应 harness 判断与核收缺口，未改产品页面；本项单独保留，未安排后台执行。相关 harness 诊断为 HARNESS-20261018-label-value。
+
+- **补充候选（2026-10-18，静态旧材料）**：本轮harness对照的两份独立报告还提出历史用量行动口吻、账号/配额列组织、成本主值与定价覆盖分层、各区域时间作用域和图表占比文字通道。尚未核实当前页面是否仍成立；实施本项时由Web维护者比对当前入口及既有修复后决定，不能据旧材料直接改动。原稿位于 `/Users/lindong/task-artifacts/label-value-20261018/run-alpha/findings.md` 与 `run-beta/findings.md`，共享验证摘要位于 ai-agent-config `docs/references/reading-judgment-20261018.md`。本轮无后台产品执行任务。
+
 ## [open] ISSUE-UX-20261017-42df: daily breakdown has no direct day-to-session shortcut
 
 - Observed: 2026-10-17, live MacStudio Explore with `range=30d`, project `github.com/lindong28/agent-monitor` and day grouping. The daily disclosure identifies 2026-10-14 as a higher-cost day, while the group's existing session link retains the whole 30-day range. Evidence: `/Users/lindong/task-artifacts/monitor-ux-improve-20261017/harness-followthrough.md` and `independent/followthrough-daily.png`; this was an additional opportunity from the skill follow-through, not a failed existing contract.
