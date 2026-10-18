@@ -2,6 +2,16 @@
 
 已关闭记录见 [archive/closed.md](archive/closed.md)。
 
+## [open] HARNESS-20261018-live-label-recurrence：真实全站审查仍漏未知身份行的组织判断
+
+- Type / Priority: instruction execution / medium。
+- Owner: agent-monitor UX审查执行与核收者；共享规则候选归ai-agent-config ui-copy / product-ux-workflows维护者。
+- Evidence: `/Users/lindong/task-artifacts/monitor-live-harness-20261018/` 的事前acceptance、initial/candidate原生轨迹与独立初稿。基线d1993e42实跑未完成四类标签判断；两份正文细化后的候选F3完成三类来源/历史标签，仍未判断“macmini 未登录／账号身份未确认”与机器列的组织关系。截图quota.png实际含该行，适用规则已加载；不能归因为未到访或规则不存在。
+- Scope: 这是同一产品两版各一次真实执行；必要未知没有被误删，严格盲验因宿主历史概述注入未核实，不证明长期检出率。原HARNESS-20261018-label-value的共享修订已完成，不重写其静态验证历史；本项跟踪新真实失败。
+- Implemented / Remaining: 本轮已按ai-agent-config ADR b71f要求具体阅读候选，并在全面UX入口并列核收信息组织、操作结果和入口取舍；候选只部分满足目标。按有界方案保留失败，不反复追加指令到本样本过关。产品四标签修复仍归ISSUE-UX-20261018-8e19。
+- Next: 后续harness维护者从完整未知身份行及本次实际轨迹判断是否遗漏不同信息关系的取样或具体判断，再决定最小修改；必须保留必要未知和分组关联，不能用标签黑名单或提示后发现替代自主检出。当前未派发后续任务，不承诺后台自动继续。
+- Search / Disposition: 核对当前ui-copy、全面UX入口、review-ui/test-ux及项目closed中的label-value；详情见[本轮审查](../references/ui-harness-review-20261018.md)和共享仓reading-judgment-20261018.md。残余自主检出未解决，明确保持open。
+
 ## [open] HARNESS-20261014-perf-retro：性能优化的首轮归因与目标收尾证据不够完整
 
 - Type: execution / workflow clarity

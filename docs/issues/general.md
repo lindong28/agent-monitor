@@ -8,7 +8,58 @@
 - Next: 在独立开发树实施后，以完整行、分组和展开详情复验，保留账号/机器身份与配额选择语义，再按项目流程发布和真实页面复验。
 - Disposition: 本轮只修对应 harness 判断与核收缺口，未改产品页面；本项单独保留，未安排后台执行。相关 harness 诊断为 HARNESS-20261018-label-value。
 
+- **2026-10-18真实复查**：四标签仍存在。初次新上下文全站审查只泛称来源/历史/未知需保留，未提出位置取舍；核收反馈后补出候选，不能计为自主检出。根线程真实展开历史账号和读数详情确认混合来源；滚动后组标题可能不可见，不能简单把说明移到顶部。当前证据与旧问题对照见 [本轮审查](../references/ui-harness-review-20261018.md)。产品仍未修改；共享规则后续执行细化归 ai-agent-config ADR b71f。除四标签外，操作卡状态及长未知提示仅为需要保全时态/窗口语义的简化候选，未证明所有变体均可无损合并。
+
 - **补充候选（2026-10-18，静态旧材料）**：本轮harness对照的两份独立报告还提出历史用量行动口吻、账号/配额列组织、成本主值与定价覆盖分层、各区域时间作用域和图表占比文字通道。尚未核实当前页面是否仍成立；实施本项时由Web维护者比对当前入口及既有修复后决定，不能据旧材料直接改动。原稿位于 `/Users/lindong/task-artifacts/label-value-20261018/run-alpha/findings.md` 与 `run-beta/findings.md`，共享验证摘要位于 ai-agent-config `docs/references/reading-judgment-20261018.md`。本轮无后台产品执行任务。
+
+## [open] ISSUE-UX-20261018-5ad1：配额筛选与账号操作选择的范围衔接
+
+- Owner / Priority: agent-monitor Web maintainer / medium。
+- Evidence: 2026-10-18真实页面搜索单邮箱后，配额表只剩对应记录，下方操作面板仍为全部9账号且按钮为“所选9个账号”；已有数量及费用提示，未执行发送，不能推断实际误发。原始 `monitor-live-harness-20261018/independent/evidence/quota-operation-scope.txt`，详见[审查记录](../references/ui-harness-review-20261018.md)。
+- Candidate / Next: 就地明确操作选择与上方筛选独立，改善比较对象到操作对象的定位。保持显式选择，不自动将搜索转换为发送选择；额外定位入口需比较完整路径代价，不重新铺设重复业务按钮。
+- Disposition: 本轮仅审查，未实施，无后台任务。
+
+## [open] ISSUE-UX-20261018-e2af：会话空结果缺少就地恢复
+
+- Owner / Priority: agent-monitor Web maintainer / medium。
+- Evidence: 2026-10-18，`/sessions?range=7d&sort=cost&project=github.com%2Flindong28%2Fllm-gateway`，103条结果翻末页后选择仅未知成本，page重置为0且显示空结果；列表和分页只重复“没有符合筛选条件的会话”。原始 `monitor-live-harness-20261018/independent/evidence/unknown-empty-settled.txt`。
+- Candidate / Next: 展示可放宽的有效条件，增加就地移除/清除入口并明确日期保留范围；用有结果→空结果→恢复同一路径验收，不自动改变查询。手工修改筛选仍可用，因此归体验优化而非查询阻塞。
+- Disposition: 本轮仅审查，未实施，无后台任务。
+
+## [open] ISSUE-UX-20261018-c051：透视配置层级挤压短视口结果
+
+- Owner / Priority: agent-monitor Web maintainer / low。
+- Evidence: 2026-10-18近7天模型成本、3个结果，首条排名约y590；1024×640 CSS视口中金额/模型刚进入底部，口径和会话入口需滚动。1280×800、1600×1000对照保留，原始 `monitor-live-harness-20261018/independent/evidence/loaded125.png` 等；不是OS缩放或所有结果状态证明。
+- Candidate / Next: 紧凑组织日期、预设、查询摘要，保留高级配置、有效条件、机器缺口和成本口径；不用删业务信息换取首屏排名。见[审查记录](../references/ui-harness-review-20261018.md)。
+- Disposition: 本轮仅审查，未实施，无后台任务。
+
+## [open] ISSUE-UX-20261018-a417：当前刷新与上次失败时态不清、旧数据说明重复
+
+- Owner / Priority: agent-monitor Web maintainer / medium。
+- Evidence: 2026-10-18总览全部机器展开，macmini同时显示“刷新中 · 显示上次快照”“刷新失败”和“用的是上次的数据”，另有最后联系/尝试时间。原始 `monitor-live-harness-20261018/root/machines.png`、`root/commands.jsonl`；未主动触发刷新。与旧启动“未检查”问题是不同实际状态，不据界面诊断数据库或磁盘。
+- Candidate / Next: 分开表达本轮正在刷新及上次失败，合并旧数据后果说明；保留旧快照可读与当前可达性区别，复验更新中/完成/失败状态。
+- Disposition: 本轮仅审查，未实施，无后台任务。
+
+## [open] ISSUE-UX-20261018-9db2：长会话近期用量定位需逐页推进
+
+- Owner / Priority: agent-monitor Web maintainer / medium。
+- Evidence: 2026-10-18，真实会话01a0eb04-032b-7ff3-bf0b-b95a3bdc21b3有8594条留存记录，默认最早记录起，每页50；实际翻页从1–50到51–100，页面只提供前后页。原始 `monitor-live-harness-20261018/candidate/evidence/detail-next-result.json`、detail-loaded.png；明细渲染同样只有前后页。172页为推导，未实际逐页点击。
+- Candidate / Next: 增加最新记录/末页或时间降序的最小入口，保留全部留存范围及返回列表上下文；不默认加入复杂检索。按真实长会话路径验收。详见[审查记录](../references/ui-harness-review-20261018.md)。
+- Disposition: 本轮只审查，未实施，无后台任务。
+
+## [open] ISSUE-UX-20261018-d821：搜索后的历史命中仍折叠且全局提示挤占结果
+
+- Owner / Priority: agent-monitor Web maintainer / medium。
+- Evidence: 搜索cyberrabbit只匹配1条历史账号，但必须再展开；无匹配时机器未登录/旧读数提示仍在结果前方，文案“上表数字”实际指向下方。原始 `monitor-live-harness-20261018/candidate/evidence/quota-single-collapsed.png`、quota-empty-confirm.json、quota-mobile.png。
+- Candidate / Next: 主动搜索时展示匹配历史行，清空后恢复默认分组；与结果无关的机器状态下沉，当前行必要过期/身份限定保留，修正位置指代。以有/无匹配及清空恢复复验。
+- Disposition: 本轮只审查，未实施，无后台任务。
+
+## [open] ISSUE-UX-20261018-4e13：中等桌面宽度的关键表列需横向补看
+
+- Owner / Priority: agent-monitor Web maintainer / low。
+- Evidence: 1280×633 CSS视口配额区域clientWidth996、scrollWidth1040，更新限定右侧裁切；会话列表事件数也在右缘。配额表可聚焦，实际ArrowRight后scrollLeft40，故不是信息不可达。原始 `monitor-live-harness-20261018/candidate/evidence/quota.png`、sessions.png、quota-table-geometry.json、table-shift-result.json。
+- Candidate / Next: 压缩重复来源与列间留白，使更新年龄和必要失效限定易读；精确时间留可访问通道，不缩小字号。与8e19来源重组协同复验，不能只用几何读数宣称可读。
+- Disposition: 本轮只审查，未实施，无后台任务。
 
 ## [open] ISSUE-UX-20261017-42df: daily breakdown has no direct day-to-session shortcut
 
