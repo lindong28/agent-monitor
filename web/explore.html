@@ -54,10 +54,9 @@
             <button id="refresh" class="icon-btn" type="button" title="更新统计与配额" aria-busy="false">更新统计与配额</button>
           </div>
         </div>
-        <section id="sync-panel" class="sync-panel" aria-label="数据覆盖与时效">
-          <div class="sync-panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span><a id="sync-overview-link" data-collection-link href="/collection">采集与诊断</a></div>
+        <section id="sync-panel" class="sync-panel" data-sync-mode="exceptions" aria-label="数据覆盖与时效" hidden>
+          <div class="sync-panel-head"><span id="sync-summary" class="status-line" aria-live="polite"></span><a id="sync-overview-link" data-collection-link href="/collection">采集与诊断</a></div>
           <div id="sync-machines"></div>
-          <p class="scope-note">快照可读不保证当前日期或筛选结果完整；未保存的最终用量无法还原。</p>
         </section>
         <div class="controls query-dates" aria-label="查询日期">
           <div class="field">

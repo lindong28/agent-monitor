@@ -1,5 +1,7 @@
 # Architecture decisions
 
+总览与透视的常态采集提示按 [条件化状态提示](20261018-conditional-sync-notice.md) 收敛；异常限定与显式刷新反馈保留。
+
 | Decision | Status |
 | --- | --- |
 | [20261018: page task ownership](20261018-page-task-ownership.md) | Accepted; collection diagnostics and contextual return supersede previous placement constraints |

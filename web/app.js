@@ -1930,15 +1930,17 @@
 
   function renderSyncStatus(status) {
     renderQuotaRefreshStatus(status?.quota_refresh);
+    const panel = qs("#sync-panel");
+    const exceptionsOnly = panel?.dataset?.syncMode === "exceptions";
     const coverageElement = qs("#sync-coverage");
     const summaryElement = qs("#sync-summary");
     const machineList = qs("#sync-machines");
-    if (!coverageElement || !summaryElement || !machineList || !status) {
+    if (!summaryElement || !machineList || !status) {
       return;
     }
     pageServerInstance = status.instance_id || pageServerInstance;
     const coverage = status.coverage || { admitted: 0, declared: 0 };
-    coverageElement.textContent = `机器快照可读：${coverage.admitted}/${coverage.declared} 台`;
+    if (coverageElement) coverageElement.textContent = `机器快照可读：${coverage.admitted}/${coverage.declared} 台`;
     const attention = (status.machines || []).filter(
       (machine) =>
         !machine.admitted ||
@@ -1948,8 +1950,18 @@
         ["failure", "cleanup_failed", "malformed_result"].includes(machine.last_attempt_outcome)
     );
     const warningSummary = attention.length ? `${attention.length} 台需要关注：${attention.map(machine => machine.name).join("、")}` : "";
+    if (exceptionsOnly) panel.hidden = !attention.length && !status.polling_error;
+    const refreshStatus = qs("#refresh-status");
+    if (refreshStatus?.dataset.pending === "true") {
+      refreshStatus.textContent = status.polling_error ? "更新状态暂不可用，请查看下方提示"
+        : status.syncing ? "已受理 · 后台更新中"
+        : attention.length ? "更新已结束，部分机器需关注" : "更新已结束";
+      if (!status.syncing && !status.polling_error) delete refreshStatus.dataset.pending;
+    }
     summaryElement.textContent = status.polling_error
       ? `${status.polling_error} · 页面保留上次渲染的数据`
+      : exceptionsOnly
+      ? warningSummary
       : status.syncing
       ? (status.phase === "quota" ? "统计轮已结束 · 后台查询配额" : "后台更新统计与配额 · 新数据陆续显示") + (warningSummary ? ` · ${warningSummary}` : "")
       : attention.length
@@ -2609,8 +2621,11 @@
           observeRefresh(receipt, generation, selectedRange).catch((error) => {
             if (pageCurrent() && generation === overviewGeneration) showOverviewLoadError(error);
           });
-          const summary = qs("#sync-summary");
-          if (summary) summary.textContent = "刷新请求已受理 · 后台更新，当前数据仍可查看";
+          const summary = qs("#refresh-status");
+          if (summary) {
+            summary.dataset.pending = "true";
+            summary.textContent = "刷新请求已受理 · 后台更新，当前数据仍可查看";
+          }
         } catch (error) {
           if (pageCurrent() && generation === overviewGeneration) showOverviewLoadError(error);
         }
@@ -2696,6 +2711,10 @@
   }
 
   function showOverviewLoadError(error) {
+    const refreshStatus = qs("#refresh-status");
+    if (refreshStatus?.dataset.pending === "true") {
+      refreshStatus.textContent = "更新未完成，请查看下方提示";
+    }
     // Inside <main>, not on <body>. It belongs to Overview, and only Overview's
     // next successful load removes it — parked on the body it outlived the swap
     // and followed the reader onto every other tab. Its `.main` class was doing

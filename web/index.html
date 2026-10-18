@@ -59,13 +59,13 @@
               <option value="2y">近 2 年</option>
               <option value="all">全部</option>
             </select>
+            <span id="refresh-status" class="status-line" role="status"></span>
             <button id="refresh" class="icon-btn" type="button" title="更新统计与配额" aria-busy="false">更新统计与配额</button>
           </div>
         </div>
-        <section id="sync-panel" class="sync-panel" aria-label="数据覆盖与时效">
-          <div class="sync-panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span><a id="sync-overview-link" data-collection-link href="/collection">采集与诊断</a></div>
+        <section id="sync-panel" class="sync-panel" data-sync-mode="exceptions" aria-label="数据覆盖与时效" hidden>
+          <div class="sync-panel-head"><span id="sync-summary" class="status-line" aria-live="polite"></span><a id="sync-overview-link" data-collection-link href="/collection">采集与诊断</a></div>
           <div id="sync-machines"></div>
-          <p class="scope-note">快照可读不保证当前日期或筛选结果完整；未保存的最终用量无法还原。</p>
         </section>
         <nav class="page-jumps" aria-label="总览内容"><a href="#kpi-spend-title">成本与趋势</a><a href="#period-comparison">周期比较</a><a href="#kpi-quota-title">配额与账号</a></nav>
         <div class="kpi-sections">
