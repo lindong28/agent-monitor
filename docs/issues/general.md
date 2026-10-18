@@ -1,5 +1,13 @@
 # tt-web Issues
 
+## [open] ISSUE-UX-20261018-9c42：未归属账号的机器读数仍作为账号行展示
+
+- Owner / Priority: agent-monitor Web maintainer / medium。
+- Evidence: 2026-10-18 在 `3a55df7` 部署页面只读复查，账号列为“未登录”的 Codex 行仍并列显示 Business Pro Lite、7 天已用 0%、重置倒计时、macmini 和“6 天前”。`/api/overview?range=30d&sync=0` 返回该行 account_id/account_label 为 null、account_state 为 signed_out、presence 为 in_use，updated_at 为 `2026-10-11T09:39:28.498Z`，signed_out_machines 包含 macmini。未直接验证 macmini 此刻的登录状态，也未确认旧读数属于哪个真实账号。
+- Mechanism: `server.py::_account_entry` 将显式 null 身份映射为 signed_out；`_merge_remembered_rate_limit_accounts` 给机器聚合行统一设置 in_use。前端将身份、历史读数与机器登录状态装进同一账号行。已有旧值警告保留了时间限制，但“未登录”不是账号身份，读者无法据此选择一个可用账号。上轮 8e19 修复了标签冗余和位置，未解决这条记录是否适合作为账号行的问题。
+- Candidate / Next: 按产品“判断使用哪个账号”的任务区分已识别账号与机器状态。建议未能归属账号的机器旧读数移出默认账号列表，登录状态归既有机器/采集状态区域；旧读数及时间保留在可展开详情，不删除数据。只有存在可靠身份关联时才合入具体账号历史，不能凭机器名、套餐或 0% 猜测。需同步保留原读数的既有契约、筛选计数与页面提示，避免只隐藏行却留下“上表数字”的说明。
+- Disposition: 本轮完成分析与记录，未修改产品代码、契约或部署，未派发后台修复。产品修复由上述 owner 在获实施授权后接续；未发现其他需交代的新问题。
+
 ## [resolved] ISSUE-UX-20261018-8e19：配额标签的常驻位置与信息分工
 
 - Owner / Priority: agent-monitor Web maintainer / medium。
