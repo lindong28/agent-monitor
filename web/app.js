@@ -2051,9 +2051,6 @@
     const quality = machine.statistics?.usage_quality_counts;
     const qualityDetail = quality == null ? "Claude 用量记录完整性未知" :
       `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}（全部留存，非当前日期范围；结束标记不保证最终用量完整）`;
-    if (quality == null || quality.incomplete || quality.unknown) {
-      facts.push(quality == null ? "Claude 用量记录完整性未知" : `Claude 留存记录：${integer(quality.incomplete)} 条不完整 · ${integer(quality.unknown)} 条完整性未知`);
-    }
     if (["unreachable", "unknown"].includes(machine.availability) && machine.last_successful_contact_ts) {
       facts.push(`最后联系 ${formatDate(machine.last_successful_contact_ts)}`);
     }
@@ -2224,13 +2221,20 @@
     qs("#cost-diagnostics-status").textContent = groups.length
       ? `已留存明细中 ${integer(groups.reduce((total, row) => total + row.entries, 0))} 条金额未知记录`
       : "所选范围的已留存明细中，没有金额未知记录。";
-    qs("#cost-diagnostics-body").innerHTML = groups.map(row => {
+    const incomplete = groups.filter(row => row.reason === "usage_incomplete");
+    const other = groups.filter(row => row.reason !== "usage_incomplete");
+    const rows = items => items.map(row => {
       const query = costDiagnosticsQuery();
       for (const key of ["machine", "agent", "model"]) query.set(key, row[key]);
       query.set("cost_status", "unknown");
       query.set("return", window.location.pathname + window.location.search + "#cost-diagnostics");
-      return `<tr><th>${escapeHtml(costReasonText(row.reason))}</th><td>${escapeHtml(row.machine)}</td><td>${escapeHtml(agentLabel(row.agent))}<br>${escapeHtml(row.model)}</td><td class="numeric">${integer(row.entries)}</td><td><a href="/sessions?${escapeHtml(query.toString())}">查看该模型未知记录</a></td></tr>`;
+      return `<tr><th scope="row">${escapeHtml(costReasonText(row.reason))}</th><td data-label="机器">${escapeHtml(row.machine)}</td><td data-label="Agent / 模型">${escapeHtml(agentLabel(row.agent))}<br>${escapeHtml(row.model)}</td><td data-label="记录数" class="numeric">${integer(row.entries)}</td><td data-label="明细"><a href="/sessions?${escapeHtml(query.toString())}">查看该模型未知记录</a></td></tr>`;
     }).join("");
+    qs("#cost-diagnostics-body").innerHTML = rows(other);
+    qs("#cost-diagnostics-table").hidden = !other.length;
+    qs("#incomplete-cost-records").hidden = !incomplete.length;
+    qs("#incomplete-cost-summary").textContent = `缺少完整用量的记录（${integer(incomplete.reduce((total, row) => total + row.entries, 0))}）`;
+    qs("#incomplete-cost-body").innerHTML = rows(incomplete);
   }
 
   async function initCollection() {

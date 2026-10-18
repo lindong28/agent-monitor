@@ -51,17 +51,22 @@
         <p><a id="collection-return" href="/">返回总览</a></p>
         <p id="collection-context" class="scope-note"></p>
         <p class="scope-note">下方机器采集与账号观测展示全部机器的最新状态，不受来源页日期或筛选影响。重新读取不会启动采集。</p>
+        <section id="sync-panel" class="panel" aria-label="机器采集状态">
+          <div class="panel-head"><h2>机器采集</h2><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span></div>
+          <p id="sync-summary" class="status-line" aria-live="polite">检查中…</p>
+          <div id="sync-machines" class="sync-machines"></div>
+        </section>
         <section class="panel" id="cost-diagnostics" aria-labelledby="cost-diagnostics-title">
           <div class="panel-head"><h2 id="cost-diagnostics-title">费用记录诊断</h2><button id="reload-cost-diagnostics" type="button">重新读取费用诊断</button></div>
           <p id="cost-diagnostics-scope" class="scope-note"></p>
           <p class="scope-note">按来源页日期与筛选检查当前可读明细；原因和数量可能与历史汇总不同。缺少用量或价格依据的记录仍保留，金额不按零计算。</p>
           <p id="cost-diagnostics-status" role="status">读取中…</p>
-          <div class="table-wrap"><table><thead><tr><th>原因</th><th>机器</th><th>Agent / 模型</th><th class="numeric">记录数</th><th>明细</th></tr></thead><tbody id="cost-diagnostics-body"></tbody></table></div>
-        </section>
-        <section id="sync-panel" class="panel" aria-label="机器采集状态">
-          <div class="panel-head"><h2>机器采集</h2><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span></div>
-          <p id="sync-summary" class="status-line" aria-live="polite">检查中…</p>
-          <div id="sync-machines" class="sync-machines"></div>
+          <div id="cost-diagnostics-table" class="table-wrap"><table class="cost-diagnostic-table"><thead><tr><th>原因</th><th>机器</th><th>Agent / 模型</th><th class="numeric">记录数</th><th>明细</th></tr></thead><tbody id="cost-diagnostics-body"></tbody></table></div>
+          <details id="incomplete-cost-records" class="note-disclosure" hidden>
+            <summary id="incomplete-cost-summary">缺少完整用量的记录</summary>
+            <p class="scope-note">这些记录缺少完整用量，未计入费用；条数不能用于推算漏计金额。可展开会话核对留存的用量依据。</p>
+            <div class="table-wrap"><table class="cost-diagnostic-table"><thead><tr><th>原因</th><th>机器</th><th>Agent / 模型</th><th class="numeric">记录数</th><th>明细</th></tr></thead><tbody id="incomplete-cost-body"></tbody></table></div>
+          </details>
         </section>
         <section class="panel" aria-labelledby="machine-quota-title"><h2 id="machine-quota-title">未归属账号的机器观测</h2>
           <p class="scope-note">未识别账号的观测不能用于选择可用账号；已知账号及其历史读数见<a href="/#quota-explorer">总览配额表</a>。</p>

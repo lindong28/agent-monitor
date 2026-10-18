@@ -59,7 +59,8 @@ class CollectionPageTests(unittest.TestCase):
     def test_cost_diagnostic_links_preserve_filters_and_escape_source_values(self):
         script = r'''
 const fs=require('fs'),assert=require('assert');
-const nodes={'#cost-diagnostics-status':{},'#cost-diagnostics-body':{}};
+const nodes=Object.fromEntries(['#cost-diagnostics-status','#cost-diagnostics-body','#cost-diagnostics-table',
+ '#incomplete-cost-records','#incomplete-cost-summary','#incomplete-cost-body'].map(id=>[id,{}]));
 global.document={readyState:'loading',addEventListener(){},querySelector:s=>nodes[s]||null,querySelectorAll:()=>[]};
 global.window={location:{origin:'http://example.test',pathname:'/collection',search:'?range=custom&start=2026-10-01&end=2026-10-02&project=a%26b&project=c',hash:''}};
 eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { renderCostDiagnostics, costDiagnosticsQuery,'));
@@ -77,8 +78,26 @@ assert(am.costReading(null,{known:0,unknown:1}).includes('无已知金额'));
 assert(am.costReading(null,{known:0,unknown:0}).includes('无记录'));
 assert(am.costReading(0,{known:1,unknown:0}).includes('$0'));
 assert(!am.costReading(1,{known:1,unknown:3}).includes('金额记录'));
+const missing={machine:'mac',agent:'claude-code',model:'missing',reason:'usage_incomplete',entries:4};
+const price={machine:'mac',agent:'codex',model:'unpriced',reason:'unknown_model',entries:1};
+am.renderCostDiagnostics({groups:[missing,price]});
+assert(nodes['#cost-diagnostics-status'].textContent.includes('5 条'));
+assert(nodes['#cost-diagnostics-body'].innerHTML.includes('unpriced'));
+assert(!nodes['#cost-diagnostics-body'].innerHTML.includes('missing'));
+assert(nodes['#incomplete-cost-body'].innerHTML.includes('missing'));
+assert(nodes['#incomplete-cost-summary'].textContent.includes('4'));
+assert.equal(nodes['#incomplete-cost-records'].hidden,false);
+nodes['#incomplete-cost-records'].open=true;
+am.renderCostDiagnostics({groups:[missing]});
+assert.equal(nodes['#cost-diagnostics-table'].hidden,true);
+assert.equal(nodes['#incomplete-cost-records'].open,true);
+am.renderCostDiagnostics({groups:[price]});
+assert.equal(nodes['#incomplete-cost-records'].hidden,true);
+assert.equal(nodes['#cost-diagnostics-table'].hidden,false);
 am.renderCostDiagnostics({groups:[]});
 assert(nodes['#cost-diagnostics-status'].textContent.includes('没有金额未知记录'));
+assert.equal(nodes['#cost-diagnostics-table'].hidden,true);
+assert.equal(nodes['#incomplete-cost-records'].hidden,true);
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)

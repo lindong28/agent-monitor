@@ -1980,6 +1980,16 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   .guide-source-table td::before { content: attr(data-label); display: block; color: var(--ink-muted); font-size: 12px; margin-bottom: 4px; }
 }
 
+/* Keep diagnostic evidence and drilldown together, as on the guide. */
+@media (max-width: 760px) {
+  .cost-diagnostic-table { min-width: 0; width: 100%; }
+  .cost-diagnostic-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .cost-diagnostic-table, .cost-diagnostic-table tbody, .cost-diagnostic-table tr, .cost-diagnostic-table th, .cost-diagnostic-table td { display: block; }
+  .cost-diagnostic-table tr { padding: 12px 0; border-top: 1px solid var(--line); }
+  .cost-diagnostic-table th, .cost-diagnostic-table td { border: 0; padding: 6px 8px; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+  .cost-diagnostic-table td::before { content: attr(data-label); display: block; color: var(--ink-muted); font-size: 12px; margin-bottom: 4px; }
+}
+
 /* Business pages show coverage without a disclosure control. */
 section.sync-panel .sync-panel-head { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 section.sync-panel #sync-summary { flex: 1 1 240px; margin-left: 0; }

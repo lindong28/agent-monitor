@@ -12,6 +12,8 @@ The effective style is `style:volcengine-ark-console`, prepared in Prompt Planet
 
 ## Project adaptations
 
+Task-focused diagnostics (2026-10-19): Collection puts current machine status before cost reasons; historical quality counts and missing-usage groups remain in disclosures. Below 760px, cost diagnostic tables use the existing labelled-card treatment so model, count and drilldown stay together. Overview and Explore share the visible cost scope rather than repeating a known-subtotal label on every ranking. No palette, data or account-operation changes. See [decision](adr/20261019-a42e-task-focused-diagnostics.md) and [review scope](references/product-capability-review-20261019.md).
+
 Notice borders (2026-10-18): quota login warnings, account availability/action notices, authorization content and excluded-machine cards use the existing neutral panel or row treatment without colored left-edge stripes. Warning text, status chips and actions remain visible; ordinary button separators and focus indicators retain their existing treatment.
 
 Explore control follow-up (2026-10-18): directory search shares quota search's control styling, and filter fields align at the top so an extra search row does not stretch adjacent selects. This closes the mismatch observed in the expanded query builder during the same live review.
