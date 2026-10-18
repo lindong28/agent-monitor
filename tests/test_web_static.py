@@ -690,22 +690,22 @@ process.stdout.write(JSON.stringify({
         # "All history" is the widest claim on the page and the one this host
         # cannot honour: the rollup starts at a collection date. The qualifier
         # travels with the figure rather than living a screen below it.
-        self.assertEqual(payload["allHistory"]["context"], "已知小计")
-        self.assertEqual(payload["allHistoryPartial"]["context"], "自 2026-04-21 起 · 已知小计")
+        self.assertEqual(payload["allHistory"]["context"], "")
+        self.assertEqual(payload["allHistoryPartial"]["context"], "自 2026-04-21 起")
         self.assertNotIn("tokens", payload["allHistoryPartial"]["context"])
         # Silence about coverage is not a report of full coverage. The branch
         # keys on what coverage said, not on whether the object arrived — the
         # producer returns a full dict even when it knows nothing.
-        self.assertEqual(payload["noCoverage"]["context"], "覆盖范围未知 · 已知小计")
-        self.assertEqual(payload["partialNoDate"]["context"], "覆盖范围未知 · 已知小计")
-        self.assertEqual(payload["thirtyDays"]["context"], "已知小计")
+        self.assertEqual(payload["noCoverage"]["context"], "覆盖范围未知")
+        self.assertEqual(payload["partialNoDate"]["context"], "覆盖范围未知")
+        self.assertEqual(payload["thirtyDays"]["context"], "")
 
         # An empty rollup DB is the case that matters most, because its numbers
         # are zeros: "we collected nothing" must not render as "you spent
         # nothing ever" under the widest heading the page can show.
         self.assertEqual(payload["emptyRollup"]["label"], "全部历史成本")
         self.assertEqual(payload["emptyRollup"]["cost"], "$0.00")
-        self.assertEqual(payload["emptyRollup"]["context"], "覆盖范围未知 · 已知小计")
+        self.assertEqual(payload["emptyRollup"]["context"], "覆盖范围未知")
 
         # A server that predates the field must not leave a live-looking heading
         # over a zero or a stale figure.

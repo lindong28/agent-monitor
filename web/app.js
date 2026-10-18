@@ -318,7 +318,7 @@
 
   function costReading(value, coverage) {
     const empty = coverage && coverage.known === 0 && coverage.unknown === 0;
-    const amount = empty ? "无记录" : value == null ? "— 无已知金额" : `${moneyPrecise(value)}${coverage?.unknown > 0 ? " 已知小计" : ""}`;
+    const amount = empty ? "无记录" : value == null ? "— 无已知金额" : moneyPrecise(value);
     return amount;
   }
 
@@ -576,15 +576,12 @@
 
   function renderOverview(data, selectedRange) {
     qs("#today-cost").textContent = money(data.today.cost_usd);
-    const todayContext = qs("#today-context");
-    if (todayContext) todayContext.textContent = "已知小计";
     qs("#week-cost").textContent = money(data.week.cost_usd);
     const weekContext = qs("#week-context");
     if (weekContext) {
       weekContext.textContent = data.week.window && data.week.window.start
         ? "自周一 00:00 · GMT+8"
         : "本周";
-      weekContext.textContent += " · 已知小计";
     }
     renderQuotaAccounts(data.rate_limits);
     // After the quota table, and guarded: a cached copy of the older HTML has no
@@ -836,8 +833,6 @@
       contextEl.hidden = true;
       contextEl.textContent = "";
     }
-    contextEl.hidden = false;
-    contextEl.textContent = [contextEl.textContent, "已知小计"].filter(Boolean).join(" · ");
   }
 
   function resetText(epoch, nowMs = Date.now()) {
