@@ -2,6 +2,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261018-9c42: quota object membership](20261018-9c42-quota-object-membership.md) | Accepted; identified account comparison and separate machine observations |
 | [20261018-71f2: focused account actions](20261018-71f2-focused-account-actions.md) | Accepted; common account panel entry and invalid-date recovery |
 | [20261017-82cb: task-oriented Web actions](20261017-82cb-task-oriented-web-actions.md) | Accepted; selected account rounds, explicit action scopes and reading continuity |
 | [20261016-6b21: reader information](20261016-6b21-reader-information.md) | Accepted; task-specific regions, shared observation context and compact machine coverage |

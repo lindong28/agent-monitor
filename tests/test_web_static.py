@@ -673,7 +673,7 @@ process.stdout.write(JSON.stringify({
         # collapsed group's highest-usage pill was placed in the second cell
         # regardless of which window produced it, so a 5h figure could sit under
         # "7d used" — in a table the column is the claim.
-        self.assertIn("worst.spec === spec", js)
+        self.assertIn("${worst.spec.key} 已用 ${worst.used}%", js)
         # The one thing the numbers cannot say for themselves: rows are per
         # account and must not be added up.
         self.assertIn("配额按账号计量，不跨账号求和。", prose)
@@ -1207,7 +1207,7 @@ process.stdout.write(JSON.stringify({
         self.assertIn(".quota-history-note", css)
 
     def test_overview_renders_all_live_accounts_before_any_remembered_account(self):
-        """Rendered live rows include a collapsed unattributed group."""
+        """Only identified accounts participate in live/history account ordering."""
         script = r'''
 const fs = require("fs");
 
@@ -1453,13 +1453,13 @@ process.stdout.write(JSON.stringify({
         with self.subTest("collapsed unattributed live group"):
             self.assertEqual(
                 ordered_presence,
-                ["in_use", "in_use", "in_use", "remembered"],
+                ["in_use", "remembered"],
             )
             collapsed = [row for row in mixed if "quota-unknown" in row["bodyClass"]]
-            self.assertEqual(len(collapsed), 3)
+            self.assertEqual(len(collapsed), 0)
             self.assertEqual(
                 [row["presence"] for row in collapsed],
-                [None, "in_use", "in_use"],
+                [],
             )
             self.assertEqual(payload["collapsedHistory"], {
                 "text": "历史账号（1）",
@@ -1483,8 +1483,8 @@ process.stdout.write(JSON.stringify({
             })
         with self.subTest("old server payload without presence"):
             self.assertEqual(
-                [row["presence"] for row in payload["missingPresence"]],
-                ["in_use", "in_use"],
+                [row["presence"] for row in payload["missingPresence"] if row["presence"]],
+                ["in_use"],
             )
         history_rows = [
             row for row in payload["onlyRemembered"]
@@ -1774,11 +1774,11 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         js = (ROOT / "web" / "app.js").read_text()
 
         self.assertIn("quotaWorstUsage", js)
-        self.assertIn("${worst.machine} 已用 ${worst.used}%", js)
+        self.assertIn("${worst.machine} 观测：${worst.spec.key} 已用 ${worst.used}%", js)
         # Each state names its own machines: one needs agent-monitor updated, the other
         # needs someone to sign in, and one lumped sentence serves neither.
-        self.assertIn("更新 ${unstamped.join", js)
-        self.assertIn('${signedOut.join("、")} 未登录', js)
+        self.assertIn("请更新 ${machines} 上的 agent-monitor", js)
+        self.assertIn('account.account_state === "signed_out" ? "未登录" : "账号未识别"', js)
 
     @staticmethod
     def quota_provider_config(js, key):
@@ -2144,7 +2144,7 @@ console.log(JSON.stringify({
         self.assertFalse(rendered["noteHidden"])
         self.assertIn("tencent", rendered["noteText"])
         self.assertIn("macmini", rendered["noteText"])
-        self.assertIn("未计入上表", rendered["noteText"])
+        self.assertIn("未提供账号配额", rendered["noteText"])
         # Nothing that reads as something to go and fix.
         for alarm in ("失败", "错误", "更新", "无法确认", "告警", "请", "需"):
             self.assertNotIn(alarm, rendered["noteText"])
@@ -2184,7 +2184,7 @@ console.log(JSON.stringify({
 
         self.assertIn("macstudio", rendered["noteText"])
         self.assertIn("失效", rendered["noteText"])
-        self.assertNotIn("未计入上表", rendered["noteText"])
+        self.assertNotIn("未提供账号配额", rendered["noteText"])
         # Its row is still there — that is what makes the other wording false.
         self.assertIn("macstudio", rendered["tableText"])
 
@@ -2222,7 +2222,7 @@ console.log(JSON.stringify({
         self.assertIn("macstudio", rendered["noteText"])
         self.assertNotIn("失效", rendered["noteText"])
         self.assertNotIn("停在最后一次读数", rendered["noteText"])
-        self.assertIn("未计入上表", rendered["noteText"])
+        self.assertIn("未提供账号配额", rendered["noteText"])
 
     def test_the_note_disappears_when_every_machine_is_signed_in(self):
         """Empty must render as absent, not as an empty sentence."""

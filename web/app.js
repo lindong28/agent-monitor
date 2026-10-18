@@ -1018,14 +1018,15 @@
 
     const remembered = [];
     const allEntries = QUOTA_PROVIDERS.flatMap((provider) =>
-      (rateLimits?.[provider.key]?.accounts || []).map((account) => ({ provider, account })));
+      (rateLimits?.[provider.key]?.accounts || []).filter((account) => account.account_state === "known")
+        .map((account) => ({ provider, account })));
     const matches = allEntries.filter(({ provider, account }) => quotaMatches(provider, account));
     const count = qs("#quota-match-count");
     if (count) {
       const known = matches.filter(({ account }) => account.account_state === "known");
       const current = known.filter(({ account }) => quotaPresence(account) === "in_use").length;
       const history = known.filter(({ account }) => quotaPresence(account) === "remembered").length;
-      count.textContent = `匹配 ${matches.length} / ${allEntries.length} 条记录 · 在用账号 ${current} · 历史账号 ${history} · 账号未知的机器记录 ${matches.length - known.length}`;
+      count.textContent = `匹配 ${matches.length} / ${allEntries.length} 个账号 · 在用账号 ${current} · 历史账号 ${history}`;
     }
     QUOTA_PROVIDERS.forEach((provider) => {
       const block = rateLimits?.[provider.key];
@@ -1036,35 +1037,23 @@
         return;
       }
       if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return;
-      const accounts = sortQuotaAccounts(provider, sourceAccounts.filter((account) => quotaMatches(provider, account)));
+      if (!sourceAccounts.some((account) => account.account_state === "known")) {
+        table.appendChild(quotaUnavailableBody(provider,
+          "机器观测见下方“未归属账号的机器读数”。", "无已识别账号"));
+        return;
+      }
+      const accounts = sortQuotaAccounts(provider, sourceAccounts.filter((account) => account.account_state === "known" && quotaMatches(provider, account)));
       const live = accounts.filter((account) => quotaPresence(account) === "in_use");
       const named = live.filter((account) => account.account_state === "known");
-      const unknown = live.filter((account) => account.account_state !== "known");
       if (named.length) {
         table.appendChild(quotaBody(provider, named));
-      }
-      if (unknown.length === 1) {
-        table.appendChild(quotaBody(provider, unknown));
       }
       accounts
         .filter((account) => quotaPresence(account) === "remembered")
         .forEach((account) => remembered.push({ provider, account }));
     });
 
-    // Rows without an account are one per machine, not one per account. Keep
-    // larger groups collapsed, but still inside the live section so no current
-    // machine falls into the past-account disclosure.
-    QUOTA_PROVIDERS.forEach((provider) => {
-      const accounts = sortQuotaAccounts(provider, rateLimits?.[provider.key]?.accounts || []);
-      const unknown = accounts.filter(
-        (account) => quotaMatches(provider, account)
-          && quotaPresence(account) === "in_use" && account.account_state !== "known",
-      );
-      if (unknown.length > 1) {
-        table.appendChild(quotaUnknownBody(provider, unknown));
-      }
-    });
-
+    renderQuotaMachineRecords(rateLimits);
     appendRememberedAccounts(table, remembered, rememberedExpanded);
     if (!matches.length && (quotaFilter.provider !== "all" || quotaFilter.search.trim())) {
       const body = document.createElement("tbody");
@@ -1152,7 +1141,8 @@
     QUOTA_PROVIDERS.forEach((provider) => {
       const block = rateLimits?.[provider.key];
       const showing = new Set(
-        (block?.accounts || []).map((account) => account.reading_from).filter(Boolean),
+        (block?.accounts || []).filter((account) => account.account_state === "known")
+          .map((account) => account.reading_from).filter(Boolean),
       );
       (block?.signed_out_machines || []).forEach((machine) => {
         (showing.has(machine) ? frozen : absent).push(`${machine} 的 ${provider.label}`);
@@ -1161,11 +1151,11 @@
 
     const sentences = [];
     if (absent.length) {
-      sentences.push(`未登录，未计入上表 —— ${absent.join("、")}。`);
+      sentences.push(`未登录，未提供账号配额 —— ${absent.join("、")}。`);
     }
     if (frozen.length) {
       sentences.push(
-        `登录已失效，上表数字停在最后一次读数 —— ${frozen.join("、")}。`,
+        `登录已失效，账号配额保留最后一次读数 —— ${frozen.join("、")}。`,
       );
     }
     note.textContent = sentences.join(" ");
@@ -1773,86 +1763,62 @@
     return pill;
   }
 
-  function quotaUnknownBody(provider, accounts) {
-    const body = document.createElement("tbody");
-    body.className = "quota-unknown";
-
-    const summary = document.createElement("tr");
-    summary.className = "quota-row unattributed quota-summary";
-
-    const head = document.createElement("td");
-    head.colSpan = 3;
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "quota-toggle";
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.appendChild(quotaProviderPill(provider));
-    const label = document.createElement("span");
-    label.className = "quota-account-label";
-    label.textContent = quotaUnknownSummaryText(accounts);
-    toggle.appendChild(label);
-    // Collapsed rows are hidden in CSS, which puts them out of reach of the
-    // browser's find-in-page. `hidden="until-found"` is the platform answer to
-    // exactly that and was tried here: it computes `content-visibility: hidden`
-    // on the rows, and they stay fully laid out at 81px each — that property has
-    // no effect on `display: table-row`, which establishes no independent
-    // formatting context. Leaving it in would have made the collapse a no-op.
-    // What is left is the summary row naming every machine in the group, so the
-    // names stay findable even though the figures beside them do not.
-    toggle.addEventListener("click", () => {
-      const open = body.classList.toggle("open");
-      toggle.setAttribute("aria-expanded", String(open));
+  function renderQuotaMachineRecords(rateLimits) {
+    const details = qs("#quota-machine-records");
+    if (!details) return;
+    const entries = QUOTA_PROVIDERS.flatMap((provider) =>
+      (rateLimits?.[provider.key]?.accounts || []).filter((account) => account.account_state !== "known")
+        .map((account) => ({ provider, account })));
+    details.hidden = !entries.length;
+    const signature = JSON.stringify(entries);
+    if (details.dataset.readings === signature) return;
+    details.dataset.readings = signature;
+    // Preserve the disclosure node and its open state across polling.
+    details.textContent = "";
+    if (!entries.length) return;
+    const summary = document.createElement("summary");
+    summary.textContent = `未归属账号的机器读数（${entries.length}）：${entries.map(({ provider, account }) => `${(account.machines || []).join("、") || account.reading_from || "机器未知"} · ${provider.label}（${account.account_state === "signed_out" ? "未登录" : "需更新 agent-monitor"}）`).join("；")}`;
+    QUOTA_PROVIDERS.forEach((provider) => {
+      const worst = quotaWorstUsage(provider, entries.filter((entry) => entry.provider === provider).map((entry) => entry.account));
+      if (!worst) return;
+      const band = worst.band === "critical" ? "即将用尽" : "余量偏低";
+      summary.appendChild(quotaBandPill(worst.band,
+        ` · ${provider.label} ${worst.machine} 观测：${worst.spec.key} 已用 ${worst.used}%（${band}；${worst.updatedAt ? formatDate(worst.updatedAt) : "观测时间未知"}）`));
     });
-    head.appendChild(toggle);
-    summary.appendChild(head);
-
-    // Collapsing must not swallow the one thing the reader has to act on. A
-    // machine at 96% used is still at 96% used when it has no account stamp, and
-    // "the fleet is behind on updates" is exactly when that happens.
-    //
-    // The pill goes in the column of the window it came from. In a table the
-    // column IS the claim: a 5h figure parked under "7d used" is read as a 7d
-    // figure, which is the misalignment this whole change exists to remove.
-    const worst = quotaWorstUsage(provider, accounts);
-    QUOTA_COLUMNS.forEach((spec) => {
-      const cell = document.createElement("td");
-      cell.className = "numeric";
-      if (worst && worst.spec === spec) {
-        cell.dataset.label = `${spec.key} 已用`;
-        cell.appendChild(quotaBandPill(worst.band, `${worst.machine} 已用 ${worst.used}%`));
+    details.appendChild(summary);
+    const context = document.createElement("p");
+    context.textContent = "这些读数尚不能归属到具体账号，不计入账号比较和筛选。以下保留采集时的数值与时间。";
+    details.appendChild(context);
+    entries.forEach(({ provider, account }) => {
+      const record = document.createElement("div");
+      record.className = "quota-machine-record";
+      const heading = document.createElement("strong");
+      const machines = (account.machines || []).join("、") || account.reading_from || "机器未知";
+      heading.textContent = `${machines} · ${provider.label} · ${account.account_state === "signed_out" ? "未登录" : "账号未识别"}`;
+      record.appendChild(heading);
+      const values = [account.updated_at ? `观测于 ${formatDate(account.updated_at)}` : "观测时间未知"];
+      if (account.account_plan) values.push(`采集时套餐：${quotaPlanLabel(account.account_plan)}`);
+      provider.windows.forEach((spec) => {
+        const reading = quotaUsage(account[spec.used]);
+        const reset = account[spec.reset];
+        const resetDate = typeof reset === "number" && Number.isFinite(reset) && reset > 0
+          ? new Date(reset * 1000) : null;
+        const resetText = !resetDate ? "重置时间未知" : Number.isFinite(resetDate.getTime())
+          ? `记录的重置时间 ${formatDate(resetDate.toISOString())}` : `重置时间无效（原值 ${reset}）`;
+        values.push(`${spec.key}：${reading.known ? `已用 ${reading.used}%` : "用量未知"}；${resetText}`);
+      });
+      values.forEach((value) => {
+        const fact = document.createElement("p");
+        fact.textContent = value;
+        record.appendChild(fact);
+      });
+      if (account.account_state === "unstamped") {
+        const remedy = document.createElement("p");
+        remedy.textContent = `请更新 ${machines} 上的 agent-monitor，以采集账号标记。`;
+        record.appendChild(remedy);
       }
-      summary.appendChild(cell);
+      details.appendChild(record);
     });
-
-    const machines = document.createElement("td");
-    machines.textContent = accounts.flatMap((a) => a.machines || []).join(" · ");
-    summary.appendChild(machines);
-    summary.appendChild(document.createElement("td"));
-
-    body.appendChild(summary);
-    accounts.forEach((account) => body.appendChild(quotaAccountRow(provider, account)));
-    return body;
-  }
-
-  // Each state names the machines it applies to, because the remedies differ:
-  // one needs agent-monitor updated, the other needs someone to sign in. A summary that
-  // says only "N machines report no account" sends the reader to neither.
-  function quotaUnknownSummaryText(accounts) {
-    const byState = (state) =>
-      accounts.filter((a) => a.account_state === state).flatMap((a) => a.machines || []);
-    const clauses = [];
-    const unstamped = byState("unstamped");
-    const signedOut = byState("signed_out");
-    if (unstamped.length) {
-      clauses.push(`更新 ${unstamped.join("、")} 上的 agent-monitor`);
-    }
-    if (signedOut.length) {
-      clauses.push(`${signedOut.join("、")} 未登录`);
-    }
-    const total = accounts.flatMap((a) => a.machines || []).length;
-    return clauses.length
-      ? `${total} 台机器无账号标记 —— ${clauses.join("；")}`
-      : `${total} 台机器无账号标记`;
   }
 
   function quotaWorstUsage(provider, accounts) {
@@ -1867,7 +1833,7 @@
           // `spec` travels with the value: the caller places the pill in that
           // window's own column, and a figure under the wrong header is a
           // wrong figure.
-          worst = { spec, used, band, machine: (account.machines || []).join("、") || "未知" };
+          worst = { spec, used, band, updatedAt: account.updated_at, machine: (account.machines || []).join("、") || "未知" };
         }
       });
     });

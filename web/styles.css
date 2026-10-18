@@ -842,17 +842,8 @@ button:disabled {
   transition: transform var(--dur) var(--ease);
 }
 
-.quota-unknown.open .quota-toggle::before,
 .quota-toggle[aria-expanded="true"]::before {
   transform: rotate(90deg);
-}
-
-.quota-unknown .quota-row:not(.quota-summary) {
-  display: none;
-}
-
-.quota-unknown.open .quota-row:not(.quota-summary) {
-  display: table-row;
 }
 
 .sync-panel {
@@ -1093,6 +1084,16 @@ button:disabled {
   color: var(--ink);
 }
 
+
+#quota-machine-records .status-pill {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.quota-machine-record {
+  margin-top: var(--sp-4);
+}
 
 .note-disclosure p {
   margin: var(--sp-4) 0 0;
@@ -1958,7 +1959,6 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   #quota-accounts thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   #quota-accounts tbody:not([hidden]) { display: block; }
   #quota-accounts tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border-top: 1px solid var(--line); }
-  #quota-accounts .quota-unknown:not(.open) .quota-row:not(.quota-summary) { display: none; }
   #quota-accounts td { display: block; min-width: 0; padding: 12px; border-top: 0; overflow-wrap: anywhere; }
   #quota-accounts td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--ink-muted); font-size: 12px; }
   #quota-accounts .quota-identity { position: static; width: auto; min-width: 0; max-width: none; box-shadow: none; }

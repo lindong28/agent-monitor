@@ -32,7 +32,7 @@ function node(tag = 'div') {
   });
   return n;
 }
-const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quota-window','quota-sort','quota-match-count','quota-signed-out'];
+const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quota-window','quota-sort','quota-match-count','quota-signed-out','quota-machine-records'];
 const nodes = Object.fromEntries(ids.map(id=>['#'+id,node(id==='quota-accounts'?'table':'div')]));
 const buttons = ['all','claude','codex'].map(p=> {const b=node('button'); b.dataset.quotaProvider=p; return b;});
 nodes['#quota-explorer'].children=buttons;
@@ -47,25 +47,51 @@ function account(id,state='known',presence='in_use',machine='alpha') {
     machines:[machine],reading_from:machine,five_hour_used_pct:91,seven_day_used_pct:37,
     five_hour_resets_at:4102444800,seven_day_resets_at:4102444800,updated_at:'2026-01-01T00:00:00Z'};
 }
-// Unknown identities remain separate per machine when preserving expanded time.
+// An account table must not turn a machine observation into an account.
 for (const state of ['unstamped', 'signed_out', 'known']) {
-  const samples=['old-a','old-b'].map((machine,index)=>({...account('known-'+index,state,'in_use',machine),
-    ...(state==='known'?{}:{account_id:null,account_label:null})}));
-  const readings={codex:{accounts:samples}};
-  ui.renderQuotaAccounts(readings);
-  let details=table.querySelectorAll('.quota-observation-details');
-  details[0].open=true;
-  ui.renderQuotaAccounts(readings);
-  details=table.querySelectorAll('.quota-observation-details');
-  assert.deepEqual(details.map(d=>d.open),[true,false],state+' expansion must stay with its row');
-  if (state !== 'known') {
-    const row=table.tBodies.flatMap(b=>b.children).find(r=>r.cells?.length===7);
-    assert(!row.cells[0].textContent.includes('old-a'), 'machine identity belongs in the machine column');
-    assert(!row.cells[0].textContent.includes('账号身份未确认'), 'do not restate the identity status');
-    assert(row.cells[0].textContent.includes(state==='signed_out'?'未登录':'账号未知'));
-    assert.equal(row.cells[0].textContent.includes('更新'),state==='unstamped');
-    assert(row.cells[5].textContent.includes('old-a'));
+  for (const size of [1,2]) {
+    const samples=['old-a','old-b'].slice(0,size).map((machine,index)=>({...account('known-'+index,state,'in_use',machine),
+      ...(state==='known'?{}:{account_id:null,account_label:null}), five_hour_used_pct:96,seven_day_used_pct:0}));
+    const readings={codex:{accounts:samples,signed_out_machines:state==='signed_out'?['old-a']:[]}};
+    const original=JSON.stringify(readings);
+    ui.renderQuotaAccounts(readings);
+    const machineRecords=nodes['#quota-machine-records'];
+    if (state === 'known') {
+      assert.equal(table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId).length,size);
+      assert(machineRecords.hidden);
+      let details=table.querySelectorAll('.quota-observation-details');
+      details[0].open=true;
+      ui.renderQuotaAccounts(readings);
+      details=table.querySelectorAll('.quota-observation-details');
+      assert.deepEqual(details.map(d=>d.open),size===1?[true]:[true,false]);
+    } else {
+      assert(!table.textContent.includes('old-a'),'unidentified machine must leave account comparison');
+      assert(!machineRecords.hidden);
+      assert(machineRecords.textContent.includes('old-a'));
+      assert(machineRecords.textContent.includes(state==='signed_out'?'未登录':'更新'));
+      assert(machineRecords.textContent.includes('0%'),'zero observation is retained');
+      assert(machineRecords.textContent.includes(ui.formatDate(samples[0].updated_at)));
+      const summary=machineRecords.children[0];
+      for(const value of ['96%','5h','old-a','即将用尽']) assert(summary.textContent.includes(value),value);
+      machineRecords.open=true;
+      ui.renderQuotaAccounts(readings);
+      assert(machineRecords.open,'poll must preserve disclosure');
+      assert(!nodes['#quota-signed-out'].textContent.includes('账号配额保留最后一次读数'));
+      const missing={...samples[0],five_hour_used_pct:null,five_hour_resets_at:null};
+      ui.renderQuotaAccounts({codex:{accounts:[missing]}});
+      assert(machineRecords.textContent.includes('用量未知'));
+      assert(!machineRecords.textContent.includes('天后重置'),'raw history must not acquire a live countdown');
+    }
+    assert.equal(JSON.stringify(readings),original,'renderer must not change snapshot');
   }
+}
+// Malformed remote timestamps must not interrupt other account rows.
+for (const reset of [10000000000000, Number.MAX_VALUE]) {
+  const damaged={...account(null,'signed_out','in_use','invalid-clock'),account_label:null,
+    seven_day_resets_at:reset};
+  ui.renderQuotaAccounts({codex:{accounts:[damaged,account('retained','known','remembered')]}});
+  assert(nodes['#quota-machine-records'].textContent.includes('重置时间无效'));
+  assert(table.textContent.includes('retained@example.test'),'bad machine timestamp must not interrupt history rendering');
 }
 const data={claude:{accounts:[account('alice'),account('past','known','remembered'),account('u1','unstamped','in_use','old-a'),account('u2','unstamped','in_use','old-b')],
   refresh_errors:[{machine:'alpha',reason:'fixture failure'}],signed_out_machines:['signedout']},
@@ -182,8 +208,8 @@ assert(!document.querySelector('#quota-past-accounts').hidden,'new action observ
 descendants(table).find(n=>n.className.includes('quota-past-toggle')).click();
 ui.updateCodexQuotaReadings([]);
 ui.renderQuotaAccounts(data);
-assert(count().includes('匹配 5 / 5')); assert(count().includes('在用账号 2')); assert(count().includes('历史账号 1')); assert(count().includes('机器记录 2'));
-assert(table.tBodies.some(b=>b.className==='quota-unknown'));
+assert(count().includes('匹配 3 / 3')); assert(count().includes('在用账号 2')); assert(count().includes('历史账号 1')); assert(!count().includes('机器记录'));
+assert(!table.tBodies.some(b=>b.className==='quota-unknown')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
 assert(table.tBodies.find(b=>b.className==='quota-history').hidden);
 buttons[2].click();
 assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'bob');
@@ -191,9 +217,9 @@ assert(table.textContent.includes('fixture failure')); assert(!nodes['#quota-sig
 assert(!table.textContent.includes('账号操作')); assert(!table.textContent.includes('查询配额')); assert(table.textContent.includes('37%'));
 ui.renderQuotaAccounts(data); assert.equal(rows().length,1); assert.equal(buttons[2].attributes['aria-pressed'],'true');
 search('nobody'); assert(table.textContent.includes('没有匹配的配额记录')); assert(table.textContent.includes('fixture failure'));
-nodes['#quota-clear'].click(); assert.equal(nodes['#quota-search'].value,''); assert(count().includes('匹配 5 / 5'));
+nodes['#quota-clear'].click(); assert.equal(nodes['#quota-search'].value,''); assert(count().includes('匹配 3 / 3'));
 search('PRO alice'); assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'alice');
-search('old-b'); assert(count().includes('匹配 1 / 5')); assert(count().includes('在用账号 0')); assert(count().includes('机器记录 1'));
+search('old-b'); assert(count().includes('匹配 0 / 3')); assert(count().includes('在用账号 0')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
 search('past'); assert(table.textContent.includes('移除')); assert.strictEqual(ui.snapshot(),data);
 // The delete request can finish after the user hides its row with a filter.
 search('bob'); assert.equal(rows().length,1);
@@ -201,7 +227,7 @@ nodes['#quota-window'].value='seven_day'; nodes['#quota-window'].listeners.chang
 nodes['#quota-sort'].value='remaining_desc'; nodes['#quota-sort'].listeners.change();
 assert.equal(nodes['#quota-clear'].hidden,false);
 ui.removeRenderedAccount('claude','past','2026-01-01T00:00:00Z');
-nodes['#quota-clear'].click(); assert(count().includes('匹配 4 / 4')); assert(table.textContent.includes('bob@example.test')); assert(table.textContent.includes('alice@example.test'));
+nodes['#quota-clear'].click(); assert(count().includes('匹配 2 / 2')); assert(table.textContent.includes('bob@example.test')); assert(table.textContent.includes('alice@example.test'));
 assert.equal(nodes['#quota-window'].value,'five_hour','reset restores the contracted default window');
 assert.equal(nodes['#quota-sort'].value,'default','reset restores the contracted default order');
 assert.equal(nodes['#quota-clear'].hidden,true,'no active filter needs no reset action');
@@ -216,7 +242,7 @@ ui.renderQuotaAccounts(data);
 assert.equal(nodes['#quota-search'].value,'bob');
 assert.equal(rows().length,1);
 replacementButtons[1].click(); assert.equal(rows().length,0);
-nodes['#quota-clear'].click(); assert(count().includes('匹配 5 / 5'));
+nodes['#quota-clear'].click(); assert(count().includes('匹配 3 / 3'));
 ui.renderQuotaAccounts({claude:{accounts:[],unavailable_reason:'fixture unavailable'},codex:{accounts:[]}});
 assert(table.textContent.includes('fixture unavailable')); assert(!table.textContent.includes('没有匹配'));
 replacementButtons[2].click();
