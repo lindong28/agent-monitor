@@ -1138,7 +1138,7 @@ process.stdout.write(JSON.stringify({
         )
 
         self.assertEqual(future["cellCount"], 7)
-        self.assertEqual(future["providerText"], "Claude已登出")
+        self.assertEqual(future["providerText"], "Claude")
         self.assertIn("agent-claude-code", future["providerPillClass"])
         self.assertEqual(future["planText"], "Max 20×")
         self.assertIn("history@example.test", future["accountText"])
@@ -1147,7 +1147,7 @@ process.stdout.write(JSON.stringify({
         for remembered in (future, past, unknown):
             self.assertIn("remembered", remembered["rowClass"])
             self.assertIn("stale", remembered["rowClass"])
-            self.assertEqual(remembered["historyMarkerCount"], 1)
+            self.assertEqual(remembered["historyMarkerCount"], 0)
             self.assertEqual(remembered["historyNoteCount"], 1)
             self.assertEqual(remembered["staleWarningCount"], 0)
             # 5h first, then 7d — the fixture's two windows carry different
@@ -1172,6 +1172,8 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(past["observedTexts"], [])
         self.assertNotIn("观测", past["accountText"])
         self.assertIn("历史读数，不代表当前状态", past["updateText"])
+        self.assertIn("当前未在已纳入的机器上使用", past["updateText"])
+        self.assertNotIn("账号操作", past["updateText"])
         self.assertTrue(all(text.startswith("观测于 ") for text in past["observedTexts"]))
 
         self.assertEqual(unknown["warningTexts"], [])

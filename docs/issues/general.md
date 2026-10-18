@@ -1,6 +1,6 @@
 # tt-web Issues
 
-## [open] ISSUE-UX-20261018-8e19：配额标签的常驻位置与信息分工
+## [resolved] ISSUE-UX-20261018-8e19：配额标签的常驻位置与信息分工
 
 - Owner / Priority: agent-monitor Web maintainer / medium。
 - Evidence: 用户指出总览中的“本页查询”“机器记录”“机器历史账号”“账号身份未确认”。上轮真实页面观察 `/Users/lindong/task-artifacts/monitor-ux-round2-20261017/independent/evidence/commands.jsonl` 第36条包含这些文字；后续只读审查结合 `459bff6` 的 `quotaAccountRow`、`quotaProviderCell`、`quotaAccountCell`、`quotaUpdatedCell` 核对来源与身份含义。新账号查询读数可以与机器旧套餐、旧关联并存，关联历史不等于配额读数过旧。
@@ -11,6 +11,8 @@
 - **2026-10-18真实复查**：四标签仍存在。初次新上下文全站审查只泛称来源/历史/未知需保留，未提出位置取舍；核收反馈后补出候选，不能计为自主检出。根线程真实展开历史账号和读数详情确认混合来源；滚动后组标题可能不可见，不能简单把说明移到顶部。当前证据与旧问题对照见 [本轮审查](../references/ui-harness-review-20261018.md)。产品仍未修改；共享规则后续执行细化归 ai-agent-config ADR b71f。除四标签外，操作卡状态及长未知提示仅为需要保全时态/窗口语义的简化候选，未证明所有变体均可无损合并。
 
 - **补充候选（2026-10-18，静态旧材料）**：本轮harness对照的两份独立报告还提出历史用量行动口吻、账号/配额列组织、成本主值与定价覆盖分层、各区域时间作用域和图表占比文字通道。尚未核实当前页面是否仍成立；实施本项时由Web维护者比对当前入口及既有修复后决定，不能据旧材料直接改动。原稿位于 `/Users/lindong/task-artifacts/label-value-20261018/run-alpha/findings.md` 与 `run-beta/findings.md`，共享验证摘要位于 ai-agent-config `docs/references/reading-judgment-20261018.md`。本轮无后台产品执行任务。
+
+- **2026-10-18 产品修复**：按 [ADR 6f21](../adr/20261018-6f21-quota-label-placement.md) 将查询及套餐来源移入观测详情；历史机器状态归机器列；未知身份与未登录分开，移除账号列重复机名及身份说明。候选页面真实展开行与详情已复验，既有 renderer/Web 测试覆盖读数选择、历史状态与未知身份。发布版本和真实 Hub 的宽窄屏核验以 `/Users/lindong/task-artifacts/monitor-label-fix-20261018/verification.md` 为准。此前补充候选未转为本次已证实缺陷，不据旧材料扩大改动；本项修复不代表 harness 自主检出问题已解决。
 
 ## [open] ISSUE-UX-20261018-5ad1：配额筛选与账号操作选择的范围衔接
 

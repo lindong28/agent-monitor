@@ -1242,15 +1242,8 @@
     }
 
     row.appendChild(quotaAccountCell(provider, account));
-    row.appendChild(quotaProviderCell(provider, display));
-    const plan = quotaPlanCell(account);
-    if (display.quota_source === "account_action") {
-      const source = document.createElement("span");
-      source.className = "quota-history-note";
-      source.textContent = "机器记录";
-      plan.appendChild(source);
-    }
-    row.appendChild(plan);
+    row.appendChild(quotaProviderCell(provider));
+    row.appendChild(quotaPlanCell(account));
     QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell(provider, spec, display)));
     row.appendChild(quotaMachinesCell(account, display));
     row.appendChild(quotaUpdatedCell(provider, display, stale, display.quota_source === "account_action"
@@ -1261,17 +1254,11 @@
     return row;
   }
 
-  function quotaProviderCell(provider, account) {
+  function quotaProviderCell(provider) {
     const cell = document.createElement("td");
     const wrap = document.createElement("div");
     wrap.className = "quota-provider-cell";
     wrap.appendChild(quotaProviderPill(provider));
-    if (quotaPresence(account) === "remembered") {
-      const marker = document.createElement("span");
-      marker.className = "status-pill quota-history-marker";
-      marker.textContent = account.quota_source === "account_action" ? "机器历史账号" : "已登出";
-      wrap.appendChild(marker);
-    }
     cell.appendChild(wrap);
     return cell;
   }
@@ -1340,12 +1327,13 @@
 
     const name = document.createElement("span");
     name.className = "quota-account-label";
-    name.textContent = quotaAccountName(account);
+    name.textContent = account.account_state === "known" ? quotaAccountName(account)
+      : account.account_state === "signed_out" ? "未登录" : "账号未知";
     wrap.appendChild(name);
-    if (account.account_state !== "known") {
+    if (account.account_state !== "known" && account.account_state !== "signed_out") {
       const note = document.createElement("span");
       note.className = "quota-history-note";
-      note.textContent = "账号身份未确认";
+      note.textContent = "请更新对应机器上的 agent-monitor";
       wrap.appendChild(note);
     }
     const actions = document.createElement("div");
@@ -1650,7 +1638,9 @@
     const cell = document.createElement("td");
     const names = account.machines || [];
     const source = display.quota_source === "account_action" ? null : display.reading_from;
-    if (!names.length) cell.textContent = "—";
+    const remembered = quotaPresence(account) === "remembered";
+    if (!names.length) cell.textContent = remembered ? "无在用机器" : "—";
+    else if (remembered) cell.appendChild(document.createTextNode("历史关联："));
     names.forEach((name, index) => {
       if (index) cell.appendChild(document.createTextNode(" · "));
       const node = document.createElement("span");
@@ -1690,13 +1680,20 @@
       account.account_state, account.account_state === "known" ? null : [...(account.machines || [])].sort()]);
     const summary = document.createElement("summary");
     summary.textContent = quotaObservationAge(account.updated_at);
-    summary.setAttribute("aria-label", `配额更新：${summary.textContent}，查看完整时间`);
+    summary.setAttribute("aria-label", `配额更新：${summary.textContent}，查看时间与来源`);
     details.appendChild(summary);
     const exact = document.createElement("span");
     exact.className = "quota-history-note";
     const knownTime = typeof account.updated_at === "string" && account.updated_at && Number.isFinite(Date.parse(account.updated_at));
     exact.textContent = knownTime ? `观测时间：${formatDate(account.updated_at)}` : "未取得观测时间";
     details.appendChild(exact);
+    if (quotaPresence(account) === "remembered") {
+      const membership = document.createElement("span");
+      membership.className = "quota-history-note";
+      membership.textContent = "当前未在已纳入的机器上使用"
+        + (provider.key === "codex" ? "；独立保存的登录状态见账号操作" : "");
+      details.appendChild(membership);
+    }
     cell.appendChild(details);
     const note = (text) => {
       const node = document.createElement("span");
@@ -1705,10 +1702,10 @@
       cell.appendChild(node);
     };
     if (account.quota_source === "account_action") {
-      note(stale ? "本页查询 · 读数较旧" : "本页查询");
+      if (stale) note("读数较旧");
       const context = document.createElement("span");
       context.className = "quota-history-note";
-      context.textContent = "机器归属与套餐仍按采集记录显示";
+      context.textContent = "配额来自账号操作中的配额查询；机器归属与套餐来自机器采集";
       details.appendChild(context);
       return cell;
     }
