@@ -71,20 +71,18 @@
         <div class="kpi-sections">
           <section class="kpi-group panel overview-cost" aria-labelledby="kpi-spend-title">
             <h2 id="kpi-spend-title" class="kpi-group-title">成本概况</h2>
-            <p class="scope-note">仅合计已采集记录中的已知金额，金额未知的记录不计入。金额来自日志记录或按配置价格估算，不是服务商账单。</p>
+            <p class="scope-note">用量按已采集日志统计；费用仅汇总可计价记录，非服务商账单。<a data-collection-link href="/collection#cost-diagnostics">采集与诊断</a></p>
             <p id="spend-coverage" class="quota-scope" hidden></p>
             <div class="kpi-grid">
               <article class="kpi-card">
                 <div class="kpi-label">今日成本 <span class="scope-tag">固定窗口 · GMT+8</span></div>
                 <div id="today-cost" class="kpi-value">—</div>
-                <div id="today-context" class="kpi-sub">金额已知与未知的记录数未提供</div>
-                <a id="today-unknown-cost" class="panel-link" hidden></a>
+                <div id="today-context" class="kpi-sub">已知小计</div>
               </article>
               <article class="kpi-card">
                 <div class="kpi-label">本周成本 <span class="scope-tag">固定窗口</span></div>
                 <div id="week-cost" class="kpi-value">—</div>
                 <div id="week-context" class="kpi-sub">自周一 00:00 · GMT+8</div>
-                <a id="week-unknown-cost" class="panel-link" hidden></a>
               </article>
               <!-- The third figure is the one the range selector controls, so the
                    label names the window rather than saying "区间": a card headed
@@ -94,7 +92,6 @@
                 <div id="range-label" class="kpi-label">区间成本</div>
                 <div id="range-cost" class="kpi-value">—</div>
                 <div id="range-context" class="kpi-sub" hidden></div>
-                <a id="range-unknown-cost" class="panel-link" hidden></a>
               </article>
             </div>
             <p class="scope-note">日期范围仅影响区间成本、趋势与周期比较；其余指标使用各自固定窗口。</p>

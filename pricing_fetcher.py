@@ -80,6 +80,11 @@ def _cost_and_provenance(entry, pricing):
         return None, _provenance("unpriced", reason="conflicting_service_context")
     allowed = {"speed": {"standard", "fast"}, "inference_geo": {"global", "us"},
                "service_tier": {"standard"}}
+    # Official Claude Code 2.1.296 applies a geo multiplier only for "us".
+    # Recognize its observed sentinel without inventing an actual region or
+    # accepting arbitrary future values (see the cost diagnostics ADR).
+    if entry.agent_id == "claude-code":
+        allowed["inference_geo"].add("not_available")
     if any(key not in allowed or not isinstance(value, str) or value not in allowed[key]
            for key, value in context.items()):
         return None, _provenance("unpriced", reason="unsupported_service_context")
@@ -99,6 +104,8 @@ def _cost_and_provenance(entry, pricing):
         sources = [rates["source"]]
         verified_at = rates.get("verified_at")
     multiplier = 1
+    if context.get("inference_geo") == "not_available":
+        sources.append("claude-code:2.1.296:sha256:c9b5341637becbd423ddffc5b254afb645682a3868cb708bbc6cc0e7bb419937")
     if context.get("inference_geo") == "us":
         geo = table[model_key].get("inference_geo_us")
         if not isinstance(geo, dict):

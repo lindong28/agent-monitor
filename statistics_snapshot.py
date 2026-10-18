@@ -249,6 +249,8 @@ def read_admitted_usage(current, *, time_range=None, query=None, session_id=None
             if values:
                 clauses.append(f"json_extract(payload, '$.{field}') IN ({','.join('?' for _ in values)})")
                 parameters.extend(values)
+        if (query or {}).get("cost_status") == ["unknown"]:
+            clauses.append("json_extract(payload, '$.cost_usd') IS NULL")
         if session_id is not None:
             clauses.append("json_extract(payload, '$.session_id') = ?")
             parameters.append(session_id)

@@ -37,6 +37,27 @@ class HistoryContractTests(unittest.TestCase):
         for context in ({"speed": "future"}, {"speed": None}, {"service_tier": "priority"}, {"speed": {"private": "not retained"}}):
             self.assertIsNone(pricing.calculate_cost(self.entry(**context), table))
 
+    def test_claude_unavailable_geo_uses_client_nominal_multiplier(self):
+        # Claude Code 2.1.296 rM: us => 1.1, otherwise 1; only the observed
+        # sentinel is accepted here, never arbitrary future geography values.
+        table = pricing._fallback_pricing()
+        base = self.entry(speed="standard", service_tier="standard", inference_geo="not_available")
+        for model in ("claude-opus-4-8", "claude-opus-5"):
+            for speed, expected in (("standard", 5), ("fast", 10)):
+                entry = replace(base, model=model, service_context={**base.service_context, "speed": speed})
+                result = pricing.with_calculated_cost(entry, table)
+                self.assertEqual(result.cost_usd, expected)
+                self.assertEqual(result.service_context["inference_geo"], "not_available")
+                us = replace(entry, service_context={**entry.service_context, "inference_geo": "us"})
+                self.assertAlmostEqual(pricing.calculate_cost(us, table), expected * 1.1)
+        for entry in (replace(base, usage_quality="incomplete"), replace(base, model="unknown"),
+                      replace(base, agent_id="codex"),
+                      replace(base, service_context={**base.service_context, "inference_geo": "future"})):
+            self.assertIsNone(pricing.calculate_cost(entry, table))
+        self.assertEqual(pricing.calculate_cost(replace(base, cost_usd=12), {}), 12)
+        no_fast = {key: {k: v for k, v in rates.items() if k != "service_modes"} for key, rates in table.items()}
+        self.assertIsNone(pricing.calculate_cost(replace(base, service_context={**base.service_context, "speed": "fast"}), no_fast))
+
     def test_equal_tokens_upgrade_independent_metadata(self):
         old = self.entry("absent")
         incomplete = parsers.complete_usage_observation(old, self.entry(None))

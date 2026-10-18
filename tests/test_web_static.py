@@ -690,22 +690,22 @@ process.stdout.write(JSON.stringify({
         # "All history" is the widest claim on the page and the one this host
         # cannot honour: the rollup starts at a collection date. The qualifier
         # travels with the figure rather than living a screen below it.
-        self.assertEqual(payload["allHistory"]["context"], "已知小计 · 金额已知与未知的记录数未提供")
-        self.assertEqual(payload["allHistoryPartial"]["context"], "自 2026-04-21 起 · 已知小计 · 金额已知与未知的记录数未提供")
+        self.assertEqual(payload["allHistory"]["context"], "已知小计")
+        self.assertEqual(payload["allHistoryPartial"]["context"], "自 2026-04-21 起 · 已知小计")
         self.assertNotIn("tokens", payload["allHistoryPartial"]["context"])
         # Silence about coverage is not a report of full coverage. The branch
         # keys on what coverage said, not on whether the object arrived — the
         # producer returns a full dict even when it knows nothing.
-        self.assertEqual(payload["noCoverage"]["context"], "覆盖范围未知 · 已知小计 · 金额已知与未知的记录数未提供")
-        self.assertEqual(payload["partialNoDate"]["context"], "覆盖范围未知 · 已知小计 · 金额已知与未知的记录数未提供")
-        self.assertEqual(payload["thirtyDays"]["context"], "已知小计 · 金额已知与未知的记录数未提供")
+        self.assertEqual(payload["noCoverage"]["context"], "覆盖范围未知 · 已知小计")
+        self.assertEqual(payload["partialNoDate"]["context"], "覆盖范围未知 · 已知小计")
+        self.assertEqual(payload["thirtyDays"]["context"], "已知小计")
 
         # An empty rollup DB is the case that matters most, because its numbers
         # are zeros: "we collected nothing" must not render as "you spent
         # nothing ever" under the widest heading the page can show.
         self.assertEqual(payload["emptyRollup"]["label"], "全部历史成本")
         self.assertEqual(payload["emptyRollup"]["cost"], "$0.00")
-        self.assertEqual(payload["emptyRollup"]["context"], "覆盖范围未知 · 已知小计 · 金额已知与未知的记录数未提供")
+        self.assertEqual(payload["emptyRollup"]["context"], "覆盖范围未知 · 已知小计")
 
         # A server that predates the field must not leave a live-looking heading
         # over a zero or a stale figure.
@@ -2020,7 +2020,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         html = (ROOT / "web" / "explore.html").read_text()
 
         self.assertIn("Codex 按已识别模型估算", html)
-        self.assertIn("成本为已知小计、非账单，未知费用不计入", html)
+        self.assertIn("用量按已采集日志统计；费用仅汇总可计价记录，非服务商账单", html)
         self.assertIn("GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算", html)
 
     def test_pivot_js_renders_explicit_empty_states(self):

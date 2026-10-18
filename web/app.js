@@ -319,7 +319,7 @@
   function costReading(value, coverage) {
     const empty = coverage && coverage.known === 0 && coverage.unknown === 0;
     const amount = empty ? "无记录" : value == null ? "— 无已知金额" : `${moneyPrecise(value)}${coverage?.unknown > 0 ? " 已知小计" : ""}`;
-    return `${amount} · ${costCoverageText(coverage)}`;
+    return amount;
   }
 
   function integer(value) {
@@ -530,7 +530,7 @@
   }
 
   function costTableReading(value, coverage) {
-    return {amount: costReading(value, coverage).split(" · ")[0], coverage: costCoverageText(coverage)};
+    return costReading(value, coverage);
   }
 
   function renderChartTable(id, headings, rows) {
@@ -577,14 +577,14 @@
   function renderOverview(data, selectedRange) {
     qs("#today-cost").textContent = money(data.today.cost_usd);
     const todayContext = qs("#today-context");
-    if (todayContext) todayContext.textContent = "已知小计 · " + costCoverageText(data.today.cost_coverage);
+    if (todayContext) todayContext.textContent = "已知小计";
     qs("#week-cost").textContent = money(data.week.cost_usd);
     const weekContext = qs("#week-context");
     if (weekContext) {
       weekContext.textContent = data.week.window && data.week.window.start
         ? "自周一 00:00 · GMT+8"
         : "本周";
-      weekContext.textContent += " · 已知小计 · " + costCoverageText(data.week.cost_coverage);
+      weekContext.textContent += " · 已知小计";
     }
     renderQuotaAccounts(data.rate_limits);
     // After the quota table, and guarded: a cached copy of the older HTML has no
@@ -592,18 +592,6 @@
     // charts and sync panel rendered — turning "one card is missing" into a
     // blank page, which is exactly the skew initOverview already handles.
     renderRangeCost(data.range, selectedRange || getRange(), data.rollup_coverage);
-    const today = data.attribution_windows?.month?.end;
-    const week = data.attribution_windows?.week;
-    for (const [key, dates] of [["today", today ? {start: today, end: today} : null], ["week", week], ["range", null]]) {
-      const link = qs(`#${key}-unknown-cost`);
-      if (!link) continue;
-      const count = data[key]?.cost_coverage?.unknown;
-      link.hidden = !(count > 0) || (key !== "range" && !dates);
-      const query = new URLSearchParams({range: dates ? "custom" : selectedRange || getRange(), group_by: "model", metric: "unknown_cost", ...dates});
-      link.href = `/explore?${query}`;
-      link.textContent = `追查 ${integer(count)} 条未知成本`;
-    }
-
     const costHistory = data.cost_over_time || legacyCostHistory(data.daily_cost_30d || []);
     const costGranularity = data.cost_over_time_granularity || "day";
     renderChartTable("daily-cost-data", ["时间", ...costHistory.columns.map((column) => `${agentLabel(column)} · USD`)],
@@ -732,11 +720,11 @@
     if (!data.available) { target.textContent = data.reason; return; }
     const period = (label, p) => {
       const query = new URLSearchParams({range: "custom", start: p.start, end: p.end, group_by: "model", metric: "cost"});
-      return `<tr><th>${label}<br>${p.start} — ${p.end}<br><a class="panel-link" href="/explore?${escapeHtml(query.toString())}">透视此周期</a></th><td>${p.entries ? money(p.known_cost_usd) : "无记录"}</td><td>${p.entries ? integer(p.tokens) : "无记录"}</td><td>${integer(p.unknown_cost_entries)} / ${integer(p.entries)}</td></tr>`;
+      return `<tr><th>${label}<br>${p.start} — ${p.end}<br><a class="panel-link" href="/explore?${escapeHtml(query.toString())}">透视此周期</a></th><td>${p.entries ? money(p.known_cost_usd) : "无记录"}</td><td>${p.entries ? integer(p.tokens) : "无记录"}</td></tr>`;
     };
     const delta = data.known_cost_delta_usd;
     const change = delta === null ? "无法比较（一期无已知金额）" : delta === 0 ? "相同" : `${delta > 0 ? "增加" : "减少"} ${money(Math.abs(delta))}`;
-    target.innerHTML = `<p class="comparison-summary">最近完整周期的已知成本较前一周期${change}。</p><div class="table-wrap"><table><thead><tr><th>周期 · ${data.days} 天</th><th>已知成本 · USD</th><th>已记录 token</th><th>金额未知记录 / 全部记录</th></tr></thead><tbody>${period("最近完整周期", data.current)}${period("前一周期", data.previous)}</tbody></table></div><p class="scope-note">— 表示没有已知金额；$0.00 表示已知零成本。金额未知的记录未计入差额；数据源的新鲜度与采集缺口见采集状态。</p>`;
+    target.innerHTML = `<p class="comparison-summary">最近完整周期的已知成本较前一周期${change}。</p><div class="table-wrap"><table><thead><tr><th>周期 · ${data.days} 天</th><th>已知成本 · USD</th><th>已记录 token</th></tr></thead><tbody>${period("最近完整周期", data.current)}${period("前一周期", data.previous)}</tbody></table></div><p class="scope-note">— 表示没有已知金额；$0.00 表示已知零成本。金额未知的记录未计入差额；数据源的新鲜度与采集缺口见采集状态。</p>`;
   }
 
   // Project identifiers share a long host-and-owner prefix, so truncating from
@@ -849,7 +837,7 @@
       contextEl.textContent = "";
     }
     contextEl.hidden = false;
-    contextEl.textContent = [contextEl.textContent, "已知小计", costCoverageText(range.cost_coverage)].filter(Boolean).join(" · ");
+    contextEl.textContent = [contextEl.textContent, "已知小计"].filter(Boolean).join(" · ");
   }
 
   function resetText(epoch, nowMs = Date.now()) {
@@ -1914,8 +1902,8 @@
 
   function collectionUrl(hash = "") {
     const url = new URL("/collection", window.location.origin);
-    for (const key of ["range", "start", "end"]) {
-      if (params().has(key)) url.searchParams.set(key, params().get(key));
+    for (const key of ["range", "start", "end", "machine", "agent", "model", "project"]) {
+      for (const value of params().getAll(key)) url.searchParams.append(key, value);
     }
     url.searchParams.set("return", currentPageUrl());
     return url.pathname + url.search + hash;
@@ -1925,7 +1913,7 @@
     if (window.location.pathname === "/collection") return;
     const link = qs("#sync-overview-link");
     if (link) link.href = collectionUrl();
-    qsa('[data-collection-link], a[data-nav][href^="/collection"]').forEach(link => { link.href = collectionUrl(); });
+    qsa('[data-collection-link], a[data-nav][href^="/collection"]').forEach(link => { link.href = collectionUrl(new URL(link.href, window.location.origin).hash); });
   }
 
   function renderSyncStatus(status) {
@@ -2221,6 +2209,35 @@
     return `${Math.floor(hours / 24)} 天前更新`;
   }
 
+  function costReasonText(reason) {
+    return ({usage_incomplete: "用量记录不完整", unknown_model: "模型价格未知",
+      missing_rates: "缺少适用费率", unsupported_service_context: "服务模式无法定价",
+      conflicting_service_context: "服务模式记录冲突", invalid_recorded_cost: "源记录金额无效",
+      unrecorded: "原因未记录"})[reason] || "原因未识别";
+  }
+
+  function costDiagnosticsQuery() {
+    const query = new URLSearchParams({range: getRange()});
+    for (const key of ["start", "end", "machine", "agent", "model", "project"]) {
+      for (const value of params().getAll(key)) query.append(key, value);
+    }
+    return query;
+  }
+
+  function renderCostDiagnostics(data) {
+    const groups = data.groups;
+    qs("#cost-diagnostics-status").textContent = groups.length
+      ? `已留存明细中 ${integer(groups.reduce((total, row) => total + row.entries, 0))} 条金额未知记录`
+      : "所选范围的已留存明细中，没有金额未知记录。";
+    qs("#cost-diagnostics-body").innerHTML = groups.map(row => {
+      const query = costDiagnosticsQuery();
+      for (const key of ["machine", "agent", "model"]) query.set(key, row[key]);
+      query.set("cost_status", "unknown");
+      query.set("return", window.location.pathname + window.location.search + "#cost-diagnostics");
+      return `<tr><th>${escapeHtml(costReasonText(row.reason))}</th><td>${escapeHtml(row.machine)}</td><td>${escapeHtml(agentLabel(row.agent))}<br>${escapeHtml(row.model)}</td><td class="numeric">${integer(row.entries)}</td><td><a href="/sessions?${escapeHtml(query.toString())}">查看该模型未知记录</a></td></tr>`;
+    }).join("");
+  }
+
   async function initCollection() {
     const current = pageScope();
     const back = qs("#collection-return");
@@ -2233,11 +2250,26 @@
         back.textContent = "返回来源页（保留日期、筛选与详情）";
       }
     }
-    const context = qs("#collection-context");
-    context.textContent = params().get("range") === "custom"
-      ? `来源日期：${params().get("start") || "未指定"} 至 ${params().get("end") || "未指定"}，仅用于返回。`
-      : "";
-    context.hidden = !context.textContent;
+    const query = costDiagnosticsQuery();
+    const dates = query.get("range") === "custom"
+      ? `${query.get("start") || "未指定"} 至 ${query.get("end") || "未指定"}`
+      : query.get("range") === "all" ? "全部历史" : `最近 ${query.get("range").replace("d", " 天")}`;
+    const filters = ["machine", "agent", "model", "project"].flatMap(key => query.getAll(key));
+    qs("#collection-context").hidden = true;
+    qs("#cost-diagnostics-scope").textContent = dates + (filters.length ? " · " + filters.join("、") : " · 全部来源");
+    async function loadCosts() {
+      const button = qs("#reload-cost-diagnostics");
+      button.disabled = true;
+      qs("#cost-diagnostics-status").textContent = "读取中…";
+      try {
+        const data = await api("/api/cost-diagnostics", Object.fromEntries([...new Set(query.keys())].map(key => [key, query.getAll(key)])));
+        if (current()) renderCostDiagnostics(data);
+      } catch (error) {
+        if (current()) qs("#cost-diagnostics-status").textContent = `费用诊断读取失败：${error.message}。可重新读取。`;
+      } finally { if (current()) button.disabled = false; }
+    }
+    qs("#reload-cost-diagnostics").addEventListener("click", loadCosts);
+    loadCosts();
     async function load() {
       try {
         const data = await api("/api/collection");
@@ -2756,6 +2788,16 @@
   ];
 
   async function initSessions() {
+    const diagnosticBack = qs("#sessions-diagnostics-return");
+    if (diagnosticBack && params().has("return")) {
+      try {
+        const target = new URL(params().get("return"), window.location.origin);
+        if (target.origin === window.location.origin && target.pathname === "/collection") {
+          diagnosticBack.href = target.pathname + target.search + target.hash;
+          diagnosticBack.hidden = false;
+        }
+      } catch (_) { /* Ignore invalid return URLs; the session remains usable. */ }
+    }
     if (params().has("session")) return initSessionDetail();
     SESSION_FILTERS.forEach(({key}) => { sessionsView.filters[key] = params().get(key) || ""; });
     sessionsView.page = Math.max(0, parseInt(params().get("page"), 10) || 0);
@@ -3658,7 +3700,8 @@
         return;
       }
       const url = new URL(link.href, window.location.origin);
-      if (url.pathname === "/collection" && window.location.pathname !== "/collection") {
+      if (url.pathname === "/collection" && window.location.pathname !== "/collection"
+          && link.id !== "sessions-diagnostics-return") {
         url.searchParams.set("return", currentPageUrl());
         link.href = url.pathname + url.search + url.hash;
       }

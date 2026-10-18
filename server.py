@@ -297,6 +297,42 @@ def collection_endpoint(_query):
         return {"sync": status, "rate_limits": _live_rate_limits_from_admission(admission, sync_status=status)}
 
 
+def cost_diagnostics_endpoint(query):
+    """Group unpriced observations without starting remote collection."""
+    time_range = _session_window(query, datetime.now().astimezone())
+    counts = defaultdict(int)
+
+    def collect(entries, machine, aliases=None):
+        projects = [canonical_project(value, aliases) for value in query.get("project", [])]
+        for entry in _filter_time(entries, time_range):
+            if entry.cost_usd is not None:
+                continue
+            if projects and canonical_project(entry.project, aliases) not in projects:
+                continue
+            if query.get("agent") and entry.agent_id not in query["agent"]:
+                continue
+            if query.get("model") and entry.model not in query["model"]:
+                continue
+            reason = (entry.cost_provenance or {}).get("reason") or "unrecorded"
+            counts[(machine, entry.agent_id, entry.model, reason)] += 1
+
+    if hub.enabled():
+        with generation.generation_admission_snapshot() as admission:
+            for current in admission.admitted:
+                if query.get("machine") and current.host not in query["machine"]:
+                    continue
+                selection = {key: query[key] for key in ("agent", "model") if key in query}
+                selection["cost_status"] = ["unknown"]
+                entries = statistics_snapshot.read_admitted_usage(current, time_range=time_range, query=selection)
+                collect(entries, current.host, (current.meta or {}).get("aliases"))
+    else:
+        machine = sync.load_machine_config().self_machine.name
+        if not query.get("machine") or machine in query["machine"]:
+            collect(load_all_entries(read_only=True, diagnostic=True), machine)
+    return {"groups": [dict(zip(("machine", "agent", "model", "reason"), key), entries=count)
+                       for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]}
+
+
 def refresh_endpoint(query):
     receipt = {}
     _maybe_sync_remotes({"force": ["1"]}, request_receipt=receipt)
@@ -505,6 +541,7 @@ ROUTES = {
     "/api/pivot-filters": pivot_filters_endpoint,
     "/api/sync-status": sync_status_endpoint,
     "/api/collection": collection_endpoint,
+    "/api/cost-diagnostics": cost_diagnostics_endpoint,
     "/api/sessions": sessions_endpoint,
     "/api/diagnostics": diagnostics_endpoint,
     "/api/network": network,

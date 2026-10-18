@@ -89,6 +89,16 @@ class StatisticsSnapshotTests(unittest.TestCase):
         self.addCleanup(current.close)
         return current
 
+    def test_unpriced_pushdown_excludes_known_zero_before_decoding(self):
+        entries = LoadedEntries([replace(self.usage()[0], message_id=str(i), request_id=str(i), cost_usd=cost)
+                                 for i, cost in enumerate((None, 0, 3))])
+        current = self.imported(entries)
+        with mock.patch.object(snapshots, "_usage_entry", wraps=snapshots._usage_entry) as decode:
+            result = snapshots.read_admitted_usage(current, query={"cost_status": ["unknown"]})
+            self.assertEqual(result, [entries[0]])
+            self.assertEqual(decode.call_count, 1)
+        self.assertEqual(len(snapshots.read_admitted_usage(current)), 3)
+
     def test_admitted_usage_matches_full_reader_at_boundaries_and_filters(self):
         import server
         start = NOW.replace(hour=0, minute=0, second=0, microsecond=1)

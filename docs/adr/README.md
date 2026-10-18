@@ -66,3 +66,5 @@ Earlier decisions remain in the source repository at the immutable commit linked
 - [20261016-3e7a](20261016-3e7a-full-reading-review.md)：完整全站阅读优化与同一覆盖图接续，独立 L1 放行；实施与未来遵循效果另验。
 
 - [20261018-6f21 — Quota label placement](20261018-6f21-quota-label-placement.md): query provenance in observation details, historical membership in the machine column, distinct unknown and signed-out identities. Revises a62e presentation only.
+
+- [20261018-8c42: nominal geography and cost diagnostics](20261018-8c42-cost-diagnostics.md) — preserve valuation evidence and move repeated coverage into diagnostics.

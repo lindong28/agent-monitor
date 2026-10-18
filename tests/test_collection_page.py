@@ -26,6 +26,83 @@ class CollectionPageTests(unittest.TestCase):
             sync.assert_called_once_with(admission=admitted)
             quota.assert_called_once_with(admitted, sync_status=status)
 
+    def test_cost_diagnostics_counts_records_and_respects_scope(self):
+        from datetime import datetime, timezone
+        from dataclasses import replace
+        from types import SimpleNamespace
+        from parsers import UsageEntry
+        base = UsageEntry(datetime(2026, 10, 2, 0, tzinfo=timezone.utc), "s", "m", "r",
+                          "model", 10, 2, 0, 0, None, "project", "claude-code")
+        entries = [base, replace(base, message_id="second", message_count=8),
+                   replace(base, message_id="zero", cost_usd=0),
+                   replace(base, message_id="out", timestamp=datetime(2026, 10, 3, tzinfo=timezone.utc)),
+                   replace(base, message_id="other", model="other")]
+        query = {"range": ["custom"], "start": ["2026-10-02"], "end": ["2026-10-02"],
+                 "model": ["model"], "project": ["project"], "machine": ["m1"]}
+        expected = {"groups": [{"machine": "m1", "agent": "claude-code", "model": "model",
+                               "reason": "unrecorded", "entries": 2}]}
+        hosts = [SimpleNamespace(host="m1", meta={}), SimpleNamespace(host="m2", meta={})]
+        with mock.patch.object(server.hub, "enabled", return_value=True), \
+             mock.patch.object(server.generation, "generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=hosts))), \
+             mock.patch.object(server.statistics_snapshot, "read_admitted_usage", return_value=entries) as read, \
+             mock.patch.object(server, "_maybe_sync_remotes", side_effect=AssertionError("refresh")):
+            self.assertEqual(server.cost_diagnostics_endpoint(query), expected)
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(read.call_args.kwargs["query"]["cost_status"], ["unknown"])
+        with mock.patch.object(server.hub, "enabled", return_value=False), \
+             mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(self_machine=SimpleNamespace(name="m1"))), \
+             mock.patch.object(server, "load_all_entries", return_value=entries) as read:
+            self.assertEqual(server.cost_diagnostics_endpoint(query), expected)
+            read.assert_called_once_with(read_only=True, diagnostic=True)
+            self.assertEqual(server.cost_diagnostics_endpoint({**query, "model": ["absent"]}), {"groups": []})
+
+    def test_cost_diagnostic_links_preserve_filters_and_escape_source_values(self):
+        script = r'''
+const fs=require('fs'),assert=require('assert');
+const nodes={'#cost-diagnostics-status':{},'#cost-diagnostics-body':{}};
+global.document={readyState:'loading',addEventListener(){},querySelector:s=>nodes[s]||null,querySelectorAll:()=>[]};
+global.window={location:{origin:'http://example.test',pathname:'/collection',search:'?range=custom&start=2026-10-01&end=2026-10-02&project=a%26b&project=c',hash:''}};
+eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { renderCostDiagnostics, costDiagnosticsQuery,'));
+const am=window.AgentMonitor;
+assert.deepEqual(am.costDiagnosticsQuery().getAll('project'),['a&b','c']);
+am.renderCostDiagnostics({groups:[{machine:'mac',agent:'codex',model:'<model>',reason:'unknown_model',entries:1}]});
+assert(nodes['#cost-diagnostics-status'].textContent.includes('1 条'));
+assert(!nodes['#cost-diagnostics-body'].innerHTML.includes('<model>'));
+const href=nodes['#cost-diagnostics-body'].innerHTML.match(/href="([^"]+)"/)[1].replaceAll('&amp;','&');
+const link=new URL(href,window.location.origin);
+assert.equal(link.searchParams.get('cost_status'),'unknown');
+assert.deepEqual(link.searchParams.getAll('project'),['a&b','c']);
+assert.equal(link.searchParams.get('return'),'/collection'+window.location.search+'#cost-diagnostics');
+assert(am.costReading(null,{known:0,unknown:1}).includes('无已知金额'));
+assert(am.costReading(null,{known:0,unknown:0}).includes('无记录'));
+assert(am.costReading(0,{known:1,unknown:0}).includes('$0'));
+assert(!am.costReading(1,{known:1,unknown:3}).includes('金额记录'));
+am.renderCostDiagnostics({groups:[]});
+assert(nodes['#cost-diagnostics-status'].textContent.includes('没有金额未知记录'));
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_return_to_cost_diagnostics_preserves_original_source_on_click(self):
+        script = r'''
+const fs=require('fs'),assert=require('assert'),listeners={};
+global.document={readyState:'loading',documentElement:{dataset:{}},querySelector:()=>null,
+ querySelectorAll:()=>[],addEventListener:(kind,handler)=>{listeners[kind]=handler;}};
+const source='/explore?range=all&model=M';
+const collection='/collection?range=all&return='+encodeURIComponent(source)+'#cost-diagnostics';
+global.window={location:{origin:'http://example.test',pathname:'/sessions',
+ search:'?range=all&model=M&return='+encodeURIComponent(collection),hash:''},addEventListener(){}};
+eval(fs.readFileSync('web/app.js','utf8'));
+window.AgentMonitor.initClientNavigation();
+for(const modified of [true,false]) {
+ const link={id:'sessions-diagnostics-return',href:collection,hasAttribute:()=>false};
+ listeners.click({button:0,ctrlKey:modified,target:{closest:s=>s==='a[href]'?link:null},preventDefault(){}});
+ assert.equal(new URL(link.href,window.location.origin).searchParams.get('return'),source);
+}
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_collection_static_route_and_initializer(self):
         handler = object.__new__(server.Handler)
         handler.path = "/collection?return=%2Fsessions%3Fsession%3Dfixture"
