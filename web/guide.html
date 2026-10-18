@@ -35,6 +35,7 @@
           <a data-nav href="/">总览</a>
           <a data-nav href="/explore">透视</a>
           <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/collection">采集与诊断</a>
           <a data-nav href="/network">网络</a>
         </nav>
         <nav class="guide-nav" aria-label="使用指南章节">
@@ -64,7 +65,7 @@
           <div class="panel-head"><h2>当前采集状态</h2><button id="refresh" type="button" class="btn">更新采集状态</button></div>
           <p class="scope-note">“机器快照可读”表示能够读取该机器已采集的数据，不表示每种来源都有数据，也不保证历史完整。无匹配记录不等于尚未接入。</p>
           <div class="panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></div>
-          <details class="note-disclosure"><summary>查看各机器的采集详情</summary><div id="sync-machines" class="sync-machines"></div></details>
+          <div id="sync-machines"></div><a id="sync-overview-link" data-collection-link href="/collection">打开采集与诊断，查看机器、质量与历史详情</a>
         </section>
         <section class="panel" id="setup">
           <h2>首次接入</h2>
@@ -75,7 +76,7 @@
             <li>运行 <code>./install.sh</code> 安装 Monitor。</li>
             <li>运行 <code>agent-monitor start</code> 启动服务。</li>
             <li>运行 <code>agent-monitor refresh</code> 进行首次采集。</li>
-            <li>运行 <code>agent-monitor open</code> 打开页面。在总览展开「全部机器」，确认机器名称、快照是否可读及数据更新时间。</li>
+            <li>运行 <code>agent-monitor open</code> 打开页面。进入「采集与诊断」，确认机器名称、快照是否可读及数据更新时间。</li>
           </ol>
           <p>macOS 安装器会设置定时采集。Linux 用户需另行配置定时任务。</p>
           <div class="code-card"><div class="code-card-head"><span>新单机 machines.json 示例</span><button type="button" data-copy-code="machine-config">复制配置</button></div><pre><code id="machine-config">{
@@ -88,7 +89,7 @@ agent-monitor refresh
 agent-monitor open</code></pre></div>
           <p>页面能打开不表示采集已完成。若快照不可读或更新时间未变化，先查看采集详情中的错误，再检查对应配置与连接。没有匹配记录也不等于安装失败。</p>
           <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>Hub 负责拉取快照；采集器独立保存各机数据。开始前，确认 Hub 能通过 SSH 连接各采集器。</p><ol><li>在 <code>machines.json</code> 中配置机器名称与 SSH 目标，在 <code>hub.json</code> 中配置 Hub、URL 和采集机器。已有安装须保留机器身份和退休记录。</li><li>在每台机器的代码目录中运行以下命令。将占位符替换为该机器在配置中的名称。</li></ol>
-          <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div><p>安装后，在 Hub 的总览展开「全部机器」，逐台核对机器名称、纳入状态与数据更新时间。显示旧快照时，按该机器的错误继续排查。</p></details>
+          <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div><p>安装后，进入 Hub 的「采集与诊断」，逐台核对机器名称、纳入状态与数据更新时间。显示旧快照时，按该机器的错误继续排查。</p></details>
           <p>完整命令、依赖与已有服务迁移见代码目录中的 <code>README.md</code> 和 <code>docs/operations/services.md</code>。本页只说明与检查状态，不修改配置或登录账号。</p>
         </section>
         <section class="panel" id="questions">

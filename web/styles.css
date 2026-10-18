@@ -1982,3 +1982,11 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   .guide-source-table th, .guide-source-table td { border: 0; padding: 6px 8px; white-space: normal; }
   .guide-source-table td::before { content: attr(data-label); display: block; color: var(--ink-muted); font-size: 12px; margin-bottom: 4px; }
 }
+
+/* Business pages show coverage without a disclosure control. */
+section.sync-panel .sync-panel-head { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+section.sync-panel #sync-summary { flex: 1 1 240px; margin-left: 0; }
+section.sync-panel #sync-overview-link { margin-left: auto; }
+section.sync-panel > .scope-note:last-child { margin-bottom: 0; }
+#quota-machine-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#quota-machine-notice[hidden] { display: none; }

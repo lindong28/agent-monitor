@@ -244,10 +244,13 @@ assert.equal(nodes["#sync-coverage"].textContent, "机器快照可读：2/2 台"
 assert(nodes["#sync-machines"].innerHTML.includes("failed"));
 assert(!nodes["#sync-machines"].innerHTML.includes("healthy"), "healthy machine cards belong in overview");
 assert(!nodes["#sync-machines"].innerHTML.includes("sync-machine-title"));
-assert.equal(nodes["#sync-overview-link"].href, "/?range=custom&start=2026-10-01&end=2026-10-12#sync-panel");
+const target = new URL(nodes["#sync-overview-link"].href, window.location.origin);
+assert.equal(target.pathname, "/collection");
+assert.equal(target.searchParams.get("return"), "/sessions" + window.location.search);
+assert.equal(target.searchParams.get("start"), "2026-10-01");
 window.location.search = "?range=7d";
 window.AgentMonitor.updateSyncOverviewLink();
-assert.equal(nodes["#sync-overview-link"].href, "/?range=7d#sync-panel");
+assert.equal(new URL(nodes["#sync-overview-link"].href, window.location.origin).searchParams.get("return"), "/sessions?range=7d");
 delete nodes["#sync-overview-link"];
 window.AgentMonitor.renderSyncStatus({coverage: {admitted: 2, declared: 2}, machines: [healthy, {...failed, syncing: true}]});
 assert(nodes["#sync-machines"].innerHTML.includes("healthy"), "overview and guide retain machine detail");
@@ -1911,7 +1914,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         app = (ROOT / "web" / "app.js").read_text()
 
         for html in (overview, explore):
-            self.assertIn('aria-label="机器同步状态"', html)
+            self.assertIn('aria-label="数据覆盖与时效"', html)
             self.assertIn('id="sync-coverage"', html)
             self.assertIn('id="sync-machines"', html)
         for token in (
@@ -2044,7 +2047,7 @@ class SignedOutMachinesReadAsStateNotFailureTests(unittest.TestCase):
     empty are the reason the table exists.
     """
 
-    def render_with(self, claude_signed_out, codex_signed_out, refresh_errors=(), claude_accounts=(), recover=False):
+    def render_with(self, claude_signed_out, codex_signed_out, refresh_errors=(), claude_accounts=(), recover=False, diagnostic=True):
         script = r'''
 const fs = require("fs");
 
@@ -2097,7 +2100,7 @@ global.document = {
 };
 
 const source = fs.readFileSync("web/app.js", "utf8")
-  .replace("window.AgentMonitor = {", "window.AgentMonitor = { renderQuotaAccounts,");
+  .replace("window.AgentMonitor = {", "window.AgentMonitor = { renderQuotaAccounts, renderQuotaSignedOut,");
 eval(source);
 
 const payload = __PAYLOAD__;
@@ -2106,6 +2109,7 @@ if (__RECOVER__) {
   payload.claude.refresh_errors = [];
   window.AgentMonitor.renderQuotaAccounts(payload);
 }
+window.AgentMonitor.renderQuotaSignedOut(payload, __DIAGNOSTIC__);
 function all(node) { return [node, ...node.children.flatMap(all)]; }
 
 console.log(JSON.stringify({
@@ -2133,11 +2137,17 @@ console.log(JSON.stringify({
         }
         script = script.replace("__PAYLOAD__", json.dumps(payload))
         script = script.replace("__RECOVER__", json.dumps(recover))
+        script = script.replace("__DIAGNOSTIC__", json.dumps(diagnostic))
         result = subprocess.run(
             ["node", "-e", script], cwd=ROOT, capture_output=True, text=True
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
+
+    def test_absent_machine_inventory_is_only_shown_in_diagnostics(self):
+        rendered = self.render_with(["tencent"], ["macmini"], diagnostic=False)
+        self.assertTrue(rendered["noteHidden"])
+        self.assertEqual(rendered["noteText"], "")
 
     def test_the_machines_are_named_outside_the_table_and_not_as_a_failure(self):
         rendered = self.render_with(["tencent"], ["tencent", "macmini"])

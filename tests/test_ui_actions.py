@@ -7,6 +7,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ActionTests(unittest.TestCase):
+    def test_operation_details_keep_own_observation_apart_from_latest_quota(self):
+        script = r'''
+const fs=require('fs'),assert=require('assert');
+global.document={readyState:'loading',addEventListener(){}};global.window={};
+eval(fs.readFileSync('web/app.js','utf8'));
+const source=fs.readFileSync('web/codex-accounts.js','utf8');
+const declaration=source.split('\n').find(line=>line.includes('const latestReading ='));
+const operationReading=new Function('account',declaration+';return latestReading;');
+const before={observed_at:'2026-10-18T01:00:00Z',seven_day_used_pct:1};
+const after={observed_at:'2026-10-18T02:00:00Z',seven_day_used_pct:2};
+for(const last of [before,{observed_at:'2026-10-18T03:00:00Z',seven_day_used_pct:54}]) {
+ const account={operation:{before,after},last_quota:last};
+ assert.strictEqual(operationReading(account),after);
+ assert.strictEqual(window.AgentMonitor.latestCodexQuotaReading(account),last===before?after:last);
+ delete account.operation.after;
+ assert.strictEqual(operationReading(account),before,'failed post-send query retains the successful before observation');
+}
+assert(source.includes('本次操作的最近观测'));
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_invalid_dates_invalidate_loaded_status_and_summary(self):
         script = r'''
 const fs=require('fs'), assert=require('assert');

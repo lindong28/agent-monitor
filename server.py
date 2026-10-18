@@ -290,6 +290,13 @@ def sync_status_endpoint(_query):
     return _sync_status()
 
 
+def collection_endpoint(_query):
+    """Read existing collection and quota observations without usage aggregation."""
+    with _query_admission() as admission:
+        status = _sync_status(admission=admission)
+        return {"sync": status, "rate_limits": _live_rate_limits_from_admission(admission, sync_status=status)}
+
+
 def refresh_endpoint(query):
     receipt = {}
     _maybe_sync_remotes({"force": ["1"]}, request_receipt=receipt)
@@ -497,6 +504,7 @@ ROUTES = {
     "/api/pivot": pivot_endpoint,
     "/api/pivot-filters": pivot_filters_endpoint,
     "/api/sync-status": sync_status_endpoint,
+    "/api/collection": collection_endpoint,
     "/api/sessions": sessions_endpoint,
     "/api/diagnostics": diagnostics_endpoint,
     "/api/network": network,
@@ -766,7 +774,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(route(query), send_body=send_body,
                                 compress=parsed.path == "/api/sessions")
                 return
-            if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/ip-check-docs") or parsed.path.startswith("/web/"):
+            if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/collection", "/ip-check-docs") or parsed.path.startswith("/web/"):
                 self._serve_static(parsed.path, send_body=send_body)
                 return
             self.send_error(404)
@@ -826,6 +834,8 @@ class Handler(BaseHTTPRequestHandler):
             file_path = WEB_ROOT / "sessions.html"
         elif path == "/network":
             file_path = WEB_ROOT / "network.html"
+        elif path == "/collection":
+            file_path = WEB_ROOT / "collection.html"
         elif path == "/guide":
             file_path = WEB_ROOT / "guide.html"
         elif path == "/ip-check-docs":

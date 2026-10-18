@@ -35,6 +35,7 @@
           <a data-nav href="/">总览</a>
           <a data-nav href="/explore">透视</a>
           <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/collection">采集与诊断</a>
           <a data-nav href="/network">网络</a>
         </nav>
         <nav class="guide-nav" aria-label="使用指南章节" hidden>
@@ -74,13 +75,12 @@
             <h2>会话明细</h2>
             <span id="session-count" class="status-line">加载中…</span>
           </div>
-          <details id="sync-panel" class="sync-panel" aria-label="机器同步状态">
-            <summary class="sync-panel-head"><strong>快照覆盖 <span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span></strong><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span></summary>
-            <p class="scope-note">Hub 模式汇集已纳入机器的会话。以下为机器快照覆盖，不代表当前日期或筛选结果完整；机器暂时联系不上时保留上次快照。</p>
-            <div id="sync-machines" class="sync-machines"></div>
-            <p class="scope-note"><a id="sync-overview-link" href="/#sync-panel">查看总览中的机器采集详情</a></p>
-            <p id="session-source-coverage" class="scope-note"></p>
-          </details>
+          <section id="sync-panel" class="sync-panel" aria-label="数据覆盖与时效">
+          <div class="sync-panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span><a id="sync-overview-link" data-collection-link href="/collection">采集与诊断</a></div>
+          <div id="sync-machines"></div>
+          <p class="scope-note">Hub 模式汇集已纳入机器的会话。快照可读不保证当前日期或筛选结果完整；未保存的最终用量无法还原。</p>
+          <p id="session-source-coverage" class="scope-note"></p>
+        </section>
           <details class="note-disclosure">
             <summary>会话范围、金额与事件数怎么读</summary>
             <p><strong>记录范围：</strong>这里只统计已采集的用量记录，不保证包含最终用量。明细可查看用量记录完整性及金额依据。</p>

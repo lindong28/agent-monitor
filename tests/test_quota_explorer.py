@@ -32,7 +32,7 @@ function node(tag = 'div') {
   });
   return n;
 }
-const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quota-window','quota-sort','quota-match-count','quota-signed-out','quota-machine-records'];
+const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quota-window','quota-sort','quota-match-count','quota-signed-out','quota-machine-records','quota-machine-notice'];
 const nodes = Object.fromEntries(ids.map(id=>['#'+id,node(id==='quota-accounts'?'table':'div')]));
 const buttons = ['all','claude','codex'].map(p=> {const b=node('button'); b.dataset.quotaProvider=p; return b;});
 nodes['#quota-explorer'].children=buttons;
@@ -59,6 +59,7 @@ for (const state of ['unstamped', 'signed_out', 'known']) {
     if (state === 'known') {
       assert.equal(table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId).length,size);
       assert(machineRecords.hidden);
+      assert(nodes['#quota-machine-notice'].hidden);
       let details=table.querySelectorAll('.quota-observation-details');
       details[0].open=true;
       ui.renderQuotaAccounts(readings);
@@ -81,6 +82,16 @@ for (const state of ['unstamped', 'signed_out', 'known']) {
       ui.renderQuotaAccounts({codex:{accounts:[missing]}});
       assert(machineRecords.textContent.includes('用量未知'));
       assert(!machineRecords.textContent.includes('天后重置'),'raw history must not acquire a live countdown');
+    }
+    if (state !== 'known') {
+      ui.renderQuotaAccounts(readings);
+      assert(!nodes['#quota-machine-notice'].hidden);
+      assert(nodes['#quota-machine-notice'].textContent.includes('96%'));
+      const normal = JSON.parse(JSON.stringify(readings));
+      normal.codex.accounts.forEach(account => {account.five_hour_used_pct=0;account.seven_day_used_pct=null;});
+      ui.renderQuotaAccounts(normal);
+      assert(nodes['#quota-machine-notice'].hidden, 'normal machine evidence belongs on diagnostics');
+      assert(nodes['#quota-machine-records'].textContent.includes('用量未知'));
     }
     assert.equal(JSON.stringify(readings),original,'renderer must not change snapshot');
   }
@@ -213,7 +224,7 @@ assert(!table.tBodies.some(b=>b.className==='quota-unknown')); assert(nodes['#qu
 assert(table.tBodies.find(b=>b.className==='quota-history').hidden);
 buttons[2].click();
 assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'bob');
-assert(table.textContent.includes('fixture failure')); assert(!nodes['#quota-signed-out'].hidden);
+assert(table.textContent.includes('fixture failure')); assert(nodes['#quota-signed-out'].hidden, 'unrelated signed-out machines belong in diagnostics');
 assert(!table.textContent.includes('账号操作')); assert(!table.textContent.includes('查询配额')); assert(table.textContent.includes('37%'));
 ui.renderQuotaAccounts(data); assert.equal(rows().length,1); assert.equal(buttons[2].attributes['aria-pressed'],'true');
 search('nobody'); assert(table.textContent.includes('没有匹配的配额记录')); assert(table.textContent.includes('fixture failure'));

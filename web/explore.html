@@ -35,6 +35,7 @@
           <a data-nav href="/">总览</a>
           <a data-nav href="/explore">透视</a>
           <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/collection">采集与诊断</a>
           <a data-nav href="/network">网络</a>
         </nav>
         <nav class="guide-nav" aria-label="使用指南章节" hidden>
@@ -53,16 +54,11 @@
             <button id="refresh" class="icon-btn" type="button" title="更新统计与配额" aria-busy="false">更新统计与配额</button>
           </div>
         </div>
-        <details id="sync-panel" class="sync-panel" aria-label="机器同步状态">
-          <summary class="sync-panel-head">
-            <div>
-              <strong>全部机器</strong>
-              <span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span>
-            </div>
-            <span id="sync-summary" class="status-line" aria-live="polite">检查中…</span>
-          </summary>
-          <div id="sync-machines" class="sync-machines"></div>
-        </details>
+        <section id="sync-panel" class="sync-panel" aria-label="数据覆盖与时效">
+          <div class="sync-panel-head"><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span><span id="sync-summary" class="status-line" aria-live="polite">检查中…</span><a id="sync-overview-link" data-collection-link href="/collection">采集与诊断</a></div>
+          <div id="sync-machines"></div>
+          <p class="scope-note">快照可读不保证当前日期或筛选结果完整；未保存的最终用量无法还原。</p>
+        </section>
         <div class="controls query-dates" aria-label="查询日期">
           <div class="field">
             <label for="range">时间范围</label>

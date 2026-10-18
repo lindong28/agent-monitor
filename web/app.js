@@ -98,7 +98,7 @@
     updateSyncOverviewLink();
     const range = getRange();
     function setLinkRange(url) {
-      const custom = range === "custom" && ["/explore", "/sessions"].includes(url.pathname);
+      const custom = range === "custom" && ["/explore", "/sessions", "/collection"].includes(url.pathname);
       url.searchParams.set("range", range === "custom" && !custom ? "30d" : range);
       ["start", "end"].forEach((key) => {
         const value = custom && params().get(key);
@@ -109,6 +109,7 @@
     qsa("[data-nav]").forEach((link) => {
       const url = new URL(link.getAttribute("href"), window.location.origin);
       setLinkRange(url);
+      if (url.pathname === "/collection" && window.location.pathname !== "/collection") url.searchParams.set("return", currentPageUrl());
       link.href = url.pathname + url.search;
       const current = url.pathname === window.location.pathname;
       link.setAttribute("aria-current", current ? "page" : "false");
@@ -145,7 +146,8 @@
   }
 
   const PAGE_SEARCH_ENTRIES = [
-    ["控制台", "总览", "用量、成本趋势与机器状态", "/"],
+    ["控制台", "总览", "用量、成本趋势与账号配额", "/"],
+    ["控制台", "采集与诊断", "机器采集、历史质量与未归属账号的观测", "/collection"],
     ["控制台", "透视", "按目录、模型、机器分析成本和 token", "/explore"],
     ["控制台", "会话", "查找会话、筛选记录并查看明细", "/sessions"],
     ["控制台", "网络", "查看服务端主机的出口和网络诊断", "/network"],
@@ -178,9 +180,10 @@
         const link = document.createElement("a");
         const url = new URL(path, window.location.origin);
         const range = getRange();
-        const custom = range === "custom" && ["/explore", "/sessions"].includes(url.pathname);
+        const custom = range === "custom" && ["/explore", "/sessions", "/collection"].includes(url.pathname);
         url.searchParams.set("range", range === "custom" && !custom ? "30d" : range);
         if (custom) ["start", "end"].forEach((key) => { if (params().get(key)) url.searchParams.set(key, params().get(key)); });
+        if (url.pathname === "/collection" && window.location.pathname !== "/collection") url.searchParams.set("return", currentPageUrl());
         link.href = url.pathname + url.search + url.hash;
         const label = document.createElement("strong");
         label.textContent = title;
@@ -1011,6 +1014,7 @@
     bindQuotaExplorer();
     const rememberedExpanded = options.rememberedExpanded ?? Boolean(qs("#quota-past-accounts")
       && !qs("#quota-past-accounts").hidden);
+    const focusedObservation = document.activeElement?.closest?.(".quota-observation-details")?.dataset.observationKey;
     const openObservations = new Set(Array.from(table.querySelectorAll?.(".quota-observation-details[open]") || [])
       .filter((node) => node.tagName === "DETAILS").map((node) => node.dataset.observationKey));
     // Only the bodies are ours; the header row is in the markup.
@@ -1039,7 +1043,7 @@
       if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return;
       if (!sourceAccounts.some((account) => account.account_state === "known")) {
         table.appendChild(quotaUnavailableBody(provider,
-          "机器观测见下方“未归属账号的机器读数”。", "无已识别账号"));
+          "机器观测见“采集与诊断”，不能据此选择可用账号。", "无已识别账号"));
         return;
       }
       const accounts = sortQuotaAccounts(provider, sourceAccounts.filter((account) => account.account_state === "known" && quotaMatches(provider, account)));
@@ -1072,8 +1076,10 @@
     });
     Array.from(table.querySelectorAll?.(".quota-observation-details") || []).forEach((node) => {
       if (node.tagName === "DETAILS") node.open = openObservations.has(node.dataset.observationKey);
+      if (focusedObservation && node.dataset.observationKey === focusedObservation) node.querySelector?.("summary")?.focus();
     });
     renderQuotaSignedOut(rateLimits);
+    updateSyncOverviewLink();
   }
 
   function quotaFailureDetails(provider, failures) {
@@ -1119,7 +1125,7 @@
   // It lives outside the table on purpose: a row would put a machine with no
   // account in the same visual class as accounts that have quota, and the
   // columns it would have to leave empty are the reason to read the table.
-  function renderQuotaSignedOut(rateLimits) {
+  function renderQuotaSignedOut(rateLimits, includeAbsent = false) {
     const note = qs("#quota-signed-out");
     if (!note) {
       return;
@@ -1150,7 +1156,7 @@
     });
 
     const sentences = [];
-    if (absent.length) {
+    if (includeAbsent && absent.length) {
       sentences.push(`未登录，未提供账号配额 —— ${absent.join("、")}。`);
     }
     if (frozen.length) {
@@ -1194,6 +1200,7 @@
       const open = historyBody.hidden;
       historyBody.hidden = !open;
       toggle.setAttribute("aria-expanded", String(open));
+      updateSyncOverviewLink();
     });
     table.appendChild(summaryBody);
     table.appendChild(historyBody);
@@ -1765,6 +1772,7 @@
   }
 
   function renderQuotaMachineRecords(rateLimits) {
+    renderQuotaMachineNotice(rateLimits);
     const details = qs("#quota-machine-records");
     if (!details) return;
     const entries = QUOTA_PROVIDERS.flatMap((provider) =>
@@ -1774,6 +1782,7 @@
     const signature = JSON.stringify(entries);
     if (details.dataset.readings === signature) return;
     details.dataset.readings = signature;
+    const hadFocus = details.contains?.(document.activeElement);
     // Preserve the disclosure node and its open state across polling.
     details.textContent = "";
     if (!entries.length) return;
@@ -1820,6 +1829,28 @@
       }
       details.appendChild(record);
     });
+    if (hadFocus) summary.focus();
+  }
+
+  function renderQuotaMachineNotice(rateLimits) {
+    const notice = qs("#quota-machine-notice");
+    if (!notice) return;
+    const entries = QUOTA_PROVIDERS.flatMap(provider => (rateLimits?.[provider.key]?.accounts || [])
+      .filter(account => account.account_state !== "known").map(account => ({provider, account})));
+    const warnings = QUOTA_PROVIDERS.map(provider => ({provider, worst: quotaWorstUsage(provider, entries.filter(entry => entry.provider === provider).map(entry => entry.account))})).filter(entry => entry.worst);
+    notice.hidden = !warnings.length;
+    const signature = JSON.stringify(entries) + currentPageUrl();
+    if (notice.dataset.readings === signature) return;
+    notice.dataset.readings = signature;
+    notice.textContent = "";
+    warnings.forEach(({provider, worst}) => {
+      if (worst) notice.appendChild(quotaBandPill(worst.band,
+        `${provider.label} · ${worst.machine} · ${worst.spec.key} 已用 ${worst.used}%（${worst.band === "critical" ? "即将用尽" : "余量偏低"}；机器观测 ${worst.updatedAt ? formatDate(worst.updatedAt) : "时间未知"}，不代表当前可用账号）`));
+    });
+    const link = document.createElement("a");
+    link.textContent = "查看采集与诊断";
+    link.href = collectionUrl();
+    notice.appendChild(link);
   }
 
   function quotaWorstUsage(provider, accounts) {
@@ -1868,16 +1899,33 @@
     return body;
   }
 
-  function updateSyncOverviewLink() {
-    const link = qs("#sync-overview-link");
-    if (!link) return;
-    const url = new URL("/", window.location.origin);
-    const current = new URLSearchParams(window.location.search);
-    for (const key of ["range", "start", "end"]) {
-      if (current.has(key)) url.searchParams.set(key, current.get(key));
+  function currentPageUrl() {
+    const query = params();
+    if (window.location.pathname === "/") {
+      for (const key of ["provider", "search", "window", "sort"]) query.set("quota_" + key, quotaFilter[key]);
+      query.set("quota_history", String(Boolean(qs("#quota-past-accounts") && !qs("#quota-past-accounts").hidden)));
+      query.set("account_actions", String(Boolean(qs("#codex-account-actions")?.open)));
+      query.delete("quota_observation");
+      qsa(".quota-observation-details[open]").forEach(node => query.append("quota_observation", node.dataset.observationKey));
     }
-    url.hash = "sync-panel";
-    link.href = url.pathname + url.search + url.hash;
+    const search = window.location.pathname === "/" ? "?" + query.toString() : window.location.search;
+    return window.location.pathname + search + (window.location.hash || "");
+  }
+
+  function collectionUrl(hash = "") {
+    const url = new URL("/collection", window.location.origin);
+    for (const key of ["range", "start", "end"]) {
+      if (params().has(key)) url.searchParams.set(key, params().get(key));
+    }
+    url.searchParams.set("return", currentPageUrl());
+    return url.pathname + url.search + hash;
+  }
+
+  function updateSyncOverviewLink() {
+    if (window.location.pathname === "/collection") return;
+    const link = qs("#sync-overview-link");
+    if (link) link.href = collectionUrl();
+    qsa('[data-collection-link], a[data-nav][href^="/collection"]').forEach(link => { link.href = collectionUrl(); });
   }
 
   function renderSyncStatus(status) {
@@ -1907,15 +1955,20 @@
       : attention.length
       ? warningSummary
       : "使用已采集数据 · 自动更新";
+    renderSpendCoverage(status.machines || []);
     const overviewLink = qs("#sync-overview-link");
     if (overviewLink) {
       updateSyncOverviewLink();
-      machineList.innerHTML = attention.map(machine => `<p class="scope-note"><strong>${escapeHtml(machine.name)}</strong>：${escapeHtml(!machine.admitted ? exclusionText(machine) + "；未纳入" : machine.availability === "unreachable" ? "暂时无法联系，保留上次快照" : machine.stale ? "快照较旧" : machine.availability === "unknown" ? "本次服务尚未检查" : "最近刷新未完成；查看总览详情")}</p>`).join("");
+      machineList.innerHTML = attention.map(machine => `<p class="scope-note"><strong>${escapeHtml(machine.name)}</strong>：${escapeHtml(!machine.admitted ? exclusionText(machine) + "；未纳入" : machine.availability === "unreachable" ? "暂时无法联系，保留上次快照" : machine.stale ? "快照较旧" : machine.availability === "unknown" ? "本次服务尚未检查" : "最近刷新未完成")}${machine.admitted && machine.generated_at ? ` · 数据截至 ${escapeHtml(formatDate(machine.generated_at))}` : ""}</p>`).join("");
       return;
     }
     const expandedMachines = new Set(qsa("#sync-machines details[open]").map(detail => detail.dataset.machine));
-    machineList.innerHTML = (status.machines || []).map(machine => renderMachineStatus(machine, expandedMachines.has(machine.name))).join("");
-    renderSpendCoverage(status.machines || []);
+    const markup = (status.machines || []).map(machine => renderMachineStatus(machine, expandedMachines.has(machine.name))).join("");
+    if (machineList.innerHTML !== markup) {
+      const focusedMachine = document.activeElement?.closest?.("details[data-machine]")?.dataset.machine;
+      machineList.innerHTML = markup;
+      if (focusedMachine) Array.from(machineList.querySelectorAll("details[data-machine]")).find(node => node.dataset.machine === focusedMachine)?.querySelector("summary")?.focus();
+    }
   }
 
   function renderQuotaRefreshStatus(status) {
@@ -2019,14 +2072,14 @@
       consequence = `${exclusion}；该机数据未计入合计。检查这台机器的接入配置和采集状态。`;
     } else if (machine.availability === "unreachable") {
       const age = machine.stale ? "（已过期）" : "";
-      consequence = `用的是上次的数据${age}。检查这台机器的连接和采集状态，恢复后点击刷新。`;
+      consequence = `用的是上次的数据${age}。检查这台机器的连接和采集状态，恢复后返回业务页更新统计与配额。`;
     } else if (refreshAttemptFailed) {
       const age = machine.stale ? "（已过期）" : "";
-      consequence = `用的是上次的数据${age}。检查这台机器的采集状态和技术详情，处理后点击刷新。`;
+      consequence = `用的是上次的数据${age}。检查这台机器的采集状态和技术详情，处理后返回业务页更新统计与配额。`;
     } else if (machine.availability === "unknown") {
-      consequence = machine.syncing ? "正在进行首次检查，暂用上次的数据；完成后会自动更新。" : "用的是上次的数据；本服务启动后还没检查过这台机器，可点击刷新。";
+      consequence = machine.syncing ? "正在进行首次检查，暂用上次的数据；完成后会自动更新。" : "用的是上次的数据；本服务启动后还没检查过这台机器，可返回业务页更新统计与配额。";
     } else if (machine.stale) {
-      consequence = "用的是较旧的数据。点击刷新；若仍未更新，请检查这台机器的采集状态。";
+      consequence = "用的是较旧的数据。返回业务页更新统计与配额；若仍未更新，请检查这台机器的采集状态。";
     } else if (machine.last_attempt_outcome === "cleanup_failed") {
       consequence = "数据已更新，但刷新后的清理未完成；请查看技术详情和该机采集日志。";
     } else if (machine.reason && !machine.syncing) {
@@ -2154,6 +2207,39 @@
       return `${hours} 小时前更新`;
     }
     return `${Math.floor(hours / 24)} 天前更新`;
+  }
+
+  async function initCollection() {
+    const current = pageScope();
+    const back = qs("#collection-return");
+    const raw = params().get("return");
+    if (raw) {
+      let url;
+      try { url = new URL(raw, window.location.origin); } catch (_) { url = new URL("/", window.location.origin); }
+      if (url.origin === window.location.origin && ["/", "/explore", "/sessions", "/network", "/guide"].includes(url.pathname)) {
+        back.href = url.pathname + url.search + url.hash;
+        back.textContent = "返回来源页（保留日期、筛选与详情）";
+      }
+    }
+    const context = qs("#collection-context");
+    context.textContent = params().get("range") === "custom"
+      ? `来源日期：${params().get("start") || "未指定"} 至 ${params().get("end") || "未指定"}，仅用于返回；下方为全部机器与留存历史。`
+      : "下方观测各有自己的时间，来源页日期范围仅用于返回。";
+    async function load() {
+      try {
+        const data = await api("/api/collection");
+        if (!current()) return;
+        renderSyncStatus(data.sync);
+        renderQuotaMachineRecords(data.rate_limits);
+        renderQuotaSignedOut(data.rate_limits, true);
+        qs("#collection-quota-empty").hidden = !qs("#quota-machine-records").hidden;
+      } catch (error) {
+        if (current()) qs("#sync-summary").textContent = `读取失败：${error.message}；保留上次显示的观测，可重新读取。`;
+      }
+    }
+    bindShell(load);
+    watchPageData(load);
+    await load();
   }
 
   async function initGuide() {
@@ -2457,6 +2543,16 @@
   }
 
   async function initOverview() {
+    const restored = params();
+    if (restored.has("quota_provider")) {
+      quotaFilter.provider = ["all", "claude", "codex"].includes(restored.get("quota_provider")) ? restored.get("quota_provider") : "all";
+      quotaFilter.search = restored.get("quota_search") || "";
+      quotaFilter.window = restored.get("quota_window") === "seven_day" ? "seven_day" : "five_hour";
+      quotaFilter.sort = ["default", "remaining", "remaining_desc", "reset", "observed"].includes(restored.get("quota_sort")) ? restored.get("quota_sort") : "default";
+    }
+    let restoreQuotaReading = true;
+    const accountActions = qs("#codex-account-actions");
+    if (accountActions && restored.get("account_actions") === "true") accountActions.open = true;
     if (window.location.hash === "#sync-panel") {
       const panel = qs("#sync-panel");
       if (panel) panel.open = true;
@@ -2537,6 +2633,16 @@
         error.remove();
       }
       renderOverview(data, selectedRange);
+      if (restoreQuotaReading) {
+        restoreQuotaReading = false;
+        if (restored.get("quota_history") === "true") {
+          const history = qs("#quota-past-accounts");
+          if (history) history.hidden = false;
+          qs(".quota-past-toggle")?.setAttribute("aria-expanded", "true");
+        }
+        const open = new Set(restored.getAll("quota_observation"));
+        qsa(".quota-observation-details").forEach(node => { if (open.has(node.dataset.observationKey)) node.open = true; });
+      }
       renderSyncStatus(data.sync);
       if (data.sync && data.sync.refresh_pending) {
         // The click acknowledges a refresh request; this observer owns background
@@ -3042,7 +3148,7 @@
     const panel = document.createElement("section");
     panel.className = "session-detail";
     panel.innerHTML = `<a class="session-back" href="/sessions?${escapeHtml(back.toString())}">返回会话列表</a>
-      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p>${escapeHtml(machine || "本机")} · 此会话的全部已留存记录</p><p class="scope-note">可能缺少未采集或未保存的记录。</p><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div></div></div>
+      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p>${escapeHtml(machine || "本机")} · 此会话的全部已留存记录</p><p class="scope-note">可能缺少未采集或未保存的记录。<a data-collection-link href="${escapeHtml(collectionUrl())}">采集与诊断</a></p><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div></div></div>
       <div id="session-detail-content" aria-live="polite"></div>`;
     qs("main").appendChild(panel);
     qs("#session-identity").textContent = id;
@@ -3378,6 +3484,7 @@
     ["/sessions", () => initSessions()],
     ["/network", () => initNetwork()],
     ["/guide", () => initGuide()],
+    ["/collection", () => initCollection()],
   ]);
 
   // Path *and* query. Two history entries for the same page differing only in
@@ -3504,6 +3611,10 @@
     }
     document.documentElement.dataset.clientNav = "on";
     updateAreaNavigation();
+    // Keep the actual href current for native new-tab and copy-link actions too.
+    document.addEventListener("toggle", (event) => {
+      if (event.target.matches?.("#codex-account-actions, .quota-observation-details")) updateSyncOverviewLink();
+    }, true);
     initPageSearch();
     renderedRoute = routeKey(
       new URL(
@@ -3527,6 +3638,10 @@
         return;
       }
       const url = new URL(link.href, window.location.origin);
+      if (url.pathname === "/collection" && window.location.pathname !== "/collection") {
+        url.searchParams.set("return", currentPageUrl());
+        link.href = url.pathname + url.search + url.hash;
+      }
       if (!clientRouteFor(url)) {
         return;
       }
@@ -3608,6 +3723,7 @@
     pollFreshness,
     initNetwork,
     initGuide,
+    initCollection,
     initOverview,
     initSessions,
   };

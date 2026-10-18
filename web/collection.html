@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>agent-monitor 采集与诊断</title>
+    <link rel="stylesheet" href="/web/styles.css">
+    <script src="/web/vendor/chart.umd.min.js"></script>
+    <script src="/web/app.js"></script>
+    <script src="/web/pivot.js"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" data-preserve-range href="/">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-title">agent-monitor</span>
+      </a>
+      <nav class="top-nav" aria-label="区域导航">
+        <a data-area="console" aria-current="page" href="/">控制台</a>
+        <a data-area="guide" data-preserve-range href="/guide">使用与接入</a>
+      </nav>
+      <button class="header-search" id="open-page-search" type="button" aria-haspopup="dialog" aria-controls="page-search"><span aria-hidden="true">⌕</span> 搜索页面与帮助</button>
+    </header>
+    <dialog id="page-search" class="page-search" aria-labelledby="page-search-title">
+      <div class="search-heading"><h2 id="page-search-title">搜索页面与帮助</h2><button type="button" id="close-page-search" aria-label="关闭搜索">关闭</button></div>
+      <p class="scope-note">查找功能入口和接入说明；账号与会话内容请使用各页面的筛选。</p>
+      <label class="sr-only" for="page-search-input">页面或帮助关键词</label>
+      <div class="search-input-row"><input id="page-search-input" type="search" placeholder="搜索总览、会话、安装…" autocomplete="off"><button type="button" id="clear-page-search">清空</button></div>
+      <p id="page-search-count" class="scope-note" role="status"></p>
+      <div id="page-search-results" class="search-results"></div>
+    </dialog>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <nav class="nav" aria-label="控制台导航">
+          <a data-nav href="/">总览</a>
+          <a data-nav href="/explore">透视</a>
+          <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/collection">采集与诊断</a>
+          <a data-nav href="/network">网络</a>
+        </nav>
+        <nav class="guide-nav" aria-label="使用指南章节" hidden>
+          <span class="nav-caption">使用指南</span>
+          <a href="/guide#sources">数据来源</a>
+          <a href="/guide#collection">采集状态</a>
+          <a href="/guide#setup">首次接入</a>
+          <a href="/guide#questions">查找证据</a>
+        </nav>
+      </aside>
+      <main class="main collection-main">
+        <div class="page-toolbar"><h1 class="page-title">采集与诊断</h1><button id="refresh" class="btn" type="button">重新读取采集状态</button></div>
+        <p><a id="collection-return" href="/">返回总览</a></p>
+        <p id="collection-context" class="scope-note"></p>
+        <p class="scope-note">这里展示全部声明机器的最新采集状态与全部留存历史质量，不按来源页的日期或筛选裁剪。重新读取不会启动采集；更新统计与配额请返回业务页操作。</p>
+        <section id="sync-panel" class="panel" aria-label="机器采集状态">
+          <div class="panel-head"><h2>机器采集</h2><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span></div>
+          <p id="sync-summary" class="status-line" aria-live="polite">检查中…</p>
+          <div id="sync-machines" class="sync-machines"></div>
+        </section>
+        <section class="panel" aria-labelledby="machine-quota-title"><h2 id="machine-quota-title">未归属账号的机器观测</h2>
+          <p class="scope-note">未识别账号的观测不能用于选择可用账号；已知账号及其历史读数仍在总览中比较。</p>
+          <p id="quota-signed-out" class="scope-note" hidden></p>
+          <p id="collection-quota-empty" class="scope-note" hidden>没有未归属账号的机器观测。</p>
+          <details id="quota-machine-records" class="note-disclosure" open hidden></details>
+        </section>
+        <p><a data-preserve-range href="/guide#collection">采集与接入说明</a> · <a data-preserve-range href="/network">服务端网络诊断</a></p>
+      </main>
+    </div>
+    <script>
+      AgentMonitor.initClientNavigation();
+      AgentMonitor.initCollection().catch((error) => {
+        console.error(error);
+        document.querySelector("main").insertAdjacentHTML("beforeend",
+          '<p class="error">页面未能完整加载，请重新加载页面。</p>');
+      });
+    </script>
+  </body>
+</html>

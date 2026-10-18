@@ -231,7 +231,7 @@ export function init() {
     const ordered = [...accounts].sort((a, b) => priority(a) - priority(b));
     for (const [index, account] of ordered.entries()) {
       const batchItem = batch?.items.find((item) => item.profile_id === account.id);
-      const latestReading = window.AgentMonitor.latestCodexQuotaReading?.(account) || account.operation?.after;
+      const latestReading = window.AgentMonitor.latestCodexQuotaReading?.({operation: account.operation}) || account.operation?.after;
       const resetLabel = window.AgentMonitor.formatQuotaReset?.(latestReading?.seven_day_resets_at);
       const signature = JSON.stringify([account, batchItem, resetLabel, submittingBatch, accounts.some(a => a.busy)]);
       const old = existing.get(account.id);
@@ -295,7 +295,7 @@ export function init() {
           reading.append(element("dt", "7 天配额窗口重置"), element("dd", `${resetLabel || "重置时间未知"} · ${timestamp(latestReading.seven_day_resets_at, true)}`));
           const used = latestReading.seven_day_used_pct;
           reading.append(element("dt", "7 天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
-          reading.append(element("dt", "最近成功查询"), element("dd", timestamp(latestReading.observed_at)));
+          reading.append(element("dt", "本次操作的最近观测"), element("dd", timestamp(latestReading.observed_at)));
           if (op.before?.seven_day_resets_at != null) details.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
           details.append(reading);
           if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) details.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
