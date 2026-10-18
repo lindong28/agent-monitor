@@ -24,6 +24,14 @@
 
 机制取证：读取improve-skill、diagnose-harness、execution-control-principles §1/§4、plan-execution-principles Trajectory/Stop Gate及maintenance-validation；中央账本按improve-skill/轮数/部分通过检索，定向核HARNESS-20261017-e4c2，其“不要新增固定实验轮数或另一套停止规则”与本建议相容。最低修改面为improve-skill的验证返回段，必要时同步SKILL入口描述；不预设新增循环引擎、hook或独立工作流。本建议与剩余真实漏检继续归本条owner，尚未实施，没有后台任务。
 
+### 2026-10-18接续实施：共享入口已补返回分支，产品漏检仍开放
+
+用户随后授权按上述建议修复 improve-skill。共享仓已按 ADR `20261018-9c72-improve-skill-continuation` 修改验证出口及主题入口：必要项未达时接回诊断、修复与受影响复验，真实预算和停止边界复用既有 owner。方案与证据归 `ai-agent-config/docs/references/improve-skill-continuation-20261018.md`，不在本条复制通用规则。
+
+两个隔离合成任务各执行一次（Codex gpt-6-astra/medium）：继续场景修正校验路径后仍3/4失败，接着修产物并复验4/4；权限场景修好已知数值，保留缺失源数据与非零验收，明确整体未完成。caller核实际产物、完整工具轨迹及10份只读文件不变。前者覆盖0、null、正数三类数量，后者覆盖已知与缺失两类；不是严格盲验、旧新同输入收益对照或真实页面复验。
+
+此前分析中的“尚未实施”现由本段更新：验证后接续的指令修订已实施并完成上述有限验证；未知身份行自主判断与产品四标签修复仍未验收，本条保持open，原Next继续只针对该产品问题。本次没有后台任务，也未将合成任务通过计为产品自主检出。
+
 ## [open] HARNESS-20261014-perf-retro：性能优化的首轮归因与目标收尾证据不够完整
 
 - Type: execution / workflow clarity
