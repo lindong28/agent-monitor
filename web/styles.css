@@ -285,7 +285,7 @@ button:active:not(:disabled) {
 .query-builder .field { min-width: 0; }
 .query-builder select { max-width: 100%; width: 100%; min-width: 0; }
 .query-builder #metric { width: 200px; }
-.query-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-5); }
+.query-filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-5); align-items: start; }
 .group-options { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-5); }
 .group-option, .group-time { display: inline-flex; align-items: center; gap: var(--sp-3); }
 .group-option { cursor: pointer; min-height: var(--h-control); color: var(--ink); }
@@ -589,7 +589,8 @@ button:disabled {
   font-size: 12px;
 }
 
-.quota-search-label input {
+.quota-search-label input,
+#project-search {
   width: 100%;
   min-width: 0;
   min-height: var(--h-control);
