@@ -397,3 +397,25 @@ harness `d26d46c2` 增量补的是跨区域入口的替代路径交回与核收�
 
 
 - **Resolved 2026-10-18（仅harness实施范围）**：用户批准按建议修复后，ai-agent-config `1d3e865c28bee8dc79d7d28711fbc1a6ab0508e1` 重组ui-copy的信息取舍与展示位置判断、review-ui的实际阅读结论交回、test-ux的结果核收。独立决策与变更审查放行；旧/新版各一次独立静态材料执行，实际加载三份目标正文，均满足冻结的标签关系、迁移样本、必要限定和简略报告核收条件。因此未测得新版优于旧版，不宣称根治漏检。完整结果与边界归共享仓 `docs/references/reading-judgment-20261018.md`，原始产物在 `/Users/lindong/task-artifacts/label-value-20261018/`。产品四类标签未改、未部署；其实施与当前页面复验另由 `ISSUE-UX-20261018-8e19` 跟踪，无后台接续。原诊断与当时未实施状态保留作历史。
+
+
+---
+
+## [resolved] HARNESS-20261018-page-task-ownership：全面 UX 优化缺少页面归属的明确比较
+
+- Type / Priority: workflow decision scope / medium。
+- Owner: agent-monitor UX 案例维护者；通用修法候选归 ai-agent-config product-ux-workflows，Web 内容入口复用同一 owner。
+- Scope / Status: 用户要求先分析 harness 缺口和改进方案；本轮只核现有机制并记账，不修改指令或产品、不运行候选实验。当前主线程按 task-routing R4 处理，已有会话与定向源码足够，不新增委派。
+- Evidence: 本会话真实页面核查及 `/Users/lindong/task-artifacts/monitor-quality-diagnosis-20261018/findings.md`。7c5b6f2 下配额主视图保留“未归属账号的机器读数（1）：macmini · Codex（未登录）”，展开是7天前的无账号读数；机器区域常显全部留存Claude质量计数。用户认可按任务分离日常页面与采集排障页面，同时保留影响当前结果判断的必要限制。此前把未知身份行移出账号表解决了成员归类，但不足以完成页面归属判断。
+- Current mechanisms: `review-product-capabilities.md` 已有自然语言全面UX入口、任务与操作双向关联、内容/操作/入口取舍并列结论；`review-ui.md` 与 `ui-copy.md` 已要求比较信息取舍、行/组/区域的组织；`reading-principles.md` 已要求集合身份与迁移时保留警示；`human-facing-message-principles.md` 已要求限定与主结论同层。不能称这些机制不存在。当前明确比较仍以既有行、组、区域与按钮为主，未明确要求比较页面职责及同页补充与独立任务页面。既有原则本可支持跨页判断，本次不足也包含执行层停在局部组织；未补取各历史运行的完整加载轨迹，不能断定历次均未加载。
+- Candidate fix: 在产品UX全面入口的信息组织阶段，先核页面服务的用户任务，再比较内容/操作的页面归属；观察现有页面是证据，不是禁止重组的边界。在共享阅读原则中明确数据保留、任务入口、常驻呈现分别判断，以任务关联、当前决定所需信息和上下文切换成本选择同页说明/展开或独立页面；关键信息保留条件引用已有human-facing owner。review-ui在内容判断处接回该判据，ui-copy只按需调整引用，避免多处复制。不写“所有排障一律另建页面”，不新增模板族、hook或独立工作流。
+- Validation: improve-skill及maintenance-validation已有修复后接续、最小用户请求、原问题/正常反例、隔离已知答案与实际候选加载要求；不再添加循环规则。补本案例的页面归属验收，不能用已修页面通过或提示后发现声称自主检出。用改前输入和同一句目标请求检查发现、修法、实现及实际跨页结果；原案例作回归，另取未用于修法的不同领域样本检验迁移。覆盖应移出的独立排障任务、应就地保留的必要限定与少量说明，以及不需要拆页的正常页面；不限定唯一正确页面名称或DOM形态。原页面到对应诊断对象及返回时，核对象/范围/筛选连续性与正常任务仍可完成。候选失败按既有improve-skill接续，不作无限通过保证。
+- Semantic boundary: 数字口径、旧数据缺字段或真实采集问题不得靠移页宣称修复；内容语义有疑点时定向复用review-metric，数据根因和呈现问题分别交代，不把所有UX任务升级成全量指标审计。
+- Search / Limits: 定向检索两仓open/closed账本与product-ux、web-ui、ui-copy及human-facing正文：`页面职责|页面级|排障|渐进披露|信息架构|跨页`。命中既有认知负荷、跨页上下文与入口简化规则，以上判断基于所读正文，不宣称全harness无同类规则。reading-instance的details指令明确仅用于长篇文档、不适用控制台，因此不是本次已证实的通用强制折叠根因，不据此修改该模板。
+- Next: 指令维护者在获修复请求后实施上述最窄共享变更并按既有improve-skill验证；本次未派发后续任务，未证明短prompt已能稳定自主发现。问题已记账，产品与harness修复保持未实施。
+
+### 2026-10-18 修复与验证
+
+以上 Scope / Next 保留初次只读分析的历史状态。本次用户已授权并完成共享指令修订：入口先核页面职责，reading-principles 按读者结论/动作及完成条件划分任务，review-ui 复用同一判据。两轮改前实跑未达后，按 improve-skill 取得独立第二意见并修任务识别粒度；第三候选在同一旧产品自主完成两个必要归属判断与完整路径比较，正常限定保留。三个候选各一次实跑，库存台一个合成场景及同场景回归；不代表长期检出率。完整记录为 ai-agent-config/docs/references/page-task-ownership-20261018.md 及 /Users/lindong/task-artifacts/page-task-ux-20261018/。
+
+产品已实现独立采集与诊断页及上下文返回，必要覆盖/时效/成本限定留在业务页。原始历史不完整数据未因此恢复；真实部署和交互读数单独写入 runtime-verification.md，不以此 issue 关闭代替生产验收。其余历史 harness issues 不因本项完成自动关闭。

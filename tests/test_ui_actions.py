@@ -7,6 +7,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ActionTests(unittest.TestCase):
+    def test_only_same_successful_operation_collapses_batch_status(self):
+        script = r'''
+const fs=require('fs'),assert=require('assert');
+eval(fs.readFileSync('web/codex-accounts.js','utf8').replace('export function init','function init'));
+const op={id:'send-1',batch_id:'batch-1',stage:'succeeded',message_status:'succeeded',refresh_only:false};
+assert.equal(sameSuccessfulBatchOperation(op,{...op}),true);
+for(const changed of [{id:'query-2',refresh_only:true},{id:'send-2'},{batch_id:'older-batch'},
+ {stage:'partial'},{message_status:'unknown'},{id:undefined}]) {
+ assert.equal(sameSuccessfulBatchOperation({...op,...changed},op),false);
+}
+assert.equal(sameSuccessfulBatchOperation(op,null),false);
+assert.equal(sameSuccessfulBatchOperation(null,op),false);
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_operation_details_keep_own_observation_apart_from_latest_quota(self):
         script = r'''
 const fs=require('fs'),assert=require('assert');

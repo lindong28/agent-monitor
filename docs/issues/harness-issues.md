@@ -1,18 +1,5 @@
 # Harness issues
 
-## [open] HARNESS-20261018-page-task-ownership：全面 UX 优化缺少页面归属的明确比较
-
-- Type / Priority: workflow decision scope / medium。
-- Owner: agent-monitor UX 案例维护者；通用修法候选归 ai-agent-config product-ux-workflows，Web 内容入口复用同一 owner。
-- Scope / Status: 用户要求先分析 harness 缺口和改进方案；本轮只核现有机制并记账，不修改指令或产品、不运行候选实验。当前主线程按 task-routing R4 处理，已有会话与定向源码足够，不新增委派。
-- Evidence: 本会话真实页面核查及 `/Users/lindong/task-artifacts/monitor-quality-diagnosis-20261018/findings.md`。7c5b6f2 下配额主视图保留“未归属账号的机器读数（1）：macmini · Codex（未登录）”，展开是7天前的无账号读数；机器区域常显全部留存Claude质量计数。用户认可按任务分离日常页面与采集排障页面，同时保留影响当前结果判断的必要限制。此前把未知身份行移出账号表解决了成员归类，但不足以完成页面归属判断。
-- Current mechanisms: `review-product-capabilities.md` 已有自然语言全面UX入口、任务与操作双向关联、内容/操作/入口取舍并列结论；`review-ui.md` 与 `ui-copy.md` 已要求比较信息取舍、行/组/区域的组织；`reading-principles.md` 已要求集合身份与迁移时保留警示；`human-facing-message-principles.md` 已要求限定与主结论同层。不能称这些机制不存在。当前明确比较仍以既有行、组、区域与按钮为主，未明确要求比较页面职责及同页补充与独立任务页面。既有原则本可支持跨页判断，本次不足也包含执行层停在局部组织；未补取各历史运行的完整加载轨迹，不能断定历次均未加载。
-- Candidate fix: 在产品UX全面入口的信息组织阶段，先核页面服务的用户任务，再比较内容/操作的页面归属；观察现有页面是证据，不是禁止重组的边界。在共享阅读原则中明确数据保留、任务入口、常驻呈现分别判断，以任务关联、当前决定所需信息和上下文切换成本选择同页说明/展开或独立页面；关键信息保留条件引用已有human-facing owner。review-ui在内容判断处接回该判据，ui-copy只按需调整引用，避免多处复制。不写“所有排障一律另建页面”，不新增模板族、hook或独立工作流。
-- Validation: improve-skill及maintenance-validation已有修复后接续、最小用户请求、原问题/正常反例、隔离已知答案与实际候选加载要求；不再添加循环规则。补本案例的页面归属验收，不能用已修页面通过或提示后发现声称自主检出。用改前输入和同一句目标请求检查发现、修法、实现及实际跨页结果；原案例作回归，另取未用于修法的不同领域样本检验迁移。覆盖应移出的独立排障任务、应就地保留的必要限定与少量说明，以及不需要拆页的正常页面；不限定唯一正确页面名称或DOM形态。原页面到对应诊断对象及返回时，核对象/范围/筛选连续性与正常任务仍可完成。候选失败按既有improve-skill接续，不作无限通过保证。
-- Semantic boundary: 数字口径、旧数据缺字段或真实采集问题不得靠移页宣称修复；内容语义有疑点时定向复用review-metric，数据根因和呈现问题分别交代，不把所有UX任务升级成全量指标审计。
-- Search / Limits: 定向检索两仓open/closed账本与product-ux、web-ui、ui-copy及human-facing正文：`页面职责|页面级|排障|渐进披露|信息架构|跨页`。命中既有认知负荷、跨页上下文与入口简化规则，以上判断基于所读正文，不宣称全harness无同类规则。reading-instance的details指令明确仅用于长篇文档、不适用控制台，因此不是本次已证实的通用强制折叠根因，不据此修改该模板。
-- Next: 指令维护者在获修复请求后实施上述最窄共享变更并按既有improve-skill验证；本次未派发后续任务，未证明短prompt已能稳定自主发现。问题已记账，产品与harness修复保持未实施。
-
 已关闭记录见 [archive/closed.md](archive/closed.md)。
 
 ## [open] HARNESS-20261018-live-label-recurrence：真实全站审查仍漏未知身份行的组织判断
