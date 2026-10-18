@@ -520,14 +520,12 @@ button:disabled {
 .codex-batch-summary { margin-block: 16px; }
 #codex-batch-status { display: block; margin-top: 8px; font-size: 12px; line-height: 20px; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
 #codex-account-unavailable:not(:empty), #codex-account-notice:not(:empty), #quota-signed-out:not([hidden]) { padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; max-width: none; }
-#codex-account-unavailable:not(:empty), #codex-account-notice:not(:empty), #quota-signed-out[data-tone="warning"] { border-left: 3px solid var(--warn); }
 .codex-workspace { font-family: var(--font-mono); }
 .codex-account-controls { margin-top: var(--sp-5); }
 .codex-authorization {
   padding: var(--pad-card);
   margin-block: var(--sp-5);
   background: var(--surface);
-  border-left: 3px solid var(--accent);
 }
 .codex-authorization a { color: var(--accent); text-decoration: underline; }
 .codex-authorization code { font-size: 18px; font-weight: 600; letter-spacing: .06em; user-select: all; }
@@ -907,11 +905,6 @@ button:disabled {
   border-top: 1px solid var(--line-soft);
   background: var(--surface);
 }
-.sync-machine.excluded {
-  border-left: 3px solid var(--danger);
-  padding-left: calc(var(--sp-4) - 3px);
-}
-
 .sync-machine-title { justify-content: flex-start; }
 .sync-chips {
   margin-left: auto;

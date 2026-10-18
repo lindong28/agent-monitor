@@ -12,6 +12,8 @@ The effective style is `style:volcengine-ark-console`, prepared in Prompt Planet
 
 ## Project adaptations
 
+Notice borders (2026-10-18): quota login warnings, account availability/action notices, authorization content and excluded-machine cards use the existing neutral panel or row treatment without colored left-edge stripes. Warning text, status chips and actions remain visible; ordinary button separators and focus indicators retain their existing treatment.
+
 Explore control follow-up (2026-10-18): directory search shares quota search's control styling, and filter fields align at the top so an extra search row does not stretch adjacent selects. This closes the mismatch observed in the expanded query builder during the same live review.
 
 Reading cleanup (2026-10-18): Overview, Explore, Sessions, Collection, Network and Guide share the existing console style. Panel titles use 16/24px; supporting notes and advanced, period and technical disclosures use 12/20px. Collection has its own navigation icon, and form labels preserve normal capitalization. Nearby repeated scope explanations are consolidated while known-subtotal, non-bill, missing-collection, account-operation and server-only diagnostic boundaries remain at their decision points. Session records retain time and model in expanded evidence because their table context can scroll out of view. See the dated follow-up in [reading review](references/ui-reading-review-20261015.md).
