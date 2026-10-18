@@ -518,7 +518,8 @@ button:disabled {
 }
 .codex-batch-summary { margin-block: 16px; }
 #codex-batch-status { display: block; margin-top: 8px; font-size: 12px; line-height: 20px; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
-#codex-account-unavailable:not(:empty), #codex-account-notice:not(:empty), #quota-signed-out:not([hidden]) { padding: 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 8px; max-width: none; }
+#codex-account-unavailable:not(:empty), #codex-account-notice:not(:empty), #quota-signed-out:not([hidden]) { padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; max-width: none; }
+#codex-account-unavailable:not(:empty), #codex-account-notice:not(:empty), #quota-signed-out[data-tone="warning"] { border-left: 3px solid var(--warn); }
 .codex-workspace { font-family: var(--font-mono); }
 .codex-account-controls { margin-top: var(--sp-5); }
 .codex-authorization {

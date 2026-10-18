@@ -2110,6 +2110,7 @@ function all(node) { return [node, ...node.children.flatMap(all)]; }
 
 console.log(JSON.stringify({
   noteHidden: note.hidden,
+  noteTone: note.dataset.tone || null,
   noteText: note.textContent,
   tableText: table.textContent,
   rows: all(table).filter(n => n.dataset.accountId).map(n => n.textContent),
@@ -2142,6 +2143,7 @@ console.log(JSON.stringify({
         rendered = self.render_with(["tencent"], ["tencent", "macmini"])
 
         self.assertFalse(rendered["noteHidden"])
+        self.assertEqual(rendered["noteTone"], "neutral")
         self.assertIn("tencent", rendered["noteText"])
         self.assertIn("macmini", rendered["noteText"])
         self.assertIn("未提供账号配额", rendered["noteText"])
@@ -2184,6 +2186,7 @@ console.log(JSON.stringify({
 
         self.assertIn("macstudio", rendered["noteText"])
         self.assertIn("失效", rendered["noteText"])
+        self.assertEqual(rendered["noteTone"], "warning")
         self.assertNotIn("未提供账号配额", rendered["noteText"])
         # Its row is still there — that is what makes the other wording false.
         self.assertIn("macstudio", rendered["tableText"])
@@ -2221,6 +2224,7 @@ console.log(JSON.stringify({
 
         self.assertIn("macstudio", rendered["noteText"])
         self.assertNotIn("失效", rendered["noteText"])
+        self.assertEqual(rendered["noteTone"], "neutral")
         self.assertNotIn("停在最后一次读数", rendered["noteText"])
         self.assertIn("未提供账号配额", rendered["noteText"])
 

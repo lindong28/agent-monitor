@@ -1158,6 +1158,7 @@
         `登录已失效，账号配额保留最后一次读数 —— ${frozen.join("、")}。`,
       );
     }
+    note.dataset.tone = frozen.length ? "warning" : "neutral";
     note.textContent = sentences.join(" ");
     note.hidden = !sentences.length;
   }
