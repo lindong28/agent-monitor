@@ -41,3 +41,29 @@
 - Evidence: 独立 headless session 的 open 返回目标标题与 URL，后续 get url 为 about:blank、snapshot 无元素；直连 HTTP 返回 200。独立诊断在 CLI 0.27.0 与现有 0.39.1 均观察到该形态。共享配置含 idleTimeout 字符串 30m，但对照同时改变启动参数，不能认定超时解析为根因。
 - 可用路径：每条调用保持同一 session 和 `--args --no-proxy-server,--mute-audio`，以 subprocess 环境传整数毫秒 AGENT_BROWSER_IDLE_TIMEOUT_MS，已连续完成 open/get url/snapshot/click。脚本与证据在 `/Users/lindong/task-artifacts/agent-monitor-writing-20261016/`。这只证明本次组合可用，不证明单一因素因果或未来稳定性。
 - Next: 后续浏览器维护任务分别控制启动参数和超时，核对 daemon/session 身份与页面存活；本轮不改共享配置或升级工具，也不据此诊断 Monitor 线上故障。
+
+
+## [open] HARNESS-20261018-label-value：配额来源标签的语义必要性未落实到阅读验收
+
+- Type: execution / content acceptance
+- Priority: medium
+- Owner: agent-monitor UX 执行与验收者；共享指引候选归 ai-agent-config 的 ui-copy / review-ui / test-ux owner。
+- Scope: 用户询问上轮全站优化为何漏掉“本页查询”“机器记录”“机器历史账号”“账号身份未确认”；本轮仅诊断和记录，不修改产品或共享指令。
+- Evidence: 产品 `459bff6`；上轮基线前端 `65dcd1d` 与当时线上页面资产已匹配。持久目录 `/Users/lindong/task-artifacts/monitor-ux-round2-20261017/`，`independent/evidence/commands.jsonl` 第36条同时包含四类文字；`independent/findings.md` 的配额行概括为保留未知值和来源说明。当前浏览器再次展开历史账号及配额更新时间，显示同一行的“机器历史账号”“机器记录”“本页查询”及较新时间；展开层已有“机器归属与套餐仍按采集记录显示”。这是此前覆盖区域中的漏检，不是新加入的页面状态。
+
+### 诊断与证据边界
+
+原报告从“信息有真实语义、可防误读”直接给出保留结论，没有说明为何必须常驻当前列、是否可由分组或详情承载，也未明确区分机器关联历史与配额观测年龄。上轮主线程核收主要补交互路径和跨区域按钮比较，没有要求配额阅读结论展示这些关系的判断；主线程对漏检负有责任，不能只归给worker。
+
+现有 reading-principles 已要求主次与重复、保留改变判断的差异；human-facing-message-principles 已要求主视图按决策相关性组织；ui-copy 已要求先定信息分工、共同上下文不逐处复述。原始worker轨迹第40行可见“主次与重复”正文，第47行可见“主视图只留读者据以判断的内容”及review-ui对ui-copy的引用。该轨迹尚未证实ui-copy全文取得，不能据此说所有规则都完整加载，也不能把加载不足认定为这次漏检的原因。可以确认的是已有相关判断要求，但实际产出未充分落实；模型内部原因、时间压力或指令组织是否主导均未核实。
+
+harness `d26d46c2` 增量补的是跨区域入口的替代路径交回与核收，不涵盖这四类字段/标签的阅读结果，不能用该提交或63项实现回归称本问题已解决。旧项目案例 HARNESS-20261016-reading-redundancy / reading-structure 已处理当时的重复机器名和列组织；本例说明同类判断仍会漏检，不推翻其具体修复，也不将其关闭解释为通用遵循率已证实。
+
+### 最低充分改进候选与验证
+
+优先重组既有内容判断和核收，不另造模板、标签黑名单、固定问题数或全局hook：ui-copy沿“先定信息分工”明确区分事实需要保留与当前展示必须保留，遇重复说明/混合来源行比较删去、合并到父层或下沉详情后，读者会失去哪项必要判断；review-ui继续引用同一owner。test-ux在既有内容验收中核收读者实际能否说清对象、当前采用的值、时点及影响决定的未知；控件可用、区域到访和泛称“来源说明应保留”不能代替这个结果。按实际不同信息关系取样，不为每个DOM节点填表。
+
+实施后验证应使用未改造现场材料和用户自然短请求，不向执行者点名四个词或透露预期删改。本案已知，只能作回归样本；另用未参与修法的同类案例核迁移，保留来源确实改变判断、未知身份不可省略的合法反例。分别报告自主发现、提示后补查和页面修复复验，不把删除数量、字数减少或静态引用检查当行为收益。尚未运行这项验证，不承诺新指令必能检出全部问题。
+
+- Search: 在项目 `docs/issues/harness-issues.md` 与 `docs/issues/archive/closed.md` 查询 `entry-necessity|reading|标签|信息分工|配额`，定向读取上述旧案例及当前owner；本次没有全规则栈普查。
+- Disposition: 诊断与建议已记录。产品标签优化、共享指令调整及行为验证均未实施；本轮没有派发后续执行任务，也没有后台自动接续。待后续明确实施请求按本条与原始证据接续。
