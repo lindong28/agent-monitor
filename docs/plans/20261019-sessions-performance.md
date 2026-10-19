@@ -36,4 +36,14 @@ MacBook→MacStudio 默认30d API：TTFB 4.584s、总计4.869s（identity传输�
 
 后续冷读优化：索引窗口查询把完整payload写入SQLite临时排序B-tree；改为索引先选position，外层按position主键顺序取payload，保留相同候选、顺序和完整验证。固定macbook副本189365条，原/新原始序列SHA256相同，读取0.529→0.127秒；macmini13530条同样相等。L0固定行为实现手段，可回退单条查询；变更gate不另起reviewer，已有完整对象差分及32项受影响测试直接检查回归。最新8组完整对象仍与独立冻结基线相等，30d冷2.048秒、热0.00182秒，all冷8.546秒、热0.01408秒；离线结果非生产收益。此后续查询优化待发布、部署与数据更新后的消费者验收。
 
-恢复入口：私树 /Users/lindong/research/.worktrees/agent-monitor-sessions-performance-20261019；诊断目录 /Users/lindong/.local/share/agent-monitor-diagnostics/20261019-sessions，compare_sessions.py 已冻结基线 server 与 statistics reader，避免差分自证。浏览器测量 browser/measure.mjs，binding browser/browser.json；自有 headless Chrome 有退出上界，超过15:44需核存活后再复用或重建。原生 reviewer projection_decision / sessions_changes_review 已完成，browser_measurement 已交回浏览器。现有单份记录可恢复状态，未提升 Long-task mode。
+第二轮 a7204c80ca62c667cfa20f20af43d4619a41601a 已整合、push、通过 MacStudio 主树 deploy.py 安装，并在确认无账号操作忙任务后通过 /api/restart 重启。health 的 asset_watch=1 返回 stale=false，instance_id=18b74bddd03a4630b829cf24989a23f8。独立 Chrome 1440×1000：30d 新浏览器、HTTP cache disabled 到真实可操作3455.6ms/API3070.1ms（不能推定服务缓存冷暖）；重复220ms/API57.6ms，7d1204ms/API1038ms，再次30d148.7ms/API65ms。筛选Codex和真实点击详情正常。每项1样本，热命中不替代新代际证据。
+
+自动同步观察中，07:35:31 UTC 列表从1073变1074，首行时间15:32:42变15:34:40，DOM内容hash变化；本次API仍2904.9ms。新鲜度已实证，首读目标仍未完成。sync progress路径保留旧100行；定时load路径短暂清空列表155.9/327ms，已记录待本任务处理。旧浏览器visibility hidden导致的两次无效采样排除，不归因服务性能。
+
+第三阶段探索：仅省去重复验证的离线对照30d1.734→1.460秒、all8.481→7.268秒，完整API对象相等，但不足以凭此增加复杂IPC。原始读数 validated-reader-experiment.json。导入的完整验证发生 sync_process 子进程，活跃lease不等于完整验证回执；未实施放宽读取。继续比较减少整批JSON物化和复用已完成工作的结构方案，未知项为可信证明的传递、浮点/大整数/重复JSON键语义和总成本。独立第二意见由已有 projection_decision 只读执行；主线程负责区分实验和最终决定，当前源码冻结在a7204c8。
+
+第三阶段决定与实现：独立第二意见比较会话内容复用和导入派生副本后，前者扫描下界约0.382秒30d/1.522秒all（不含SessionIndex构建），范围更窄。独立L1审查修正了一处身份证明：必须SQL身份与完整解析身份精确相等，不能仅当前root相同；反例为重复JSON键指向a/b，之后仅b改父。七项放行后落盘 [f3a1](../adr/20261019-f3a1-sessions-conversation-reuse.md) 再实施。新增conversation_cache.py，按完整raw顺序hash、当前root上下文、版本和查询窗口复用结果，只重算变化的会话；未改任何持久数据或同步流程。按本次首个可见记录的位置恢复稳定全局排序。定时刷新保留已显示行和可用筛选，首载、显式筛选与错误继续显式展示。两项RED分别复现新增一会话仍解码3条而非1条、定时刷新清空原行；实现后GREEN。
+
+第三阶段离线8组完整API对象与冻结e9fdc3f基线相等。30d基线2.838秒、实现冷1.849秒、同内容新signature0.464秒、同signature热0.00179秒；all12.876/6.491/1.613/0.01316秒。新signature是隔离机制实验，不冒充真实新代际。30d缓存1306桶/1,382,524编码字节，all4759桶/11,601,652字节。50项相关测试通过，覆盖旧事件修正、父/标题变化、筛选后稳定同值排序、原位置改变、重复JSON键、非法metadata、surrogate字符串、大整数、v1–v4、时间推进/回拨、并发及容量；每项样本范围以测试为准。UI异步测试确认后台保留行、真实返回替换、错误显式化、恢复及显式筛选仍显示加载。全量1036项/123.2秒仅原基线同样10项失败，无新增；V1独立审查无finding或承重未知，另独立验证2项UI测试及5组缓存边界。生产待部署/新代际浏览器验收。证据 comparison-conversations.json / conversation-cache-decision-review.md。
+
+恢复入口：私树 /Users/lindong/research/.worktrees/agent-monitor-sessions-performance-20261019；诊断目录 /Users/lindong/.local/share/agent-monitor-diagnostics/20261019-sessions，compare_sessions.py 已冻结基线 server 与 statistics reader，避免差分自证。浏览器测量 browser/README.md / measure.mjs，最新binding browser/browser-postdeploy.json，自有Chrome PID55186、endpoint127.0.0.1:52098、退出上界17:01 SGT；超时需核存活再复用或重建。browser_measurement 已交回浏览器。原先deploy控制shell exec84490有900秒idle退出上界。现有单份记录可恢复状态，未提升 Long-task mode。无用户待办；首次读取残余和定时刷新清空由本任务继续处理。

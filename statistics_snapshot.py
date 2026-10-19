@@ -245,13 +245,14 @@ def _admitted_meta(conn):
     return meta
 
 
-@diagnostics.measured("statistics.read_usage")
-def read_admitted_usage(current, *, time_range=None, query=None, session_id=None, session_agent=None):
-    """Decode only usage needed by Sessions; callers retain exact time filtering."""
+@contextmanager
+def admitted_usage_rows(current, *, time_range=None, query=None, session_id=None, session_agent=None, identities=False):
+    """Select the existing candidates while retaining the admission transaction."""
     with _admitted_connection(current) as conn:
         meta = _admitted_meta(conn)
         if meta is None:
-            return []
+            yield None, [], iter(())
+            return
         sessions = [json.loads(row[0]) for row in conn.execute("SELECT payload FROM statistics_sessions ORDER BY position")] if meta["version"] >= 4 else []
         clauses, parameters = [], []
         if time_range is not None:
@@ -279,24 +280,43 @@ def read_admitted_usage(current, *, time_range=None, query=None, session_id=None
                 clauses.append("json_extract(payload, '$.agent_id') = ?")
                 parameters.append(session_agent)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        previous_metadata = None
-
-        def validate_metadata(row):
-            nonlocal previous_metadata
-            # JSON metadata contains only strings, null, lists and dictionaries
-            # after validation. Reuse only an identical successful validation,
-            # including the amount's nullness; scalar fields are still checked
-            # for every row. Nothing is retained across reads or generations.
-            metadata = (row.get("usage_quality", "unknown"), row.get("service_context"),
-                        row.get("cost_provenance"), row["cost_usd"] is None)
-            if metadata != previous_metadata:
-                validate_usage_metadata(row)
-                previous_metadata = metadata
-
         # Sort only row identifiers for indexed selections. Sorting complete
         # payloads spills large JSON records into SQLite's temporary B-tree.
         # The outer primary-key lookup retains the original position order.
         selection = (" WHERE position IN (SELECT position FROM statistics_usage" + where + ")") if clauses else ""
-        from aggregators import LoadedEntries
-        return LoadedEntries([_usage_entry(json.loads(row[0]), version=meta["version"], metadata_validator=validate_metadata) for row in conn.execute(
-            "SELECT payload FROM statistics_usage" + selection + " ORDER BY position", parameters)], session_metadata=sessions)
+        columns = ("position, payload, json_extract(payload, '$.agent_id', '$.session_id')"
+                   if identities else "payload")
+        yield meta, sessions, conn.execute(
+            "SELECT " + columns + " FROM statistics_usage" + selection + " ORDER BY position", parameters)
+
+
+def decode_usage_payloads(payloads, version):
+    """Fully validate selected payloads, retaining only this read's metadata memo."""
+    previous_metadata = None
+
+    def validate_metadata(row):
+        nonlocal previous_metadata
+        # JSON metadata contains only strings, null, lists and dictionaries
+        # after validation. Reuse only an identical successful validation,
+        # including the amount's nullness; scalar fields are still checked
+        # for every row. Nothing is retained across reads or generations.
+        metadata = (row.get("usage_quality", "unknown"), row.get("service_context"),
+                    row.get("cost_provenance"), row["cost_usd"] is None)
+        if metadata != previous_metadata:
+            validate_usage_metadata(row)
+            previous_metadata = metadata
+
+    return [_usage_entry(json.loads(payload), version=version, metadata_validator=validate_metadata)
+            for payload in payloads]
+
+
+@diagnostics.measured("statistics.read_usage")
+def read_admitted_usage(current, *, time_range=None, query=None, session_id=None, session_agent=None):
+    """Decode only usage needed by Sessions; callers retain exact time filtering."""
+    from aggregators import LoadedEntries
+    with admitted_usage_rows(current, time_range=time_range, query=query,
+                             session_id=session_id, session_agent=session_agent) as (meta, sessions, rows):
+        if meta is None:
+            return []
+        return LoadedEntries(decode_usage_payloads((row[0] for row in rows), meta["version"]),
+                             session_metadata=sessions)

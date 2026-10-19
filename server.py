@@ -31,6 +31,7 @@ import generation
 import statistics_snapshot
 from session_identity import SessionIndex
 from session_cache import SessionCache
+from conversation_cache import ConversationCache
 import hub
 import sync
 import sync_process
@@ -50,6 +51,7 @@ logger = logging.getLogger("agent-monitor")
 _NETWORK_CACHE = {"ts": 0.0, "data": None}
 _NETWORK_TTL = 60.0
 _SESSION_CACHE = SessionCache()
+_CONVERSATION_CACHE = ConversationCache()
 _SYNC_DUE_AFTER_SECONDS = 600
 _STALE_AFTER_SECONDS = 6 * 60 * 60
 RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "6m": 180, "1y": 365, "2y": 730}
@@ -358,18 +360,24 @@ def sessions_endpoint(query):
     options = {key: set() for key in ("machine", "agent", "project", "model")}
     with_filters = _first(query, "with_filters", "") == "1"
 
-    def collect(entries, machine=None, aliases=None):
+    def collect(entries, machine=None, aliases=None, *, index=None, projects=None, with_offset=False):
         source_sessions = []
         source_options = {key: set() for key in options}
-        index = SessionIndex(getattr(entries, "session_metadata", ()))
+        index = index if index is not None else SessionIndex(getattr(entries, "session_metadata", ()))
         # Match Explore display identities without rewriting stored usage.
-        projects = {}
+        projects = projects if projects is not None else {}
         in_window = []
-        for entry in _filter_time(entries, time_range):
+        offsets = {}
+        for offset, entry in enumerate(entries):
+            if time_range is not None and not time_range[0] <= entry.timestamp.astimezone() <= time_range[1]:
+                continue
             if entry.project not in projects:
                 projects[entry.project] = canonical_project(entry.project, aliases)
             project = projects[entry.project]
-            in_window.append(entry if project == entry.project else replace(entry, project=project))
+            entry = entry if project == entry.project else replace(entry, project=project)
+            in_window.append(entry)
+            if with_offset:
+                offsets[id(entry)] = offset
         display_query = dict(query)
         if query.get("project"):
             display_query["project"] = [canonical_project(value, aliases)
@@ -383,7 +391,7 @@ def sessions_endpoint(query):
                 source_options["model"].add(entry.model)
         source_options = {key: sorted(values) for key, values in source_options.items()}
         if _first(query, "machine", "") not in ("", machine):
-            return source_sessions, source_options
+            return source_sessions, source_options, None
         visible = _filter_values(in_window, display_query)
         if cost_status == "unknown":
             visible = [entry for entry in visible if entry.cost_usd is None]
@@ -392,10 +400,10 @@ def sessions_endpoint(query):
             if machine:
                 row["machine"] = machine
             source_sessions.append(row)
-        return source_sessions, source_options
+        return source_sessions, source_options, offsets[id(visible[0])] if with_offset and visible else None
 
     def merge(result):
-        rows, filters = result
+        rows, filters = result[:2]
         sessions.extend(rows)
         for key, values in filters.items():
             options[key].update(values)
@@ -408,11 +416,22 @@ def sessions_endpoint(query):
                     continue
                 result = _SESSION_CACHE.get(current, query, time_range)
                 if result is None:
-                    entries = statistics_snapshot.read_admitted_usage(
-                        current, time_range=time_range, query=None if with_filters else
-                        {key: value for key, value in query.items() if key != "project"})
-                    result = collect(entries, current.host, (getattr(current, "meta", None) or {}).get("aliases"))
-                    _SESSION_CACHE.put(current, query, time_range, entries, result)
+                    aliases = (getattr(current, "meta", None) or {}).get("aliases")
+                    grouped = _CONVERSATION_CACHE.read(current, query, time_range,
+                        lambda entries, index, projects: collect(entries, current.host, aliases,
+                            index=index, projects=projects, with_offset=True))
+                    if grouped is None:
+                        entries = statistics_snapshot.read_admitted_usage(
+                            current, time_range=time_range, query=None if with_filters else
+                            {key: value for key, value in query.items() if key != "project"})
+                        result = collect(entries, current.host, aliases)
+                        _SESSION_CACHE.put(current, query, time_range, entries, result)
+                    else:
+                        result, reusable = grouped
+                        if reusable:
+                            # Every bucket checked all candidate timestamps;
+                            # no retained event objects are needed for this guard.
+                            _SESSION_CACHE.put(current, query, time_range, (), result)
                 merge(result)
     else:
         merge(collect(load_all_entries(), sync.load_machine_config().self_machine.name))

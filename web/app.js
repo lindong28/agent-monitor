@@ -2804,6 +2804,7 @@
     if (initialSort && params().has("sort")) initialSort.value = params().get("sort");
     const pageCurrent = pageScope();
     let activeLoads = 0;
+    let hasLoaded = false;
     async function load(force, background = false) {
       if (background && activeLoads) return;
       const generation = ++sessionsGeneration;
@@ -2818,8 +2819,10 @@
         return;
       }
       activeLoads += 1;
-      sessionsView.status = "loading";
-      renderSessionState("loading");
+      if (!background || !hasLoaded || sessionsView.status !== "ready") {
+        sessionsView.status = "loading";
+        renderSessionState("loading");
+      }
       try {
         if (force === true) await refreshStatistics({
           isCurrent: () => pageCurrent() && generation === sessionsGeneration,
@@ -2864,6 +2867,7 @@
           return;
         }
         sessionsView.rows = data;
+        hasLoaded = true;
         if (!keepPage) sessionsView.page = 0;
         populateSessionFilters(data, payload.filters);
         sessionsView.status = "ready";

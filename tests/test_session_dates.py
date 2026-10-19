@@ -7,6 +7,55 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SessionDateTests(unittest.TestCase):
+    def test_timer_refresh_keeps_rows_operable_and_still_reports_errors(self):
+        script = r'''
+const fs=require('fs'), assert=require('assert'), vm=require('vm');
+const timers=[];
+function node() {
+  return {dataset:{},value:'',children:[],listeners:{},attrs:{},disabled:false,textContent:'',
+    get innerHTML(){return this.html||'';},set innerHTML(v){this.html=v;this.children=[];},
+    options:[{textContent:'全部'}],appendChild(c){this.children.push(c);return c;},
+    setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);},checkValidity(){return true;}};
+}
+const filters=['#filter-machine','#filter-agent','#filter-project','#filter-model','#filter-cost-status'];
+const nodes=Object.fromEntries(['#range','#session-start','#session-end','#session-dates','#sessions-body','#session-count','#page-status',...filters].map(k=>[k,node()]));
+nodes['#range'].value='30d';
+const location=new URL('http://fixture.test/sessions');
+let pending=null, delay=false, fail=false, tokens=10;
+const row=()=>({session_id:'fixture',agent_id:'codex',project:'repo',model:'M',started_at:'2026-10-19T01:00:00Z',ended_at:'2026-10-19T01:00:00Z',tokens,usage_events:1,cost_usd:null,estimated:true});
+const response=()=>({ok:true,json:async()=>({sessions:[row()],filters:{}})});
+const context={URL,URLSearchParams,console,Date,Intl,AbortController,setTimeout,clearTimeout,
+ document:{readyState:'loading',querySelector:k=>nodes[k]||null,querySelectorAll:()=>[],addEventListener(){},createElement:node,createTextNode:text=>({textContent:text})},
+ window:{location,history:{replaceState(_,__,url){location.href=new URL(url,location).href;}},addEventListener(){},setInterval(fn,ms){timers.push({fn,ms});return timers.length;}},
+ fetch:async url=>{
+   if(!String(url).includes('/api/sessions'))return {ok:true,json:async()=>({machines:[],syncing:false})};
+   if(fail)throw new Error('fixture unavailable');
+   if(delay)return new Promise(resolve=>{pending=()=>resolve(response());});
+   return response();
+ }};
+(async()=>{
+ vm.runInNewContext(fs.readFileSync('web/app.js','utf8'),context);
+ await context.window.AgentMonitor.initSessions();
+ const visible=()=>nodes['#sessions-body'].children.filter(n=>n.className==='session-row');
+ assert.equal(visible().length,1,nodes['#page-status'].textContent);
+ const refresh=timers.find(t=>t.ms===30000).fn;
+ delay=true;let running=refresh();
+ assert.equal(visible().length,1,'timer must retain the previous real row');
+ assert(filters.every(k=>nodes[k].disabled===false),'timer must retain usable filters');
+ tokens=20;pending();await running;
+ assert(visible()[0].innerHTML.includes('20'));
+ delay=false;fail=true;await refresh();
+ assert(nodes['#page-status'].textContent.includes('fixture unavailable'));
+ fail=false;await refresh();assert.equal(visible().length,1);
+ delay=true;nodes['#filter-model'].value='M';nodes['#filter-model'].listeners.change[0]();
+ assert.equal(visible().length,0,'explicit filter change still shows loading');
+ pending();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(visible().length,1);
+})().catch(e=>{console.error(e);process.exitCode=1;});
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_invalid_dates_do_not_query_and_correction_recovers(self):
         script = r'''
 const fs=require('fs'), assert=require('assert'), vm=require('vm');
