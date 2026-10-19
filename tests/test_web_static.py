@@ -230,13 +230,12 @@ eval(source); init();
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_daily_pages_show_sync_exceptions_without_normal_status_chatter(self):
+    def test_daily_pages_keep_refresh_receipts_and_cost_coverage_without_sync_panel(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");
 const nodes = {
-  "#sync-panel": {dataset: {syncMode: "exceptions"}, hidden: true},
-  "#sync-summary": {textContent: ""}, "#sync-machines": {innerHTML: ""},
-  "#sync-overview-link": {}, "#refresh-status": {dataset: {}, textContent: ""},
+  "#refresh-status": {dataset: {}, textContent: ""},
+  "#spend-coverage": {hidden: true, textContent: ""},
   "#overview-load-error": {textContent: ""},
 };
 global.window = {location: {origin: "http://example.test", pathname: "/", search: "?range=7d", hash: ""}};
@@ -245,84 +244,70 @@ eval(fs.readFileSync("web/app.js", "utf8").replace("window.AgentMonitor = {", "w
 const machine = {name: "fixture", admitted: true, stale: false, availability: "reachable", last_attempt_outcome: "success"};
 for (const route of ["/", "/explore", "/sessions"]) {
   window.location.pathname = route;
+  nodes["#refresh-status"].textContent = "";
   for (const syncing of [false, true]) {
     window.AgentMonitor.renderSyncStatus({syncing, machines: [machine]});
-    assert(nodes["#sync-panel"].hidden, "normal state does not occupy the daily reading surface");
-    assert.equal(nodes["#sync-summary"].textContent, "");
     assert.equal(nodes["#refresh-status"].textContent, "", "automatic work does not create action feedback");
+    assert(nodes["#spend-coverage"].hidden);
   }
   for (const change of [{admitted: false}, {stale: true}, {availability: "unreachable"}, {availability: "unknown"}, ...["failure", "cleanup_failed", "malformed_result"].map(last_attempt_outcome => ({last_attempt_outcome}))]) {
     window.AgentMonitor.renderSyncStatus({syncing: true, machines: [{...machine, ...change}]});
-    assert(!nodes["#sync-panel"].hidden, "necessary exceptions remain visible during background work");
-    assert(nodes["#sync-summary"].textContent.includes("fixture"));
-    assert(nodes["#sync-machines"].innerHTML.includes("fixture"));
-    assert(!nodes["#sync-summary"].textContent.includes("后台"));
+    assert.equal(nodes["#refresh-status"].textContent, "", "automatic exceptions do not create a replacement notice");
   }
-  const target = new URL(nodes["#sync-overview-link"].href, window.location.origin);
-  assert.equal(target.pathname, "/collection");
-  assert(target.searchParams.get("return").startsWith(route + "?range=7d"));
-  window.AgentMonitor.renderSyncStatus({machines: [machine], polling_error: "同步状态不可用"});
-  assert(!nodes["#sync-panel"].hidden);
-  assert(nodes["#sync-summary"].textContent.includes("页面保留上次渲染的数据"));
-  window.AgentMonitor.renderSyncStatus({machines: [machine]});
-  assert(nodes["#sync-panel"].hidden, "recovery removes the warning");
-  assert.equal(nodes["#sync-machines"].innerHTML, "");
+  window.AgentMonitor.renderSyncStatus({machines: [{...machine, stale: true}]});
+  assert(!nodes["#spend-coverage"].hidden, "cost completeness remains beside the figures without a sync panel");
+  assert(nodes["#spend-coverage"].textContent.includes("fixture"));
+  nodes["#refresh-status"].dataset.pending = "true";
+  window.AgentMonitor.renderSyncStatus({syncing: true, machines: [machine]});
+  assert.equal(nodes["#refresh-status"].textContent, "已受理 · 后台更新中");
+  window.AgentMonitor.renderSyncStatus({syncing: false, machines: [machine]});
+  assert.equal(nodes["#refresh-status"].textContent, "更新已结束");
+  assert.equal(nodes["#refresh-status"].dataset.pending, undefined);
+  assert(nodes["#spend-coverage"].hidden, "recovery removes obsolete cost qualification");
+  window.AgentMonitor.renderSyncStatus({syncing: true, machines: [machine]});
+  assert.equal(nodes["#refresh-status"].textContent, "更新已结束", "automatic updates preserve the action receipt");
+  nodes["#refresh-status"].dataset.pending = "true";
+  window.AgentMonitor.renderSyncStatus({syncing: false, machines: [machine], polling_error: "同步状态不可用"});
+  assert(nodes["#refresh-status"].textContent.includes("采集与诊断"));
+  window.AgentMonitor.renderSyncStatus({syncing: false, machines: [machine]});
+  assert.equal(nodes["#refresh-status"].textContent, "更新已结束");
+  nodes["#refresh-status"].dataset.pending = "true";
+  window.AgentMonitor.showOverviewLoadError(new Error("读取失败"));
+  assert(nodes["#refresh-status"].textContent.includes("更新未完成"));
+  window.AgentMonitor.renderSyncStatus({syncing: false, machines: [machine]});
+  assert.equal(nodes["#refresh-status"].textContent, "更新已结束");
 }
-nodes["#refresh-status"].dataset.pending = "true";
-window.AgentMonitor.renderSyncStatus({syncing: true, machines: [machine]});
-assert.equal(nodes["#refresh-status"].textContent, "已受理 · 后台更新中");
-assert(nodes["#sync-panel"].hidden);
-window.AgentMonitor.renderSyncStatus({syncing: false, machines: [machine]});
-assert.equal(nodes["#refresh-status"].textContent, "更新已结束");
-assert.equal(nodes["#refresh-status"].dataset.pending, undefined);
-window.AgentMonitor.renderSyncStatus({syncing: true, machines: [machine]});
-assert.equal(nodes["#refresh-status"].textContent, "更新已结束", "later automatic updates do not rewrite the action receipt");
-nodes["#refresh-status"].dataset.pending = "true";
-window.AgentMonitor.renderSyncStatus({syncing: false, machines: [machine], polling_error: "同步状态不可用"});
-assert(nodes["#refresh-status"].textContent.includes("状态暂不可用"));
-window.AgentMonitor.renderSyncStatus({syncing: false, machines: [machine]});
-assert.equal(nodes["#refresh-status"].textContent, "更新已结束", "successful reads clear obsolete action errors");
-nodes["#refresh-status"].dataset.pending = "true";
-window.AgentMonitor.showOverviewLoadError(new Error("读取失败"));
-assert(nodes["#refresh-status"].textContent.includes("更新未完成"));
-window.AgentMonitor.renderSyncStatus({syncing: false, machines: [machine]});
-assert.equal(nodes["#refresh-status"].textContent, "更新已结束");
-delete nodes["#sync-panel"].dataset.syncMode;
-nodes["#sync-coverage"] = {textContent: ""};
-delete nodes["#sync-overview-link"];
-window.AgentMonitor.renderSyncStatus({coverage: {admitted: 1, declared: 1}, machines: [machine]});
-assert.equal(nodes["#sync-coverage"].textContent, "机器快照可读：1/1 台");
-assert(nodes["#sync-machines"].innerHTML.includes("fixture"), "diagnostic page retains healthy machines");
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_session_snapshot_summary_links_to_overview_with_dates(self):
+    def test_collection_navigation_preserves_dates_and_diagnostics_keep_all_machines(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");
-const nodes = Object.fromEntries(["#sync-coverage", "#sync-summary", "#sync-machines", "#sync-overview-link"].map(id => [id, {textContent: "", innerHTML: ""}]));
+const link = {href: "http://example.test/collection#cost-diagnostics"};
+const nodes = Object.fromEntries(["#sync-coverage", "#sync-summary", "#sync-machines"].map(id => [id, {textContent: "", innerHTML: ""}]));
 global.window = {location: {origin: "http://example.test", pathname: "/sessions", search: "?range=custom&start=2026-10-01&end=2026-10-12&model=fixture", hash: ""}};
-global.document = {readyState: "loading", addEventListener() {}, querySelector: key => nodes[key] || null, querySelectorAll: () => []};
+global.document = {readyState: "loading", addEventListener() {}, querySelector: key => nodes[key] || null, querySelectorAll: selector => selector.includes("data-collection-link") ? [link] : []};
 eval(fs.readFileSync("web/app.js", "utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { updateSyncOverviewLink,"));
-const healthy = {name: "healthy", admitted: true, availability: "reachable", statistics: {usage_quality_counts: {observed: 12, incomplete: 0, unknown: 0}}};
-const failed = {...healthy, name: "failed", availability: "unreachable", generated_at: "2026-10-12T00:00:00Z"};
-window.AgentMonitor.renderSyncStatus({coverage: {admitted: 2, declared: 2}, machines: [healthy, failed]});
-assert.equal(nodes["#sync-coverage"].textContent, "机器快照可读：2/2 台");
-assert(nodes["#sync-machines"].innerHTML.includes("failed"));
-assert(!nodes["#sync-machines"].innerHTML.includes("healthy"), "healthy machine cards belong in overview");
-assert(!nodes["#sync-machines"].innerHTML.includes("sync-machine-title"));
-const target = new URL(nodes["#sync-overview-link"].href, window.location.origin);
+window.AgentMonitor.updateSyncOverviewLink();
+const target = new URL(link.href, window.location.origin);
 assert.equal(target.pathname, "/collection");
+assert.equal(target.hash, "#cost-diagnostics");
 assert.equal(target.searchParams.get("return"), "/sessions" + window.location.search);
 assert.equal(target.searchParams.get("start"), "2026-10-01");
 window.location.search = "?range=7d";
 window.AgentMonitor.updateSyncOverviewLink();
-assert.equal(new URL(nodes["#sync-overview-link"].href, window.location.origin).searchParams.get("return"), "/sessions?range=7d");
-delete nodes["#sync-overview-link"];
-window.AgentMonitor.renderSyncStatus({coverage: {admitted: 2, declared: 2}, machines: [healthy, {...failed, syncing: true}]});
-assert(nodes["#sync-machines"].innerHTML.includes("healthy"), "overview and guide retain machine detail");
+assert.equal(new URL(link.href, window.location.origin).searchParams.get("return"), "/sessions?range=7d");
+window.location.pathname = "/collection";
+const healthy = {name: "healthy", admitted: true, availability: "reachable", statistics: {usage_quality_counts: {observed: 12, incomplete: 0, unknown: 0}}};
+const failed = {...healthy, name: "failed", availability: "unreachable", generated_at: "2026-10-12T00:00:00Z"};
+window.AgentMonitor.renderSyncStatus({coverage: {admitted: 2, declared: 2}, machines: [healthy, failed]});
+assert.equal(nodes["#sync-coverage"].textContent, "机器快照可读：2/2 台");
+assert(nodes["#sync-summary"].textContent.includes("1 台需要关注：failed"));
+assert(nodes["#sync-machines"].innerHTML.includes("failed"));
+assert(nodes["#sync-machines"].innerHTML.includes("healthy"));
+window.AgentMonitor.renderSyncStatus({machines: [healthy, {...failed, syncing: true}]});
 assert(nodes["#sync-machines"].innerHTML.includes("刷新中 · 显示上次快照"));
-assert(!nodes["#sync-machines"].innerHTML.includes("刷新中，仍显示"));
 assert(nodes["#sync-machines"].innerHTML.includes("质量、历史范围与技术详情"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
@@ -1983,10 +1968,13 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
 
         sessions = (ROOT / "web" / "sessions.html").read_text()
         for html in (overview, explore, sessions):
-            self.assertIn('aria-label="数据覆盖与时效"', html)
-            self.assertIn('data-sync-mode="exceptions"', html)
-            self.assertNotIn('id="sync-coverage"', html)
-            self.assertIn('id="sync-machines"', html)
+            self.assertNotIn('id="sync-panel"', html)
+            self.assertNotIn('id="sync-summary"', html)
+            self.assertNotIn('id="sync-machines"', html)
+            self.assertIn('data-collection-link', html)
+        collection = (ROOT / "web" / "collection.html").read_text()
+        for element in ("sync-panel", "sync-coverage", "sync-summary", "sync-machines"):
+            self.assertIn(f'id="{element}"', collection)
         for token in (
             "coverageElement.textContent = `机器快照可读：${coverage.admitted}/${coverage.declared} 台`",
             'statusChip("bad", "未纳入")',

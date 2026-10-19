@@ -2,6 +2,8 @@
 
 ## 2026-10-19
 
+- Remove machine-status notice boxes entirely from Overview, Explore and Sessions, including exception states. Keep machine diagnostics on Collection and preserve manual refresh receipts and cost-completeness qualifiers.
+
 - Rebuild the six-page Web presentation around the Philo Pulse workspace: white navigation rail, neutral canvas, open cost summaries and consistent cards, typography and controls. Keep existing routes, search, details and account semantics; adapt dense tables and navigation for narrow screens.
 - Reuse completed Sessions results while admitted source versions and query windows remain unchanged; retain freshness and full validation on misses. Reduce repeated project normalization and identical metadata validation during first reads.
 - Recompute only changed conversations after snapshot updates, preserving full validation, ancestry and stable arithmetic. Keep the visible list usable during ordinary background refresh.

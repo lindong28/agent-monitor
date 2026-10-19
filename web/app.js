@@ -1906,24 +1906,13 @@
 
   function updateSyncOverviewLink() {
     if (window.location.pathname === "/collection") return;
-    const link = qs("#sync-overview-link");
-    if (link) link.href = collectionUrl();
     qsa('[data-collection-link], a[data-nav][href^="/collection"]').forEach(link => { link.href = collectionUrl(new URL(link.href, window.location.origin).hash); });
   }
 
   function renderSyncStatus(status) {
     renderQuotaRefreshStatus(status?.quota_refresh);
-    const panel = qs("#sync-panel");
-    const exceptionsOnly = panel?.dataset?.syncMode === "exceptions";
-    const coverageElement = qs("#sync-coverage");
-    const summaryElement = qs("#sync-summary");
-    const machineList = qs("#sync-machines");
-    if (!summaryElement || !machineList || !status) {
-      return;
-    }
+    if (!status) return;
     pageServerInstance = status.instance_id || pageServerInstance;
-    const coverage = status.coverage || { admitted: 0, declared: 0 };
-    if (coverageElement) coverageElement.textContent = `机器快照可读：${coverage.admitted}/${coverage.declared} 台`;
     const attention = (status.machines || []).filter(
       (machine) =>
         !machine.admitted ||
@@ -1932,31 +1921,28 @@
         machine.availability === "unknown" ||
         ["failure", "cleanup_failed", "malformed_result"].includes(machine.last_attempt_outcome)
     );
-    const warningSummary = attention.length ? `${attention.length} 台需要关注：${attention.map(machine => machine.name).join("、")}` : "";
-    if (exceptionsOnly) panel.hidden = !attention.length && !status.polling_error;
     const refreshStatus = qs("#refresh-status");
     if (refreshStatus?.dataset.pending === "true") {
-      refreshStatus.textContent = status.polling_error ? "更新状态暂不可用，请查看下方提示"
+      refreshStatus.textContent = status.polling_error ? "更新状态暂不可用，请查看采集与诊断"
         : status.syncing ? "已受理 · 后台更新中"
         : attention.length ? "更新已结束，部分机器需关注" : "更新已结束";
       if (!status.syncing && !status.polling_error) delete refreshStatus.dataset.pending;
     }
+    renderSpendCoverage(status.machines || []);
+    const coverageElement = qs("#sync-coverage");
+    const summaryElement = qs("#sync-summary");
+    const machineList = qs("#sync-machines");
+    if (!summaryElement || !machineList) return;
+    const coverage = status.coverage || { admitted: 0, declared: 0 };
+    if (coverageElement) coverageElement.textContent = `机器快照可读：${coverage.admitted}/${coverage.declared} 台`;
+    const warningSummary = attention.length ? `${attention.length} 台需要关注：${attention.map(machine => machine.name).join("、")}` : "";
     summaryElement.textContent = status.polling_error
       ? `${status.polling_error} · 页面保留上次渲染的数据`
-      : exceptionsOnly
-      ? warningSummary
       : status.syncing
       ? (status.phase === "quota" ? "统计轮已结束 · 后台查询配额" : "后台更新统计与配额 · 新数据陆续显示") + (warningSummary ? ` · ${warningSummary}` : "")
       : attention.length
       ? warningSummary
       : "使用已采集数据 · 自动更新";
-    renderSpendCoverage(status.machines || []);
-    const overviewLink = qs("#sync-overview-link");
-    if (overviewLink) {
-      updateSyncOverviewLink();
-      machineList.innerHTML = attention.map(machine => `<p class="scope-note"><strong>${escapeHtml(machine.name)}</strong>：${escapeHtml(!machine.admitted ? exclusionText(machine) + "；未纳入" : machine.availability === "unreachable" ? "暂时无法联系，保留上次快照" : machine.stale ? "快照较旧" : machine.availability === "unknown" ? "本次服务尚未检查" : "最近刷新未完成")}${machine.admitted && machine.generated_at ? ` · 数据截至 ${escapeHtml(formatDate(machine.generated_at))}` : ""}</p>`).join("");
-      return;
-    }
     const expandedMachines = new Set(qsa("#sync-machines details[open]").map(detail => detail.dataset.machine));
     const markup = (status.machines || []).map(machine => renderMachineStatus(machine, expandedMachines.has(machine.name))).join("");
     if (machineList.innerHTML !== markup) {
@@ -1987,10 +1973,8 @@
     note.hidden = !note.textContent;
   }
 
-  // The Spend figures are fleet totals, so a machine whose refresh failed is
-  // silently missing from them. The sync panel says which machine is behind,
-  // but it sits a section above the numbers and closes on healthy days; the
-  // qualifier has to travel with the figures it undercounts.
+  // Fleet totals can omit newer records from machines whose refresh failed.
+  // Keep that qualifier beside the figures; machine details live in Collection.
   function renderSpendCoverage(machines) {
     const note = qs("#spend-coverage");
     if (!note) {
@@ -2597,10 +2581,6 @@
     let restoreQuotaReading = true;
     const accountActions = qs("#codex-account-actions");
     if (accountActions && restored.get("account_actions") === "true") accountActions.open = true;
-    if (window.location.hash === "#sync-panel") {
-      const panel = qs("#sync-panel");
-      if (panel) panel.open = true;
-    }
     codexQuotaReadings = [];
     renderedQuotaRateLimits = null;
     pageCleanups.push(() => { codexQuotaReadings = []; renderedQuotaRateLimits = null; });
