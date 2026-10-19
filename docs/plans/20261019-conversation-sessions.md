@@ -1,6 +1,6 @@
 # 会话视角的用量归因
 
-状态：实现、145 项相关测试与独立变更审查完成；待发布及线上页面复验。用户于 2026-10-19 批准按讨论方案修复；本文件同时保存实施状态，不另建重复台账。
+状态：实现、145 项相关测试、独立变更审查、四机部署及线上页面复验完成。用户于 2026-10-19 批准按讨论方案修复；本文件同时保存实施状态，不另建重复台账。
 
 ## 目标与验收
 
@@ -39,8 +39,8 @@
 - [done] 决策审查与元数据/查询设计；L1（共享数据契约及用户可见归因）。一个独立 reviewer，一轮，按 finding 定向复核。
 - [done] 采集→归档→v4 快照→后端会话归组和筛选详情。
 - [done] 会话 UI、权威产品/指标/UX 文档同步及适用测试。
-- [pending] 独立变更审查、整合与普通 push、部署、真实页面复验。
-- [pending] 核销自有 worktree 和证据交付。
+- [done] 独立变更审查、整合与普通 push、四机部署、真实页面复验。
+- [done] 提交与测试/浏览器证据已保全；本轮交付前回收自有 worktree，实际回收结果写入仓外交付回执。
 
 执行方式：跨模块实现由主线程负责（task-routing R4）；独立审查用 Codex 原生 collaboration，独立上下文，R14 gpt-6-astra/high。候选仅原生 collaboration，符合 Codex 路由；不启动 wrapper。审查以终态回传收回，不在审查期间改输入。测试使用隔离 HOME/state，浏览器使用自有 headless surface。开发树 `/Users/lindong/research/.worktrees/monitor-conversations-20261019`，分支 `feat/conversation-sessions-20261019`，回收责任归本 session。
 
@@ -53,3 +53,17 @@
 真实 headless 浏览器使用隔离合成数据：1440×900 列表从主会话 $3/36 tokens（含两个子代理）切 model B 为 $2/12，进入详情仍 $2/12，切全部回 $3/36 并提示部分未计价；展开三个执行贡献 $1/$2/未知及各 12 tokens，返回保留 B；model C 显示未知而非零，独立行真实零为 $0。390×844 详情宽度 390、截图已查看。该读数不代替生产数据；preview-evidence.md 及两张截图位于 `/Users/lindong/task-artifacts/conversation-sessions-20261019/`。
 
 修复后浏览器展开主执行 ID，手动刷新及随后 30 秒重读均保持该内层展开；其余两个执行仍关闭。费用、token、筛选与范围切换保持原结果。
+
+## 生产发布与复验（2026-10-19）
+
+功能提交 `274523bc9bf6ccc09d3bca847027c5b041e53591` 已整合并普通 push 到 origin/main，四台主 checkout 均通过 deploy.py --expect 安装。MacStudio 先部署兼容读取端并经现有重启入口重启，实际 instance_id 从 `9c10e5b7240149d2bdee0fde5570be76` 变为 `44f053202be543bba5aa305a29ab0386`，asset watch 无旧 Python 读数；随后更新 MacBook、MacMini 与腾讯云采集端。未执行额外历史回放，元数据随正常采集更新。
+
+Hub 持准入租约读取的四份真实快照 exporter_commit 均为上述功能提交，statistics version 均为 4。会话目录 / native child 数分别为 macbook 5530 / 4109、macmini 5438 / 4149、macstudio 198 / 115、tencent-webserver-china 0 / 0；不把无来源会话误报为采集故障。四机均 admitted 且最后同步成功。日期窗口 30d 的一次读数为 1071 个会话，其中 268 行有子代理；正常采集持续变化，此数不作为固定验收阈值。
+
+真实 headless 浏览器：macbook + codex + gpt-6-astra 筛选后，本次主会话与 25 个子代理合并显示；列表费用 $267.7743、187,085,306 token，点击详情完全一致。切全部留存、展开 26 个执行贡献与内层 ID、展开用量记录均可用，返回保留原筛选；下一页显示 101–200 / 355，按成本排序就绪后有 100 行。390×844 详情与逐条技术证据展开均实测文档宽度 390；1440×900 列表与展开内容截图已查看。总览、透视、采集与诊断、网络、使用与接入五页完成当前内容及桌面布局回归；费用诊断加载完成后显示 51 条金额未知，完整性明细 6 行可展开。未操作账号发送、登录或移除功能。
+
+agent-browser 跨命令出现 about:blank，使用同一批次维持验证链；一次 click 回执成功却未导航，确认视口与滚轮定位后原链接实际导航成功。未把工具回执算作业务成功，也未修改用户浏览器。线上详情 API 单次读数 0.281 秒；全机 30d 列表单次 7.447 秒，受正常采集与缓存状态影响，不据此宣称性能提升或完整性能覆盖。
+
+保留的范围外读数：macbook 源扫描 14 个错误 / 0 个 blocked source，macmini 83 / 1，部署前后相同；macstudio、腾讯云均 0 / 0。网络页展示既有时区不一致、DNS 地域及 IPv6 缺测，本次未调整机器网络。上述来源/环境问题不由会话归组修复，仍由既有诊断入口呈现。基线测试债见上节；本次没有未处置的变更审查 finding。
+
+证据在 `/Users/lindong/task-artifacts/conversation-sessions-20261019/`：tests-final.log、tests-baseline.log、live-data.json、live-browser-detail.log、live-browser-regression.log、live-collection-detail.log 与 live-*.png。源码与文档已提交保全，不依赖开发 worktree 恢复。
