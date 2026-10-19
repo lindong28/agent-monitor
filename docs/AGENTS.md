@@ -20,6 +20,7 @@ Current usage and installation belong in the root README; current architecture a
 | [performance-20261013.md](performance-20261013.md) | Session indexes, runtime diagnostics and measured performance delivery |
 | [plans/20261019-sessions-performance.md](plans/20261019-sessions-performance.md) | Sessions loading optimization, decision boundaries and cold/warm browser evidence |
 | [proactive-performance.md](proactive-performance.md) | Proactive performance gaps, implementation, diagnostic commands and verification limits |
+| [plans/20261019-pulse-ui.md](plans/20261019-pulse-ui.md) | Pulse reference redesign, scoped acceptance and release evidence location |
 | [design.md](design.md) | Shared product visual design, inheritance, exceptions and observed coverage |
 | [operations/services.md](operations/services.md) | Current lifecycle/migration instructions and preserved historical deployment record |
 | [contracts/ux-contract.md](contracts/ux-contract.md) | Existing observable behavior contract |

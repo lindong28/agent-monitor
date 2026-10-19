@@ -1,89 +1,89 @@
 {
   "schema_version": 1,
   "template": {
-    "id": "style:volcengine-ark-console",
-    "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console",
-    "sha256": "8693b3a1749619c1c4c10dfcb1fccf75844a7fdc2e47eedc183b0609867011ff"
+    "id": "project:agent-monitor-pulse-workspace",
+    "source": "docs/design.md#effective-design",
+    "sha256": "88387b47f0160fb80d279a99bcc436f166e9436021143186ecb47d914e32553b"
   },
   "rules": [
     {
-      "id": "ARK-V01",
+      "id": "PULSE-V01",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V01",
+      "source": "docs/design.md#effective-design",
       "description": "字体层级：实际文字角色采用 theme 的字号、行高与字体；项目例外写明对象和用途。"
     },
     {
-      "id": "ARK-V02",
+      "id": "PULSE-V02",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V02",
+      "source": "docs/design.md#effective-design",
       "description": "颜色角色：画布、表面、文字、已有状态与品牌角色按有效设计用色，已有文字区别保持可辨。"
     },
     {
-      "id": "ARK-V03",
+      "id": "PULSE-V03",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V03",
+      "source": "docs/design.md#effective-design",
       "description": "间距与密度：组件采用约定间距及内距，内容换行后仍完整可读。"
     },
     {
-      "id": "ARK-V04",
+      "id": "PULSE-V04",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V04",
+      "source": "docs/design.md#effective-design",
       "description": "边框与表面：轻边线、圆角及浮层阴影按组件角色一致使用。"
     },
     {
-      "id": "ARK-V05",
+      "id": "PULSE-V05",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V05",
+      "source": "docs/design.md#effective-design",
       "description": "图标：同类图标的尺寸、笔画、间距与展开方向一致，保留动作名称和操作区域。"
     },
     {
-      "id": "ARK-V06",
+      "id": "PULSE-V06",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V06",
+      "source": "docs/design.md#effective-design",
       "description": "标签值关联：标签、对应值及已有补充说明在分组、对齐和跨宽度重排后仍能正确对应。"
     },
     {
-      "id": "ARK-V07",
+      "id": "PULSE-V07",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V07",
+      "source": "docs/design.md#effective-design",
       "description": "操作回归：本次样式改变涉及的现有控件、导航、展开与返回仍可操作，焦点与状态可见。"
     },
     {
-      "id": "ARK-V08",
+      "id": "PULSE-V08",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V08",
+      "source": "docs/design.md#effective-design",
       "description": "既有意义保留：本次视觉调整没有隐藏、截断或重新强调内容而改变已有业务含义；基线语义问题单列，不自动整改或阻断纯风格任务。"
     },
     {
-      "id": "ARK-V09",
+      "id": "PULSE-V09",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V09",
+      "source": "docs/design.md#effective-design",
       "description": "跨页一致性：适用页面及详情使用同一视觉规则，共享入口、具体例外与未核实范围有记录。"
     },
     {
       "id": "canvas",
       "role": "body",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.canvas",
-      "description": "background-color follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "background-color follows effective project design",
       "property": "background-color",
-      "expected": "rgb(246, 246, 252)"
+      "expected": "rgb(244, 245, 246)"
     },
     {
       "id": "body-font",
       "role": "body",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.body_font_px",
-      "description": "font-size follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "font-size follows effective project design",
       "property": "font-size",
       "expected": "14px"
     },
@@ -91,35 +91,35 @@
       "id": "body-line",
       "role": "body",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.body_line_height_px",
-      "description": "line-height follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "line-height follows effective project design",
       "property": "line-height",
-      "expected": "22px"
+      "expected": "21px"
     },
     {
       "id": "body-ink",
       "role": "body",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.ink",
-      "description": "color follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "color follows effective project design",
       "property": "color",
-      "expected": "rgb(11, 11, 15)"
+      "expected": "rgb(31, 35, 40)"
     },
     {
       "id": "page-title",
       "role": "page-title",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.page_title_font_px",
-      "description": "font-size follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "font-size follows effective project design",
       "property": "font-size",
-      "expected": "20px"
+      "expected": "24px"
     },
     {
       "id": "section-title",
       "role": "section-title",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.section_title_font_px",
-      "description": "font-size follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "font-size follows effective project design",
       "property": "font-size",
       "expected": "16px"
     },
@@ -127,8 +127,8 @@
       "id": "control-font",
       "role": "controls",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.body_font_px",
-      "description": "font-size follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "font-size follows effective project design",
       "property": "font-size",
       "expected": "14px"
     },
@@ -136,17 +136,17 @@
       "id": "control-height",
       "role": "controls",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.control_height_px",
-      "description": "height follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "height follows effective project design",
       "property": "height",
-      "expected": "32px"
+      "expected": "36px"
     },
     {
       "id": "control-radius",
       "role": "controls",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.radius_px",
-      "description": "border-radius follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "border-radius follows effective project design",
       "property": "border-radius",
       "expected": "6px"
     },
@@ -154,8 +154,8 @@
       "id": "panel-surface",
       "role": "panels",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.surface",
-      "description": "background-color follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "background-color follows effective project design",
       "property": "background-color",
       "expected": "rgb(255, 255, 255)"
     },
@@ -163,17 +163,17 @@
       "id": "panel-radius",
       "role": "panels",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.radius_px",
-      "description": "border-radius follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "border-radius follows effective project design",
       "property": "border-radius",
-      "expected": "8px"
+      "expected": "6px"
     },
     {
       "id": "panel-shadow",
       "role": "panels",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.description",
-      "description": "box-shadow follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "box-shadow follows effective project design",
       "property": "box-shadow",
       "expected": "none"
     },
@@ -181,8 +181,8 @@
       "id": "table-heading",
       "role": "table-heading",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.supporting_font_px",
-      "description": "font-size follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "font-size follows effective project design",
       "property": "font-size",
       "expected": "12px"
     },
@@ -190,8 +190,8 @@
       "id": "detail-label",
       "role": "detail-label",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.supporting_font_px",
-      "description": "font-size follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "font-size follows effective project design",
       "property": "font-size",
       "expected": "12px"
     },
@@ -199,8 +199,8 @@
       "id": "detail-value",
       "role": "detail-value",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.body_font_px",
-      "description": "font-size follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "font-size follows effective project design",
       "property": "font-size",
       "expected": "14px"
     },
@@ -208,8 +208,8 @@
       "id": "badge-font",
       "role": "badges",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.supporting_font_px",
-      "description": "font-size follows template token",
+      "source": "docs/design.md#effective-design",
+      "description": "font-size follows effective project design",
       "property": "font-size",
       "expected": "12px"
     },
@@ -217,7 +217,7 @@
       "id": "page-overflow",
       "role": "document",
       "kind": "no-horizontal-overflow",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[9]",
+      "source": "docs/design.md#effective-design",
       "description": "宽表局部滚动，文档本身不溢出"
     },
     {
@@ -243,19 +243,19 @@
       "description": "Preserved existing regression check; product behavior, not a new visual template requirement. 不适用配额的原因在同一单元格内常显，不依赖title"
     },
     {
-      "id": "ARK-V01.metric",
+      "id": "PULSE-V01.metric",
       "role": "session-metric",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#theme.tokens.metric_font_px",
-      "description": "Session primary readings share the 28px metric role",
+      "source": "docs/design.md#effective-design",
+      "description": "Session primary readings share the 32px metric role",
       "property": "font-size",
       "expected": "32px"
     },
     {
-      "id": "ARK-V06.tabular",
+      "id": "PULSE-V06.tabular",
       "role": "numeric-detail-value",
       "kind": "style",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[10]",
+      "source": "docs/design.md#effective-design",
       "description": "Detail values keep tabular numerals",
       "property": "font-variant-numeric",
       "expected": "tabular-nums"
@@ -265,55 +265,55 @@
       "role": "quota-filter-adjacency",
       "kind": "predicate",
       "source": "docs/design.md#2026-10-10-component-follow-up",
-      "description": "独立批次工作台位于配额筛选之前，不插在筛选及结果之间。"
+      "description": "Quota filters and comparison precede the independent account-operation panel; no action panel interrupts filter/results."
     },
     {
       "id": "history-context",
       "role": "history-context",
       "kind": "predicate",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V06",
-      "description": "历史组标题和既有观测说明在局部横滚后仍与身份关联；读数口径归产品。"
+      "source": "docs/design.md#effective-design",
+      "description": "Each historical row retains its qualification in the observation column; scrolling and mobile labels keep it reachable."
     },
     {
-      "id": "ARK-V10",
+      "id": "PULSE-V10",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V10",
+      "source": "docs/design.md#effective-design",
       "description": "顶层与局部导航：目标已有的区域入口、局部导航与详情归属区分清楚，选中、焦点与窄屏入口可见；新增示例能力不强制移植到产品。"
     },
     {
-      "id": "ARK-V11",
+      "id": "PULSE-V11",
       "role": "visual-page",
       "kind": "manual",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#ARK-V11",
-      "description": "展示组件：适用的推荐卡、目录筛选、作品主视觉、订阅状态和文档代码块按各自组件规则呈现，内容与操作关联明确；局部深色及未验证媒体能力分别说明。"
+      "source": "docs/design.md#effective-design",
+      "description": "Guide code blocks and account-operation details retain their labels, controls and readable wrapping in the shared design."
     },
     {
       "id": "top-nav-height",
       "role": "top-nav",
       "kind": "style",
       "property": "height",
-      "expected": "36px",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[0]",
-      "description": "top-nav-height follows current template"
+      "expected": "30px",
+      "source": "docs/design.md#effective-design",
+      "description": "top-nav-height follows effective project design"
     },
     {
       "id": "top-nav-radius",
       "role": "top-nav",
       "kind": "style",
       "property": "border-radius",
-      "expected": "8px",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[0]",
-      "description": "top-nav-radius follows current template"
+      "expected": "4px",
+      "source": "docs/design.md#effective-design",
+      "description": "top-nav-radius follows effective project design"
     },
     {
       "id": "search-radius",
       "role": "search-dialog",
       "kind": "style",
       "property": "border-radius",
-      "expected": "16px",
-      "source": "prompt-templates:library/webui/templates.json#style:volcengine-ark-console#components[1]",
-      "description": "search-radius follows current template"
+      "expected": "8px",
+      "source": "docs/design.md#effective-design",
+      "description": "search-radius follows effective project design"
     }
   ]
 }

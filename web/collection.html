@@ -10,17 +10,6 @@
     <script src="/web/pivot.js"></script>
   </head>
   <body>
-    <header class="app-header">
-      <a class="brand" data-preserve-range href="/">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span class="brand-title">agent-monitor</span>
-      </a>
-      <nav class="top-nav" aria-label="区域导航">
-        <a data-area="console" aria-current="page" href="/">控制台</a>
-        <a data-area="guide" data-preserve-range href="/guide">使用与接入</a>
-      </nav>
-      <button class="header-search" id="open-page-search" type="button" aria-haspopup="dialog" aria-controls="page-search"><span aria-hidden="true">⌕</span> 搜索页面与帮助</button>
-    </header>
     <dialog id="page-search" class="page-search" aria-labelledby="page-search-title">
       <div class="search-heading"><h2 id="page-search-title">搜索页面与帮助</h2><button type="button" id="close-page-search" aria-label="关闭搜索">关闭</button></div>
       <p class="scope-note">查找功能入口和接入说明；账号与会话内容请使用各页面的筛选。</p>
@@ -31,6 +20,17 @@
     </dialog>
     <div class="app-shell">
       <aside class="sidebar">
+        <header class="app-header">
+          <a class="brand" data-preserve-range href="/">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-title">agent-monitor</span>
+          </a>
+          <nav class="top-nav" aria-label="区域导航">
+            <a data-area="console" aria-current="page" href="/">控制台</a>
+            <a data-area="guide" data-preserve-range href="/guide">使用与接入</a>
+          </nav>
+          <button class="header-search" id="open-page-search" type="button" aria-haspopup="dialog" aria-controls="page-search"><span aria-hidden="true">⌕</span> 搜索页面与帮助</button>
+        </header>
         <nav class="nav" aria-label="控制台导航">
           <a data-nav href="/">总览</a>
           <a data-nav href="/explore">透视</a>

@@ -24,7 +24,7 @@ observations = []
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True, args=["--mute-audio"])
     try:
-        for width, height in [(390, 844), (1440, 1000)]:
+        for width, height in [(390, 844), (1024, 844), (1440, 1000)]:
             page = browser.new_page(viewport={"width": width, "height": height})
             page.set_default_timeout(10000)
             page.route("**/*", lambda route: route.fulfill(status=200, body="{}", content_type="application/json"))
@@ -54,10 +54,10 @@ with sync_playwright() as p:
                     const range=document.createRange(); range.selectNodeContents(el); const b=range.getBoundingClientRect();
                     return b.width>0 && b.left>=clip.left-1 && b.right<=clip.right+1;
                   };
-                  const note=document.querySelector('.remembered .quota-account-observation');
+                  const note=document.querySelector('.remembered .quota-updated-cell > .quota-history-note');
                   return {scrollLeft:scroller.scrollLeft, historyTitle:visible(document.querySelector('.quota-past-toggle')),
-                    historyNote:visible(note), note:note?.textContent || '',
-                    batchBeforeFilters:Boolean(document.querySelector('#codex-account-actions').compareDocumentPosition(document.querySelector('#quota-explorer')) & Node.DOCUMENT_POSITION_FOLLOWING),
+                    historyNote:!!note && note.checkVisibility(), historyNoteInView:visible(note), note:note?.textContent || '',
+                    filtersBeforeResultsBeforeActions:Boolean((document.querySelector('#quota-explorer').compareDocumentPosition(document.querySelector('.quota-table-wrap')) & Node.DOCUMENT_POSITION_FOLLOWING) && (document.querySelector('.quota-table-wrap').compareDocumentPosition(document.querySelector('#codex-account-actions')) & Node.DOCUMENT_POSITION_FOLLOWING)),
                     documentOverflow:document.documentElement.scrollWidth>innerWidth};
                 }""")
                 for role in ['history-context','quota-filter-adjacency']:
@@ -98,9 +98,11 @@ with sync_playwright() as p:
 failures=[]
 for r in observations:
     if 'scrollLeft' in r:
-        for key in ['historyTitle','historyNote','batchBeforeFilters']:
+        for key in ['historyTitle','historyNote','filtersBeforeResultsBeforeActions']:
             if not r[key]: failures.append(f"{r['width']}px / scroll {r['scrollLeft']}: {key}")
         if r['documentOverflow']: failures.append(f"{r['width']}px: document overflow")
+        if r['position'] == 10000 and not r['historyNoteInView']:
+            failures.append(f"{r['width']}px: historical qualification unreachable at end of scroller")
         for role in ['history-context','quota-filter-adjacency']:
             if not r[role]['pass']: failures.append(f"{r['width']}px: {role} binding")
     if 'chart' in r:

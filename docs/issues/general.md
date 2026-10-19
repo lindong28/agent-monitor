@@ -1,5 +1,11 @@
 # tt-web Issues
 
+## [open] ISSUE-TEST-20261019-c7b2: Baseline test expectations drift
+
+- Owner: agent-monitor test maintainer.
+- Evidence: Pulse UI redesign full suite ran 1036 tests with 10 failures. Re-running the seven affected methods from an isolated `git archive f20e4c0` reproduces the same ten failures: three AdmissionStatusTests methods (one has four reason subcases) expect payloads before `unknown_cost`; three FrontendStatusRenderTests methods expect earlier snapshot/attention wording; one ProgressiveFreshnessTests method expects the removed pricing-coverage suffix. Exact names, actual/expected output and interpreter/source boundaries are retained in `/Users/lindong/task-artifacts/agent-monitor-pulse-ui-20261020/unittest.log` and `baseline-failures.log`.
+- Disposition: not introduced by the visual redesign; no runtime behavior was changed to satisfy older assertions. The test maintainer should reconcile expectations against current contracts in a separate scoped maintenance change. This record does not claim the whole suite passes.
+
 ## [resolved] ISSUE-UX-20261018-9c42：未归属账号的机器读数仍作为账号行展示
 
 - Owner / Priority: agent-monitor Web maintainer / medium。

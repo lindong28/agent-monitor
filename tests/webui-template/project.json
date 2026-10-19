@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "project": "Agent Monitor - Ark Console visual style",
-  "base_url": "http://127.0.0.1:18974",
+  "project": "Agent Monitor — Pulse workspace reference",
+  "base_url": "http://127.0.0.1:39086",
   "viewports": [
     {
       "id": "wide",
@@ -25,7 +25,7 @@
       "selector": ".page-title"
     },
     "section-title": {
-      "selector": "main h2, .llm-detail h3"
+      "selector": "main h2"
     },
     "controls": {
       "selector": "#refresh, main select, main input:not([type=checkbox]):not([type=radio])"
@@ -37,10 +37,10 @@
       "selector": "table thead th"
     },
     "detail-label": {
-      "selector": ".codex-account-reading dt, .session-fields dt, .llm-detail-fields dt, .kv-row .label"
+      "selector": ".codex-account-reading dt, .session-fields dt, .kv-row .label"
     },
     "detail-value": {
-      "selector": ".codex-account-reading dd, .session-fields dd, .llm-detail-fields dd, .kv-row .value"
+      "selector": ".codex-account-reading dd, .session-fields dd, .kv-row .value"
     },
     "badges": {
       "selector": ".pill, .status-pill"
@@ -61,13 +61,13 @@
       "selector": ".session-metrics strong"
     },
     "numeric-detail-value": {
-      "selector": ".codex-account-reading dd, .session-fields dd, .llm-detail-fields dd"
+      "selector": ".codex-account-reading dd, .session-fields dd"
     },
     "quota-filter-adjacency": {
-      "expression": "(() => {const b=document.querySelector('#codex-account-actions'), f=document.querySelector('#quota-explorer'), t=document.querySelector('.quota-table-wrap'); return {pass:!!(b&&f&&t&&(b.compareDocumentPosition(f)&4)&&(f.compareDocumentPosition(t)&4)),samples:b&&f&&t?1:0,detail:'Batch workspace precedes quota-only filters and results'};})()"
+      "expression": "(() => {const b=document.querySelector('#codex-account-actions'), f=document.querySelector('#quota-explorer'), t=document.querySelector('.quota-table-wrap'); return {pass:!!(b&&f&&t&&(f.compareDocumentPosition(t)&4)&&(t.compareDocumentPosition(b)&4)),samples:b&&f&&t?1:0,detail:'Quota filters precede results; account actions follow comparison'};})()"
     },
     "history-context": {
-      "expression": "(() => {const w=document.querySelector('.quota-table-wrap'), b=document.querySelector('#quota-past-accounts'); if(!w||!b||b.hidden)return {pass:false,samples:0,detail:'Expanded historical account sample required'};const clip=w.getBoundingClientRect();const nodes=[document.querySelector('.quota-past-toggle'),...b.querySelectorAll('.quota-account-observation')];const visible=el=>{if(!el)return false;const r=document.createRange();r.selectNodeContents(el);const x=r.getBoundingClientRect();return x.width>0&&x.left>=clip.left-1&&x.right<=clip.right+1;};return {pass:nodes.length>1&&nodes.every(visible),samples:nodes.length,detail:'Visible history title and row provenance; scrollLeft='+w.scrollLeft};})()"
+      "expression": "(() => {const rows=[...document.querySelectorAll('#quota-past-accounts .remembered')];const bad=rows.filter(row=>![...row.querySelectorAll('.quota-updated-cell > .quota-history-note')].some(n=>n.checkVisibility()&&n.textContent.includes('历史读数，不代表当前状态')));return {pass:rows.length>0&&bad.length===0,samples:rows.length,detail:'Every historical row retains its visible qualification in the observation column'};})()"
     },
     "top-nav": {
       "selector": ".top-nav a"
@@ -83,10 +83,10 @@
       "state": "默认折叠账号区、图表与配额实际加载",
       "ready": "document.querySelector('.quota-account-cell') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
       "exclude": {
-        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-label": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "PULSE-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "PULSE-V06.tabular": "此状态没有详情键值；已在账号/会话详情单独覆盖",
         "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
         "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       }
@@ -97,15 +97,15 @@
       "state": "默认透视及分组排名加载",
       "ready": "document.querySelector('#pivot-status')?.textContent.startsWith('已加载 ') && document.querySelector('#group-ranking li')",
       "exclude": {
-        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-label": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话详情单独覆盖",
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "table-heading": "透视使用排名列表及键盘可读时间值，不使用表格",
         "badge-font": "默认透视没有身份徽章；分组名为普通文本",
-        "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "PULSE-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "PULSE-V06.tabular": "此状态没有详情键值；已在账号/会话详情单独覆盖",
         "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
         "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
         "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
@@ -117,13 +117,32 @@
       "state": "会话列表第一页",
       "ready": "document.querySelector('#sessions-body')?.getAttribute('aria-busy') === 'false' && document.querySelector('#sessions-body tr:not([data-session-state])')",
       "exclude": {
-        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-label": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话详情单独覆盖",
         "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
-        "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "PULSE-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "PULSE-V06.tabular": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
+        "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
+        "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
+      }
+    },
+    {
+      "id": "collection",
+      "path": "/collection",
+      "state": "机器采集与质量分组加载",
+      "ready": "document.querySelector(\"#sync-machines details\")",
+      "exclude": {
+        "detail-label": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "collapsed-summary": "仅总览拥有此组件；由总览case覆盖",
+        "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
+        "quota-reason": "仅总览拥有此组件；由总览case覆盖",
+        "table-heading": "采集页使用机器卡片及质量分组，无数据表",
+        "PULSE-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "PULSE-V06.tabular": "此状态没有详情键值；已在账号/会话详情单独覆盖",
         "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
         "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
         "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
@@ -139,8 +158,8 @@
         "chart-data-access": "仅总览拥有此组件；由总览case覆盖",
         "quota-reason": "仅总览拥有此组件；由总览case覆盖",
         "table-heading": "网络采用键值列表，无数据表",
-        "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "ARK-V06.tabular": "Network identifiers/IP addresses are not measured numeric quantities; preserve proportional text to avoid introducing extra line breaks.",
+        "PULSE-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "PULSE-V06.tabular": "Network identifiers/IP addresses are not measured numeric quantities; preserve proportional text to avoid introducing extra line breaks.",
         "quota-filter-adjacency": "总览独有的配额筛选与工作台布局。",
         "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
         "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
@@ -152,10 +171,10 @@
       "state": "历史账号展开，读取未知/历史配额及常显不适用原因",
       "ready": "document.querySelector('.quota-account-cell') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
       "exclude": {
-        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-label": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "PULSE-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "PULSE-V06.tabular": "此状态没有详情键值；已在账号/会话详情单独覆盖",
         "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       },
       "steps": [
@@ -182,12 +201,12 @@
       "state": "配额搜索无匹配；保留清空入口",
       "ready": "document.querySelector('.quota-account-cell') && Chart.getChart('daily-cost-chart') && document.fonts.status === 'loaded'",
       "exclude": {
-        "detail-label": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
-        "detail-value": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "detail-label": "此状态没有详情键值；已在账号/会话详情单独覆盖",
+        "detail-value": "此状态没有详情键值；已在账号/会话详情单独覆盖",
         "quota-reason": "无匹配状态无配额窗口；原因在默认和历史状态验证",
         "badge-font": "搜索空态无账号徽章；其他状态验证",
-        "ARK-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
-        "ARK-V06.tabular": "此状态没有详情键值；已在账号/会话/请求详情单独覆盖",
+        "PULSE-V01.metric": "This state has no session primary metrics; real session detail has a separate case.",
+        "PULSE-V06.tabular": "此状态没有详情键值；已在账号/会话详情单独覆盖",
         "history-context": "历史展开状态单独检查；横滚失败样本由离线浏览器脚本覆盖。",
         "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
       },
@@ -259,8 +278,8 @@
         "quota-reason": "The guide has no corresponding overview, quota or session detail component.",
         "detail-label": "The guide has no corresponding overview, quota or session detail component.",
         "detail-value": "The guide has no corresponding overview, quota or session detail component.",
-        "ARK-V01.metric": "The guide has no corresponding overview, quota or session detail component.",
-        "ARK-V06.tabular": "The guide has no corresponding overview, quota or session detail component.",
+        "PULSE-V01.metric": "The guide has no corresponding overview, quota or session detail component.",
+        "PULSE-V06.tabular": "The guide has no corresponding overview, quota or session detail component.",
         "quota-filter-adjacency": "The guide has no corresponding overview, quota or session detail component.",
         "history-context": "The guide has no corresponding overview, quota or session detail component.",
         "search-radius": "搜索浮层由 guide-search 展开状态覆盖。"
@@ -287,8 +306,8 @@
         "quota-reason": "The guide has no corresponding overview, quota or session detail component.",
         "detail-label": "The guide has no corresponding overview, quota or session detail component.",
         "detail-value": "The guide has no corresponding overview, quota or session detail component.",
-        "ARK-V01.metric": "The guide has no corresponding overview, quota or session detail component.",
-        "ARK-V06.tabular": "The guide has no corresponding overview, quota or session detail component.",
+        "PULSE-V01.metric": "The guide has no corresponding overview, quota or session detail component.",
+        "PULSE-V06.tabular": "The guide has no corresponding overview, quota or session detail component.",
         "quota-filter-adjacency": "The guide has no corresponding overview, quota or session detail component.",
         "history-context": "The guide has no corresponding overview, quota or session detail component."
       }

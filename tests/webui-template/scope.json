@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "id": "agent-monitor-ark-topbar-20261014",
-  "objective": "Apply the expanded Ark Console template to the five Monitor routes and session detail, including top-level areas, local navigation, page/help search and documentation code display, while preserving data and context.",
+  "id": "agent-monitor-pulse-workspace-20261019",
+  "objective": "Adapt the Pulse workspace visual system across all six Monitor routes and expanded details while preserving data, operations and navigation context.",
   "application": "style",
   "design": {
     "path": "effective-design.json",
-    "sha256": "ea33b5b7e240b077f2b8f0b67dce97f4cb988aaf31813fff4a37809240b61904"
+    "sha256": "31ebe08a536de27c4fa06e2bb9dcaf3bdf85c1eaca583d826ae54f89ee5f7c07"
   },
   "project": {
     "path": "project.json",
-    "sha256": "ff12770ffce29de995df3f2eb6814f772bacafbc5d0d80938bec3aa554c06970"
+    "sha256": "59757b78882d50bc3efafefeb24c9ad6b66c8a0fa9bde661ac7c9dda103803d6"
   }
 }

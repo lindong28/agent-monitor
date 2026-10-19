@@ -1,4 +1,4 @@
-/* Product visual design: style:volcengine-ark-console.
+/* Product visual design: Philo Pulse workspace reference.
    Shared by every route; scope and project overrides: docs/design.md. */
 
 :root {
@@ -14,20 +14,20 @@
   --sp-7: 24px;
   --sp-8: 32px;
 
-  --h-control: 32px;
+  --h-control: 36px;
   --pad-cell: 12px 16px;
   --pad-card: var(--sp-7);
 
-  --sidebar-w: 220px;
-  --header-h: 56px;
+  --sidebar-w: 208px;
+  --header-h: 0px;
   /* Limit the shared page once; prose uses its content region. */
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --r-sm: 6px;
   --r-md: 6px;
-  --r-lg: 8px;
+  --r-lg: 6px;
   --r-pill: 999px;
 
   /* Separation is carried by line and tint; shadow only for things that float. */
@@ -41,22 +41,23 @@
     border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
     opacity var(--dur) var(--ease);
 
-  --canvas: #f6f6fc;
+  --canvas: #f4f5f6;
   --surface: #ffffff;
-  --surface-sunken: #f7f7fa;
-  --ink: #0b0b0f;
-  --ink-muted: #5d5d70;
-  --ink-subtle: #68687b;
-  --line: #e7e7ef;
-  --line-soft: #f0f0f5;
-  --line-strong: #b9b9cc;
-  --bg-hover: #efeff7;
-  --bg-active: #ebebf5;
-  --primary: #5252ff;
-  --primary-hover: #4242df;
-  --accent: #0b66c3;
-  --accent-ink: #0a559f;
-  --accent-bg: #dcecfb;
+  --surface-sunken: #f6f8fa;
+  --ink: #1f2328;
+  --ink-muted: #59636e;
+  --ink-subtle: #656d76;
+  --line: #e2e4e7;
+  --line-soft: #eef0f2;
+  --line-strong: #afb8c1;
+  --bg-hover: #f3f4f6;
+  --bg-active: #eff1f3;
+  --primary: #0969da;
+  --primary-hover: #075cbe;
+  --accent: #0969da;
+  --accent-ink: #0969da;
+  --accent-bg: #ddf4ff;
+  --nav-marker: #ff8975;
   --ok: #18794e;
   --warn: #946800;
   --danger: #c42b2b;
@@ -71,7 +72,7 @@ body {
   min-width: 320px;
   background: var(--canvas);
   color: var(--ink);
-  font: 400 14px/22px var(--font-sans);
+  font: 400 14px/21px var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -109,26 +110,23 @@ a:hover {
   }
 }
 
-/* The brand bar and navigation survive SPA swaps; page controls stay in main. */
+/* The rail survives SPA swaps; page controls stay in main. */
 .app-header, .app-shell {
   width: 100%;
 }
 .app-header {
-  position: sticky;
-  top: 0;
-  z-index: 6;
-  height: var(--header-h);
   display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 0 24px;
+  flex-direction: column;
+  gap: 20px;
+  padding: 8px 0 16px;
   background: var(--surface);
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line);
 }
-.top-nav { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.top-nav a { display: flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 8px; color: var(--ink-muted); white-space: nowrap; text-decoration: none; }
-.top-nav a:hover, .top-nav a[aria-current="page"] { background: var(--bg-active); color: var(--accent); }
-.header-search { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--ink-muted); background: var(--surface-sunken); white-space: nowrap; }
+.top-nav { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 3px; background: var(--canvas); border-radius: 6px; }
+.top-nav a { display: flex; align-items: center; justify-content: center; flex: 1; min-height: 30px; padding: 0 6px; border-radius: 4px; color: var(--ink-muted); font-size: 12px; white-space: nowrap; text-decoration: none; }
+.top-nav a:hover { color: var(--ink); }
+.top-nav a[aria-current="page"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px #1f232814; font-weight: 600; }
+.app-header .header-search { display: flex; justify-content: flex-start; gap: 8px; color: var(--ink-muted); background: var(--surface); white-space: nowrap; font-size: 12px; }
 .header-search > span { font-size: 20px; }
 .sidebar [hidden] { display: none; }
 .guide-nav { display: flex; flex-direction: column; gap: 4px; }
@@ -143,16 +141,17 @@ a:hover {
 
 .sidebar {
   position: sticky;
-  top: var(--header-h);
+  top: 0;
   z-index: 5;
   flex: 0 0 var(--sidebar-w);
   width: var(--sidebar-w);
-  height: calc(100vh - var(--header-h));
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   gap: var(--sp-5);
-  padding: 24px 12px;
-  background: var(--canvas);
+  padding: 20px 14px 16px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
   overflow-y: auto;
 }
 
@@ -167,15 +166,18 @@ a:hover {
 }
 
 .brand-mark {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
   border-radius: var(--r-md);
-  background: var(--accent);
+  background: var(--ink);
+  position: relative;
 }
+.brand-mark::after { content: ""; position: absolute; inset: 7px 5px; border-bottom: 2px solid white; border-left: 2px solid white; transform: skewY(-28deg); }
 
 .brand-title {
   margin: 0;
-  font: 600 16px/22px var(--font-sans);
+  font: 700 16px/24px var(--font-sans);
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
@@ -220,6 +222,7 @@ button:active:not(:disabled) {
    drew five competing boxes down the left edge and made the active item —
    which differs from the rest only by tint — harder to pick out, not easier. */
 .nav a {
+  position: relative;
   display: flex;
   align-items: center;
   padding: 0 var(--sp-5);
@@ -228,7 +231,7 @@ button:active:not(:disabled) {
   color: var(--ink-muted);
   text-decoration: none;
   min-height: 40px;
-  border-radius: 8px;
+  border-radius: 6px;
   gap: 12px;
 }
 
@@ -253,10 +256,11 @@ button:active:not(:disabled) {
 
 .nav a[aria-current="page"] {
   border-color: transparent;
-  background: var(--accent-bg);
-  color: var(--accent-ink);
+  background: var(--bg-active);
+  color: var(--ink);
   font-weight: 600;
 }
+.nav a[aria-current="page"]::after { content: ""; position: absolute; left: -7px; top: 10px; bottom: 10px; width: 4px; border-radius: 2px; background: var(--nav-marker); }
 
 .toolbar {
   display: flex;
@@ -380,10 +384,9 @@ button:disabled {
 .main {
   flex: 1;
   min-width: 0;
-  padding: var(--sp-7) var(--sp-7) var(--sp-8);
-  margin: 16px 16px 16px 0;
-  background: var(--surface);
-  border-radius: 12px;
+  padding: 22px 28px 60px;
+  margin: 0;
+  background: transparent;
 }
 
 /* Per-page controls, inside <main> because that is what they belong to: the
@@ -396,12 +399,12 @@ button:disabled {
   justify-content: space-between;
   gap: var(--sp-6);
   flex-wrap: wrap;
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sp-7);
 }
 
 .page-title {
   margin: 0;
-  font: 600 20px/28px var(--font-sans);
+  font: 700 24px/30px var(--font-sans);
   letter-spacing: -0.01em;
 }
 
@@ -443,31 +446,28 @@ button:disabled {
 
 /* Values and history share one surface; each value keeps its own window. */
 .overview-cost .kpi-grid {
-  padding-bottom: var(--sp-6);
-  margin-bottom: var(--sp-6);
-  border-bottom: 1px solid var(--line-soft);
+  padding: 16px 0;
+  margin: 8px 0;
+  gap: 0;
 }
 
 .overview-cost .kpi-card {
   min-height: 0;
-  padding: 16px 20px;
+  padding: 0 24px;
   border: 0;
-  background: var(--surface-sunken);
+  background: transparent;
   box-shadow: none;
+  border-radius: 0;
 }
+.overview-cost .kpi-card:first-child { padding-left: 0; }
+.overview-cost .kpi-card + .kpi-card { border-left: 1px solid var(--line); }
 
-.overview-cost .panel-head {
+.overview-trend .panel-head {
   flex-wrap: wrap;
 }
 
 @media (max-width: 900px) {
-  .overview-cost .kpi-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .overview-cost .kpi-card:last-child {
-    grid-column: 1 / -1;
-  }
+  .overview-cost .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* Quota is one row per account, not a fixed set of cards: how many accounts
@@ -1000,6 +1000,8 @@ button:disabled {
   padding: var(--pad-card);
   min-width: 0;
 }
+.main > .panel + .panel { margin-top: var(--sp-7); }
+.collection-main > .panel { margin-top: var(--sp-7); }
 
 .panel-head {
   display: flex;
@@ -1738,30 +1740,33 @@ td.numeric {
   }
 
   .sidebar {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--sp-6);
+    position: sticky;
+    flex-direction: column;
+    gap: 0;
     width: auto;
     height: auto;
-    padding: var(--sp-4) var(--sp-6);
+    padding: 0 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
-    overflow-x: auto;
-    overflow-y: visible;
+    overflow: visible;
   }
-
-  .app-header { padding: 0 16px; }
 
   .nav {
     flex-direction: row;
     gap: var(--sp-2);
+    width: 100%;
+    overflow-x: auto;
+    padding: 6px 0;
   }
 
   .brand, .nav { flex-shrink: 0; }
 
   .nav a {
     white-space: nowrap;
+    min-height: 36px;
+    flex-shrink: 0;
   }
+  .nav a[aria-current="page"]::after { top: auto; bottom: 1px; left: 12px; right: 12px; width: auto; height: 3px; }
 
   .toolbar {
     justify-content: flex-start;
@@ -1773,6 +1778,7 @@ td.numeric {
   .sync-machines {
     grid-template-columns: 1fr;
   }
+  .sessions-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   .sync-panel-head,
   .sync-machine-title {
@@ -1785,8 +1791,8 @@ td.numeric {
   }
 
   .main {
-    padding: var(--sp-6);
-    margin: 12px;
+    padding: 20px 16px 40px;
+    margin: 0;
   }
 
   .verdict-banner {
@@ -1823,14 +1829,13 @@ td.numeric {
 
 
 /* Shared product typography: new pages inherit without a page-specific class. */
-.main { min-height: calc(100vh - var(--header-h) - 32px); }
-.page-title { font-size: 20px; line-height: 28px; }
+.main { min-height: 100vh; }
 .panel-head h2, .panel > h2, .kpi-group-title, .network-card h2 {
   font-size: 16px; line-height: 24px; color: var(--ink);
   letter-spacing: 0; text-transform: none;
 }
 button, select, input, .field label { font-size: 14px; line-height: 22px; }
-.scope-note, .quota-scope, .status-line, .kpi-sub, .note-disclosure { font-size: 12px; line-height: 20px; }
+.scope-note, .quota-scope, .status-line, .kpi-sub, .note-disclosure { font-size: 13px; line-height: 21px; }
 .query-options > summary, .ranking-periods > summary, .entry-technical > summary { font-size: 12px; line-height: 20px; color: var(--ink-muted); }
 .field label { text-transform: none; letter-spacing: 0; }
 .kpi-label { font-size: 14px; line-height: 22px; }
@@ -1843,7 +1848,6 @@ button, select, input, .field label { font-size: 14px; line-height: 22px; }
 }
 table th { font-size: 12px; line-height: 20px; letter-spacing: 0; text-transform: none; }
 table td { font-size: 14px; line-height: 22px; }
-.nav a[aria-current="page"] { background: var(--bg-active); color: var(--ink); }
 .toolbar { flex-wrap: wrap; }
 .session-identity, .panel-head { overflow-wrap: anywhere; }
 /* Refresh is the common primary action; account and destructive actions retain
@@ -1853,14 +1857,15 @@ table td { font-size: 14px; line-height: 22px; }
 #refresh:disabled { opacity: .45; }
 .overview-main .kpi-sections { gap: 24px; }
 .overview-main .panel-grid { margin: 0; }
-.overview-main .overview-cost { padding: 20px 24px; }
-.overview-main .kpi-group[aria-labelledby="kpi-quota-title"] { border-top: 1px solid var(--line); padding-top: 24px; }
+.overview-main .overview-cost { padding: 0; }
 .overview-main .codex-account-actions > summary { font-size: 14px; line-height: 22px; }
 @media (max-width: 800px) {
-  .overview-main .overview-cost { padding: 16px; }
+  .panel { padding: 16px; }
 }
 @media (max-width: 480px) {
   .overview-cost .kpi-grid { grid-template-columns: 1fr; }
+  .overview-cost .kpi-card { padding: 12px 0; }
+  .overview-cost .kpi-card + .kpi-card { border-left: 0; border-top: 1px solid var(--line); }
 }
 
 /* Shared linear icons: decorative SVG masks inherit the action's text color. */
@@ -1933,8 +1938,8 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 .code-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--ink-muted); font-size: 12px; }
 .code-card pre { margin: 0; padding: 16px; overflow-x: auto; }
 .code-card pre code { white-space: pre; overflow-wrap: normal; padding: 0; background: transparent; }
-.page-search { box-sizing: border-box; width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--surface); box-shadow: 0 16px 64px #17173326; }
-.page-search::backdrop { background: #18182e66; }
+.page-search { box-sizing: border-box; width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); box-shadow: 0 16px 64px #1f232826; }
+.page-search::backdrop { background: #1f232866; }
 .search-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .search-heading h2 { margin: 0; font-size: 20px; line-height: 28px; }
 .search-input-row { display: flex; gap: 8px; }
@@ -1950,15 +1955,19 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   .guide-article { grid-row: 1; }
 }
 @media (max-width: 900px) {
-  :root { --header-h: 104px; }
-  .app-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 56px 48px; gap: 0 8px; }
+  :root { --header-h: 146px; }
+  .app-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 52px 40px; gap: 0 8px; padding: 0 0 6px; }
   .app-header .brand { padding: 0; }
-  .top-nav { grid-row: 2; grid-column: 1 / -1; overflow-x: auto; align-self: start; }
-  .header-search { grid-row: 1; grid-column: 2; font-size: 12px; padding: 0 8px; }
-  .guide-nav { flex-direction: row; flex-shrink: 0; align-items: center; }
+  .top-nav { grid-row: 2; grid-column: 1 / -1; align-self: start; }
+  .app-header .header-search { grid-row: 1; grid-column: 2; padding: 0 8px; align-self: center; }
+  .guide-nav { flex-direction: row; align-items: center; overflow-x: auto; padding: 6px 0; }
   .guide-nav .nav-caption { display: none; }
-  .guide-article section { scroll-margin-top: calc(var(--header-h) + 96px); }
+  .guide-article section { scroll-margin-top: calc(var(--header-h) + 16px); }
   .page-search { padding: 16px; }
+}
+@media (max-width: 380px) {
+  .brand-title { font-size: 14px; }
+  .app-header .header-search { font-size: 11px; gap: 4px; }
 }
 #session-dates:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px; }
 
