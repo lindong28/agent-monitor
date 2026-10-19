@@ -112,7 +112,7 @@
       "source": "docs/design.md#effective-design",
       "description": "font-size follows effective project design",
       "property": "font-size",
-      "expected": "24px"
+      "expected": "14px"
     },
     {
       "id": "section-title",

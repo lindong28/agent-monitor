@@ -297,7 +297,7 @@ button:active:not(:disabled) {
 .query-builder #time-dim { width: auto; }
 .query-grouping p { margin: var(--sp-3) 0 0; }
 .custom-date[hidden] { display: none; }
-.custom-date input { width: 100%; min-width: 0; height: var(--h-control); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 var(--sp-3); font: inherit; color: var(--ink); background: var(--surface); }
+.custom-date input, #session-dates input { width: 100%; min-width: 0; height: var(--h-control); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 var(--sp-3); font: inherit; color: var(--ink); background: var(--surface); }
 .group-ranking { list-style: none; padding: 0; margin: var(--sp-5) 0 0; max-height: 520px; overflow: auto; }
 .ranking-item { padding: var(--sp-4) var(--sp-2); }
 .ranking-item + .ranking-item { border-top: 1px solid var(--line-soft); }
@@ -389,28 +389,43 @@ button:disabled {
 .main {
   flex: 1;
   min-width: 0;
-  padding: 22px 28px 60px;
+  --page-gutter: 28px;
+  padding: 0 var(--page-gutter) 60px;
   margin: 0;
   background: transparent;
 }
 
-/* Per-page controls, inside <main> because that is what they belong to: the
-   range selector means something different on Overview than on Sessions, and
-   Network has neither. Keeping them in the shell meant every page shipped a
-   toolbar describing some other page's controls. */
+/* Keep the banner inside <main> so SPA navigation swaps each page's own
+   controls. Shared gutters align its contents with the cards beneath it. */
 .page-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-6);
+  gap: 12px 24px;
   flex-wrap: wrap;
-  margin-bottom: var(--sp-7);
+  min-height: 72px;
+  padding: 16px var(--page-gutter);
+  margin: 0 calc(-1 * var(--page-gutter)) 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
 }
+
+.page-location {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.workspace-label { color: var(--ink-muted); }
+.breadcrumb-separator { color: var(--line-strong); }
 
 .page-title {
   margin: 0;
-  font: 700 24px/30px var(--font-sans);
-  letter-spacing: -0.01em;
+  color: var(--ink);
+  font: 600 14px/20px var(--font-sans);
 }
 
 /* Two labelled groups rather than one flat row: five equal cards left an orphan
@@ -1752,7 +1767,8 @@ td.numeric {
   }
 
   .main {
-    padding: 20px 16px 40px;
+    --page-gutter: 16px;
+    padding: 0 var(--page-gutter) 40px;
     margin: 0;
   }
 
@@ -1923,6 +1939,8 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   .app-header .header-search { font-size: 11px; gap: 4px; }
 }
 #session-dates:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px; }
+#session-dates label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); font-size: 12px; }
+#session-dates input { width: 140px; }
 
 /* Keep each account's seven fields together when columns no longer fit. */
 @media (max-width: 900px) {
