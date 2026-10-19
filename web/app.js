@@ -2831,8 +2831,6 @@
         const status = await api("/api/sync-status");
         if (!pageCurrent() || generation !== sessionsGeneration) return;
         renderSyncStatus(status);
-        const coverage = qs("#session-source-coverage");
-        if (coverage) coverage.textContent = sessionCoverageText(status.machines || []);
         if (force !== true && (status.syncing || status.queued_refresh)) {
           const terminal = await waitForSyncTerminal(status, {
             waitForIdle: true,
@@ -2916,44 +2914,6 @@
       qs(`#page-next${suffix}`)?.addEventListener("click", () => turnSessionPage(1));
     });
     await load(false, true);
-  }
-
-  // One clause per machine, and the retention date pulled out to the end — but
-  // only when it is true of every machine that reported one. Hoisting it any
-  // other time states a fleet-wide fact the data does not support: from one
-  // machine's reading (an older exporter beside it reports no date at all), or
-  // from several different dates, which arrive at the end as a bare list with
-  // no machine attached to any of them. Both of those read as answers and are
-  // wrong, so those cases keep the date on the machine it came from.
-  function sessionCoverageText(machines) {
-    const withData = [];
-    const clauses = machines.map((machine) => {
-      const details = machine.statistics;
-      if (!details) {
-        return { text: `${machine.name}：采集情况未知` };
-      }
-      if (details.state !== "available") {
-        return { text: `${machine.name}：未采集会话明细` };
-      }
-      const clause = {
-        text: `${machine.name}：${updatedText(details.observed_at)}${details.scan_complete ? "" : "（源扫描未完成）"}`,
-        from: details.history_authoritative_from || "",
-      };
-      withData.push(clause);
-      return clause;
-    });
-    const dates = new Set(withData.map((clause) => clause.from));
-    const hoistable = withData.length > 0 && dates.size === 1 && !dates.has("");
-    if (hoistable) {
-      // Machines that reported nothing at all are not in withData, so the
-      // hoisted date says nothing about them. Naming the subject keeps the
-      // de-duplication without widening the claim to cover them.
-      const subject = withData.length === clauses.length ? "" : "有数据的机器";
-      return `${clauses.map((clause) => clause.text).join(" · ")}。${subject}日粒度历史自 ${withData[0].from} 起保留。`;
-    }
-    return clauses
-      .map((clause) => clause.text + (clause.from ? `（日粒度历史自 ${clause.from} 起保留）` : ""))
-      .join(" · ");
   }
 
   function turnSessionPage(step) {

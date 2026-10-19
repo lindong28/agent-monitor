@@ -2,6 +2,7 @@
 
 ## 2026-10-19
 
+- Remove the routine snapshot/status box from Sessions; retain conditional failure notices and move coverage guidance into the existing disclosure and diagnostics page.
 - Group explicitly linked native Codex subagents under the main conversation, including nested agents. Prefer source titles and latest usage; keep models, execution IDs and individual usage records in expandable detail. Detail now starts with the list's date and filters and offers an explicit all-retained view. Priceable costs remain useful when some records cannot be priced, with a visible qualification.
 
 ## 2026-10-17

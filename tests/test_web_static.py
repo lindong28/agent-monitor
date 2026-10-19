@@ -243,7 +243,7 @@ global.window = {location: {origin: "http://example.test", pathname: "/", search
 global.document = {readyState: "loading", addEventListener() {}, querySelector: key => nodes[key] || null, querySelectorAll: () => []};
 eval(fs.readFileSync("web/app.js", "utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { showOverviewLoadError,"));
 const machine = {name: "fixture", admitted: true, stale: false, availability: "reachable", last_attempt_outcome: "success"};
-for (const route of ["/", "/explore"]) {
+for (const route of ["/", "/explore", "/sessions"]) {
   window.location.pathname = route;
   for (const syncing of [false, true]) {
     window.AgentMonitor.renderSyncStatus({syncing, machines: [machine]});
@@ -1981,7 +1981,8 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         explore = (ROOT / "web" / "explore.html").read_text()
         app = (ROOT / "web" / "app.js").read_text()
 
-        for html in (overview, explore):
+        sessions = (ROOT / "web" / "sessions.html").read_text()
+        for html in (overview, explore, sessions):
             self.assertIn('aria-label="数据覆盖与时效"', html)
             self.assertIn('data-sync-mode="exceptions"', html)
             self.assertNotIn('id="sync-coverage"', html)
