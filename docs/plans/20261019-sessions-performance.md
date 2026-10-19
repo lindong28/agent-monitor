@@ -47,3 +47,23 @@ MacBook→MacStudio 默认30d API：TTFB 4.584s、总计4.869s（identity传输�
 第三阶段离线8组完整API对象与冻结e9fdc3f基线相等。30d基线2.838秒、实现冷1.849秒、同内容新signature0.464秒、同signature热0.00179秒；all12.876/6.491/1.613/0.01316秒。新signature是隔离机制实验，不冒充真实新代际。30d缓存1306桶/1,382,524编码字节，all4759桶/11,601,652字节。50项相关测试通过，覆盖旧事件修正、父/标题变化、筛选后稳定同值排序、原位置改变、重复JSON键、非法metadata、surrogate字符串、大整数、v1–v4、时间推进/回拨、并发及容量；每项样本范围以测试为准。UI异步测试确认后台保留行、真实返回替换、错误显式化、恢复及显式筛选仍显示加载。全量1036项/123.2秒仅原基线同样10项失败，无新增；V1独立审查无finding或承重未知，另独立验证2项UI测试及5组缓存边界。生产待部署/新代际浏览器验收。证据 comparison-conversations.json / conversation-cache-decision-review.md。
 
 恢复入口：私树 /Users/lindong/research/.worktrees/agent-monitor-sessions-performance-20261019；诊断目录 /Users/lindong/.local/share/agent-monitor-diagnostics/20261019-sessions，compare_sessions.py 已冻结基线 server 与 statistics reader，避免差分自证。浏览器测量 browser/README.md / measure.mjs，最新binding browser/browser-postdeploy.json，自有Chrome PID55186、endpoint127.0.0.1:52098、退出上界17:01 SGT；超时需核存活再复用或重建。browser_measurement 已交回浏览器。原先deploy控制shell exec84490有900秒idle退出上界。现有单份记录可恢复状态，未提升 Long-task mode。无用户待办；首次读取残余和定时刷新清空由本任务继续处理。
+
+第三阶段发布：1a3605d8175fadafccc5c6de4043cddaa712c1b8 已整合、push、MacStudio deploy.py退出0后实际/api/restart；health instance3ecf55b6170d4db297d5dd030d62f06c、signature1bd951200b03a6dd、web498752f5719ae1df、stale=false。自动刷新保持100行并已观察DOM内容变化，原始stage3-active-freshness.jsonl。浏览器首次30d末文档计时794.4ms不可暂称servicecold：运行诊断另有同期2.9576秒sessions请求，正在核是否其他consumer或重载重置计时；重复289.4ms、7d953.6ms、all首次10.100秒/重复678.5ms也等待导航链核对。全历史残余固定四源897677事件profile（含profiler）12.41秒：decode7.82、scan/bucket1.96、collect1.50；首次全字段验证仍主导，跨代复用不等于首次免验证。下一步由browser_measurement核原调用与跨导航时钟，必要时root二次受控重启并由/api/diagnostics证首次请求；尚不收口。
+
+## 部署验收与边界（2026-10-19）
+
+第三阶段使用同一隔离 Chrome、1440×1000、MacBook→MacStudio真实入口。第二次受控重启在导航前核 /api/diagnostics：sessions完成/在飞均0、样本淘汰0；导航后恰1个sessions请求，CDP仅1次Document导航，天然visible。30d首读从Document请求至列表可见可操作2743.0ms，包含CLI启动的open至ready2901.1ms；API2564.6ms，Server-Timing app2531.83ms。源代码与运行signature不变，新health instance51cd83cd5c0e4beba3da8d554697d76b。原794.4ms只保留末文档历史读数，不作为冷启动收益；旧异常归因未知，不借此推断服务或harness缺陷。
+
+重复30d的单导航新取证为Document请求至ready393.2ms、open至ready551.7ms；此前普通重复289.4ms、切换回来704.5ms。7d首次953.6ms；all首次10.100秒、重复678.5ms，各1样本，非尾延迟承诺。初始30d浏览器冷/热4.623/4.517秒均为原始同入口读数，但当时未独立证明服务缓存冷暖；不把它们包装成严格服务冷对冷百分比。3种日期范围、初次/重复2种请求状态已采样，只有30d另核服务真冷；数据会随正常采集变化，固定数据语义由8组离线完整对象差分承接。
+
+四源均admitted，30d API/UI均1074个会话，实际有会话的machine为macbook891、macmini81、macstudio102；分页显示100行。筛选Codex后100行均匹配，实际点击会话进入详情正常；探针隐藏链接/禁用筛选对照会失败，恢复后通过。08:14:52–08:16:54活跃页观察25次，macbook代际60423f21…→119b9e2b…，页面hash77ebb122…→b08301ac…，持续100行；两次timer请求114.7/120.4ms，MutationObserver未见清空。该观察显式启用了headless焦点模拟以维持visible，未操控用户窗口；此前hidden样本不作为可见性证据。更新期间API样本67.9–565.5ms，不以同版本命中替代新鲜度证明。
+
+本轮消除了每次打开和任意来源更新都重建整窗的主要重复工作；正常重复打开与更新已在本次样本中达到亚秒级，自动刷新不再中断列表操作。首次服务读仍需校验完整候选，首次全部历史仍需约10秒：相同进程后续可复用，但不宣称所有范围/状态均达统一SLA。保留的首次成本与完整字段拒绝语义绑定；已比较直接投影、跳过重复验证、增量内容复用及导入派生方案，未以无可信证明的投影换掉校验，也未新增持久派生存储或后台全历史预热。后续若首次全历史成为主要使用入口、变化的单个会话明显增大或当前日期窗口扩大，应重新评估导入侧可信派生摘要；当前收口依据为默认入口和真实更新的收益与新增持久化/同步生命周期的代价，而非所有冷读已消失。
+
+交付核对：性能实现、口径/新鲜度回归、独立审查、main整合、远端发布及MacStudio真实部署均已完成。相关50项测试通过；全量1036项仍有原始基线相同10项旧字段/文案失败，本轮不扩修，维护入口为这些既有测试及本记录。两条SQLite ResourceWarning创建处未定位，保留观察，不宣称生产泄漏。未处置审查findings无，未部署代码无；剩余首读成本如上。权威架构、ADR、CHANGELOG和docs导航已同步，普通文档核对未另开专项审查。
+
+审计保留：诊断目录中的原始时间读数、差分报告、决策/审查及四源冻结副本/manifest用于核查本次性能与口径比较；运行基线可由e9fdc3f恢复，不依赖临时工作树。私有开发树、浏览器进程/profile、隔离测试HOME及基线展开目录将在交付前回收，实际清理结果由独立回执核对。本记录中的阶段性“待完成”均为当时状态，以上部署验收为当前结论。
+
+最终同一新进程30d重复测量：导航请求至可操作294ms/API92ms，单Document且天然visible；最终API/UI均1075会话（macbook892/macmini81/macstudio102），四源admitted。该变化继续证明真实数据推进。基线展开目录和隔离测试HOME已回收；固定四源审计输入保留。
+
+16:26 SGT浏览器回收完成：owned target关闭，Chrome55186、adapter daemon90260及所观察后代退出；两个profile和两个私有runtime目录已删除，bindings/测量/cleanup-receipt保留。原始Chrome25639已不存在。未动用户浏览器、其他session资源或生产state。最终文档属于运行代码1a3605d的验收记录，不改变业务代码，收尾同步后无需再次重启或重复业务测试。
