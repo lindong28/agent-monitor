@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-19
+
+- Group explicitly linked native Codex subagents under the main conversation, including nested agents. Prefer source titles and latest usage; keep models, execution IDs and individual usage records in expandable detail. Detail now starts with the list's date and filters and offers an explicit all-retained view. Priceable costs remain useful when some records cannot be priced, with a visible qualification.
+
 ## 2026-10-17
 
 - Restore available width across the console while keeping body text and expanded notes aligned with their content regions; adapt network evidence columns and long status labels to the space available.

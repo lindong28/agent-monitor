@@ -417,6 +417,25 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.assertEqual(self.archive_path.read_bytes(), before)
         self.assertEqual(self.archive_path.stat().st_mtime_ns, before_mtime)
 
+    def test_metadata_title_refresh_does_not_reparse_or_change_usage(self):
+        self.session()
+        conn = self.models_db()
+        with conn:
+            conn.execute("ALTER TABLE threads ADD COLUMN title TEXT")
+            conn.execute("ALTER TABLE threads ADD COLUMN source TEXT")
+            conn.execute("UPDATE threads SET title='before', source='cli'")
+        original = self.load()
+        self.assertEqual(original.session_metadata[0]["title"], "before")
+        with conn:
+            conn.execute("UPDATE threads SET title='after'")
+        conn.close()
+        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+            refreshed = self.load()
+            self.assertEqual(parse.call_count, 0)
+        self.assertEqual(original, refreshed)
+        self.assertEqual(refreshed.session_metadata[0]["title"], "after")
+        self.assertNotIn("PRIVATE_TRANSCRIPT", json.dumps(refreshed.session_metadata))
+
     def test_parse_errors_do_not_become_success_cache(self):
         path = self.session()
         self.models_db().close()

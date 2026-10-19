@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 import rollup
 import generation
 import statistics_snapshot
+from session_identity import SessionIndex
 import hub
 import sync
 import sync_process
@@ -356,6 +357,7 @@ def sessions_endpoint(query):
     with_filters = _first(query, "with_filters", "") == "1"
 
     def collect(entries, machine=None, aliases=None):
+        index = SessionIndex(getattr(entries, "session_metadata", ()))
         # Match Explore display identities without rewriting stored usage.
         in_window = [replace(entry, project=canonical_project(entry.project, aliases))
                      for entry in _filter_time(entries, time_range)]
@@ -375,8 +377,8 @@ def sessions_endpoint(query):
         visible = _filter_values(in_window, display_query)
         if cost_status == "unknown":
             visible = [entry for entry in visible if entry.cost_usd is None]
-        for items in _group_sessions(visible).values():
-            row = _session_stats(items)
+        for key, items in index.group(visible).items():
+            row = _conversation_stats(items, key, index, aliases)
             if machine:
                 row["machine"] = machine
             sessions.append(row)
@@ -402,22 +404,59 @@ def sessions_endpoint(query):
     return sessions
 
 
-def session_detail(session_id, machine=None):
+def session_detail(session_id, machine=None, query=None):
+    # Direct Python callers retain the old all-records default; the HTTP/UI
+    # passes its actual list context, including the ordinary 30-day default.
+    query = {"scope": ["all"]} if query is None else query
+    scope = _first(query, "scope", "filtered")
+    if scope not in ("all", "filtered"):
+        raise ValueError("Unsupported session scope")
+    if _first(query, "cost_status", "") not in ("", "unknown"):
+        raise ValueError("Unsupported cost_status")
+    agent = _first(query, "session_agent", "")
+    window = None if scope == "all" else _session_window(query, datetime.now().astimezone())
+    aliases = None
     if hub.enabled():
-        import statistics_snapshot
         with generation.generation_admission_snapshot() as admission:
             selected = [current for current in admission.admitted if current.host == machine]
-            entries = [entry for current in selected
-                       for entry in statistics_snapshot.read_admitted_usage(current, session_id=session_id)
-                       if entry.session_id == session_id]
-        entries.sort(key=lambda entry: entry.timestamp)
-        return {"meta": {**_session_stats(entries), "machine": machine} if entries else None,
-                "entries": [_entry_json(entry) for entry in entries]}
-    entries = [entry for entry in load_all_entries() if entry.session_id == session_id]
+            if not selected:
+                return {"meta": None, "entries": [], "scope": scope}
+            current = selected[0]
+            entries = statistics_snapshot.read_admitted_usage(current, session_id=session_id, session_agent=agent,
+                time_range=window, query=None if scope == "all" else
+                {key: value for key, value in query.items() if key != "project"})
+            aliases = (getattr(current, "meta", None) or {}).get("aliases")
+    else:
+        entries = load_all_entries()
+    index = SessionIndex(getattr(entries, "session_metadata", ()))
+    keys = {(entry.agent_id, entry.session_id) for entry in entries if entry.session_id == session_id and (not agent or entry.agent_id == agent)}
+    keys.update(key for key in index.metadata if key[1] == session_id and (not agent or key[0] == agent))
+    roots = {index.root(key) for key in keys}
+    if len(roots) > 1:
+        raise ValueError("Session ID is ambiguous; specify session_agent")
+    if not roots:
+        return {"meta": None, "entries": [], "scope": scope}
+    root = next(iter(roots))
+    entries = [replace(entry, project=canonical_project(entry.project, aliases)) for entry in entries
+               if index.root((entry.agent_id, entry.session_id)) == root]
+    if scope != "all":
+        display_query = dict(query)
+        if query.get("project"):
+            display_query["project"] = [canonical_project(value, aliases) for value in query["project"]]
+        entries = _filter_values(_filter_time(entries, window), display_query)
+        if _first(query, "cost_status", "") == "unknown":
+            entries = [entry for entry in entries if entry.cost_usd is None]
     entries.sort(key=lambda entry: entry.timestamp)
     if not entries:
-        return {"meta": None, "entries": []}
-    return {"meta": _session_stats(entries), "entries": [_entry_json(entry) for entry in entries]}
+        return {"meta": None, "entries": [], "scope": scope}
+    meta = _conversation_stats(entries, root, index, aliases)
+    meta["machine"] = machine
+    meta["executions"] = []
+    for key, items in _group_execution_sessions(entries).items():
+        identity = index.metadata.get(key, {})
+        meta["executions"].append({**_session_stats(items), "title": identity.get("title"),
+                                   "parent_session_id": identity.get("parent_session_id"), "is_main": key == root})
+    return {"meta": meta, "entries": [_entry_json(entry) for entry in entries], "scope": scope}
 
 
 def health(query):
@@ -803,8 +842,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path.startswith("/api/session/"):
                 session_id = unquote(parsed.path[len("/api/session/") :])
-                self._send_json(session_detail(session_id, _first(query, "machine", "")) if hub.enabled()
-                                else session_detail(session_id), send_body=send_body, compress=True)
+                self._send_json(session_detail(session_id, _first(query, "machine", ""), query), send_body=send_body, compress=True)
                 return
             route = ROUTES.get(parsed.path)
             if route:
@@ -1679,10 +1717,29 @@ def _group_sessions(entries):
     return sessions
 
 
+def _group_execution_sessions(entries):
+    sessions = defaultdict(list)
+    for entry in entries:
+        sessions[(entry.agent_id, entry.session_id)].append(entry)
+    return sessions
+
+
+def _conversation_stats(entries, key, index, aliases=None):
+    result = _session_stats(entries)
+    identity = index.metadata.get(key, {})
+    own = next((entry for entry in entries if (entry.agent_id, entry.session_id) == key), None)
+    result.update(session_id=key[1], agent_id=key[0], title=identity.get("title"),
+                  created_at=identity.get("created_at"),
+                  relationship_status=index.status(key),
+                  subagent_count=len({(e.agent_id, e.session_id) for e in entries} - {key}),
+                  project=own.project if own else canonical_project(identity.get("project") or result["project"], aliases))
+    return result
+
+
 def _session_stats(entries):
     entries = sorted(entries, key=lambda entry: entry.timestamp)
     known_costs = [entry.cost_usd for entry in entries if entry.cost_usd is not None]
-    cost = sum(known_costs) if len(known_costs) == len(entries) else None
+    cost = sum(known_costs) if known_costs else None
     start = entries[0].timestamp
     end = entries[-1].timestamp
     usage_events = sum(entry.message_count for entry in entries)
@@ -1695,9 +1752,10 @@ def _session_stats(entries):
         "ended_at": end.isoformat(),
         "duration_seconds": max(int((end - start).total_seconds()), 0),
         "cost_usd": cost,
+        "unpriced_records": len(entries) - len(known_costs),
         "tokens": sum(extract_metric(entry, "total") for entry in entries),
         "usage_events": usage_events,
-        "estimated": entries[0].agent_id == "codex" or is_estimated_pricing_model(entries[0].model),
+        "estimated": any(e.agent_id == "codex" or is_estimated_pricing_model(e.model) for e in entries),
     }
 
 
@@ -1729,7 +1787,7 @@ def _session_sort_key(row, sort):
         return row["tokens"]
     if sort == "duration":
         return row["duration_seconds"]
-    return row["started_at"]
+    return row["ended_at"]
 
 
 def _codex_action_catalog():

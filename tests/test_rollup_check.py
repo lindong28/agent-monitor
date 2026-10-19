@@ -667,6 +667,7 @@ class RollupCheckTests(unittest.TestCase):
                 "pricing_fetcher.py",
                 "rollup.py",
                 "usage_archive.py",
+                "session_identity.py",
             ):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")

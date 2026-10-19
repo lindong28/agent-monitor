@@ -24,6 +24,7 @@ Current usage and installation belong in the root README; current architecture a
 | [contracts/ux-contract.md](contracts/ux-contract.md) | Existing observable behavior contract |
 | [plans/20261013-published-main-deployment/plan.md](plans/20261013-published-main-deployment/plan.md) | Completed publication and production-source workflow plan |
 | [adr/README.md](adr/README.md) | Extraction decision and source provenance |
+| [plans/20261019-conversation-sessions.md](plans/20261019-conversation-sessions.md) | Conversation grouping, implementation and release evidence |
 | [references/tt-web-readme-20261004.md](references/tt-web-readme-20261004.md) | Full pre-extraction README, with original dated observations |
 | [references/open-source-preparation.md](references/open-source-preparation.md) | Open-source preparation status, evidence boundaries, unresolved decisions and release gaps |
 | [issues/general.md](issues/general.md) | Product issues inherited from tt-web |

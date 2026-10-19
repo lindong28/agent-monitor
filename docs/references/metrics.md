@@ -42,7 +42,7 @@ Let `E` be the normalized observations admitted for a selected window and filter
 | Estimated arithmetic | `(I·pI + R·pR + (W−H)·pW + H·pH + O·pO) / 1,000,000` when prices are USD/MTok | `H⊆W`; splitting writes avoids billing them twice. Tier selection uses `I+R+W` and the applicable threshold. Shared `token_cost.py` uses per-token prices internally. | `token_cost.price`; coordinate its byte-identical consumers before changing arithmetic |
 | Known cost subtotal | `ΣK cost_usd`; unknown if `K` is empty | A known zero is a valid amount; no records, no priced records and mixed coverage are distinct. Sum only disjoint selected observations and retain both `len(K)` and `len(U)`. | Rollup cost query, Overview/Explore projections |
 | Pricing coverage | Known observations `len(K)`, unknown observations `len(U)`; if a fraction is shown its denominator is `len(E)` | Coverage describes available prices for observed entries only. It does not prove every call/source/date was captured. | `cost_known_count`, `entry_count−cost_known_count`; API and renderer together |
-| Strict session cost | Sum only when every retained selected entry has known cost; otherwise null | This is deliberately stricter than Overview's known subtotal. An explanatory known subtotal must not be relabeled total. | `server._session_stats`, `web/app.js` session detail |
+| Session record cost | Sum known costs within the selected records; null only when none are known | Mixed groups show a partial-pricing qualification; true zero stays zero. This is record cost, not an invoice or all-attempt total. | `server._session_stats`, `web/app.js` session detail |
 
 Overview and Explore retain subtotal semantics but no longer repeat known/unknown counts in each card, tooltip or ranking. Overview also omits repeated “已知小计” labels from cards, chart tooltips and data tables; its visible shared scope note states that costs include only priceable records. Date-coverage qualifiers and empty/unknown/known-zero distinctions remain. Collection diagnostics groups only currently readable null-cost observations, using record counts rather than `message_count`; recorded zero is excluded. Its source-window filters match Sessions, while machine collection/quality panels still describe all retained history. The diagnostic's grouped counts do not promise agreement with longer-lived rollups. Hub diagnostics reads stored reasons from admitted snapshots without reconstructing legacy evidence. Standalone diagnostics follows the existing Sessions loader: it reparses local sources and estimates with currently available prices (which may require fetching prices), without persisting usage; its unknown reasons describe that current estimate, not a historical snapshot.
 
@@ -92,20 +92,22 @@ These are projections of the same observations: reordering/filtering must not cr
 
 ## Sessions
 
-Sources are `/api/sessions` and `/api/session/:id`; normalization is shared with aggregates, but the record population is retained event detail. List filtering occurs on individual events before session grouping (with machine identity retained). Detail opens the entire retained session, not only the list's filtered subset. Therefore neither list-to-detail equality nor detail-to-all-history equality is promised.
+Sources are `/api/sessions` and `/api/session/:id`; normalization is shared with aggregates, but the population is retained event detail. Resolve explicit native Codex ancestry on the same machine and agent before filtering events. Complete, unambiguous chains share their root ID; missing parents, conflicts and cycles stay separate. Ordinary forks and independently launched wrappers do not imply parentage. No usage fact or inherited-history dedup key changes. Older snapshots without metadata remain flat.
+
+List and default detail apply the same date, agent, directory, model and unknown-cost filters. Their figures agree for the same snapshot; later collection can change observations. `scope=all` explicitly selects the entire retained conversation. `session_agent` disambiguates execution IDs across agents; an old child URL resolves to its root when metadata is available. Retained detail need not equal the longer aggregate history.
 
 | Visible value | Definition, unit and scope | Implementation/update entry |
 | --- | --- | --- |
-| Matching sessions; page rows and position | Count of grouped matching sessions; page is a slice of that list | `sessions_endpoint`, `renderSessions`, `renderSessionPager` |
-| List cost / tokens / usage events | Strict known cost, sum of four token categories, sum of message counts, over matched records only | `_session_stats`; USD / tokens / events |
-| List first/last observation; duration sorting | Min/max matched timestamps; nonnegative integer seconds between them | `_session_stats`; this is observed span, not active work duration |
-| Detail total cost / unknown-cost records | Strict total over all retained entries; count of entries with null cost | `renderSessionDetail`; unknown count uses records, not event weights |
-| Detail tokens / usage events / records | Four-category sum / `Σusage_event_count` / `entries.length` | `renderSessionDetail`; these three counts have different units |
-| Detail filtered records / total / page range | Model-filtered record count versus all retained records; displayed page positions | Detail table pagination; no extrapolation to lost history |
-| Detail model count | Number of distinct retained `model` values | Unknown model remains an explicit identity, not a guessed priced model |
-| Detail first/last time and observed span | Min/max retained timestamp; rounded difference in minutes | Browser detail calculation; can include idle gaps and only one observation |
-| Entry input/output/cache read/cache write | Per-record normalized token categories | `_entry_json` → detail table; see partition proof above |
-| Entry cost; expanded usage count | Recorded/estimated USD or unknown; represented `usage_event_count` | `_entry_json`; one displayed row need not be one network attempt |
+| Matching conversations; page rows | Count of roots with matching records; frontend page is a slice | `SessionIndex`, `sessions_endpoint`, `renderSessions` |
+| List and detail record cost | Sum non-null costs; null only if all selected costs are unknown; mixed groups visibly qualified | `_session_stats`, `renderSessionDetail`; USD, not invoices |
+| Tokens / usage events / records | Four-category token sum / sum of source message counts / record count; selected records only | `_session_stats`, `_entry_json`; three different units |
+| Latest usage / first observation / span sorting | Max/min selected timestamps; nonnegative difference in seconds | `_session_stats`; neither active duration nor running/completion status |
+| Conversation title and creation | Codex name/title and earliest observed source creation timestamp; absent data uses directory/time fallback | `codex.session_metadata`, archive metadata; never the first filtered event as creation |
+| Subagent count | Distinct matched execution IDs other than the root | `_conversation_stats`; filtered-out or unobserved executions are not counted |
+| Main/subagent breakdown | Disjoint execution groups within current detail scope | `meta.executions`; their known costs and tokens sum to the conversation figures |
+| Detail model filter / page | Select among current detail records, 50 per page; preserves the parent scope | `renderSessionDetail`; does not alter conversation summary or extrapolate lost history |
+| Detail model count / unpriced count | Distinct selected model values / selected records with null cost | Secondary session information; unknown model is not guessed |
+| Entry tokens / cost / evidence | Normalized input, output, cache read/write; recorded or estimated USD or unknown; source IDs and provenance | `_entry_json`; a row is not necessarily one network attempt |
 
 ## Quota, account actions and sync
 

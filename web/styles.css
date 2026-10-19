@@ -1197,6 +1197,17 @@ th.nowrap {
   white-space: nowrap;
 }
 
+.session-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-width: 32rem;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.project-cell small { display: block; }
+.session-executions code { overflow-wrap: anywhere; }
+
 .pager {
   display: flex;
   gap: var(--sp-5);

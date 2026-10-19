@@ -427,7 +427,8 @@ function node() {
 }
 const nodes = Object.fromEntries([
   "#session-list-panel", "main h1", "#range", "#sort", "main",
-  "#session-identity", "#session-copy", "#session-detail-content", "#refresh"
+  "#session-identity", "#session-copy", "#session-detail-content", "#refresh",
+  "#session-scope-toggle", "#session-scope", "#session-title", "#session-time"
 ].map(k => [k, node()]));
 global.window = {
   location: { origin: "http://example.test", pathname: "/sessions",
@@ -466,12 +467,12 @@ eval(fs.readFileSync("web/app.js", "utf8"));
   assert.equal(nodes["#session-copy"].textContent, "复制失败，请选中 ID 复制");
   await nodes["#refresh"].click();
   assert.deepStrictEqual(calls, ["http://example.test/api/refresh",
-    "http://example.test/api/session/s1?machine=macbook"]);
+    "http://example.test/api/session/s1?session=s1&session_machine=macbook&machine=macbook"]);
   assert.deepStrictEqual(timers.map(t => t.ms), [30000]);
   assert(listeners.some(t => t.k === "focus"));
   assert(listeners.some(t => t.k === "visibilitychange"));
   calls.length = 0; await timers[0].fn();
-  assert.deepStrictEqual(calls, ["http://example.test/api/session/s1?machine=macbook"]);
+  assert.deepStrictEqual(calls, ["http://example.test/api/session/s1?session=s1&session_machine=macbook&machine=macbook"]);
 })().catch(e => { console.error(e); process.exitCode = 1; });
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
@@ -2040,7 +2041,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn("用量事件数", sessions)
         self.assertIn('<option value="messages">用量事件数</option>', explore)
         self.assertIn('const numberFields = ["tokens", "usage_events"]', app)
-        self.assertIn("integer(row.usage_events)", app)
+        self.assertIn("integer(entries.length)", app)
         self.assertNotIn("integer(row.messages)", app)
 
     def test_pivot_ranking_preserves_period_details_without_a_table(self):

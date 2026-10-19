@@ -23,7 +23,7 @@ with patch.object(exporter, 'exporter_version', return_value='a' * 40):
     bundle = exporter.export_bundle(Path.home() / 'rollup.db', Path.home() / 'bundle',
         entries_loader=lambda: [], rate_limits={},
         source_host_identity='host-v1:' + '1' * 64)
-assert statistics_snapshot.read_snapshot(Path.home() / 'bundle/snapshot.db')['version'] == 3
+assert statistics_snapshot.read_snapshot(Path.home() / 'bundle/snapshot.db')['version'] == 4
 '''
         with tempfile.TemporaryDirectory() as home:
             env = {**os.environ, "HOME": home, "LLM_GATEWAY_ROOT": home + "/absent", "PYTHONPATH": "."}

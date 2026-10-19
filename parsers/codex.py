@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import RateLimits, UsageEntry
+from session_identity import codex_metadata, merge_metadata
 
 
 # Ported and dependency-stripped from token-tracker src/adapters/codex.py.
@@ -647,12 +648,41 @@ def _file_signature(path):
     return (file_stat.st_dev, file_stat.st_ino, file_stat.st_size, file_stat.st_mtime_ns)
 
 
+class ThreadModels(dict):
+    session_metadata = ()
+
+
 def _query_thread_models(state_path, immutable, read_only=True):
     query = "mode=ro&immutable=1" if immutable else ("mode=ro" if read_only else "mode=rw")
     uri = state_path.resolve().as_uri() + "?" + query
     with contextlib.closing(sqlite3.connect(uri, uri=True)) as conn:
-        rows = conn.execute("SELECT id, model FROM threads WHERE model IS NOT NULL").fetchall()
-    return {row[0]: row[1] for row in rows if row[0] and row[1]}
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(threads)")}
+        selected = ["id", "model"] + [key for key in
+                    ("source", "title", "name", "created_at", "created_at_ms", "cwd") if key in columns]
+        rows = [dict(zip(selected, row)) for row in conn.execute("SELECT " + ", ".join(selected) + " FROM threads")]
+    models = ThreadModels({row["id"]: row["model"] for row in rows if row["id"] and row["model"]})
+    models.session_metadata = [codex_metadata(row["id"], row.get("source"),
+        title=row.get("name") or row.get("title"), project=row.get("cwd"),
+        created_at=row["created_at_ms"] / 1000 if type(row.get("created_at_ms")) is int else row.get("created_at"))
+        for row in rows if isinstance(row["id"], str) and row["id"]]
+    return models
+
+
+def session_metadata(history, models):
+    headers = []
+    for path in history.paths:
+        try:
+            header = history.header(path)
+        except (OSError, ValueError, UnicodeError):
+            # The usage parser already reports unreadable sources. Metadata
+            # absence never changes a retained usage event or invents a link.
+            continue
+        row = codex_metadata(header["id"], header.get("source"),
+                             created_at=header.get("timestamp"), project=header.get("cwd"))
+        if row:
+            headers.append(row)
+    # DB titles are mutable; headers supply owner IDs even for paginated files.
+    return merge_metadata(headers, getattr(models, "session_metadata", ()))
 
 
 def _record_metadata_error(source_errors, path, exc):

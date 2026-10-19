@@ -62,10 +62,10 @@
             </select>
             <span id="session-dates" hidden><label>起始 <input type="date" id="session-start"></label> <label>终止 <input type="date" id="session-end"></label></span>
             <select id="sort" aria-label="排序">
-              <option value="time">按时间</option>
+              <option value="time">按最近用量</option>
               <option value="cost">按成本</option>
               <option value="tokens">按 token</option>
-              <option value="duration">按时长</option>
+              <option value="duration">按观测跨度</option>
             </select>
             <button id="refresh" class="icon-btn" type="button" title="更新统计与配额" aria-busy="false">更新统计与配额</button>
           </div>
@@ -83,10 +83,11 @@
           <p id="session-source-coverage" class="scope-note"></p>
         </section>
           <details class="note-disclosure">
-            <summary>会话范围、金额与事件数怎么读</summary>
+            <summary>会话与金额怎么读</summary>
+            <p><strong>会话：</strong>Codex 原生子代理按明确的父关系计入主会话；无法关联的记录保留独立显示。独立启动的进程和普通分叉不会自动合并。最近用量不代表会话是否仍在运行。</p>
             <p><strong>模型与估算：</strong>Codex 模型名来自请求或配置，实际处理请求的模型未知。估算使用计算时的配置价格，不代表历史实际费率。</p>
             <p><strong>会话目录：</strong>按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
-            <p><strong>金额：</strong>— 表示金额未知；标 <em>推算</em> 的 Codex 与 GLM-5.1/5.2 行按配置价格估算。记录展开后可查看完整性与金额依据。</p>
+            <p><strong>金额：</strong>仅合计可计价记录，全部无法计价时显示未知；估算金额非账单。详情展开后可查看模型与金额依据。</p>
             <p><strong>用量事件数：</strong>记录中包含的用量事件合计。一条记录可能包含多个事件；事件数不是请求次数。</p>
             <p><strong>历史留存：</strong>已采集的会话统计不随本地日志清理而丢失，但采集前就删掉的历史找不回来。未升级采集器的机器不在其中。</p>
           </details>
@@ -112,7 +113,7 @@
               <select id="filter-cost-status" disabled><option value="">全部成本状态</option><option value="unknown">仅未知成本条目</option></select>
             </div>
           </div>
-          <p class="scope-note">列表仅计匹配记录，详情显示会话的全部留存记录；汇总与明细的留存范围可能不同。金额非账单，未知金额不按零计算。</p>
+          <p class="scope-note">列表与详情默认仅计匹配记录；详情可切换全部留存记录。费用仅合计可计价记录，非账单。</p>
           <div class="pager pager-top">
             <button id="page-prev-top" type="button" disabled>上一页</button>
             <span id="page-status-top" class="status-line">加载中…</span>
@@ -123,16 +124,14 @@
               <thead>
                 <tr>
                   <th>Agent</th>
-                  <th>会话目录</th>
-                  <th>模型</th>
-                  <th>开始时间</th>
+                  <th>会话</th>
+                  <th>最近用量</th>
                   <th class="numeric">成本</th>
                   <th class="numeric">token</th>
-                  <th class="numeric">用量事件数</th>
                 </tr>
               </thead>
               <tbody id="sessions-body" aria-busy="true">
-                <tr data-session-state="loading"><td class="empty-state" colspan="7">加载中…</td></tr>
+                <tr data-session-state="loading"><td class="empty-state" colspan="5">加载中…</td></tr>
               </tbody>
             </table>
           </div>

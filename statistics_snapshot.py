@@ -10,11 +10,13 @@ import sqlite3
 import diagnostics
 
 from parsers import UsageEntry, USAGE_QUALITIES, usage_quality_counts, validate_usage_metadata
+from session_identity import SessionIndex, validate as validate_session
 
 
-VERSION = 3
-TABLES = {"statistics_meta", "statistics_usage"}
-LEGACY_TABLES = TABLES | {"statistics_requests", "statistics_attempts"}
+VERSION = 4
+V3_TABLES = {"statistics_meta", "statistics_usage"}
+TABLES = V3_TABLES | {"statistics_sessions"}
+LEGACY_TABLES = V3_TABLES | {"statistics_requests", "statistics_attempts"}
 META_FIELDS = {"version", "observed_at", "history_authoritative_from", "scan_complete",
                "blocked_source_count", "source_error_count"}
 USAGE_FIELDS = {field.name for field in fields(UsageEntry)}
@@ -41,6 +43,15 @@ def ensure_retained(previous_path, candidate_path):
     after_usage = {entry.dedup_key for entry in candidate["usage_entries"]}
     if not before_usage <= after_usage:
         raise StatisticsSnapshotError("source usage history shrank; restore its archive before retrying")
+    before_sessions = {(r["agent_id"], r["session_id"]) for r in previous.get("session_metadata", ())}
+    after_sessions = {(r["agent_id"], r["session_id"]) for r in candidate.get("session_metadata", ())}
+    if not before_sessions <= after_sessions:
+        raise StatisticsSnapshotError("source session metadata shrank; restore its archive before retrying")
+    after_metadata = {(r["agent_id"], r["session_id"]): r for r in candidate.get("session_metadata", ())}
+    for row in previous.get("session_metadata", ()):
+        new = after_metadata[(row["agent_id"], row["session_id"])]
+        if row["relation"] in ("root", "child", "conflict") and new["relation"] == "unknown":
+            raise StatisticsSnapshotError("source lost recorded session ancestry; restore its archive before retrying")
 
 
 def read_metadata(path):
@@ -78,6 +89,7 @@ def write_snapshot(snapshot_path, loaded_entries, *, observed_at=None):
     usage = []
     entries = list(loaded_entries) + list(getattr(loaded_entries, "unattributed_entries", ()))
     meta["usage_quality_counts"] = usage_quality_counts(entries)
+    sessions = [validate_session(row) for row in getattr(loaded_entries, "session_metadata", ())]
     for entry in entries:
         row = asdict(entry)
         row["timestamp"] = _timestamp(entry.timestamp)
@@ -90,7 +102,7 @@ def write_snapshot(snapshot_path, loaded_entries, *, observed_at=None):
         for name in sorted(TABLES):
             conn.execute(f"CREATE TABLE IF NOT EXISTS {name} (position INTEGER PRIMARY KEY, payload TEXT NOT NULL)")
             conn.execute(f"DELETE FROM {name}")
-        for name, rows in (("statistics_meta", [meta]), ("statistics_usage", usage)):
+        for name, rows in (("statistics_meta", [meta]), ("statistics_usage", usage), ("statistics_sessions", sessions)):
             conn.executemany(f"INSERT INTO {name} VALUES (?, ?)",
                              [(index, json.dumps(row, allow_nan=False, sort_keys=True))
                               for index, row in enumerate(rows)])
@@ -108,10 +120,10 @@ def _create_usage_indexes(conn):
 
 
 def _validate_meta(meta):
-    if not isinstance(meta, dict) or type(meta.get("version")) is not int or meta["version"] not in (1, 2, VERSION):
+    if not isinstance(meta, dict) or type(meta.get("version")) is not int or meta["version"] not in (1, 2, 3, VERSION):
         raise ValueError("unsupported statistics extension")
     expected = META_FIELDS | ({"gateway"} if meta["version"] == 1 else set())
-    if meta["version"] == VERSION:
+    if meta["version"] >= 3:
         expected |= {"usage_quality_counts"}
     if set(meta) != expected:
         raise ValueError("invalid statistics metadata fields")
@@ -125,7 +137,7 @@ def _validate_meta(meta):
     for key in ("blocked_source_count", "source_error_count"):
         if type(meta[key]) is not int or meta[key] < 0:
             raise ValueError("invalid source count")
-    if meta["version"] == VERSION:
+    if meta["version"] >= 3:
         counts = meta["usage_quality_counts"]
         if (not isinstance(counts, dict) or set(counts) != set(USAGE_QUALITIES)
                 or any(type(value) is not int or value < 0 for value in counts.values())):
@@ -170,10 +182,11 @@ def read_snapshot(snapshot_path):
             if not objects:
                 return {"state": "not_collected", "observed_at": None, "usage_entries": [],
                         "history_authoritative_from": None}
-            if {name for name, _ in objects} not in (TABLES, LEGACY_TABLES) or any(kind != "table" for _, kind in objects):
+            present = {name for name, _ in objects}
+            if present not in (TABLES, V3_TABLES, LEGACY_TABLES) or any(kind != "table" for _, kind in objects):
                 raise ValueError("incomplete statistics extension")
             rows = {}
-            for name in sorted(TABLES):
+            for name in sorted(present & TABLES):
                 columns = conn.execute(f"PRAGMA table_info({name})").fetchall()
                 if [(row[1], row[2], row[3], row[5]) for row in columns] != [("position", "INTEGER", 0, 1), ("payload", "TEXT", 1, 0)]:
                     raise ValueError("unsupported statistics table")
@@ -182,15 +195,18 @@ def read_snapshot(snapshot_path):
                 raise ValueError("invalid statistics metadata")
             meta = rows["statistics_meta"][0]
             _validate_meta(meta)
-            expected_tables = LEGACY_TABLES if meta["version"] == 1 else TABLES
+            expected_tables = LEGACY_TABLES if meta["version"] == 1 else (TABLES if meta["version"] >= 4 else V3_TABLES)
             if {name for name, _ in objects} != expected_tables:
                 raise ValueError("statistics version/table mismatch")
             meta.pop("gateway", None)  # v1 raw Gateway rows are retired; outer digest still binds them.
             entries = [_usage_entry(row, version=meta["version"]) for row in rows["statistics_usage"]]
-            if meta["version"] == VERSION and meta["usage_quality_counts"] != usage_quality_counts(entries):
+            if meta["version"] >= 3 and meta["usage_quality_counts"] != usage_quality_counts(entries):
                 raise ValueError("usage quality counts disagree with retained observations")
             meta.setdefault("usage_quality_counts", None)
-            return {**meta, "state": "available", "usage_entries": entries}
+            sessions = [validate_session(row) for row in rows.get("statistics_sessions", [])]
+            if len({(r["agent_id"], r["session_id"]) for r in sessions}) != len(sessions):
+                raise ValueError("duplicate session metadata")
+            return {**meta, "state": "available", "usage_entries": entries, "session_metadata": sessions}
     except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
         raise StatisticsSnapshotError("Statistics snapshot is invalid or unavailable") from exc
 
@@ -230,12 +246,13 @@ def _admitted_meta(conn):
 
 
 @diagnostics.measured("statistics.read_usage")
-def read_admitted_usage(current, *, time_range=None, query=None, session_id=None):
+def read_admitted_usage(current, *, time_range=None, query=None, session_id=None, session_agent=None):
     """Decode only usage needed by Sessions; callers retain exact time filtering."""
     with _admitted_connection(current) as conn:
         meta = _admitted_meta(conn)
         if meta is None:
             return []
+        sessions = [json.loads(row[0]) for row in conn.execute("SELECT payload FROM statistics_sessions ORDER BY position")] if meta["version"] >= 4 else []
         clauses, parameters = [], []
         if time_range is not None:
             start, end = time_range
@@ -252,8 +269,16 @@ def read_admitted_usage(current, *, time_range=None, query=None, session_id=None
         if (query or {}).get("cost_status") == ["unknown"]:
             clauses.append("json_extract(payload, '$.cost_usd') IS NULL")
         if session_id is not None:
-            clauses.append("json_extract(payload, '$.session_id') = ?")
-            parameters.append(session_id)
+            index = SessionIndex(sessions)
+            keys = [key for key in index.metadata if key[1] == session_id and (not session_agent or key[0] == session_agent)]
+            members = set().union(*(index.members(key) for key in keys)) if keys else set()
+            ids = sorted({key[1] for key in members} | {session_id})
+            clauses.append("json_extract(payload, '$.session_id') IN (SELECT value FROM json_each(?))")
+            parameters.append(json.dumps(ids))
+            if session_agent:
+                clauses.append("json_extract(payload, '$.agent_id') = ?")
+                parameters.append(session_agent)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        return [_usage_entry(json.loads(row[0]), version=meta["version"]) for row in conn.execute(
-            "SELECT payload FROM statistics_usage" + where + " ORDER BY position", parameters)]
+        from aggregators import LoadedEntries
+        return LoadedEntries([_usage_entry(json.loads(row[0]), version=meta["version"]) for row in conn.execute(
+            "SELECT payload FROM statistics_usage" + where + " ORDER BY position", parameters)], session_metadata=sessions)

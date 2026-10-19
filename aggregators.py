@@ -99,6 +99,7 @@ class LoadedEntries(list):
         scan_complete=True,
         history_authoritative_from=None,
         history_authoritative_projects=None,
+        session_metadata=(),
     ):
         super().__init__(entries)
         self.blocked_sources = list(blocked_sources)
@@ -109,6 +110,7 @@ class LoadedEntries(list):
         self.scan_complete = scan_complete
         self.history_authoritative_from = history_authoritative_from
         self.history_authoritative_projects = history_authoritative_projects
+        self.session_metadata = list(session_metadata)
 
 
 @dataclass(frozen=True)
@@ -808,6 +810,7 @@ def load_all_entries(force_reload=False, read_only=False, diagnostic=False, arch
 
             source_errors = []
             authority = None
+            session_metadata = []
             if not (read_only or diagnostic) and _GLOBAL_USAGE_CACHE is not None and not isinstance(_GLOBAL_USAGE_CACHE, UsageArchive):
                 # Retain the existing injectable cache interface for callers.
                 if force_reload:
@@ -820,6 +823,7 @@ def load_all_entries(force_reload=False, read_only=False, diagnostic=False, arch
                 entries, authority = _load_archived_entries(
                     archive, source_errors, force_reload, read_only or diagnostic,
                 )
+                session_metadata = archive.session_metadata
             loaded = _with_calculated_costs(
                 _deduped(entries, source_errors),
                 read_only=read_only or diagnostic,
@@ -827,6 +831,7 @@ def load_all_entries(force_reload=False, read_only=False, diagnostic=False, arch
                 source_errors=source_errors,
             )
             loaded.history_authoritative_from = authority
+            loaded.session_metadata = session_metadata
             return loaded
 
 
@@ -874,6 +879,7 @@ def _load_archived_entries(archive, source_errors, force_reload, read_only):
             ).hexdigest()
 
     history = codex.HistoryResolver(path for path in paths if _is_codex_usage_path(path))
+    sessions = codex.session_metadata(history, codex_models)
 
     def signature_for(path):
         file_stat = path.stat()
@@ -897,9 +903,12 @@ def _load_archived_entries(archive, source_errors, force_reload, read_only):
         from cache import MtimeCache
 
         retained, authority = archive.read()
+        from session_identity import merge_metadata
+        archive.session_metadata = merge_metadata(archive.session_metadata, sessions)
         entries = MtimeCache(lambda: paths, parse).load(source_errors=source_errors)
         return _deduped(list(entries) + retained, source_errors), authority
-    return archive.collect(paths, parse, signature_for, source_errors, USAGE_TIMEZONE, force_reload=force_reload)
+    return archive.collect(paths, parse, signature_for, source_errors, USAGE_TIMEZONE,
+                           force_reload=force_reload, session_metadata=sessions)
 
 
 def _identity_rollup_lock():

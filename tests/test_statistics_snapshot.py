@@ -99,6 +99,34 @@ class StatisticsSnapshotTests(unittest.TestCase):
             self.assertEqual(decode.call_count, 1)
         self.assertEqual(len(snapshots.read_admitted_usage(current)), 3)
 
+    def test_admitted_conversation_keeps_ancestry_outside_window_and_decodes_only_members(self):
+        from session_identity import codex_metadata
+        metadata = [codex_metadata("root", "cli"), codex_metadata("child",
+            {"subagent": {"thread_spawn": {"parent_thread_id": "root"}}}),
+            codex_metadata("nested", {"subagent": {"thread_spawn": {"parent_thread_id": "child"}}})]
+        entries = LoadedEntries([replace(self.usage()[0], agent_id="codex", session_id=sid,
+            timestamp=NOW + timedelta(days=i), message_id=sid, request_id=sid)
+            for i, sid in enumerate(("root", "child", "nested", "unrelated"))], session_metadata=metadata)
+        current = self.imported(entries)
+        window = (NOW + timedelta(days=2), NOW + timedelta(days=2, hours=1))
+        with mock.patch.object(snapshots, "_usage_entry", wraps=snapshots._usage_entry) as decode:
+            result = snapshots.read_admitted_usage(current, session_id="nested", session_agent="codex", time_range=window)
+            # Date pushdown deliberately widens by one day; exact filtering is the API's job.
+            self.assertEqual(result, entries[1:3])
+            self.assertEqual(decode.call_count, 2)
+            self.assertEqual(result.session_metadata, metadata)
+        import server
+        from types import SimpleNamespace
+        with mock.patch("server.hub.enabled", return_value=True), mock.patch(
+                "server.generation.generation_admission_snapshot") as admission:
+            admission.return_value.__enter__.return_value = SimpleNamespace(admitted=[current])
+            query = {"range": ["custom"], "start": ["2026-09-02"], "end": ["2026-09-02"], "session_agent": ["codex"]}
+            detail = server.session_detail("nested", "macbook", query)
+            self.assertEqual(detail["meta"]["session_id"], "root")
+            self.assertEqual([e["session_id"] for e in detail["entries"]], ["nested"])
+            all_detail = server.session_detail("root", "macbook", {**query, "scope": ["all"]})
+            self.assertEqual([e["session_id"] for e in all_detail["entries"]], ["root", "child", "nested"])
+
     def test_admitted_usage_matches_full_reader_at_boundaries_and_filters(self):
         import server
         start = NOW.replace(hour=0, minute=0, second=0, microsecond=1)
@@ -183,6 +211,7 @@ class StatisticsSnapshotTests(unittest.TestCase):
             meta.update(version=1, gateway={"schema_version": "future-schema"})
             meta.pop("usage_quality_counts", None)
             conn.execute("UPDATE statistics_meta SET payload=?", (json.dumps(meta),))
+            conn.execute("DROP TABLE statistics_sessions")
             for position, payload in conn.execute("SELECT position, payload FROM statistics_usage").fetchall():
                 row = json.loads(payload)
                 for key in snapshots.EVIDENCE_FIELDS:

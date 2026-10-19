@@ -34,7 +34,7 @@ class UsageEvidenceSnapshotTests(unittest.TestCase):
         if version == 1:
             meta["gateway"] = {}
         with closing(sqlite3.connect(path)) as conn, conn:
-            tables = snapshots.LEGACY_TABLES if version == 1 else snapshots.TABLES
+            tables = snapshots.LEGACY_TABLES if version == 1 else snapshots.V3_TABLES
             for name in tables:
                 conn.execute("CREATE TABLE " + name + " (position INTEGER PRIMARY KEY, payload TEXT NOT NULL)")
             for table, payload in (("statistics_meta", meta), ("statistics_usage", row)):
@@ -53,13 +53,13 @@ class UsageEvidenceSnapshotTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), before)
                 self.assertIsNone(snapshots.read_metadata(path)["usage_quality_counts"])
 
-    def test_v3_transports_quality_and_counts_only_claude_observations(self):
+    def test_current_version_transports_quality_and_counts_only_claude_observations(self):
         entries = [replace(self.entry, message_id=str(index), usage_quality=quality)
                    for index, quality in enumerate(("incomplete", "observed", "unknown"))]
         entries.append(replace(self.entry, agent_id="codex", message_id="codex"))
         path = self.root / "current.db"
         result = snapshots.write_snapshot(path, entries)
-        self.assertEqual(result["version"], 3)
+        self.assertEqual(result["version"], 4)
         self.assertEqual(result["usage_quality_counts"], {"incomplete": 1, "observed": 1, "unknown": 1})
         self.assertEqual(result["usage_entries"], entries)
         self.assertTrue(result["scan_complete"])

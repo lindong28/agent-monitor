@@ -3090,11 +3090,11 @@
     tbody.innerHTML = "";
     tbody.setAttribute("aria-busy", "false");
     pageRows.forEach((row) => {
-      const day = dayKey(row.started_at);
+      const day = dayKey(row.ended_at);
       if (grouped && day && day !== lastDay) {
         const heading = document.createElement("tr");
         heading.className = "date-group";
-        heading.innerHTML = `<th colspan="7" scope="colgroup">${escapeHtml(day)}</th>`;
+        heading.innerHTML = `<th colspan="5" scope="colgroup">${escapeHtml(day)}</th>`;
         tbody.appendChild(heading);
         lastDay = day;
       }
@@ -3105,14 +3105,13 @@
       const detailParams = new URLSearchParams(listParams);
       detailParams.set("session", row.session_id);
       detailParams.set("session_machine", row.machine || "");
+      detailParams.set("session_agent", row.agent_id);
       tr.innerHTML = `
         <td><span class="pill agent-${escapeHtml(row.agent_id)}">${escapeHtml(row.agent_id)}</span><br><small>${escapeHtml(row.machine || "本机")}</small></td>
-        <td class="project-cell"><a href="/sessions?${escapeHtml(detailParams.toString())}" title="${escapeHtml(row.project)}">${escapeHtml(projectLabel(row.project))}</a></td>
-        <td class="nowrap">${escapeHtml(row.model)}${row.estimated ? ' <span class="muted">推算</span>' : ""}</td>
-        <td class="nowrap">${grouped ? escapeHtml(timeOfDay(row.started_at)) : formatDate(row.started_at)}</td>
-        <td class="numeric">${moneyPrecise(row.cost_usd)}</td>
+        <td class="project-cell"><a class="session-title" href="/sessions?${escapeHtml(detailParams.toString())}" title="${escapeHtml(row.title || row.project)}">${escapeHtml(row.title || projectLabel(row.project))}</a>${row.title ? `<small>${escapeHtml(projectLabel(row.project))}</small>` : ""}${row.subagent_count ? `<small>含 ${integer(row.subagent_count)} 个子代理</small>` : ""}</td>
+        <td class="nowrap">${grouped ? escapeHtml(timeOfDay(row.ended_at)) : formatDate(row.ended_at)}</td>
+        <td class="numeric">${sessionEntryCost(row.cost_usd)}${row.unpriced_records && row.cost_usd != null ? '<br><small>部分未计价</small>' : ""}</td>
         <td class="numeric">${integer(row.tokens)}</td>
-        <td class="numeric">${integer(row.usage_events)}</td>
       `;
       tr.addEventListener("click", (event) => {
         if (!event.target.closest("a, button") && !window.getSelection()?.toString()) tr.querySelector("a").click();
@@ -3140,7 +3139,7 @@
     const row = document.createElement("tr");
     row.dataset.sessionState = state;
     const cell = document.createElement("td");
-    cell.colSpan = 7;
+    cell.colSpan = 5;
     cell.className = state === "error" ? "error" : "empty-state";
     const text = message || "加载中…";
     cell.appendChild(document.createTextNode(text));
@@ -3202,21 +3201,21 @@
     const id = selected.get("session");
     const machine = selected.get("session_machine") || "";
     const back = new URLSearchParams(selected);
-    ["session", "session_machine", "usage_model", "usage_page"].forEach(key => back.delete(key));
+    ["session", "session_machine", "session_agent", "scope", "usage_model", "usage_page"].forEach(key => back.delete(key));
     qs("#session-list-panel").hidden = true;
     qs("main h1").textContent = "会话详情";
     ["#range", "#sort"].forEach(selector => { const el = qs(selector); if (el) el.hidden = true; });
     const panel = document.createElement("section");
     panel.className = "session-detail";
     panel.innerHTML = `<a class="session-back" href="/sessions?${escapeHtml(back.toString())}">返回会话列表</a>
-      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p>${escapeHtml(machine || "本机")} · 此会话的全部已留存记录</p><p class="scope-note">可能缺少未采集或未保存的记录。<a data-collection-link href="${escapeHtml(collectionUrl())}">采集与诊断</a></p><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div></div></div>
+      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p>${escapeHtml(machine || "本机")} · <span id="session-scope"></span></p><button id="session-scope-toggle" type="button"></button><details class="note-disclosure"><summary>会话标识与记录范围</summary><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div><p class="scope-note">仅含已采集的用量和会话标题，不含对话正文。<a data-collection-link href="${escapeHtml(collectionUrl())}">采集与诊断</a></p></details></div></div>
       <div id="session-detail-content" aria-live="polite"></div>`;
     qs("main").appendChild(panel);
     qs("#session-identity").textContent = id;
     qs("#session-copy").addEventListener("click", async (event) => {
-      await copyText(event.currentTarget, id, "复制失败，请选中 ID 复制");
+      await copyText(event.currentTarget, qs("#session-identity").textContent, "复制失败，请选中 ID 复制");
     });
-    const readingState = {expanded: new Set(), technical: new Set(), metadata: false};
+    const readingState = {expanded: new Set(), technical: new Set(), metadata: false, usage: false, executions: false};
     let generation = 0;
     let activeLoads = 0;
     async function load(force = false, background = false) {
@@ -3228,10 +3227,16 @@
       try {
         if (force === true) await refreshStatistics({isCurrent: () => current() && ticket === generation});
         if (!current() || ticket !== generation) return;
-        const detail = await api("/api/session/" + encodeURIComponent(id), {machine});
+        const detailQuery = Object.fromEntries(params());
+        detailQuery.machine = machine;
+        const all = detailQuery.scope === "all";
+        qs("#session-scope").textContent = all ? "全部留存记录" : "与列表相同的日期和筛选";
+        qs("#session-scope-toggle").textContent = all ? "返回列表筛选范围" : "查看全部留存记录";
+        const detail = await api("/api/session/" + encodeURIComponent(id), detailQuery);
         if (!current() || ticket !== generation) return;
         if (!Array.isArray(detail.entries)) throw new Error("会话数据格式无效");
-        renderSessionDetail(detail.entries, content, readingState);
+        if (detail.meta?.session_id) qs("#session-identity").textContent = detail.meta.session_id;
+        renderSessionDetail(detail.entries, content, readingState, detail.meta || {});
       } catch (error) {
         if (!current() || ticket !== generation) return;
         content.innerHTML = `<div class="panel"><p class="error">会话读取失败：${escapeHtml(error.message || error)}</p><button id="session-retry" type="button">重试</button></div>`;
@@ -3240,6 +3245,13 @@
         activeLoads--;
       }
     }
+    qs("#session-scope-toggle").addEventListener("click", () => {
+      const next = params();
+      if (next.get("scope") === "all") next.delete("scope"); else next.set("scope", "all");
+      next.delete("usage_page"); next.delete("usage_model");
+      replaceCurrentUrl("/sessions?" + next);
+      load(false);
+    });
     bindShell(load, {range: false});
     watchPageData(() => load(false, true));
     await load();
@@ -3251,16 +3263,17 @@
     return moneyPrecise(value);
   }
 
-  function renderSessionDetail(entries, content, readingState = {expanded: new Set(), technical: new Set(), metadata: false}) {
+  function renderSessionDetail(entries, content, readingState = {expanded: new Set(), technical: new Set(), metadata: false}, meta = {}) {
     if (!entries.length) {
-      content.innerHTML = '<div class="panel empty-state">未找到此机器上的已留存用量。会话可能未采集，或机器尚未纳入。</div>';
+      content.innerHTML = '<div class="panel empty-state">此范围内没有留存用量。可切换全部留存记录，或返回列表调整筛选。</div>';
       return;
     }
+    const executionIds = readingState.executionIds || (readingState.executionIds = new Set());
     const distinct = key => [...new Set(entries.map(entry => entry[key]).filter(Boolean))];
     const models = distinct("model");
     const tokens = entries.reduce((n, e) => n + ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens"].reduce((sum, key) => sum + (Number(e[key]) || 0), 0), 0);
     const unknown = entries.filter(e => e.cost_usd == null).length;
-    const cost = unknown ? null : entries.reduce((n, e) => n + e.cost_usd, 0);
+    const cost = unknown === entries.length ? null : entries.reduce((n, e) => n + (e.cost_usd || 0), 0);
     const events = entries.reduce((n, e) => n + (Number(e.usage_event_count) || 0), 0);
     const dates = entries.map(e => new Date(e.timestamp).getTime()).filter(Number.isFinite);
     const first = dates.length ? dates.reduce((a, b) => Math.min(a, b)) : null;
@@ -3275,24 +3288,34 @@
       missing_rates: "缺少适用费率", unsupported_service_context: "服务模式无法定价",
       conflicting_service_context: "服务模式记录冲突", mode_unreported: "部分服务模式未记录，按标准模式估值",
       invalid_recorded_cost: "源记录金额无效"}[reason] || "计价原因未识别");
-    const incomplete = entries.filter(e => e.agent_id === "claude-code" && e.usage_quality === "incomplete").length;
-    qs("#session-project").textContent = distinct("project").join("、") || "会话目录未记录";
-    qs("#session-times").textContent = `${first === null ? "时间未知" : formatDate(first)} — ${last === null ? "时间未知" : formatDate(last)}`;
+    qs("#session-project").textContent = meta.title || projectLabel(meta.project || distinct("project").join("、")) || "会话目录未记录";
+    qs("#session-times").textContent = `最近用量：${last === null ? "时间未知" : formatDate(last)}`;
     content.innerHTML = `<div class="session-metrics">
-      <article><h3>记录成本</h3><strong>${sessionEntryCost(cost)}</strong><p>${unknown ? `${unknown} 条记录金额未知，未合计为总额` : "按现有定价口径 · 非账单"}</p></article>
-      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>已观测输入、输出与缓存合计${incomplete ? ` · ${incomplete} 条用量记录不完整` : "；不保证最终用量"}</p></article>
-      <article><h3>用量事件数</h3><strong>${integer(events)}</strong><p>来自 ${integer(entries.length)} 条记录 · 非请求次数</p></article>
-      <article><h3>观测跨度</h3><strong class="session-span">${span}</strong><p>首末记录之间 · 非活跃时长</p></article></div>
+      <article><h3>记录费用</h3><strong>${sessionEntryCost(cost)}</strong><p>${cost === null ? "当前记录均无法计价" : unknown ? "部分未计价 · 仅合计可计价记录 · 非账单" : "仅合计可计价记录 · 非账单"}</p></article>
+      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>已记录的输入、输出与缓存合计</p></article></div>
       <details class="panel session-metadata" ${readingState.metadata ? "open" : ""}><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
         ${field("Agent", distinct("agent_id").join("、"))}
+        ${field("会话目录", meta.project || distinct("project").join("、"))}
         ${field("模型", models.join("、"))}
-      </dl><p class="scope-note"><strong>记录范围：</strong>不受列表时间窗口限制；仅含用量记录，不含对话正文。</p><p class="scope-note"><strong>模型与计价：</strong>Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。</p></details>
-      <section class="panel" id="usage-section"><div class="panel-head"><h2 tabindex="-1" id="usage-heading">用量明细</h2><span id="usage-count" class="status-line"></span></div>
+        ${field("创建时间", meta.created_at ? formatDate(meta.created_at) : "源数据未提供")}
+        ${field("当前范围首条用量", first === null ? "未知" : formatDate(first))}
+        ${field("观测跨度（非活跃时长）", span)}
+        ${field("用量事件（非请求次数）", integer(events))}
+        ${unknown ? field("未计价记录", integer(unknown)) : ""}
+        ${meta.relationship_status && meta.relationship_status !== "linked" ? field("关联信息", ({missing_parent: "父会话未采集，当前记录独立显示", conflict: "父关系冲突，当前记录独立显示", cycle: "父关系循环，当前记录独立显示"}[meta.relationship_status] || "未取得完整父关系，当前记录独立显示")) : ""}
+      </dl><p class="scope-note"><strong>模型与计价：</strong>Codex 模型是请求或配置值，实际路由模型未知；估值使用计算时价格，非历史账单。未知费用不归零。</p></details>
+      ${(meta.executions || []).length > 1 || meta.subagent_count ? `<details class="panel session-executions" ${readingState.executions ? "open" : ""}><summary>主会话与子代理用量</summary><p class="scope-note">仅合计当前范围内的匹配记录。</p><div class="table-wrap"><table><thead><tr><th>执行会话</th><th>费用</th><th>Token</th></tr></thead><tbody>${(meta.executions || []).map(e => `<tr><td>${escapeHtml(e.is_main ? "主会话" : e.title || "子代理")}<details data-execution-key="${escapeHtml(JSON.stringify([e.agent_id, e.session_id]))}" ${executionIds.has(JSON.stringify([e.agent_id, e.session_id])) ? "open" : ""}><summary>执行标识</summary><code>${escapeHtml(e.session_id)}</code>${e.parent_session_id ? `<p>父 ID：<code>${escapeHtml(e.parent_session_id)}</code></p>` : ""}</details></td><td>${sessionEntryCost(e.cost_usd)}${e.unpriced_records && e.cost_usd != null ? "（部分未计价）" : ""}</td><td>${integer(e.tokens)}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
+      <details class="panel" id="usage-section" ${readingState.usage ? "open" : ""}><summary id="usage-heading">用量记录 · ${integer(entries.length)} 条</summary><div class="panel-head"><span id="usage-count" class="status-line"></span></div>
       <div class="controls"><div class="field"><label for="usage-model">模型</label><select id="usage-model"><option value="">全部模型</option>${models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select></div><button id="usage-clear" type="button">清除筛选</button></div>
       <div class="table-wrap"><table><thead><tr><th>记录时间</th><th>模型</th><th class="numeric">输入</th><th class="numeric">输出</th><th class="numeric">缓存读取 / 写入</th><th class="numeric">成本</th><th>详情</th></tr></thead><tbody id="usage-body"></tbody></table></div>
-      <div class="pager"><button id="usage-prev" type="button">上一页</button><span id="usage-status" role="status"></span><button id="usage-next" type="button">下一页</button></div></section>`;
+      <div class="pager"><button id="usage-prev" type="button">上一页</button><span id="usage-status" role="status"></span><button id="usage-next" type="button">下一页</button></div></details>`;
     qs(".session-metadata")?.addEventListener("toggle", event => { readingState.metadata = event.currentTarget.open; });
-    const entryKey = e => JSON.stringify([e.timestamp, e.agent_id, e.message_id, e.request_id, e.model, e.project]);
+    qs("#usage-section")?.addEventListener("toggle", event => { readingState.usage = event.currentTarget.open; });
+    qs(".session-executions")?.addEventListener("toggle", event => { readingState.executions = event.currentTarget.open; });
+    qsa(".session-executions [data-execution-key]").forEach(el => el.addEventListener("toggle", () => {
+      if (el.open) executionIds.add(el.dataset.executionKey); else executionIds.delete(el.dataset.executionKey);
+    }));
+    const entryKey = e => JSON.stringify([e.timestamp, e.agent_id, e.session_id, e.message_id, e.request_id, e.model, e.project]);
     let page = Math.max(0, parseInt(params().get("usage_page"), 10) || 0);
     const select = qs("#usage-model");
     select.value = models.includes(params().get("usage_model")) ? params().get("usage_model") : "";
@@ -3316,7 +3339,7 @@
         function expand() {
           const row = document.createElement("tr");
           row.className = "session-entry-detail";
-          row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><p class="scope-note">${escapeHtml(formatDate(e.timestamp))} · ${escapeHtml(e.model || "模型未记录")}</p><dl class="session-fields">${e.cost_provenance?.reason ? field("计价说明", costReason(e.cost_provenance.reason)) : ""}${field("金额依据", costBasis(e))}${field("用量记录完整性", qualityText(e))}${field("用量事件数", String(e.usage_event_count ?? "未知"))}</dl><details class="entry-technical" ${readingState.technical.has(key) ? "open" : ""}><summary>技术证据 · ID、服务模式与价格来源</summary><dl class="session-fields">${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}</dl><p class="scope-note">ID 来自源日志，用于核对原始记录。</p></details></div></td>`;
+          row.innerHTML = `<td colspan="7"><div class="session-entry-evidence"><p class="scope-note">${escapeHtml(formatDate(e.timestamp))} · ${escapeHtml(e.model || "模型未记录")}</p><dl class="session-fields">${e.cost_provenance?.reason ? field("计价说明", costReason(e.cost_provenance.reason)) : ""}${field("金额依据", costBasis(e))}${field("用量记录完整性", qualityText(e))}${field("用量事件数", String(e.usage_event_count ?? "未知"))}</dl><details class="entry-technical" ${readingState.technical.has(key) ? "open" : ""}><summary>技术证据 · ID、服务模式与价格来源</summary><dl class="session-fields">${field("执行会话 ID", e.session_id)}${field("消息 ID", e.message_id)}${field("日志请求 ID", e.request_id)}${field("Agent", e.agent_id)}${field("会话目录", e.project)}${field("服务模式（日志值）", e.service_context ? JSON.stringify(e.service_context) : "未记录")}${field("价格来源", e.cost_provenance?.sources?.join("、"))}${field("价格核验日期", e.cost_provenance?.verified_at)}${field("计价时间口径", e.cost_provenance?.time_basis === "valuation_time" ? "计算时价格，非历史实际费率" : "未知")}</dl><p class="scope-note">ID 来自源日志，用于核对原始记录。</p></details></div></td>`;
           row.querySelector("details").addEventListener("toggle", event => {
             if (event.currentTarget.open) readingState.technical.add(key); else readingState.technical.delete(key);
           });
