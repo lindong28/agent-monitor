@@ -293,6 +293,10 @@ def read_admitted_usage(current, *, time_range=None, query=None, session_id=None
                 validate_usage_metadata(row)
                 previous_metadata = metadata
 
+        # Sort only row identifiers for indexed selections. Sorting complete
+        # payloads spills large JSON records into SQLite's temporary B-tree.
+        # The outer primary-key lookup retains the original position order.
+        selection = (" WHERE position IN (SELECT position FROM statistics_usage" + where + ")") if clauses else ""
         from aggregators import LoadedEntries
         return LoadedEntries([_usage_entry(json.loads(row[0]), version=meta["version"], metadata_validator=validate_metadata) for row in conn.execute(
-            "SELECT payload FROM statistics_usage" + where + " ORDER BY position", parameters)], session_metadata=sessions)
+            "SELECT payload FROM statistics_usage" + selection + " ORDER BY position", parameters)], session_metadata=sessions)

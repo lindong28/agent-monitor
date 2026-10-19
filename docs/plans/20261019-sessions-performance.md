@@ -32,6 +32,8 @@ MacBook→MacStudio 默认30d API：TTFB 4.584s、总计4.869s（identity传输�
 
 ## 状态
 
-已完成实现、决策审查、完整回归与基线失败归因。单轮独立V1变更审查覆盖12个文件，32项隔离测试通过，正式findings与承重未知均无；报告 changes-review.md。两条SQLite ResourceWarning未定位创建处，只保留未归因观察，不宣称生产泄漏。提交发布、部署和最终消费者验收仍归当前 session。未提交、未发布、未部署。无用户待办。
+已完成首轮实现、决策审查、完整回归与基线失败归因。单轮独立V1变更审查覆盖12个文件，32项隔离测试通过，正式findings与承重未知均无；报告 changes-review.md。两条SQLite ResourceWarning未定位创建处，只保留未归因观察，不宣称生产泄漏。首轮 adae377 已整合、push并通过MacStudio主树deploy.py安装。安装器保留旧进程，首次两次浏览器读数仍4.8/5.1秒；重启后重复打开0.192秒，启动后的首读6.698秒，全历史首读12.972秒。不能以热命中宣称冷读目标完成。无用户待办。
+
+后续冷读优化：索引窗口查询把完整payload写入SQLite临时排序B-tree；改为索引先选position，外层按position主键顺序取payload，保留相同候选、顺序和完整验证。固定macbook副本189365条，原/新原始序列SHA256相同，读取0.529→0.127秒；macmini13530条同样相等。L0固定行为实现手段，可回退单条查询；变更gate不另起reviewer，已有完整对象差分及32项受影响测试直接检查回归。最新8组完整对象仍与独立冻结基线相等，30d冷2.048秒、热0.00182秒，all冷8.546秒、热0.01408秒；离线结果非生产收益。此后续查询优化待发布、部署与数据更新后的消费者验收。
 
 恢复入口：私树 /Users/lindong/research/.worktrees/agent-monitor-sessions-performance-20261019；诊断目录 /Users/lindong/.local/share/agent-monitor-diagnostics/20261019-sessions，compare_sessions.py 已冻结基线 server 与 statistics reader，避免差分自证。浏览器测量 browser/measure.mjs，binding browser/browser.json；自有 headless Chrome 有退出上界，超过15:44需核存活后再复用或重建。原生 reviewer projection_decision / sessions_changes_review 已完成，browser_measurement 已交回浏览器。现有单份记录可恢复状态，未提升 Long-task mode。
