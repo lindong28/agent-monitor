@@ -44,7 +44,7 @@ assert(html.includes('timeout'));assert.equal((html.match(/未取得读数/g)||[
 const fs = require("fs"), assert = require("assert");
 const consoleLink = {dataset: {area: "console"}, setAttribute(k,v) {this[k]=v;}};
 const guideLink = {dataset: {area: "guide"}, setAttribute(k,v) {this[k]=v;}};
-const consoleNav = {}, guideNav = {}, chapter = {href: "/guide#setup"};
+const consoleNav = {}, guideNav = {}, chapter = {href: "/guide/setup", setAttribute(k,v){this[k]=v;}};
 const nodes = {'[data-area="console"]':consoleLink, '.sidebar .nav':consoleNav, '.guide-nav':guideNav};
 global.document = {readyState:"loading", addEventListener(){}, querySelector(s){return nodes[s]||null;},
   querySelectorAll(s){return s==="[data-area]"?[consoleLink,guideLink]:s===".guide-nav a"?[chapter]:[];}};
@@ -56,13 +56,45 @@ for (const query of ["?range=custom&start=2026-10-01&end=2026-10-14&session=s1&s
   Object.assign(window.location,{pathname:"/sessions",search:query,hash:"#detail"}); sync();
   const expected="/sessions"+query+"#detail";
   assert.equal(consoleLink.href,expected); assert.equal(consoleNav.hidden,false); assert.equal(guideNav.hidden,true);
-  Object.assign(window.location,{pathname:"/guide",search:"?range=30d",hash:"#setup"}); sync(); sync();
+  Object.assign(window.location,{pathname:"/guide/setup",search:"?range=30d",hash:""}); sync(); sync();
   assert.equal(consoleLink.href,expected,"guide must not normalize the return URL");
   assert.equal(consoleNav.hidden,true); assert.equal(guideNav.hidden,false); assert.equal(guideLink['aria-current'],"page");
-  assert.equal(chapter.href,"/guide?range=30d#setup");
+  assert.equal(chapter.href,"/guide/setup?range=30d");
+  assert.equal(chapter["aria-current"],"page");
+  for (const path of ["/guide/sources", "/guide/collection", "/guide/questions"]) {
+    window.location.pathname=path; sync();
+    assert.equal(consoleLink.href,expected); assert.equal(guideNav.hidden,false);
+    assert.equal(chapter["aria-current"],"false");
+  }
   Object.assign(window.location,{pathname:"/sessions",search:query,hash:"#detail"}); sync();
   assert.equal(consoleLink['aria-current'],"page"); assert.equal(guideLink['aria-current'],"false");
 }
+'''
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_guide_pages_and_legacy_urls_do_not_load_unrelated_status(self):
+        script = r'''
+const fs=require("fs"),assert=require("assert");
+global.document={readyState:"loading",addEventListener(){},querySelector(){return null;},querySelectorAll(){return [];}};
+let redirects=[];
+global.window={location:{origin:"http://example.test",pathname:"/guide",search:"?range=7d&model=a%2Fb",hash:"",replace(url){redirects.push(url);}}};
+global.fetch=()=>{throw Error("static guide must not fetch collection status");};
+eval(fs.readFileSync("web/app.js","utf8"));
+(async()=>{
+ for(const chapter of ["sources","collection","setup","questions"]){
+  window.location.pathname="/guide"; window.location.hash="#"+chapter;
+  await window.AgentMonitor.initGuide();
+  assert.equal(redirects.pop(),"/guide/"+chapter+"?range=7d&model=a%2Fb");
+ }
+ window.location.hash="";await window.AgentMonitor.initGuide();
+ assert.equal(redirects.pop(),"/guide/sources?range=7d&model=a%2Fb");
+ for(const chapter of ["sources","setup","questions"]){
+  window.location.pathname="/guide/"+chapter;
+  await window.AgentMonitor.initGuide();
+ }
+ assert.equal(redirects.length,0);
+})().catch(error=>{console.error(error);process.exitCode=1;});
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

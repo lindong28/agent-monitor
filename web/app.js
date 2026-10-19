@@ -124,9 +124,11 @@
 
   // The shell survives main swaps. Keep the full console URL separately from
   // ordinary range propagation, which deliberately normalizes custom on guide.
+  const GUIDE_CHAPTERS = ["sources", "collection", "setup", "questions"];
+  const GUIDE_ROUTES = new Set(["/guide", ...GUIDE_CHAPTERS.map(chapter => `/guide/${chapter}`)]);
   let lastConsoleUrl = null;
   function updateAreaNavigation() {
-    const guide = window.location.pathname === "/guide";
+    const guide = GUIDE_ROUTES.has(window.location.pathname);
     if (!guide) lastConsoleUrl = window.location.pathname + window.location.search + (window.location.hash || "");
     const consoleLink = qs('[data-area="console"]');
     if (consoleLink) consoleLink.href = lastConsoleUrl || "/?range=" + encodeURIComponent(getRange() === "custom" ? "30d" : getRange());
@@ -137,11 +139,13 @@
     const guideNav = qs(".guide-nav");
     if (consoleNav) consoleNav.hidden = guide;
     if (guideNav) guideNav.hidden = !guide;
-    // Native fragment navigation also retains the current range in its URL.
+    // Guide pages share the date context while keeping console return state separate.
     qsa(".guide-nav a").forEach((link) => {
       const url = new URL(link.href, window.location.origin);
       url.search = window.location.search;
       link.href = url.pathname + url.search + url.hash;
+      const currentPath = window.location.pathname === "/guide" ? "/guide/sources" : window.location.pathname;
+      link.setAttribute("aria-current", url.pathname === currentPath ? "page" : "false");
     });
   }
 
@@ -152,10 +156,10 @@
     ["控制台", "会话", "查找会话、筛选记录并查看明细", "/sessions"],
     ["控制台", "网络", "查看服务端主机的出口和网络诊断", "/network"],
     ["控制台", "配额与账号", "Claude / Codex 账号余量与更新时间", "/#quota-explorer"],
-    ["使用与接入", "数据来源", "本地日志、服务商账号与服务端网络", "/guide#sources"],
-    ["使用与接入", "采集状态", "检查已纳入机器与快照状态", "/guide#collection"],
-    ["使用与接入", "首次接入", "安装、命令行 CLI 与多机配置", "/guide#setup"],
-    ["使用与接入", "查找证据", "成本变化、会话追溯、账号选择与空页面", "/guide#questions"],
+    ["使用与接入", "数据来源", "本地日志、服务商账号与服务端网络", "/guide/sources"],
+    ["使用与接入", "采集状态", "检查已纳入机器与快照状态", "/guide/collection"],
+    ["使用与接入", "首次接入", "安装、命令行 CLI 与多机配置", "/guide/setup"],
+    ["使用与接入", "查找证据", "成本变化、会话追溯、账号选择与空页面", "/guide/questions"],
   ];
 
   function initPageSearch() {
@@ -2228,7 +2232,7 @@
     if (raw) {
       let url;
       try { url = new URL(raw, window.location.origin); } catch (_) { url = new URL("/", window.location.origin); }
-      if (url.origin === window.location.origin && ["/", "/explore", "/sessions", "/network", "/guide"].includes(url.pathname)) {
+      if (url.origin === window.location.origin && (["/", "/explore", "/sessions", "/network"].includes(url.pathname) || GUIDE_ROUTES.has(url.pathname))) {
         back.href = url.pathname + url.search + url.hash;
         back.textContent = "返回来源页（保留日期、筛选与详情）";
       }
@@ -2271,6 +2275,18 @@
   }
 
   async function initGuide() {
+    // Fragments were the old public entry points. Replace, rather than push,
+    // so Back does not get trapped on an alias; the query is retained verbatim.
+    if (window.location.pathname === "/guide") {
+      const chapter = (window.location.hash || "").slice(1);
+      const target = GUIDE_CHAPTERS.includes(chapter) ? chapter : "sources";
+      window.location.replace(`/guide/${target}${window.location.search}`);
+      return;
+    }
+    if (!qs("#sync-machines")) {
+      updateNavLinks();
+      return;
+    }
     const current = pageScope();
     async function load() {
       try {
@@ -3511,7 +3527,7 @@
     ["/explore", () => window.AgentMonitorPivot.init()],
     ["/sessions", () => initSessions()],
     ["/network", () => initNetwork()],
-    ["/guide", () => initGuide()],
+    ...Array.from(GUIDE_ROUTES, path => [path, () => initGuide()]),
     ["/collection", () => initCollection()],
   ]);
 
@@ -3676,7 +3692,7 @@
       }
 
       event.preventDefault();
-      if (window.location.pathname !== "/guide") {
+      if (!GUIDE_ROUTES.has(window.location.pathname)) {
         lastConsoleUrl = window.location.pathname + window.location.search + (window.location.hash || "");
       }
       renderRoute(url, { push: true })

@@ -47,6 +47,12 @@ from pricing_fetcher import is_estimated_pricing_model
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
+GUIDE_PAGES = {
+    "/guide/sources": "guide.html",
+    "/guide/collection": "guide-collection.html",
+    "/guide/setup": "guide-setup.html",
+    "/guide/questions": "guide-questions.html",
+}
 logger = logging.getLogger("agent-monitor")
 _NETWORK_CACHE = {"ts": 0.0, "data": None}
 _NETWORK_TTL = 60.0
@@ -889,7 +895,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(route(query), send_body=send_body,
                                 compress=parsed.path == "/api/sessions")
                 return
-            if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/collection", "/ip-check-docs") or parsed.path.startswith("/web/"):
+            if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/collection", "/ip-check-docs") or parsed.path in GUIDE_PAGES or parsed.path.startswith("/web/"):
                 self._serve_static(parsed.path, send_body=send_body)
                 return
             self.send_error(404)
@@ -953,6 +959,8 @@ class Handler(BaseHTTPRequestHandler):
             file_path = WEB_ROOT / "collection.html"
         elif path == "/guide":
             file_path = WEB_ROOT / "guide.html"
+        elif path in GUIDE_PAGES:
+            file_path = WEB_ROOT / GUIDE_PAGES[path]
         elif path == "/ip-check-docs":
             file_path = ROOT / "ip_check" / "README.md"
         elif path.startswith("/web/"):

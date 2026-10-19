@@ -17,6 +17,34 @@ import server
 ROOT = Path(__file__).resolve().parents[1]
 
 class ScopeTests(unittest.TestCase):
+    def test_guide_routes_serve_independent_pages_for_get_and_head(self):
+        import io
+        chapters = {"sources": "数据来源", "collection": "采集状态", "setup": "首次接入", "questions": "查找证据"}
+        for chapter, title in chapters.items():
+            for send_body in (True, False):
+                with self.subTest(chapter=chapter, send_body=send_body):
+                    handler = object.__new__(server.Handler)
+                    handler.path = f"/guide/{chapter}?range=7d"
+                    handler.headers = {}
+                    handler.wfile = io.BytesIO()
+                    handler.send_response = mock.Mock()
+                    handler.send_header = mock.Mock()
+                    handler.end_headers = mock.Mock()
+                    handler.send_error = mock.Mock(side_effect=AssertionError("unexpected HTTP error"))
+                    handler._handle_request(send_body=send_body)
+                    handler.send_response.assert_called_once_with(200)
+                    headers = dict(call.args for call in handler.send_header.call_args_list)
+                    self.assertEqual(headers["Cache-Control"], "no-store")
+                    self.assertGreater(int(headers["Content-Length"]), 0)
+                    body = handler.wfile.getvalue().decode()
+                    if send_body:
+                        self.assertIn(f'<h1 class="page-title">{title}</h1>', body)
+                        for other in chapters:
+                            self.assertEqual(f'id="{other}"' in body, other == chapter)
+                        self.assertNotIn("guide-toc", body)
+                    else:
+                        self.assertEqual(body, "")
+
     def test_session_list_negotiates_lossless_compression(self):
         import gzip
         import io
