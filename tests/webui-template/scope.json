@@ -5,7 +5,7 @@
   "application": "style",
   "design": {
     "path": "effective-design.json",
-    "sha256": "6ea68b92be7ce29cb180657c328f47451b796853cb3da26ce9e372c0018fdf5d"
+    "sha256": "d5adc3aabb4a7aacd462f3678323684d7d13ef73dc806d8a56e337df3769df70"
   },
   "project": {
     "path": "project.json",

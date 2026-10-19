@@ -63,11 +63,9 @@
             <button id="refresh" class="icon-btn" type="button" title="更新统计与配额" aria-busy="false">更新统计与配额</button>
           </div>
         </div>
-        <nav class="page-jumps" aria-label="总览内容"><a href="#kpi-spend-title">成本与趋势</a><a href="#period-comparison">周期比较</a><a href="#kpi-quota-title">配额与账号</a></nav>
         <div class="kpi-sections">
           <section class="panel kpi-group overview-cost" aria-labelledby="kpi-spend-title">
             <h2 id="kpi-spend-title" class="kpi-group-title">成本概况</h2>
-            <p class="scope-note">用量按已采集日志统计；费用仅汇总可计价记录，非服务商账单。<a data-collection-link href="/collection#cost-diagnostics">采集与诊断</a></p>
             <p id="spend-coverage" class="quota-scope" hidden></p>
             <div class="kpi-grid">
               <article class="kpi-card">
@@ -89,7 +87,6 @@
                 <div id="range-context" class="kpi-sub" hidden></div>
               </article>
             </div>
-            <p class="scope-note">日期范围仅影响区间成本、趋势与周期比较；其余指标使用各自固定窗口。</p>
           </section>
           <section class="panel overview-trend" aria-labelledby="cost-trend-title">
             <div class="panel-head">

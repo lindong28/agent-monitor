@@ -2,6 +2,8 @@
 
 ## 2026-10-19
 
+- Remove Overview’s local jump links and two general scope paragraphs; group Explore’s query controls and shared explanations in one card.
+
 - Enclose the cost overview heading, scope and three readings in one shared white card, retaining desktop separators and the stacked narrow-screen layout.
 
 - Remove machine-status notice boxes entirely from Overview, Explore and Sessions, including exception states. Keep machine diagnostics on Collection and preserve manual refresh receipts and cost-completeness qualifiers.

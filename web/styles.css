@@ -321,11 +321,16 @@ button:active:not(:disabled) {
 #usage-section { scroll-margin-top: 80px; }
 .codex-select-account { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .query-options { margin-bottom: 16px; }
+.query-panel .query-dates { margin-top: 0; }
+.query-panel .query-options { margin-bottom: 0; }
+.query-panel .query-options:not([open]) > summary { margin-bottom: 0; }
+.query-panel .query-builder { border: 0; border-radius: 0; margin-bottom: 0; }
+.query-panel .query-clause { padding-inline: 0; }
+.query-panel .query-clause:last-child { padding-bottom: 0; }
 .query-options > summary { cursor: pointer; margin-bottom: 12px; color: var(--accent-ink); }
 #project-search { min-width: 0; width: 100%; margin-bottom: 8px; }
 .reading-amount { display: block; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .reading-coverage { display: block; color: var(--ink-muted); font-weight: 400; white-space: normal; margin-top: 4px; }
-.page-jumps { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 16px; }
 .scope-tag { font-size: 11px; font-weight: 400; color: var(--ink-muted); margin-left: 6px; }
 .pager-top { margin: 16px 0; }
 .main [id] { scroll-margin-top: calc(var(--header-h) + 56px); }

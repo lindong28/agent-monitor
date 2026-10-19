@@ -1971,6 +1971,8 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
             self.assertNotIn('id="sync-panel"', html)
             self.assertNotIn('id="sync-summary"', html)
             self.assertNotIn('id="sync-machines"', html)
+            self.assertIn('href="/collection"', html)
+        for html in (explore, sessions):
             self.assertIn('data-collection-link', html)
         collection = (ROOT / "web" / "collection.html").read_text()
         for element in ("sync-panel", "sync-coverage", "sync-summary", "sync-machines"):

@@ -54,110 +54,111 @@
             <button id="refresh" class="icon-btn" type="button" title="更新统计与配额" aria-busy="false">更新统计与配额</button>
           </div>
         </div>
-        <div class="controls query-dates" aria-label="查询日期">
-          <div class="field">
-            <label for="range">时间范围</label>
-            <select id="range" aria-label="时间范围">
-              <option value="7d">近 7 天</option>
-              <option value="30d" selected>近 30 天</option>
-              <option value="90d">近 90 天</option>
-              <option value="6m">近半年</option>
-              <option value="1y">近 1 年</option>
-              <option value="2y">近 2 年</option>
-              <option value="all">全部历史</option>
-              <option value="custom">自定义日期</option>
-            </select>
-          </div>
-          <div class="field custom-date" hidden>
-            <label for="start-date">起始日期（含）</label>
-            <input id="start-date" type="date" required>
-          </div>
-          <div class="field custom-date" hidden>
-            <label for="end-date">终止日期（含）</label>
-            <input id="end-date" type="date" required>
-          </div>
-        </div>
-        <div class="preset-row" aria-label="预设" role="group">
-          <button class="preset-btn" type="button" data-preset="daily-cost">每日成本</button>
-          <button class="preset-btn" type="button" data-preset="project-cost">会话目录成本</button>
-          <button class="preset-btn" type="button" data-preset="model-tokens">模型 token</button>
-          <button class="preset-btn" type="button" data-preset="agent-project">Agent × 会话目录</button>
-          <button class="preset-btn" type="button" data-preset="cache">缓存读取</button>
-        </div>
-        <p id="preset-state" class="scope-note"></p>
-        <p id="query-summary" class="query-summary" role="status">正在读取查询…</p>
-        <details class="query-options"><summary>调整指标、筛选与分组</summary>
-        <section class="query-builder" aria-label="透视控件">
-          <div class="query-clause">
-            <div class="clause-label"><strong>看什么</strong></div>
+        <section class="panel query-panel" aria-label="查询条件与说明">
+          <div class="controls query-dates" aria-label="查询日期">
             <div class="field">
-            <label for="metric">统计指标</label>
-            <select id="metric">
-              <option value="cost">成本</option>
-              <option value="total">总 token</option>
-              <option value="input">输入 token</option>
-              <option value="output">输出 token</option>
-              <option value="cache_read">缓存读取</option>
-              <option value="cache_creation">缓存创建</option>
-              <option value="messages">用量事件数</option>
-              <option value="unknown_cost">未知成本条目数</option>
-            </select>
+              <label for="range">时间范围</label>
+              <select id="range" aria-label="时间范围">
+                <option value="7d">近 7 天</option>
+                <option value="30d" selected>近 30 天</option>
+                <option value="90d">近 90 天</option>
+                <option value="6m">近半年</option>
+                <option value="1y">近 1 年</option>
+                <option value="2y">近 2 年</option>
+                <option value="all">全部历史</option>
+                <option value="custom">自定义日期</option>
+              </select>
+            </div>
+            <div class="field custom-date" hidden>
+              <label for="start-date">起始日期（含）</label>
+              <input id="start-date" type="date" required>
+            </div>
+            <div class="field custom-date" hidden>
+              <label for="end-date">终止日期（含）</label>
+              <input id="end-date" type="date" required>
             </div>
           </div>
-          <div class="query-clause">
-            <div class="clause-label"><strong>筛选哪些</strong></div>
-            <div class="query-filters">
-          <div class="field">
-            <label for="agent-filter">Agent 类型</label>
-            <select id="agent-filter" data-filter-control="agent" aria-label="Agent 类型">
-              <option value="">全部 Agent</option>
-            </select>
+          <div class="preset-row" aria-label="预设" role="group">
+            <button class="preset-btn" type="button" data-preset="daily-cost">每日成本</button>
+            <button class="preset-btn" type="button" data-preset="project-cost">会话目录成本</button>
+            <button class="preset-btn" type="button" data-preset="model-tokens">模型 token</button>
+            <button class="preset-btn" type="button" data-preset="agent-project">Agent × 会话目录</button>
+            <button class="preset-btn" type="button" data-preset="cache">缓存读取</button>
           </div>
-          <div class="field">
-            <label for="project-filter">会话目录</label>
-            <input id="project-search" type="search" aria-label="查找会话目录选项" placeholder="输入目录关键词…" autocomplete="off">
-            <select id="project-filter" data-filter-control="project" aria-label="会话目录">
-              <option value="">全部会话目录</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="model-filter">模型</label>
-            <select id="model-filter" data-filter-control="model" aria-label="模型">
-              <option value="">全部模型</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="machine-filter">机器</label>
-            <select id="machine-filter" data-filter-control="machine" aria-label="机器">
-              <option value="">全部机器</option>
-            </select>
-          </div>
-            </div>
-          </div>
-          <div class="query-clause">
-            <div class="clause-label"><strong>按什么拆分</strong></div>
-            <div class="query-grouping">
-              <div class="group-options" role="group" aria-label="分组维度（可多选）">
-                <label class="group-option"><input type="checkbox" data-group-dim="agent">Agent 类型</label>
-                <label class="group-option"><input type="checkbox" data-group-dim="project">会话目录</label>
-                <label class="group-option"><input type="checkbox" data-group-dim="model">模型</label>
-                <label class="group-option"><input type="checkbox" data-group-dim="machine">机器</label>
-                <div class="group-time"><label for="time-dim">时间单位</label>
-                  <select id="time-dim">
-                    <option value="none">不按时间</option>
-                    <option value="day">天</option>
-                    <option value="week">周</option>
-                    <option value="month">月</option>
-                  </select>
-                </div>
+          <p id="preset-state" class="scope-note"></p>
+          <p id="query-summary" class="query-summary" role="status">正在读取查询…</p>
+          <details class="query-options"><summary>调整指标、筛选与分组</summary>
+          <section class="query-builder" aria-label="透视控件">
+            <div class="query-clause">
+              <div class="clause-label"><strong>看什么</strong></div>
+              <div class="field">
+              <label for="metric">统计指标</label>
+              <select id="metric">
+                <option value="cost">成本</option>
+                <option value="total">总 token</option>
+                <option value="input">输入 token</option>
+                <option value="output">输出 token</option>
+                <option value="cache_read">缓存读取</option>
+                <option value="cache_creation">缓存创建</option>
+                <option value="messages">用量事件数</option>
+                <option value="unknown_cost">未知成本条目数</option>
+              </select>
               </div>
-              <p id="group-summary" class="status-line">正在读取分组条件…</p>
-              <p class="scope-note">可组合多个维度。查看总量时，取消所有分组维度，并将时间单位设为「不按时间」。</p>
             </div>
-          </div>
-        </section>
-        </details>
-        <p id="date-error" class="error" role="alert" hidden></p>
+            <div class="query-clause">
+              <div class="clause-label"><strong>筛选哪些</strong></div>
+              <div class="query-filters">
+            <div class="field">
+              <label for="agent-filter">Agent 类型</label>
+              <select id="agent-filter" data-filter-control="agent" aria-label="Agent 类型">
+                <option value="">全部 Agent</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="project-filter">会话目录</label>
+              <input id="project-search" type="search" aria-label="查找会话目录选项" placeholder="输入目录关键词…" autocomplete="off">
+              <select id="project-filter" data-filter-control="project" aria-label="会话目录">
+                <option value="">全部会话目录</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="model-filter">模型</label>
+              <select id="model-filter" data-filter-control="model" aria-label="模型">
+                <option value="">全部模型</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="machine-filter">机器</label>
+              <select id="machine-filter" data-filter-control="machine" aria-label="机器">
+                <option value="">全部机器</option>
+              </select>
+            </div>
+              </div>
+            </div>
+            <div class="query-clause">
+              <div class="clause-label"><strong>按什么拆分</strong></div>
+              <div class="query-grouping">
+                <div class="group-options" role="group" aria-label="分组维度（可多选）">
+                  <label class="group-option"><input type="checkbox" data-group-dim="agent">Agent 类型</label>
+                  <label class="group-option"><input type="checkbox" data-group-dim="project">会话目录</label>
+                  <label class="group-option"><input type="checkbox" data-group-dim="model">模型</label>
+                  <label class="group-option"><input type="checkbox" data-group-dim="machine">机器</label>
+                  <div class="group-time"><label for="time-dim">时间单位</label>
+                    <select id="time-dim">
+                      <option value="none">不按时间</option>
+                      <option value="day">天</option>
+                      <option value="week">周</option>
+                      <option value="month">月</option>
+                    </select>
+                  </div>
+                </div>
+                <p id="group-summary" class="status-line">正在读取分组条件…</p>
+                <p class="scope-note">可组合多个维度。查看总量时，取消所有分组维度，并将时间单位设为「不按时间」。</p>
+              </div>
+            </div>
+          </section>
+          </details>
+          <p id="date-error" class="error" role="alert" hidden></p>
         <p id="unknown-cost-note" class="scope-note" hidden>未知成本包含缺少价格或用量不完整的已观测记录；已知零成本不在其中。历史汇总可能早于保留会话明细，追查到的条目数不保证与汇总相同。</p>
         <p class="scope-note">用量按已采集日志统计；费用仅汇总可计价记录，非服务商账单。<a data-collection-link href="/collection#cost-diagnostics">采集与诊断</a></p>
           <details class="note-disclosure">
@@ -169,6 +170,7 @@
             <p><strong>用量事件数：</strong>记录中包含的用量事件合计。一条记录可能包含多个事件；事件数不是请求次数。</p>
             <p><strong>模型费率：</strong>Codex 按已识别模型估算；GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算。模型定价未知时成本显示 —。</p>
           </details>
+        </section>
         <section id="pivot-panel" class="panel">
           <div class="panel-head">
             <h2>透视图</h2>
