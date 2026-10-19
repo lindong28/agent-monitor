@@ -82,6 +82,16 @@ class ConversationTests(unittest.TestCase):
             self.assertIsNone(unknown["meta"]["cost_usd"])
             self.assertEqual(len(unknown["entries"]), 1)
 
+    def test_list_normalizes_each_distinct_project_once(self):
+        entries = LoadedEntries([replace(self.base, message_id=str(i), project=project)
+                                 for i, project in enumerate(["repo", "/Users/user/work"] * 20)])
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=entries), \
+                mock.patch("server.canonical_project", wraps=server.canonical_project) as canonical:
+            result = server.sessions_endpoint({"range": ["all"], "with_filters": ["1"]})
+        self.assertEqual(canonical.call_count, 2)
+        self.assertEqual(result["filters"]["project"], ["repo", "~/work"])
+        self.assertEqual(result["sessions"][0]["tokens"], 40 * 12)
+
     def test_owner_header_not_filename_or_inherited_metadata_and_forks_stay_separate(self):
         path = self.root / "physical-id.jsonl"
         rows = [{"type": "session_meta", "payload": {"id": "logical", "source": "cli", "forked_from_id": "root"}},

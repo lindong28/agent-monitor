@@ -99,6 +99,50 @@ class StatisticsSnapshotTests(unittest.TestCase):
             self.assertEqual(decode.call_count, 1)
         self.assertEqual(len(snapshots.read_admitted_usage(current)), 3)
 
+    def test_admitted_reader_reuses_only_identical_valid_metadata_within_request(self):
+        entries = LoadedEntries([replace(self.usage()[0], message_id=str(i),
+            request_id=str(i), service_context={"speed": "fast" if i < 3 else "standard"})
+            for i in range(6)])
+        current = self.imported(entries)
+        with mock.patch.object(snapshots, "validate_usage_metadata", wraps=snapshots.validate_usage_metadata) as validate:
+            self.assertEqual(snapshots.read_admitted_usage(current), entries)
+            self.assertEqual(validate.call_count, 2)
+            self.assertEqual(snapshots.read_admitted_usage(current), entries)
+            self.assertEqual(validate.call_count, 4)
+
+    def test_admitted_reader_still_rejects_changed_invalid_metadata_and_amount(self):
+        entries = LoadedEntries([replace(self.usage()[0], message_id=str(i), request_id=str(i)) for i in range(2)])
+        current = self.imported(entries)
+        with closing(sqlite3.connect(current.db_path)) as conn:
+            position, payload = conn.execute("SELECT position, payload FROM statistics_usage ORDER BY position DESC LIMIT 1").fetchone()
+        original = json.loads(payload)
+        for change in ({"service_context": "invalid"}, {"usage_quality": True},
+                       {"input_tokens": -1}, {"cost_usd": True},
+                       {"cost_provenance": {"basis": "unpriced", "sources": [], "verified_at": None,
+                                            "time_basis": "unknown", "reason": "unknown_model"}, "cost_usd": 0}):
+            with self.subTest(change=change):
+                with closing(sqlite3.connect(current.db_path)) as conn:
+                    conn.execute("UPDATE statistics_usage SET payload=? WHERE position=?", (json.dumps({**original, **change}), position))
+                    conn.commit()
+                with self.assertRaises(snapshots.StatisticsSnapshotError):
+                    snapshots.read_admitted_usage(current)
+
+    def test_identical_provenance_is_revalidated_when_amount_nullness_changes(self):
+        provenance = {"basis": "unpriced", "sources": [], "verified_at": None,
+                      "time_basis": "unknown", "reason": "unknown_model"}
+        entries = LoadedEntries([replace(self.usage()[0], message_id=str(i), request_id=str(i),
+                                         cost_provenance=provenance) for i in range(2)])
+        current = self.imported(entries)
+        self.assertEqual(snapshots.read_admitted_usage(current), entries)
+        with closing(sqlite3.connect(current.db_path)) as conn:
+            position, payload = conn.execute("SELECT position, payload FROM statistics_usage ORDER BY position DESC LIMIT 1").fetchone()
+            row = json.loads(payload)
+            row["cost_usd"] = 0
+            conn.execute("UPDATE statistics_usage SET payload=? WHERE position=?", (json.dumps(row), position))
+            conn.commit()
+        with self.assertRaises(snapshots.StatisticsSnapshotError):
+            snapshots.read_admitted_usage(current)
+
     def test_admitted_conversation_keeps_ancestry_outside_window_and_decodes_only_members(self):
         from session_identity import codex_metadata
         metadata = [codex_metadata("root", "cli"), codex_metadata("child",

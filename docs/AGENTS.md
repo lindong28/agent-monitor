@@ -18,6 +18,7 @@ Current usage and installation belong in the root README; current architecture a
 | [references/upstream-contract-repairs.md](references/upstream-contract-repairs.md) | Current ten-object repair arguments, evidence transport schema, conditions and verification boundaries |
 | [explore-performance.md](explore-performance.md) | Explore performance evidence, improvement scope and implementation results |
 | [performance-20261013.md](performance-20261013.md) | Session indexes, runtime diagnostics and measured performance delivery |
+| [plans/20261019-sessions-performance.md](plans/20261019-sessions-performance.md) | Sessions loading optimization, decision boundaries and cold/warm browser evidence |
 | [proactive-performance.md](proactive-performance.md) | Proactive performance gaps, implementation, diagnostic commands and verification limits |
 | [design.md](design.md) | Shared product visual design, inheritance, exceptions and observed coverage |
 | [operations/services.md](operations/services.md) | Current lifecycle/migration instructions and preserved historical deployment record |

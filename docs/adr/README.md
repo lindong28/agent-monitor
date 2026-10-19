@@ -4,6 +4,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261019-d8f4: Sessions result reuse](20261019-d8f4-sessions-result-reuse.md) | Accepted; bounded source/signature/window reuse after complete reads, unchanged freshness |
 | [20261019-c6b2: conversation sessions](20261019-c6b2-conversation-sessions.md) | Accepted; native subagent ancestry, matching detail scope and partial record costs |
 | [20261019-a42e: task-focused diagnostics](20261019-a42e-task-focused-diagnostics.md) | Accepted; shared fee scope, current machine status first and expandable missing-usage evidence |
 | [20261018: page task ownership](20261018-page-task-ownership.md) | Accepted; collection diagnostics and contextual return supersede previous placement constraints |

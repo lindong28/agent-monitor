@@ -144,7 +144,7 @@ def _validate_meta(meta):
             raise ValueError("invalid usage quality counts")
 
 
-def _usage_entry(row, version=VERSION):
+def _usage_entry(row, version=VERSION, *, metadata_validator=None):
     expected = LEGACY_USAGE_FIELDS if version in (1, 2) else USAGE_FIELDS
     if not isinstance(row, dict) or set(row) != expected:
         raise ValueError("invalid usage entry fields")
@@ -160,7 +160,7 @@ def _usage_entry(row, version=VERSION):
         raise ValueError("one-hour cache tokens exceed total cache creation tokens")
     if row["cost_usd"] is not None and (type(row["cost_usd"]) not in (float, int) or not math.isfinite(row["cost_usd"]) or row["cost_usd"] < 0):
         raise ValueError("invalid usage cost")
-    validate_usage_metadata(row)
+    (metadata_validator or validate_usage_metadata)(row)
     return UsageEntry(**row)
 
 
@@ -279,6 +279,20 @@ def read_admitted_usage(current, *, time_range=None, query=None, session_id=None
                 clauses.append("json_extract(payload, '$.agent_id') = ?")
                 parameters.append(session_agent)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        previous_metadata = None
+
+        def validate_metadata(row):
+            nonlocal previous_metadata
+            # JSON metadata contains only strings, null, lists and dictionaries
+            # after validation. Reuse only an identical successful validation,
+            # including the amount's nullness; scalar fields are still checked
+            # for every row. Nothing is retained across reads or generations.
+            metadata = (row.get("usage_quality", "unknown"), row.get("service_context"),
+                        row.get("cost_provenance"), row["cost_usd"] is None)
+            if metadata != previous_metadata:
+                validate_usage_metadata(row)
+                previous_metadata = metadata
+
         from aggregators import LoadedEntries
-        return LoadedEntries([_usage_entry(json.loads(row[0]), version=meta["version"]) for row in conn.execute(
+        return LoadedEntries([_usage_entry(json.loads(row[0]), version=meta["version"], metadata_validator=validate_metadata) for row in conn.execute(
             "SELECT payload FROM statistics_usage" + where + " ORDER BY position", parameters)], session_metadata=sessions)

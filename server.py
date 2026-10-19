@@ -30,6 +30,7 @@ import rollup
 import generation
 import statistics_snapshot
 from session_identity import SessionIndex
+from session_cache import SessionCache
 import hub
 import sync
 import sync_process
@@ -48,6 +49,7 @@ WEB_ROOT = ROOT / "web"
 logger = logging.getLogger("agent-monitor")
 _NETWORK_CACHE = {"ts": 0.0, "data": None}
 _NETWORK_TTL = 60.0
+_SESSION_CACHE = SessionCache()
 _SYNC_DUE_AFTER_SECONDS = 600
 _STALE_AFTER_SECONDS = 6 * 60 * 60
 RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "6m": 180, "1y": 365, "2y": 730}
@@ -357,23 +359,31 @@ def sessions_endpoint(query):
     with_filters = _first(query, "with_filters", "") == "1"
 
     def collect(entries, machine=None, aliases=None):
+        source_sessions = []
+        source_options = {key: set() for key in options}
         index = SessionIndex(getattr(entries, "session_metadata", ()))
         # Match Explore display identities without rewriting stored usage.
-        in_window = [replace(entry, project=canonical_project(entry.project, aliases))
-                     for entry in _filter_time(entries, time_range)]
+        projects = {}
+        in_window = []
+        for entry in _filter_time(entries, time_range):
+            if entry.project not in projects:
+                projects[entry.project] = canonical_project(entry.project, aliases)
+            project = projects[entry.project]
+            in_window.append(entry if project == entry.project else replace(entry, project=project))
         display_query = dict(query)
         if query.get("project"):
             display_query["project"] = [canonical_project(value, aliases)
                                         for value in query["project"]]
         if with_filters:
             if machine and in_window:
-                options["machine"].add(machine)
+                source_options["machine"].add(machine)
             for entry in in_window:
-                options["agent"].add(entry.agent_id)
-                options["project"].add(entry.project)
-                options["model"].add(entry.model)
+                source_options["agent"].add(entry.agent_id)
+                source_options["project"].add(entry.project)
+                source_options["model"].add(entry.model)
+        source_options = {key: sorted(values) for key, values in source_options.items()}
         if _first(query, "machine", "") not in ("", machine):
-            return
+            return source_sessions, source_options
         visible = _filter_values(in_window, display_query)
         if cost_status == "unknown":
             visible = [entry for entry in visible if entry.cost_usd is None]
@@ -381,7 +391,14 @@ def sessions_endpoint(query):
             row = _conversation_stats(items, key, index, aliases)
             if machine:
                 row["machine"] = machine
-            sessions.append(row)
+            source_sessions.append(row)
+        return source_sessions, source_options
+
+    def merge(result):
+        rows, filters = result
+        sessions.extend(rows)
+        for key, values in filters.items():
+            options[key].update(values)
 
     if hub.enabled():
         _maybe_sync_remotes(query)
@@ -389,12 +406,16 @@ def sessions_endpoint(query):
             for current in admission.admitted:
                 if not with_filters and _first(query, "machine", "") not in ("", current.host):
                     continue
-                entries = statistics_snapshot.read_admitted_usage(
-                    current, time_range=time_range, query=None if with_filters else
-                    {key: value for key, value in query.items() if key != "project"})
-                collect(entries, current.host, (getattr(current, "meta", None) or {}).get("aliases"))
+                result = _SESSION_CACHE.get(current, query, time_range)
+                if result is None:
+                    entries = statistics_snapshot.read_admitted_usage(
+                        current, time_range=time_range, query=None if with_filters else
+                        {key: value for key, value in query.items() if key != "project"})
+                    result = collect(entries, current.host, (getattr(current, "meta", None) or {}).get("aliases"))
+                    _SESSION_CACHE.put(current, query, time_range, entries, result)
+                merge(result)
     else:
-        collect(load_all_entries(), sync.load_machine_config().self_machine.name)
+        merge(collect(load_all_entries(), sync.load_machine_config().self_machine.name))
     sort = _first(query, "sort", "time")
     sessions.sort(key=lambda row: _session_sort_key(row, sort),
                   reverse=_first(query, "order", "desc") != "asc")
