@@ -2,6 +2,8 @@
 
 ## 2026-10-19
 
+- Enclose the cost overview heading, scope and three readings in one shared white card, retaining desktop separators and the stacked narrow-screen layout.
+
 - Remove machine-status notice boxes entirely from Overview, Explore and Sessions, including exception states. Keep machine diagnostics on Collection and preserve manual refresh receipts and cost-completeness qualifiers.
 
 - Rebuild the six-page Web presentation around the Philo Pulse workspace: white navigation rail, neutral canvas, open cost summaries and consistent cards, typography and controls. Keep existing routes, search, details and account semantics; adapt dense tables and navigation for narrow screens.

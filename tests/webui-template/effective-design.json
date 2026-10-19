@@ -3,7 +3,7 @@
   "template": {
     "id": "project:agent-monitor-pulse-workspace",
     "source": "docs/design.md#effective-design",
-    "sha256": "52218369e5f49eae519bd5a910d7c40ed97c383940977c58cc438006c4949590"
+    "sha256": "617eaf17fee531ffd861d86aa874641a00a9c57e6ea544a9a34096b6fa87d3bb"
   },
   "rules": [
     {

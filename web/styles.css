@@ -444,7 +444,7 @@ button:disabled {
   gap: var(--sp-5);
 }
 
-/* Values and history share one surface; each value keeps its own window. */
+/* Three cost figures share one panel; each keeps its own window. */
 .overview-cost .kpi-grid {
   padding: 16px 0;
   margin: 8px 0;
@@ -1813,12 +1813,11 @@ table td { font-size: 14px; line-height: 22px; }
 #refresh:disabled { opacity: .45; }
 .overview-main .kpi-sections { gap: 24px; }
 .overview-main .panel-grid { margin: 0; }
-.overview-main .overview-cost { padding: 0; }
 .overview-main .codex-account-actions > summary { font-size: 14px; line-height: 22px; }
 @media (max-width: 800px) {
   .panel { padding: 16px; }
 }
-@media (max-width: 480px) {
+@media (max-width: 1000px) {
   .overview-cost .kpi-grid { grid-template-columns: 1fr; }
   .overview-cost .kpi-card { padding: 12px 0; }
   .overview-cost .kpi-card + .kpi-card { border-left: 0; border-top: 1px solid var(--line); }
