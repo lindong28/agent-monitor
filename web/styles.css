@@ -838,13 +838,13 @@ button:disabled {
 .quota-observation-details:not([open]) {
   display: inline-block;
   margin-inline-end: 8px;
-  vertical-align: top;
+  vertical-align: middle;
 }
 .quota-observation-details:not([open]) + .quota-history-note {
   display: inline-block;
   max-width: 100%;
   margin-top: 0;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .quota-machine-self {
