@@ -449,13 +449,17 @@
     return palette[index] || OTHER_COLOR;
   }
 
+  // Agent identity must survive page-specific ordering and single-agent filters.
+  const agentColors = new Map([["claude-code", palette[0]], ["codex", palette[1]]]);
+
   function dataset(label, data, index, extra) {
+    const color = agentColors.get(extra?.agentId) || seriesColor(index);
     return Object.assign(
       {
         label,
         data,
-        borderColor: seriesColor(index),
-        backgroundColor: seriesColor(index),
+        borderColor: color,
+        backgroundColor: color,
         borderWidth: 2,
         // A single observation has no segment; keep its value visible.
         pointRadius: data.filter((value) => value != null && Number.isFinite(Number(value))).length === 1 ? 3 : 0,
@@ -606,6 +610,7 @@
         labels: costHistory.rows.map((row) => row.x),
         datasets: costHistory.columns.map((column, index) =>
           dataset(agentLabel(column), costHistory.rows.map((row) => row.values[column]), index, {
+            agentId: column,
             fill: false,
             spanGaps: true,
           })

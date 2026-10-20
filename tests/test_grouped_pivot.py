@@ -15,6 +15,48 @@ import server
 
 
 class GroupedPivotTests(unittest.TestCase):
+    def test_agent_series_colors_survive_reordering_and_filtering(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+global.window = {};
+global.document = {readyState: "loading", addEventListener() {}};
+eval(fs.readFileSync("web/app.js", "utf8"));
+const ui = window.AgentMonitor;
+const expected = {"claude-code": "#2a78d6", codex: "#eb6834"};
+let captured;
+global.AgentMonitor = {...ui, qs: () => null,
+  chart: (key, id, config) => {captured = config;}};
+eval(fs.readFileSync("web/pivot.js", "utf8").replace(
+  "window.AgentMonitorPivot = {", "window.AgentMonitorPivot = { renderChart,"));
+const pivot = window.AgentMonitorPivot;
+for (const agents of [["claude-code", "codex"], ["codex", "claude-code"], ["codex"], ["claude-code"]]) {
+  for (const metric of ["cost", "tokens"]) {
+    const data = pivot.chartData({dimensions: ["day", "agent"], rows:
+      agents.map(agent => ({key: ["2026-10-20", agent], value: 3}))}, metric);
+    pivot.renderChart(data, "day", metric);
+    agents.forEach((agent, index) => {
+      const overview = ui.dataset(agent, [3], index, {agentId: agent});
+      const explore = captured.data.datasets[index];
+      assert.equal(overview.borderColor, expected[agent], "overview identity: " + agent);
+      assert.equal(explore.borderColor, expected[agent], "explore identity: " + agent);
+      assert.equal(explore.backgroundColor, expected[agent]);
+    });
+  }
+}
+// A model/project named after an agent is not that agent. Joint groups need
+// distinct series colors rather than collapsing every project to its agent hue.
+for (const dimensions of [["day", "model"], ["day", "agent", "project"]]) {
+  const keys = dimensions.length === 2 ? [["codex"], ["claude-code"]] : [["codex", "a"], ["codex", "b"]];
+  const data = pivot.chartData({dimensions, rows: keys.map(key => ({key: ["2026-10-20", ...key], value: 3}))}, "cost");
+  pivot.renderChart(data, "day", "cost");
+  assert.deepEqual(captured.data.datasets.map(d => d.borderColor), ui.palette.slice(0, 2));
+}
+assert.equal(ui.dataset("other", [1], 2, {agentId: "future-agent"}).borderColor, ui.palette[2]);
+'''
+        result = subprocess.run(["node", "-e", script], cwd=Path(__file__).resolve().parents[1],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_ranking_uses_a_scaled_bar_chart_with_full_detail_fallback(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");

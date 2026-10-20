@@ -320,6 +320,9 @@
       const column = JSON.stringify(rest);
       const labels = rest.map((value, i) => displayLabel(value, dims[i + 1]));
       columns.set(column, {
+        // Only a pure agent series has an agent color identity. Joint groups
+        // retain separate hues so multiple projects/models remain distinguishable.
+        agentId: dims.length === 2 && dims[1] === "agent" ? rest[0] : undefined,
         text: rest.length ? labels.map((label, i) => `${dimLabels[dims[i + 1]]}：${label.text}`).join(" · ") : "合计",
         fullLabel: rest.length ? labels.map((label, i) => `${dimLabels[dims[i + 1]]}：${label.fullLabel}`).join(" · ") : "合计",
       });
@@ -431,6 +434,7 @@
       }
       const label = data.labels[column.key];
       return AgentMonitor.dataset(label.text, column.series, index, {
+        agentId: label.agentId,
         fill: false,
         spanGaps: true,
         fullLabel: label.fullLabel,
