@@ -2286,7 +2286,8 @@ console.log(JSON.stringify({
         )
 
         self.assertIn("macstudio", rendered["noteText"])
-        self.assertIn("失效", rendered["noteText"])
+        self.assertIn("来源机器未登录", rendered["noteText"])
+        self.assertNotIn("失效", rendered["noteText"])
         self.assertEqual(rendered["noteTone"], "warning")
         self.assertNotIn("未提供账号配额", rendered["noteText"])
         # Its row is still there — that is what makes the other wording false.

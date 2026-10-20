@@ -148,6 +148,7 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
     const cell=row.cells[6], detail=cell.children.find(n=>n.tagName==='DETAILS');
     const inline=cell.children.filter(n=>n.tagName!=='DETAILS').map(n=>n.textContent).join('');
     const affected=kind==='signed-out-source';
+    assert(!nodes['#quota-signed-out'].textContent.includes('登录已失效'));
     assert.equal(inline.includes('来源机器未登录'),affected,provider+': '+kind);
     assert(!cell.textContent.includes('登录已失效'));
     assert(!inline.includes('保留旧值'));
