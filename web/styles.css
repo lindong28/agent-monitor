@@ -835,6 +835,17 @@ button:disabled {
 
 .quota-observation-details > summary { cursor: pointer; white-space: nowrap; }
 .quota-observation-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.quota-observation-details:not([open]) {
+  display: inline-block;
+  margin-inline-end: 8px;
+  vertical-align: top;
+}
+.quota-observation-details:not([open]) + .quota-history-note {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 0;
+  vertical-align: top;
+}
 
 .quota-machine-self {
   color: var(--ink);
