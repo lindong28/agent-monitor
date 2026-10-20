@@ -298,11 +298,11 @@ button:active:not(:disabled) {
 .group-ranking { list-style: none; padding: 0; margin: var(--sp-5) 0 0; max-height: 520px; overflow: auto; }
 .ranking-item { padding: var(--sp-4) var(--sp-2); }
 .ranking-item + .ranking-item { border-top: 1px solid var(--line-soft); }
-.ranking-heading { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(80px, 3fr) 12ch; align-items: center; gap: var(--sp-5); }
+.ranking-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-5); }
 .ranking-heading > span { min-width: 0; overflow-wrap: anywhere; }
 .ranking-heading strong { text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.ranking-track { height: 8px; margin-top: 0; background: var(--line-soft); border-radius: 4px; overflow: hidden; }
-.ranking-track > span { display: block; height: 100%; background: var(--accent); }
+.ranking-chart-scroll { max-height: 420px; overflow-y: auto; margin-top: var(--sp-5); }
+.ranking-chart-scroll .chart-box { min-width: 0; }
 .ranking-periods { max-height: 240px; overflow-y: auto; margin-top: var(--sp-4); padding: var(--sp-3); background: var(--surface-sunken); font-variant-numeric: tabular-nums; }
 .ranking-periods > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 var(--sp-4); padding: 8px 0; }
 .ranking-periods > div + div { border-top: 1px solid var(--line); }
@@ -1977,7 +1977,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   .quota-window-line .quota-window-reset { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
-  .ranking-heading { grid-template-columns: minmax(80px, 1fr) minmax(40px, 1fr) 12ch; gap: 8px; }
+  .ranking-heading { gap: 8px; }
   .ranking-dimensions { grid-template-columns: minmax(0, 1fr); }
   .session-day-toggle { width: min(100%, calc(100vw - 100px)); }
   .session-day-total { margin-left: 24px; flex-basis: 100%; text-align: left; }

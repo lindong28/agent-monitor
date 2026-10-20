@@ -15,6 +15,56 @@ import server
 
 
 class GroupedPivotTests(unittest.TestCase):
+    def test_ranking_uses_a_scaled_bar_chart_with_full_detail_fallback(self):
+        script = r'''
+const fs = require("fs"), assert = require("assert");
+global.window = {};
+global.document = {readyState: "loading", addEventListener() {}};
+eval(fs.readFileSync("web/app.js", "utf8"));
+const nodes = new Map();
+const node = id => {
+  if (!nodes.has(id)) nodes.set(id, {style: {}, parentElement: {}, innerHTML: "", textContent: "", scrollTop: 0,
+    selectedOptions: [{textContent: "成本"}], setAttribute(k, v) {this[k] = v;}});
+  return nodes.get(id);
+};
+let captured;
+global.AgentMonitor = {...window.AgentMonitor,
+  qs: node, qsa: () => [], params: () => new URLSearchParams("range=30d"),
+  getRange: () => "30d", chart: (key, id, config) => {captured = config;}
+};
+eval(fs.readFileSync("web/pivot.js", "utf8").replace(
+  "window.AgentMonitorPivot = {", "window.AgentMonitorPivot = { renderRanking,"));
+window.AgentMonitorPivot.renderRanking({dimensions: ["day", "agent"], rows: [
+  {key: ["2026-10-19", "codex"], value: 20, cost_coverage: {known: 1, unknown: 0}},
+  {key: ["2026-10-20", "codex"], value: 10, cost_coverage: {known: 1, unknown: 1}},
+  {key: ["2026-10-20", "zero"], value: 0, cost_coverage: {known: 1, unknown: 0}},
+  {key: ["2026-10-20", "<unknown>"], value: null, cost_coverage: {known: 0, unknown: 1}},
+]}, "cost");
+assert(captured, "ranking must render a chart, not just CSS progress tracks");
+assert.equal(captured.type, "bar");
+assert.equal(captured.options.indexAxis, "y");
+assert.equal(captured.options.scales.x.beginAtZero, true);
+assert(captured.options.scales.x.ticks.callback(100).includes("$"));
+assert.equal(captured.options.scales.x.ticks.callback(0.2), "$0.2");
+assert.notEqual(captured.options.scales.x.ticks.callback(0.0002), "$0");
+assert.equal(captured.options.plugins.legend.display, false);
+assert(captured.plugins.some(p => p.id === "barValueLabels"));
+assert.deepEqual(captured.data.datasets[0].data, [30, 0, null]);
+assert.equal(captured.data.labels.length, 3);
+const tooltip = captured.options.plugins.tooltip.callbacks;
+assert(tooltip.label({raw: 30, dataIndex: 0}).join(" ").includes("未知 1"));
+assert(tooltip.title([{dataIndex: 2}]).includes("<unknown>"));
+const html = node("#group-ranking").innerHTML;
+assert(!html.includes("ranking-track"));
+assert(html.includes("&lt;unknown&gt;"));
+assert(html.includes("agent=codex"));
+assert(html.includes("2026-10-19") && html.includes("2026-10-20"));
+assert(html.includes("无已知金额"));
+'''
+        result = subprocess.run(["node", "-e", script], cwd=Path(__file__).resolve().parents[1],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_browser_ranking_aggregates_every_joint_group_and_preserves_unknowns(self):
         script = r'''
 global.window = {};

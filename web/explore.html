@@ -183,7 +183,14 @@
             <span id="ranking-count" class="status-line"></span>
           </div>
           <p id="ranking-description" class="status-line"></p>
-          <ol id="group-ranking" class="group-ranking" aria-label="分组排名"></ol>
+          <p id="ranking-coverage" class="estimate-note" hidden></p>
+          <div class="ranking-chart-scroll" tabindex="0" role="region" aria-label="分组排名图，可纵向滚动">
+            <div id="ranking-chart-box" class="chart-box"><canvas id="ranking-chart" role="img" aria-label="分组排名；完整标签、精确读数和会话入口见下方数据与明细"></canvas></div>
+          </div>
+          <details class="ranking-details chart-data-disclosure">
+            <summary>数据与明细</summary>
+            <ol id="group-ranking" class="group-ranking" aria-label="分组排名明细"></ol>
+          </details>
         </section>
       </main>
     </div>

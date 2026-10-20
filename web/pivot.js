@@ -537,7 +537,43 @@
     AgentMonitor.qs("#ranking-count").textContent = AgentMonitor.integer(ranked.rows.length) + " 个组合";
     AgentMonitor.qs("#ranking-description").textContent = "所选时间范围内合计 · 按" + (metric === "cost" ? "已知成本" : metricLabel) + "降序" +
       (timeDim ? ` · 展开${periodLabel}` : "");
-    const max = ranked.rows.reduce((largest, row) => Math.max(largest, row.value || 0), 0);
+    const chartBox = AgentMonitor.qs("#ranking-chart-box");
+    chartBox.style.height = `${Math.max(150, ranked.rows.length * 44 + 50)}px`;
+    chartBox.parentElement.hidden = !ranked.rows.length;
+    const missing = ranked.rows.filter(row => row.value == null).length;
+    const partial = metric === "cost" && ranked.rows.some(row => row.value != null && row.cost_coverage?.unknown > 0);
+    const coverage = AgentMonitor.qs("#ranking-coverage");
+    coverage.hidden = !missing && !partial;
+    coverage.textContent = [
+      missing ? `${missing} 个组合${metric === "cost" ? "无已知金额" : "无读数"}，以 — 标记` : "",
+      partial ? "部分组合含未计价记录，柱形仅表示已知成本" : "",
+    ].filter(Boolean).join("；");
+    AgentMonitor.chart("pivotRanking", "ranking-chart", {
+      type: "bar",
+      data: {
+        labels: ranked.rows.map(row => row.key.join(" · ")),
+        datasets: [AgentMonitor.dataset(metricLabel, ranked.rows.map(row => row.value), 0, { maxBarThickness: 32 })],
+      },
+      options: AgentMonitor.chartOptions({
+        indexAxis: "y",
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: {
+            title: items => ranked.rows[items[0].dataIndex].key.join(" · "),
+            label: context => metric === "cost"
+              ? [AgentMonitor.costReading(context.raw, ranked.rows[context.dataIndex].cost_coverage),
+                 AgentMonitor.costCoverageText(ranked.rows[context.dataIndex].cost_coverage)]
+              : formatValue(context.raw, metric),
+          } },
+        },
+        scales: {
+          x: { beginAtZero: true, ticks: { callback: value => metric === "cost" ? AgentMonitor.chartMoneyTick(value) : AgentMonitor.compactNumber(value) } },
+          y: { ticks: { autoSkip: false } },
+        },
+        layout: { padding: { right: 96 } },
+      }),
+      plugins: [AgentMonitor.barValueLabels(metric === "cost" ? AgentMonitor.money : AgentMonitor.compactNumber, "—")],
+    });
     const ranking = AgentMonitor.qs("#group-ranking");
     const rankingScroll = ranking.scrollTop;
     const expanded = new Map(AgentMonitor.qsa("#group-ranking .ranking-periods[open]").map(element => [element.dataset.key, element.scrollTop]));
@@ -545,13 +581,12 @@
       const key = JSON.stringify([ranked.dimensions, row.key, metric]);
       const label = row.key.map((value, i) => `<span><small>${escapeHtml(dimLabels[ranked.dimensions[i]])}</small>${escapeHtml(value)}</span>`).join("");
       const periods = row.periods.map((period) => `<div class="ranking-period"><span>${escapeHtml(period.label)}</span><span class="reading-amount">${metric === "cost" ? AgentMonitor.costReading(period.value, period.cost_coverage).split(" · ")[0] : formatValue(period.value, metric)}</span></div>`).join("");
-      const width = max > 0 && row.value !== null ? Math.max(0, row.value / max * 100) : 0;
       const query = new URLSearchParams({ range: AgentMonitor.getRange(), ...dateParams(), sort: metric === "cost" ? "cost" : "tokens" });
       filterNames.forEach(name => { const value = desiredFilterValue(name); if (value) query.set(name, value); });
       ranked.dimensions.forEach((dim, index) => query.set(dim, row.key[index]));
       if (metric === "unknown_cost") query.set("cost_status", "unknown");
       const follow = metric === "unknown_cost" && row.value === 0 ? '<span class="scope-note">没有未知成本记录</span>' : `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">${metric === "unknown_cost" ? "查看含未知成本的会话" : "查看会话"}</a>`;
-      return `<li class="ranking-item"><div class="ranking-heading"><div class="ranking-dimensions">${label}</div><div class="ranking-track" aria-hidden="true"><span style="width:${width}%"></span></div><strong>${formatValue(row.value, metric)}</strong></div>${metric === "cost" && row.value == null ? '<p class="scope-note">无已知金额</p>' : ""}${follow}${periods ? `<details class="ranking-periods" data-key="${escapeHtml(key)}" ${expanded.has(key) ? "open" : ""}><summary>${periodLabel} · ${row.periods.length} 期</summary>${periods}</details>` : ""}</li>`;
+      return `<li class="ranking-item"><div class="ranking-heading"><div class="ranking-dimensions">${label}</div><strong>${metric === "cost" ? AgentMonitor.costReading(row.value, row.cost_coverage) : formatValue(row.value, metric)}</strong></div>${metric === "cost" && row.value == null ? '<p class="scope-note">无已知金额</p>' : ""}${metric === "cost" && row.cost_coverage?.unknown > 0 ? `<p class="scope-note">${AgentMonitor.costCoverageText(row.cost_coverage)}</p>` : ""}${follow}${periods ? `<details class="ranking-periods" data-key="${escapeHtml(key)}" ${expanded.has(key) ? "open" : ""}><summary>${periodLabel} · ${row.periods.length} 期</summary>${periods}</details>` : ""}</li>`;
     }).join("") : '<li class="empty-state">当前范围内无记录，请检查日期与筛选条件。</li>';
     AgentMonitor.qsa("#group-ranking .ranking-periods[open]").forEach(element => {
       element.scrollTop = expanded.get(element.dataset.key) || 0;

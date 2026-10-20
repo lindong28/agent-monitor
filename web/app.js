@@ -362,7 +362,7 @@
   // `chart.options`: Chart.js resolves option values through a proxy that
   // treats a function as a scriptable option, and looking one up by name from
   // inside the plugin resolves to itself ("Recursion detected").
-  function barValueLabels(format) {
+  function barValueLabels(format, missingText = null) {
     return {
       id: "barValueLabels",
       afterDatasetsDraw(instance) {
@@ -386,6 +386,9 @@
           meta.data.forEach((element, pointIndex) => {
             const value = set.data[pointIndex];
             if (value === null || value === undefined) {
+              if (missingText !== null) {
+                ctx.fillText(missingText, instance.scales.x.getPixelForValue(0) + 8, element.y);
+              }
               return;
             }
             ctx.fillText(format(value), element.x + 8, element.y);
@@ -3797,6 +3800,8 @@
     bindShell,
     chart,
     chartOptions,
+    barValueLabels,
+    chartMoneyTick,
     compactNumber,
     dataset,
     getRange,
