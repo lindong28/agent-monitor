@@ -1220,9 +1220,8 @@
     const display = quotaDisplayReading(provider, account);
     const stale = quotaIsStale(display.updated_at);
     if (stale) {
-      // Deliberately carries no styling — the note in the Updated cell marks
-      // staleness where it applies. This is the machine-readable half, which
-      // the pill's wording is not: keep it even though no CSS rule selects it.
+      // Keep the machine-readable age state; observation age is visible in
+      // the update cell without repeating a stale warning on each row.
       row.classList.add("stale");
     }
 
@@ -1515,8 +1514,6 @@
     const renderedAtMs = Date.now();
     const resetEpoch = account[spec.reset];
     const resetState = quotaResetState(resetEpoch, renderedAtMs);
-    const rememberedHistoricalWindow =
-      quotaPresence(account) === "remembered" && resetState !== "future";
     if (!known && resetState === "unknown") {
       const missing = document.createElement("span");
       missing.className = "quota-window-reason";
@@ -1542,15 +1539,6 @@
     if (known) {
       line.appendChild(quotaMeter(used));
     }
-    // The frozen usage value and meter remain facts after their own window has
-    // reset, or when its reset is unknown; withdrawing the pill does not infer
-    // that current usage is zero.
-    // The pill is a present-tense warning, and D4 explicitly narrows contract
-    // G4b for this historical case rather than accidentally omitting an alert.
-    // A missing reset is not evidence that the old window is still running.
-    if (band && !rememberedHistoricalWindow) {
-      line.appendChild(quotaBandPill(band, band === "critical" ? "即将用尽" : "余量偏低"));
-    }
     cell.appendChild(line);
 
     const reset = document.createElement("div");
@@ -1561,7 +1549,7 @@
     if (resetState !== "unknown") {
       reset.title = resetText(resetEpoch, renderedAtMs);
     }
-    cell.appendChild(reset);
+    line.appendChild(reset);
     return cell;
   }
 
@@ -1624,7 +1612,7 @@
     const names = account.machines || [];
     const source = display.quota_source === "account_action" ? null : display.reading_from;
     const remembered = quotaPresence(account) === "remembered";
-    if (!names.length) cell.textContent = remembered ? "无在用机器" : "—";
+    if (!names.length) cell.textContent = "—";
     else if (remembered) cell.appendChild(document.createTextNode("历史关联："));
     names.forEach((name, index) => {
       if (index) cell.appendChild(document.createTextNode(" · "));
@@ -1687,22 +1675,26 @@
       cell.appendChild(node);
     };
     if (account.quota_source === "account_action") {
-      if (stale) note("读数较旧");
       const context = document.createElement("span");
       context.className = "quota-history-note";
       context.textContent = "配额来自账号操作中的配额查询；机器归属与套餐来自机器采集";
       details.appendChild(context);
       return cell;
     }
-    if (quotaPresence(account) === "remembered") {
-      note("历史读数，不代表当前状态");
-    } else {
+    if (!account.reading_from) {
+      const source = document.createElement("span");
+      source.className = "quota-history-note";
+      source.textContent = quotaPresence(account) === "remembered"
+        ? "历史保存未保留来源机器" : "未取得读数来源机器";
+      details.appendChild(source);
+    }
+    if (quotaPresence(account) !== "remembered") {
       const invalidSource = (renderedQuotaRateLimits?.[provider.key]?.signed_out_machines || []).includes(account.reading_from);
       if (invalidSource) note("配额来源的登录已失效；保留旧值");
       if (refreshNotice) note(refreshNotice);
       if (stale && !invalidSource) note("可能早于一次登录变更");
     }
-    if (!account.reading_from) note("配额来源未知");
+
     return cell;
   }
 
@@ -2769,6 +2761,8 @@
   const SESSIONS_PAGE_SIZE = 100;
   const sessionsView = {
     rows: [],
+    expandedDays: new Map(),
+    dayLimits: new Map(),
     page: 0,
     status: "loading",
     filters: { agent: "", project: "", model: "", machine: "", cost_status: "" },
@@ -3018,11 +3012,29 @@
     return sessionsView.rows;
   }
 
+  // Group the complete filtered result before rendering: a date total must not
+  // depend on the old 100-row page boundary. A cross-day session belongs once,
+  // to the date of its last matching usage event.
+  function sessionDateGroups(rows) {
+    const groups = new Map();
+    rows.forEach(row => {
+      const day = (row.ended_at && dayKey(row.ended_at)) || "日期未知";
+      if (!groups.has(day)) groups.set(day, { day, rows: [], tokens: 0, cost: null, partial: false });
+      const group = groups.get(day);
+      group.rows.push(row);
+      group.tokens += row.tokens;
+      if (Number.isFinite(row.cost_usd)) group.cost = (group.cost ?? 0) + row.cost_usd;
+      if (row.cost_usd == null || row.unpriced_records > 0) group.partial = true;
+    });
+    return [...groups.values()];
+  }
+
   function renderSessions() {
     const tbody = qs("#sessions-body");
     const matched = filteredSessions();
+    const grouped = (qs("#sort")?.value || "time") === "time";
     const lastPage = Math.max(0, Math.ceil(matched.length / SESSIONS_PAGE_SIZE) - 1);
-    sessionsView.page = Math.min(sessionsView.page, lastPage);
+    sessionsView.page = grouped ? 0 : Math.min(sessionsView.page, lastPage);
     const listParams = params();
     SESSION_FILTERS.forEach(({key}) => {
       if (sessionsView.filters[key]) listParams.set(key, sessionsView.filters[key]);
@@ -3032,32 +3044,15 @@
     listParams.set("sort", qs("#sort")?.value || "time");
     replaceCurrentUrl("/sessions?" + listParams);
     const start = sessionsView.page * SESSIONS_PAGE_SIZE;
-    const pageRows = matched.slice(start, start + SESSIONS_PAGE_SIZE);
     const filtering = Object.values(sessionsView.filters).some(Boolean);
-    if (!pageRows.length) {
+    if (!matched.length) {
       renderSessionState("empty", filtering ? "没有符合筛选条件的会话。" : "此范围内没有会话。");
-      qs("#session-count").textContent = filtering
-        ? "找到 0 个匹配会话"
-        : "0 个会话";
+      qs("#session-count").textContent = filtering ? "找到 0 个匹配会话" : "0 个会话";
       return;
     }
-    // Dates only group meaningfully while the list is in time order; sorted by
-    // cost or tokens the days interleave and a heading would assert an order
-    // the table does not have.
-    const grouped = (qs("#sort") ? qs("#sort").value : "time") === "time";
-    let lastDay = null;
-
     tbody.innerHTML = "";
     tbody.setAttribute("aria-busy", "false");
-    pageRows.forEach((row) => {
-      const day = dayKey(row.ended_at);
-      if (grouped && day && day !== lastDay) {
-        const heading = document.createElement("tr");
-        heading.className = "date-group";
-        heading.innerHTML = `<th colspan="5" scope="colgroup">${escapeHtml(day)}</th>`;
-        tbody.appendChild(heading);
-        lastDay = day;
-      }
+    const appendRow = (row) => {
       const tr = document.createElement("tr");
       tr.className = "session-row";
       tr.dataset.sessionId = row.session_id;
@@ -3077,13 +3072,67 @@
         if (!event.target.closest("a, button") && !window.getSelection()?.toString()) tr.querySelector("a").click();
       });
       tbody.appendChild(tr);
-    });
-
+    };
+    if (grouped) {
+      const groups = sessionDateGroups(matched);
+      groups.forEach((group, index) => {
+        const expanded = sessionsView.expandedDays.has(group.day) ? sessionsView.expandedDays.get(group.day) : index === 0;
+        const heading = document.createElement("tr");
+        heading.className = "date-group";
+        heading.dataset.day = group.day;
+        const cell = document.createElement("th");
+        cell.colSpan = 5;
+        cell.scope = "colgroup";
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "session-day-toggle quota-toggle";
+        toggle.setAttribute("aria-expanded", String(expanded));
+        toggle.innerHTML = `<span>${escapeHtml(group.day)}</span><span>${integer(group.rows.length)} 个会话</span><span class="session-day-total">${sessionEntryCost(group.cost)}${group.partial && group.cost !== null ? ' · 部分未计价' : ''} · ${integer(group.tokens)} tokens</span>`;
+        toggle.addEventListener("click", () => {
+          sessionsView.expandedDays.set(group.day, !expanded);
+          renderSessions();
+          [...tbody.querySelectorAll(".date-group")].find(row => row.dataset.day === group.day)?.querySelector("button").focus({ preventScroll: true });
+        });
+        cell.appendChild(toggle);
+        heading.appendChild(cell);
+        tbody.appendChild(heading);
+        if (expanded) {
+          const limit = sessionsView.dayLimits.get(group.day) || SESSIONS_PAGE_SIZE;
+          group.rows.slice(0, limit).forEach(appendRow);
+          if (group.rows.length > limit) {
+            const moreRow = document.createElement("tr");
+            moreRow.className = "session-day-more";
+            const moreCell = document.createElement("td");
+            moreCell.colSpan = 5;
+            const more = document.createElement("button");
+            more.type = "button";
+            more.textContent = `再显示 ${integer(Math.min(SESSIONS_PAGE_SIZE, group.rows.length - limit))} 个会话（已显示 ${integer(limit)} / ${integer(group.rows.length)}）`;
+            more.addEventListener("click", () => {
+              sessionsView.dayLimits.set(group.day, limit + SESSIONS_PAGE_SIZE);
+              renderSessions();
+              [...tbody.querySelectorAll(".date-group")].find(row => row.dataset.day === group.day)?.querySelector("button").focus({ preventScroll: true });
+            });
+            moreCell.appendChild(more);
+            moreRow.appendChild(moreCell);
+            tbody.appendChild(moreRow);
+          }
+        }
+      });
+      ["", "-top"].forEach(suffix => {
+        const status = qs(`#page-status${suffix}`);
+        if (status) status.textContent = `${integer(groups.length)} 个日期 · 共 ${integer(matched.length)} 个会话`;
+        for (const direction of ["prev", "next"]) {
+          const button = qs(`#page-${direction}${suffix}`);
+          if (button) button.disabled = true;
+        }
+      });
+    } else {
+      const pageRows = matched.slice(start, start + SESSIONS_PAGE_SIZE);
+      pageRows.forEach(appendRow);
+      renderSessionPager(matched.length, start, pageRows.length);
+    }
     syncStickyHeaderOffset();
-    qs("#session-count").textContent = filtering
-      ? `找到 ${integer(matched.length)} 个匹配会话`
-      : `${integer(sessionsView.rows.length)} 个会话`;
-    renderSessionPager(matched.length, start, pageRows.length);
+    qs("#session-count").textContent = filtering ? `找到 ${integer(matched.length)} 个匹配会话` : `${integer(matched.length)} 个会话`;
   }
 
   function renderSessionState(state, message, load) {

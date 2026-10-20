@@ -272,7 +272,7 @@
       "role": "history-context",
       "kind": "predicate",
       "source": "docs/design.md#effective-design",
-      "description": "Each historical row retains its qualification in the observation column; scrolling and mobile labels keep it reachable."
+      "description": "Historical grouping and observation age remain visible; exact time and useful provenance remain accessible in details without repeating historical or unknown-source warnings in every row."
     },
     {
       "id": "PULSE-V10",

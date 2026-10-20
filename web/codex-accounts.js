@@ -1,7 +1,7 @@
 const STAGES = {
   queued: "排队中",
   checking: "检查登录", login_queued: "等待授权排队", login: "等待官方授权", sending: "正在发送", reading: "读取配额",
-  succeeded: "已完成", partial: "消息完成 · 配额待确认", failed: "未完成",
+  succeeded: "已完成", partial: "配额待确认", failed: "未完成",
   cancelled: "已取消", interrupted: "上次操作已中断",
 };
 const MESSAGE_STATUS = { not_sent: "未发送", unknown: "结果未知，可能已消耗额度", succeeded: "发送成功", failed: "发送失败，可能已消耗额度" };
@@ -273,7 +273,7 @@ export function init() {
           if (checkbox.checked) selectedIds.add(account.id); else selectedIds.delete(account.id);
           renderBatch();
         });
-        label.append(checkbox, document.createTextNode("选择"));
+        label.append(checkbox);
         heading.prepend(label);
       }
       card.append(heading);

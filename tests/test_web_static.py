@@ -783,15 +783,13 @@ process.stdout.write(JSON.stringify({
         # what remains would pair a long bar with a small used percentage.
         self.assertIn("quotaMeter(used)", js)
 
-    def test_overview_quota_flags_low_headroom_in_words_not_only_colour(self):
-        """A row the reader must act on has to survive for a reader who cannot
-        see the colour it is drawn in."""
+    def test_overview_quota_uses_numeric_headroom_without_duplicate_warnings(self):
         js = (ROOT / "web" / "app.js").read_text()
-
-        self.assertIn("余量偏低", js)
-        self.assertIn("即将用尽", js)
-        self.assertIn("QUOTA_BAND_CRITICAL", js)
-        self.assertIn("QUOTA_BAND_LOW", js)
+        cell = js[js.index("  function quotaWindowCell"):js.index("  function quotaMeter")]
+        self.assertIn("`${used}%`", cell)
+        self.assertIn("quotaMeter(used)", cell)
+        self.assertNotIn("quotaBandPill", cell)
+        self.assertIn('line.appendChild(reset)', cell)
 
     def test_the_plan_cell_states_a_disagreement_and_stays_silent_otherwise(self):
         """Three states, and only one of them is ever asserted on the page.
@@ -1217,7 +1215,7 @@ process.stdout.write(JSON.stringify({
                     "observed_count": 0,
                 },
                 "F2 boundary reset": {
-                    "warnings": ["即将用尽"],
+                    "warnings": [],
                     "reset_text": "1 分钟后重置",
                     "observed_count": 0,
                     "clock_reads": 1,
@@ -1236,7 +1234,7 @@ process.stdout.write(JSON.stringify({
             self.assertIn("remembered", remembered["rowClass"])
             self.assertIn("stale", remembered["rowClass"])
             self.assertEqual(remembered["historyMarkerCount"], 0)
-            self.assertEqual(remembered["historyNoteCount"], 1)
+            self.assertEqual(remembered["historyNoteCount"], 0)
             self.assertEqual(remembered["staleWarningCount"], 0)
             # 5h first, then 7d — the fixture's two windows carry different
             # values, so this pair fails if the columns are ever swapped without
@@ -1244,7 +1242,7 @@ process.stdout.write(JSON.stringify({
             self.assertEqual(remembered["amounts"], ["96%", "91%"])
             self.assertEqual(remembered["fills"], ["0.96", "0.91"])
 
-        self.assertEqual(future["warningTexts"], ["即将用尽", "即将用尽"])
+        self.assertEqual(future["warningTexts"], [])
         self.assertTrue(all(reset["text"].endswith("后重置") for reset in future["resets"]))
         self.assertEqual(
             [reset["title"] for reset in future["resets"]],
@@ -1259,7 +1257,7 @@ process.stdout.write(JSON.stringify({
         )
         self.assertEqual(past["observedTexts"], [])
         self.assertNotIn("观测", past["accountText"])
-        self.assertIn("历史读数，不代表当前状态", past["updateText"])
+        self.assertNotIn("历史读数，不代表当前状态", past["updateText"])
         self.assertIn("当前未在已纳入的机器上使用", past["updateText"])
         self.assertNotIn("账号操作", past["updateText"])
         self.assertTrue(all(text.startswith("观测于 ") for text in past["observedTexts"]))
@@ -1269,10 +1267,10 @@ process.stdout.write(JSON.stringify({
         self.assertEqual([reset["title"] for reset in unknown["resets"]], [""] * 2)
         self.assertEqual(unknown["observedTexts"], [])
         self.assertNotIn("观测", unknown["accountText"])
-        self.assertIn("历史读数，不代表当前状态", unknown["updateText"])
+        self.assertNotIn("历史读数，不代表当前状态", unknown["updateText"])
         self.assertTrue(all(text.startswith("观测于 ") for text in unknown["observedTexts"]))
 
-        self.assertEqual(boundary["warningTexts"], ["即将用尽"])
+        self.assertEqual(boundary["warningTexts"], [])
         self.assertEqual(
             boundary["reset"],
             {"text": "1 分钟后重置", "title": payload["boundaryTitle"]},
@@ -1284,7 +1282,7 @@ process.stdout.write(JSON.stringify({
         self.assertIn("stale", live["rowClass"])
         self.assertEqual(live["providerText"], "Claude")
         self.assertEqual(live["planText"], "Max 20×")
-        self.assertEqual(live["warningTexts"], ["即将用尽", "即将用尽"])
+        self.assertEqual(live["warningTexts"], [])
         self.assertEqual(live["staleWarningCount"], 1)
         self.assertEqual(live["historyMarkerCount"], 0)
         self.assertEqual(live["historyNoteCount"], 0)

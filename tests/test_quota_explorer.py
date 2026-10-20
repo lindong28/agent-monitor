@@ -124,7 +124,8 @@ for (const [machines, source, expected] of [
   assert.equal(row.cells[5].textContent,expected,JSON.stringify({machines,source}));
   assert.equal(row.cells[6].dataset.label,'配额更新');
   assert(descendants(row.cells[6]).some(n=>n.tagName==='SUMMARY'&&n.textContent==='3 分钟前'));
-  assert.equal(row.cells[6].textContent.includes('配额来源未知'),source===null);
+  assert(!row.cells[6].textContent.includes('配额来源未知'));
+  assert.equal(descendants(row.cells[6]).filter(n=>n.tagName==='DETAILS').some(n=>n.textContent.includes('未取得读数来源机器')),source===null);
   assert(row.cells[6].textContent.includes(ui.formatDate(sample.updated_at)));
 }
 for (const [stamp,expected] of [
@@ -165,7 +166,7 @@ assert(!rows()[0].cells[2].textContent.includes('机器记录'));
 const observationDetails=descendants(rows()[0].cells[6]).find(n=>n.tagName==='DETAILS');
 assert(observationDetails.textContent.includes('来自账号操作中的配额查询'));
 assert(observationDetails.textContent.includes('套餐'));
-assert.equal(rows()[0].cells[5].textContent,'无在用机器');
+assert.equal(rows()[0].cells[5].textContent,'—');
 assert(observationDetails.textContent.includes('当前未在已纳入的机器上使用'));
 assert(observationDetails.textContent.includes('独立保存的登录状态见账号操作'));
 assert(!rows()[0].cells[6].children.filter(n=>n.tagName!=='DETAILS').some(n=>n.textContent.includes('查询')),
@@ -174,7 +175,8 @@ assert(!rows()[0].cells[1].textContent.includes('历史'),'provider cell describ
 assert(!rows()[0].cells[6].textContent.includes('读数较旧'));
 Date.now=()=>Date.parse(observed)+3*86400000;
 ui.renderQuotaAccounts(projection);
-assert(rows()[0].cells[6].children.filter(n=>n.tagName!=='DETAILS').some(n=>n.textContent==='读数较旧'), 'stale query qualification stays visible outside details');
+assert(!rows()[0].cells[6].textContent.includes('读数较旧'));
+assert(descendants(rows()[0].cells[6]).some(n=>n.tagName==='SUMMARY'&&n.textContent.includes('天前')), 'observation age remains visible');
 Date.now=realNow;
 ui.renderQuotaAccounts(projection);
 assert.equal(rows()[0].dataset.observedAt,past.updated_at,'deletion CAS stays on machine observation');
@@ -188,7 +190,9 @@ for (const newer of [observed,'2099-01-01T00:00:00Z']) {
   ui.renderQuotaAccounts({codex:{accounts:[{...past,updated_at:newer,seven_day_used_pct:42}]}});
   assert(rows()[0].cells[4].textContent.includes('42%'));
   assert(!rows()[0].cells[6].textContent.includes('来自账号操作中的配额查询'));
-  assert(rows()[0].cells[6].textContent.includes('历史读数，不代表当前状态'));
+  assert(!rows()[0].cells[6].textContent.includes('历史读数，不代表当前状态'));
+  assert(descendants(rows()[0].cells[6]).some(n=>n.tagName==='DETAILS'&&n.textContent.includes('历史保存未保留来源机器')));
+  assert(rows()[0].cells[6].textContent.includes('当前未在已纳入的机器上使用'));
 }
 ui.renderQuotaAccounts(projection);
 ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:'invalid',seven_day_used_pct:8}},batch_result:action.operation} ]);
