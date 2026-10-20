@@ -137,6 +137,28 @@ for (const [stamp,expected] of [
   const row=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='age');
   assert(descendants(row.cells[6]).some(n=>n.tagName==='SUMMARY'&&n.textContent===expected),expected);
 }
+// A signed-out reading source needs a short status, with recovery in details.
+for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
+  for (const kind of ['signed-out-source','healthy-source','other-machine','remembered','account-action']) {
+    const sample=account('login-context','known',kind==='remembered'?'remembered':'in_use');
+    if (kind==='account-action') sample.quota_source='account_action';
+    const signedOut=kind==='healthy-source'?[]:[kind==='other-machine'?'beta':'alpha'];
+    ui.renderQuotaAccounts({[provider]:{accounts:[sample],signed_out_machines:signedOut}});
+    const row=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='login-context');
+    const cell=row.cells[6], detail=cell.children.find(n=>n.tagName==='DETAILS');
+    const inline=cell.children.filter(n=>n.tagName!=='DETAILS').map(n=>n.textContent).join('');
+    const affected=kind==='signed-out-source';
+    assert.equal(inline.includes('来源机器未登录'),affected,provider+': '+kind);
+    assert(!cell.textContent.includes('登录已失效'));
+    assert(!inline.includes('保留旧值'));
+    if (affected) {
+      assert.equal(inline,'来源机器未登录');
+      for (const text of ['alpha',label,'最后一次','登录此账号','更新统计与配额'])
+        assert(detail.textContent.includes(text),text);
+      assert.equal(sample.five_hour_used_pct,91,'copy must not alter the reading');
+    }
+  }
+}
 Date.now=realNow;
 const original=JSON.stringify(data);
 const rows=()=>table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId);

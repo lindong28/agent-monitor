@@ -1698,7 +1698,13 @@
     }
     if (quotaPresence(account) !== "remembered") {
       const invalidSource = (renderedQuotaRateLimits?.[provider.key]?.signed_out_machines || []).includes(account.reading_from);
-      if (invalidSource) note("配额来源的登录已失效；保留旧值");
+      if (invalidSource) {
+        note("来源机器未登录");
+        const recovery = document.createElement("span");
+        recovery.className = "quota-history-note";
+        recovery.textContent = `当前显示来自 ${account.reading_from} 的最后一次配额读数。该机器未登录 ${provider.label}；如需继续从此机器更新，请在该机器登录此账号，再点击“更新统计与配额”。`;
+        details.appendChild(recovery);
+      }
       if (refreshNotice) note(refreshNotice);
       if (stale && !invalidSource) note("可能早于一次登录变更");
     }
