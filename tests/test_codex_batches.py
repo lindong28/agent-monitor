@@ -18,6 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class BatchTests(unittest.TestCase):
     def setUp(self):
+        for patch in (mock.patch.object(ca, "START_INTERVAL_SECONDS", 0),
+                      mock.patch.object(ca.shutil, "which", return_value=sys.executable)):
+            patch.start()
+            self.addCleanup(patch.stop)
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.manager = ca.Manager(Path(temp.name) / "profiles")
@@ -166,6 +170,8 @@ class BatchTests(unittest.TestCase):
                         self.assertNotIn("user_code", account["operation"])
                 self.assertEqual(self.calls(good), 2)
                 self.scenarios.update({pid: "success" for pid in ids})
+                for pid in ids:
+                    self.manager.release_rate_limit(pid)
                 self.manager.retry_batch(batch)
                 self.wait()
                 self.assertEqual(self.calls(good), 2)

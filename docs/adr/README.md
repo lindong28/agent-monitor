@@ -73,3 +73,5 @@ Earlier decisions remain in the source repository at the immutable commit linked
 - [20261018-6f21 — Quota label placement](20261018-6f21-quota-label-placement.md): query provenance in observation details, historical membership in the machine column, distinct unknown and signed-out identities. Revises a62e presentation only.
 
 - [20261018-8c42: nominal geography and cost diagnostics](20261018-8c42-cost-diagnostics.md) — preserve valuation evidence and move repeated coverage into diagnostics.
+
+- [20261021-a84c — Codex request controls](20261021-a84c-codex-request-controls.md): accepted; classified recovery, persistent pauses, local release and paced startup; local validation only, no deployment.

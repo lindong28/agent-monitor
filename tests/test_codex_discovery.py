@@ -18,6 +18,10 @@ import server
 
 class DiscoveryTests(unittest.TestCase):
     def setUp(self):
+        for patch in (mock.patch.object(ca, "START_INTERVAL_SECONDS", 0),
+                      mock.patch.object(ca.shutil, "which", return_value=sys.executable)):
+            patch.start()
+            self.addCleanup(patch.stop)
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)

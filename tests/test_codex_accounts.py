@@ -16,6 +16,10 @@ import codex_accounts as ca
 
 class AccountActionsTests(unittest.TestCase):
     def setUp(self):
+        for patch in (mock.patch.object(ca, "START_INTERVAL_SECONDS", 0),
+                      mock.patch.object(ca.shutil, "which", return_value=sys.executable)):
+            patch.start()
+            self.addCleanup(patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -150,6 +154,7 @@ class AccountActionsTests(unittest.TestCase):
     def test_login_rate_limits_are_visible_without_misdiagnosing_settings(self):
         for scenario in ("login_start_rate_limit", "login_poll_rate_limit", "login_unknown_failure"):
             with self.subTest(scenario=scenario):
+                self.manager.release_rate_limit(self.account()["id"])
                 result = self.run_case(scenario)
                 op = result["operation"]
                 self.assertEqual(op["stage"], "failed")
@@ -251,7 +256,7 @@ class AccountActionsTests(unittest.TestCase):
         for scenario, category in (("usage_limit", "usageLimitExceeded"),
                                    ("stream_error", "responseStreamDisconnected"),
                                    ("unsafe_error", "unknown"),
-                                   ("recovery_failure", "usageLimitExceeded")):
+                                   ("recovery_failure", "responseStreamDisconnected")):
             with self.subTest(scenario=scenario):
                 self.manager.root = self.root / scenario
                 result = self.run_case(scenario)

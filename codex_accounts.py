@@ -25,6 +25,9 @@ MESSAGE = "Please reply with OK."
 ACTIVE = {"queued", "checking", "login_queued", "login", "sending", "reading"}
 LOGIN_SECONDS = 600
 SEND_SECONDS = 120
+# Local startup pacing, not a provider rate limit or an anti-abuse guarantee.
+START_INTERVAL_SECONDS = 2
+INTERRUPT_SECONDS = 2
 
 
 class ActionError(Exception):
@@ -40,7 +43,7 @@ class Cancelled(ActionError):
 
 class LoginRateLimited(ActionError):
     def __init__(self):
-        super().__init__("OpenAI 登录服务限流（429），本次授权已停止，设备码不可再用于此操作。请稍后重试；本次未发送消息。", 429)
+        super().__init__("OpenAI 登录服务限流（429），本次授权已停止，设备码不可再用于此操作。请按服务端指引等待，再解除本地限流暂停；本次未发送消息。", 429, "loginRateLimited")
 
 
 # Only structured protocol discriminants enter public/persisted failure data.
@@ -58,6 +61,49 @@ TURN_FAILURES = {
     "sessionBudgetExceeded": "会话预算已耗尽。",
     "badRequest": "服务端拒绝了请求参数。",
 }
+
+RECOVERABLE_FAILURES = {"unknown", "timeout", "processExited", "httpConnectionFailed",
+                        "responseStreamConnectionFailed", "responseStreamDisconnected",
+                        "responseTooManyFailedAttempts"}
+REACHED_LIMITS = {"rate_limit_reached", "workspace_owner_credits_depleted",
+                  "workspace_member_credits_depleted", "workspace_owner_usage_limit_reached",
+                  "workspace_member_usage_limit_reached"}
+RESTRICTION_DETAILS = {
+    "authentication": "认证被拒绝，已暂停此账号操作。请在详情中清除本页登录态，再重新授权；这不代表账号已恢复。",
+    "quota": "服务端明确限制了额度使用，已暂停发送。可仅刷新配额；只有服务端明确允许使用后才解除此暂停，0% 或重置时间经过不代表恢复。",
+    "rate_limit": "消息请求遇到限流，已暂停此账号操作。请按服务端指引等待，再解除本地限流暂停。",
+    "login_rate_limit": "登录服务遇到限流，已暂停此账号操作。请按服务端指引等待，再解除本地限流暂停。",
+}
+
+
+def restriction_key(failure):
+    category, status = failure.get("category"), failure.get("http_status")
+    if category == "unauthorized" or status in (401, 403):
+        return "authentication"
+    if category == "loginRateLimited":
+        return "login_rate_limit"
+    if category == "rateLimitExceeded" or status == 429:
+        return "rate_limit"
+    if category == "usageLimitExceeded":
+        return "quota"
+    return None
+
+
+def quota_denied(reading):
+    return (reading.get("ordinary_usage_allowed") is False or reading.get("spend_control_reached") is True
+            or reading.get("rate_limit_reached_type") is not None)
+
+
+def safe_protocol_id(value):
+    # IDs have a protocol-defined shape. Never persist arbitrary upstream strings.
+    if not isinstance(value, str):
+        return None
+    if value.isascii() and value.isdecimal() and len(value) <= 20:
+        return value
+    try:
+        return str(uuid.UUID(value)) if str(uuid.UUID(value)) == value else None
+    except ValueError:
+        return None
 
 
 def turn_failure(error):
@@ -212,6 +258,7 @@ class Rpc:
         self.cancelled = cancelled
         self.sequence = 0
         self.pending = []
+        self.diagnostics = {}
         self.buffer = b""
         self.process_guard = threading.Lock()
         for name in ("home", "codex", "work"):
@@ -272,6 +319,12 @@ class Rpc:
                 if "method" in value and "id" in value:
                     self.send({"id": value["id"], "error": {"code": -32601, "message": "Tools are disabled"}})
                     raise ActionError("Codex 请求了额外权限或工具，已停止本次操作。", 502)
+                method = value.get("method")
+                if method in {"turn/started", "turn/completed", "item/started", "item/completed",
+                              "item/agentMessage/delta", "error"}:
+                    self.diagnostics.update(last_event=method, last_event_at=now())
+                    if method == "error":
+                        self.diagnostics["last_error"] = turn_failure((value.get("params") or {}).get("error"))
                 return value
             if len(self.buffer) > 4 * 1024 * 1024:
                 raise ActionError("Codex 响应超过限制，操作已停止。", 502)
@@ -283,6 +336,8 @@ class Rpc:
             self.buffer += chunk
 
     def request(self, method, params, deadline):
+        if method != "turn/interrupt":
+            self.diagnostics.update(last_request=method, last_request_at=now())
         self.sequence += 1
         request_id = self.sequence
         self.send({"id": request_id, "method": method, "params": params})
@@ -290,6 +345,9 @@ class Rpc:
             value = self.receive(deadline)
             if value.get("id") == request_id:
                 if "error" in value:
+                    code = value["error"].get("code")
+                    if type(code) is int:
+                        self.diagnostics["rpc_error_code"] = code
                     # Upstream messages can contain tokens, URLs or configuration.
                     if (method == "account/login/start" and value["error"].get("message") ==
                             "failed to request device code: device code request failed with status 429 Too Many Requests"):
@@ -319,6 +377,23 @@ class Rpc:
         self.request("initialize", {"clientInfo": {"name": "agent_monitor_accounts", "version": "1"},
                                    "capabilities": {"experimentalApi": True}}, time.monotonic() + 20)
         self.send({"method": "initialized"})
+
+    def rejections(self, thread_id, turn_id):
+        """Keep terminal refusal evidence even when turn/completed never arrives."""
+        if not thread_id or not turn_id:
+            return []
+        failures = {}
+        for value in self.pending:
+            params = value.get("params")
+            if (value.get("method") != "error" or not isinstance(params, dict)
+                    or params.get("threadId") != thread_id or params.get("turnId") != turn_id
+                    or params.get("willRetry") is not False):
+                continue
+            failure = turn_failure(params.get("error"))
+            key = restriction_key(failure)
+            if key:
+                failures[key] = failure
+        return list(failures.values())
 
     def interrupt(self, force=False):
         # The worker retains pipe/selector ownership. Only signal its child here
@@ -359,7 +434,14 @@ def quota_reading(result, account_id):
     if result.get("accountId") != account_id:
         raise ActionError("配额响应的账号与所选账号不匹配。", 502)
     limit = select_codex_rate_limit(result) or {}
-    reading = {"observed_at": now()}
+    reading = {"observed_at": now(), "codex_quota_available": bool(limit)}
+    allowed = result.get("ordinaryUsageAllowed")
+    reading["ordinary_usage_allowed"] = allowed if type(allowed) is bool else None
+    spent = limit.get("spendControlReached")
+    reading["spend_control_reached"] = spent if type(spent) is bool else None
+    reached = limit.get("rateLimitReachedType")
+    reading["rate_limit_reached_type"] = (reached if isinstance(reached, str) and reached in REACHED_LIMITS
+                                          else "unrecognized" if reached is not None else None)
     for minutes, prefix in ((300, "five_hour"), (10080, "seven_day")):
         window = next((limit[key] for key in ("primary", "secondary")
                        if isinstance(limit.get(key), dict) and limit[key].get("windowDurationMins") == minutes), {})
@@ -388,6 +470,50 @@ class Manager:
         self.slots = threading.BoundedSemaphore(8)
         self.login_slot = threading.BoundedSemaphore(1)
         self.login_generation = 0
+        self.start_interval = START_INTERVAL_SECONDS
+        self.next_start = 0
+        self.start_guard = threading.Lock()
+
+    def open_rpc(self, directory, job):
+        # All initial and recovery peers share this lane. Do not hold the state
+        # guard while waiting, so cancel/status/release remain responsive.
+        while not job["cancelled"].is_set():
+            if self.start_guard.acquire(timeout=.1):
+                try:
+                    delay = max(0, self.next_start - time.monotonic())
+                    if job["cancelled"].wait(delay):
+                        raise Cancelled("操作已取消。")
+                    with self.guard:
+                        if job["cancelled"].is_set():
+                            raise Cancelled("操作已取消。")
+                        self.next_start = time.monotonic() + self.start_interval
+                        rpc = self.rpc_factory(directory, job["cancelled"])
+                        job["rpc"] = rpc
+                        return rpc
+                finally:
+                    self.start_guard.release()
+        raise Cancelled("操作已取消。")
+
+    def restrict(self, directory, record, failure):
+        key = restriction_key(failure)
+        if key:
+            record.setdefault("restrictions", {}).setdefault(key, {
+                "category": failure["category"], "created_at": now()})
+            self.save(directory, record)
+
+    def observe_permission(self, directory, record, reading, *, explicit=False):
+        if quota_denied(reading):
+            self.restrict(directory, record, {"category": "usageLimitExceeded"})
+        elif explicit and reading.get("codex_quota_available") and reading.get("ordinary_usage_allowed") is True:
+            record.get("restrictions", {}).pop("quota", None)
+            self.save(directory, record)
+
+    @staticmethod
+    def check_restrictions(record):
+        restrictions = record.get("restrictions", {})
+        for key in RESTRICTION_DETAILS:
+            if key in restrictions and not (key == "quota" and record["operation"]["refresh_only"]):
+                raise ActionError(RESTRICTION_DETAILS[key], 409, "locallyPaused")
 
     def directory(self, profile_id):
         try:
@@ -454,6 +580,8 @@ class Manager:
                 if exc.status != 409:
                     raise
         result = copy.deepcopy(record)
+        result["restriction_details"] = [text for key, text in RESTRICTION_DETAILS.items()
+                                         if key in record.get("restrictions", {})]
         result["has_credentials"] = (directory / "codex/auth.json").is_file()
         result["busy"] = bool(job) or bool(operation and operation["stage"] in ACTIVE)
         if job and operation and operation["stage"] == "login":
@@ -640,6 +768,20 @@ class Manager:
             directory = self.directory(profile_id)
             with lock_file(directory / ".lock"):
                 (directory / "codex/auth.json").unlink(missing_ok=True)
+                record = self.read(directory)
+                record.get("restrictions", {}).pop("authentication", None)
+                self.save(directory, record)
+                return self.view(directory)
+
+    def release_rate_limit(self, profile_id):
+        """Explicit local acknowledgement only; no provider call or send."""
+        with self.guard:
+            directory = self.directory(profile_id)
+            with lock_file(directory / ".lock"):
+                record = self.read(directory)
+                for key in ("rate_limit", "login_rate_limit"):
+                    record.get("restrictions", {}).pop(key, None)
+                self.save(directory, record)
                 return self.view(directory)
 
     def update(self, directory, record, **fields):
@@ -648,7 +790,7 @@ class Manager:
             self.save(directory, record)
 
     def identity(self, rpc, directory, record):
-        account = rpc.request("account/read", {"refreshToken": True}, time.monotonic() + 20).get("account")
+        account = rpc.request("account/read", {"refreshToken": False}, time.monotonic() + 20).get("account")
         if account is None:
             return False
         credential = codex_account(directory / "codex/auth.json")
@@ -664,6 +806,7 @@ class Manager:
 
     def run(self, directory, record, job, lock):
         rpc = None
+        thread_id = turn_id = None
         slot = False
         login_slot = False
         def acquire_slot():
@@ -678,14 +821,11 @@ class Manager:
                 if job["login_generation"] != self.login_generation:
                     raise ActionError("OpenAI 登录服务刚刚限流，本账号尚未申请设备码。请稍后点击继续未发送账号，或重试单账号操作。", 429)
         try:
+            self.check_restrictions(record)
             acquire_slot()
             slot = True
             self.update(directory, record, stage="checking", detail="正在检查登录状态。")
-            with self.guard:
-                if job["cancelled"].is_set():
-                    raise Cancelled("操作已取消。")
-                rpc = self.rpc_factory(directory, job["cancelled"])
-                job["rpc"] = rpc
+            rpc = self.open_rpc(directory, job)
             rpc.initialize()
             if not self.identity(rpc, directory, record):
                 self.slots.release()
@@ -719,16 +859,18 @@ class Manager:
             if record["operation"]["refresh_only"]:
                 self.update(directory, record, stage="reading", detail="正在查询配额，本次不发送消息。")
                 after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
+                self.observe_permission(directory, record, after, explicit=True)
                 self.update(directory, record, stage="succeeded", quota_status="observed", after=after,
                             detail="已读取服务端配额，本次未发送消息。")
                 return
             deadline = time.monotonic() + SEND_SECONDS
-            try:
-                before = quota_reading(rpc.request("account/rateLimits/read", {}, min(deadline, time.monotonic() + 15)), record["account_id"])
-                self.update(directory, record, before=before)
-            except ActionError:
-                if job["cancelled"].is_set():
-                    raise Cancelled("操作已取消。")
+            before = quota_reading(rpc.request("account/rateLimits/read", {}, min(deadline, time.monotonic() + 15)), record["account_id"])
+            self.update(directory, record, before=before)
+            self.observe_permission(directory, record, before)
+            if not before["codex_quota_available"]:
+                raise ActionError("发送前未取得目标 Codex 配额，未发送消息。可仅刷新配额重查。", 502)
+            if quota_denied(before):
+                raise ActionError("发送前服务端明确限制了额度使用；本次未发送消息，可仅刷新配额查看。", 409, "usageLimitExceeded")
             configuration = rpc.request("config/read", {"includeLayers": True, "cwd": str(directory / "work")},
                                         min(deadline, time.monotonic() + 20))
             options, profile = restricted_thread_options(configuration)
@@ -738,11 +880,16 @@ class Manager:
                                  "developerInstructions": "This is a connectivity check. Reply with OK."}, deadline)
             verify_restricted_thread(thread, profile)
             thread_id = thread["thread"]["id"]
+            identifiers = {"thread_id": safe_protocol_id(thread_id)} if safe_protocol_id(thread_id) else {}
             # Commit unknown before transmission: lost acknowledgement is not proof of no usage.
-            self.update(directory, record, stage="sending", message_status="unknown", detail="正在发送一条短消息；中断后不会自动重发。")
+            self.update(directory, record, stage="sending", message_status="unknown", diagnostics=identifiers,
+                        detail="正在发送一条短消息；中断后不会自动重发。")
             turn = rpc.request("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": MESSAGE}],
                                               "environments": []}, deadline)
             turn_id = turn["turn"]["id"]
+            if safe_protocol_id(turn_id):
+                identifiers["turn_id"] = safe_protocol_id(turn_id)
+                self.update(directory, record, diagnostics=dict(identifiers))
             completed = rpc.event("turn/completed", lambda p: p.get("threadId") == thread_id and p.get("turn", {}).get("id") == turn_id, deadline)
             if completed["turn"].get("status") != "completed":
                 failure = turn_failure(completed["turn"].get("error"))
@@ -754,9 +901,10 @@ class Manager:
             self.update(directory, record, stage="reading", message_status="succeeded", detail="消息已完成，正在查询服务端配额。")
             try:
                 after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
+                self.observe_permission(directory, record, after)
                 has_reset = after["seven_day_resets_at"] is not None
                 self.update(directory, record, stage="succeeded" if has_reset else "partial", quota_status="observed", after=after,
-                            detail="消息已完成，已读取服务端重置时间。" if has_reset else "消息已完成，但服务端未返回七天窗口重置时间；不能确认已固定。")
+                            detail="消息已完成，已读取服务端重置时间；这不保证窗口已固定或重置。" if has_reset else "消息已完成，但服务端未返回七天窗口重置时间。")
             except ActionError:
                 self.update(directory, record, stage="partial", quota_status="failed", detail="消息已完成，但配额查询未成功。不要为了查询结果重复发送。")
         except Cancelled:
@@ -772,8 +920,27 @@ class Manager:
                 "stage": record["operation"]["stage"],
                 "category": exc.category if isinstance(exc, ActionError) else "unknown",
             }
+            self.restrict(directory, record, failure)
+            diagnostics = copy.deepcopy(getattr(rpc, "diagnostics", {}))
+            rejections = rpc.rejections(thread_id, turn_id) if rpc else []
+            for rejection in rejections:
+                self.restrict(directory, record, rejection)
+            if rejections:
+                diagnostics["rejections"] = rejections
+            for name, value in (("thread_id", thread_id), ("turn_id", turn_id)):
+                if safe_protocol_id(value) is not None:
+                    diagnostics[name] = safe_protocol_id(value)
+            if failure["category"] == "timeout" and thread_id and turn_id and not job["cancelled"].is_set():
+                try:
+                    rpc.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id}, time.monotonic() + INTERRUPT_SECONDS)
+                    diagnostics["interrupt"] = "acknowledged"
+                except Exception:
+                    diagnostics["interrupt"] = "unconfirmed"
+            self.update(directory, record, diagnostics=diagnostics)
             self.update(directory, record, stage="failed", detail=detail, failure=failure)
-            if record["operation"]["message_status"] in ("failed", "unknown") and not job["cancelled"].is_set():
+            if (record["operation"]["message_status"] in ("failed", "unknown")
+                    and failure["category"] in RECOVERABLE_FAILURES and not restriction_key(failure)
+                    and not record.get("restrictions") and not job["cancelled"].is_set()):
                 # The original result remains authoritative. A fresh owned peer
                 # avoids a broken send channel; no login or turn is ever started.
                 try:
@@ -782,15 +949,13 @@ class Manager:
                         rpc = None
                     with self.guard:
                         job["rpc"] = None
-                        if job["cancelled"].is_set():
-                            raise Cancelled("操作已取消。")
-                        rpc = self.rpc_factory(directory, job["cancelled"])
-                        job["rpc"] = rpc
+                    rpc = self.open_rpc(directory, job)
                     self.update(directory, record, detail=detail + " 正在补查配额，不会重发消息。")
                     rpc.initialize()  # 20s; identity and quota each also cap at 20s.
                     if not self.identity(rpc, directory, record):
                         raise ActionError("登录态不可用。")
                     after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
+                    self.observe_permission(directory, record, after)
                     self.update(directory, record, quota_status="observed", after=after,
                                 detail=detail + " 已补查服务端配额；原消息结果不变。")
                 except Exception:

@@ -70,11 +70,19 @@ for line in sys.stdin:
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
     elif method == "account/rateLimits/read":
         quota_reads += 1
-        if (scenario == "quota_failure" and quota_reads == 2) or (recovery and scenario == "recovery_failure"):
+        if scenario == "prequota_failure" or (scenario == "quota_failure" and quota_reads == 2) or (recovery and scenario == "recovery_failure"):
             emit({"id": message["id"], "error": {"message": "SECRET_FIXTURE_TOKEN"}})
             continue
         result = {"accountId": account_id, "rateLimits": {"secondary": {"windowDurationMins": 10080, "usedPercent": 0,
                   "resetsAt": None if scenario == "no_reset" else 1900000000 + quota_reads}}}
+        if scenario in ("quota_denied", "quota_allowed"):
+            result["ordinaryUsageAllowed"] = scenario == "quota_allowed"
+        if scenario == "spend_denied":
+            result["rateLimits"]["spendControlReached"] = True
+        if scenario == "reached_limit":
+            result["rateLimits"]["rateLimitReachedType"] = "rate_limit_reached"
+        if scenario == "rounded_full":
+            result["rateLimits"]["secondary"]["usedPercent"] = 100
     elif method == "config/read":
         # Producer-shaped fixture, frozen to the audited 0.162.1 feature names.
         flags = "apps code_mode code_mode_only code_mode_host context_management current_time_reminder deferred_executor enable_fanout goals hooks image_generation memories multi_agent multi_agent_v2 plugins request_permissions_tool shell_snapshot shell_tool standalone_web_search token_budget tool_suggest unified_exec view_image sleep_tool stable_environment_tools send_message_to_user_async".split()
@@ -87,13 +95,21 @@ for line in sys.stdin:
     elif method == "thread/start":
         assert message["params"]["environments"] == []
         assert message["params"]["ephemeral"] is True
-        result = {"thread": {"id": "thread-fixture"}, "sandbox": {"type": "workspaceWrite" if scenario == "unsafe_sandbox" else "readOnly"}}
+        result = {"thread": {"id": "11111111-1111-4111-8111-111111111111"}, "sandbox": {"type": "workspaceWrite" if scenario == "unsafe_sandbox" else "readOnly"}}
         if scenario in ("custom_profile", "wrong_profile"):
             assert message["params"]["permissions"] == "managed-fixture"
             assert "sandbox" not in message["params"]
             result["activePermissionProfile"] = {"id": "other" if scenario == "wrong_profile" else "managed-fixture"}
     elif method == "turn/start":
         assert message["params"]["environments"] == []
+        if scenario.startswith("notify_"):
+            info = {"notify_unauthorized": "unauthorized", "notify_usage_limit": "usageLimitExceeded",
+                    "notify_http_429": {"responseStreamDisconnected": {"httpStatusCode": 429}},
+                    "notify_other_thread": "unauthorized"}[scenario]
+            emit({"id": message["id"], "result": {"turn": {"id": "1"}}})
+            emit({"method": "error", "params": {"threadId": "other-thread" if scenario == "notify_other_thread" else "11111111-1111-4111-8111-111111111111",
+                  "turnId": "1", "willRetry": False, "error": {"codexErrorInfo": info, "message": "SECRET_FIXTURE_TOKEN"}}})
+            sys.exit(0)
         if scenario == "disconnect":
             sys.exit(0)
         if scenario == "tool_request":
@@ -101,6 +117,17 @@ for line in sys.stdin:
             continue
         if scenario == "wait_turn":
             time.sleep(20)
-        result = {"turn": {"id": "turn-fixture"}}
-        emit({"method": "turn/completed", "params": {"threadId": "thread-fixture", "turn": {"id": "turn-fixture", "status": "failed" if scenario in ("failed_turn", "usage_limit", "stream_error", "unsafe_error", "recovery_failure", "recovery_identity") else "completed", "error": {"message": "SECRET_FIXTURE_TOKEN", "additionalDetails": "SECRET_FIXTURE_TOKEN", "codexErrorInfo": {"usage_limit": "usageLimitExceeded", "recovery_failure": "usageLimitExceeded", "stream_error": {"responseStreamDisconnected": {"httpStatusCode": 503, "secret": "SECRET_FIXTURE_TOKEN"}}, "unsafe_error": {"SECRET_FIXTURE_TOKEN": {"httpStatusCode": 503}}}.get(scenario)}}}})
+        if scenario == "wait_completion":
+            emit({"id": message["id"], "result": {"turn": {"id": "1"}}})
+            emit({"method": "turn/started", "params": {"threadId": "11111111-1111-4111-8111-111111111111", "turn": {"id": "1"}}})
+            continue
+        if scenario in ("unauthorized", "rate_limit", "http_429"):
+            info = {"unauthorized": "unauthorized", "rate_limit": "rateLimitExceeded",
+                    "http_429": {"responseStreamDisconnected": {"httpStatusCode": 429}}}[scenario]
+            emit({"id": message["id"], "result": {"turn": {"id": "1"}}})
+            emit({"method": "turn/completed", "params": {"threadId": "11111111-1111-4111-8111-111111111111", "turn": {
+                "id": "1", "status": "failed", "error": {"codexErrorInfo": info, "message": "SECRET_FIXTURE_TOKEN"}}}})
+            continue
+        result = {"turn": {"id": "1"}}
+        emit({"method": "turn/completed", "params": {"threadId": "11111111-1111-4111-8111-111111111111", "turn": {"id": "1", "status": "failed" if scenario in ("failed_turn", "usage_limit", "stream_error", "unsafe_error", "recovery_failure", "recovery_identity") else "completed", "error": {"message": "SECRET_FIXTURE_TOKEN", "additionalDetails": "SECRET_FIXTURE_TOKEN", "codexErrorInfo": {"usage_limit": "usageLimitExceeded", "recovery_failure": {"responseStreamDisconnected": {"httpStatusCode": 503}}, "stream_error": {"responseStreamDisconnected": {"httpStatusCode": 503, "secret": "SECRET_FIXTURE_TOKEN"}}, "unsafe_error": {"SECRET_FIXTURE_TOKEN": {"httpStatusCode": 503}}}.get(scenario)}}}})
     emit({"id": message["id"], "result": result})

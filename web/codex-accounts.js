@@ -98,6 +98,7 @@ export function init() {
   }
 
   async function perform(action, id, button) {
+    if (action === "release-rate-limit" && !window.confirm("仅解除此账号在本页的限流暂停，不会发送消息或查询配额。\n\n这不证明服务端限流已解除；请按服务端指引等待后再尝试。认证和额度限制仍会保留。")) return;
     button.disabled = true;
     notice.textContent = action === "forget-login" ? "正在清除本页保存的登录态…" : "正在提交操作…";
     try {
@@ -131,7 +132,7 @@ export function init() {
       const targets = accounts.filter(a => payload.profile_ids.includes(a.id));
       if (!targets.length) return;
       const identities = targets.map(a => `${a.email}（${a.account_id}）`).join("\n");
-      if (!window.confirm(`开始新一轮，向以下 ${targets.length} 个账号各发送一条 “Please reply with OK.”？\n\n${identities}\n\n会使用账号额度；这不是继续未发送账号，之前已发送的账号也会再次发送。`)) return;
+      if (!window.confirm(`开始新一轮，向以下 ${targets.length} 个账号各发送一条 “Please reply with OK.”？\n\n${identities}\n\n会使用账号额度；这不是继续未发送账号，之前已发送的账号也会再次发送。暂停中的账号不会发送；发送不保证固定或重置额度窗口。`)) return;
     }
     submittingBatch = true;
     render();
@@ -166,7 +167,8 @@ export function init() {
       batchStatus.textContent = eligible.length ? `${eligible.length} 个可操作账号；发送前会检查登录状态。` : "尚未发现可发送的 Codex 登录账号。";
       batchHelp.replaceChildren(
         element("p", "账号来自当前及历史登录记录，无需手动添加。"),
-        element("p", "系统会检查并复用已保存的登录状态。需要授权时，系统逐个显示账号的设备码；完成或取消后，再处理下一个账号。")
+        element("p", "系统会检查并复用已保存的登录状态。需要授权时，系统逐个显示账号的设备码；完成或取消后，再处理下一个账号。"),
+        element("p", "仅刷新配额不会发送消息。发送会实际使用额度，不保证固定或重置窗口；账号操作错开启动，暂停中的账号不会发送。")
       );
       return;
     }
@@ -202,9 +204,9 @@ export function init() {
       statuses.unsent
         ? `继续发送：如果遇到登录限流，先等限流解除。如需继续，再点击「${batchRetry.textContent}」。系统只处理仍在登录记录中且确定未发送的账号。`
         : "继续发送：本轮没有可以继续发送的账号。",
-      "刷新：刷新页面或仅查询配额不会重发消息。",
+      "刷新：刷新页面或仅查询配额不会重发消息。发送前查询失败或服务端明确拒绝额度使用时，本次不发送。",
       ...(statuses.unknown || statuses.failed ? ["结果未知或发送失败的账号可能已消耗额度，系统不会自动重试。"] : []),
-      `再次发送：选择账号后，点击「${batchNext.textContent}」。系统不会自动判断配额是否已重置；发送前请核对所选账号。`,
+      `再次发送：选择账号后，点击「${batchNext.textContent}」。这会实际使用额度，不保证固定或重置窗口；暂停中的账号仍不会发送。`,
     ];
     batchHelp.replaceChildren(...help.map(text => element("p", text)));
   }
@@ -277,6 +279,7 @@ export function init() {
         heading.prepend(label);
       }
       card.append(heading);
+      for (const detail of account.restriction_details || []) card.append(element("p", detail, "quota-scope"));
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "账号与操作详情"));
       if (account.eligible === false) card.append(element("p", "已不在当前登录记录中；保留本轮结果，不纳入下一轮或继续发送。", "quota-scope"));
@@ -289,6 +292,12 @@ export function init() {
       if (op) {
         if (op.stage !== "succeeded") card.append(element("p", op.detail));
         details.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
+        if (op.failure) details.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
+        const diag = op.diagnostics;
+        if (diag?.last_request) details.append(element("p", `最后请求：${diag.last_request} · ${timestamp(diag.last_request_at)}`, "quota-scope"));
+        if (diag?.last_event) details.append(element("p", `最后进度：${diag.last_event} · ${timestamp(diag.last_event_at)}`, "quota-scope"));
+        if (diag?.thread_id) details.append(element("p", `Thread：${diag.thread_id}${diag.turn_id ? " · Turn：" + diag.turn_id : ""}`, "quota-scope"));
+        if (diag?.interrupt) details.append(element("p", `超时中止：${diag.interrupt === "acknowledged" ? "CLI 已确认" : "未取得确认"}；不代表消息未消耗额度。`, "quota-scope"));
         if (op.stage === "login" && op.verification_url && op.user_code) {
           const box = element("div", undefined, "codex-authorization");
           const link = element("a", "打开 OpenAI 官方授权页", "btn");
@@ -313,13 +322,17 @@ export function init() {
       if (account.eligible !== false) {
         const send = element("button", "向此账号发送一条消息", "btn");
         send.type = "button";
-        send.disabled = submittingBatch || accounts.some(a => a.busy);
+        send.disabled = submittingBatch || accounts.some(a => a.busy) || Object.keys(account.restrictions || {}).length > 0;
         send.addEventListener("click", () => performBatch("batch-start", [account.id]));
         controls.append(send);
       }
-      controls.append(button("仅刷新配额", "refresh", account));
+      const refresh = button("仅刷新配额", "refresh", account);
+      const restrictions = account.restrictions || {};
+      refresh.disabled ||= Boolean(restrictions.authentication || restrictions.rate_limit || restrictions.login_rate_limit);
+      controls.append(refresh);
+      if (restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("解除本地限流暂停", "release-rate-limit", account));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
-      else if (account.has_credentials) {
+      else if (account.has_credentials || restrictions.authentication) {
         const maintenance = element("div", undefined, "codex-account-controls");
         maintenance.append(button("清除本页登录态", "forget-login", account));
         details.append(maintenance);

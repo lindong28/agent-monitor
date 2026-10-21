@@ -795,6 +795,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = manager.cancel(payload.get("id"))
             elif path == "/api/codex-accounts/forget-login":
                 result = manager.forget_login(payload.get("id"))
+            elif path == "/api/codex-accounts/release-rate-limit":
+                result = manager.release_rate_limit(payload.get("id"))
             else:
                 raise codex_accounts.ActionError("未找到此接口。", 404)
             self._send_json(result)

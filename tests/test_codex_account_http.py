@@ -13,6 +13,9 @@ import server
 
 class AccountHttpTests(unittest.TestCase):
     def setUp(self):
+        patch = mock.patch.object(codex_accounts, "START_INTERVAL_SECONDS", 0)
+        patch.start()
+        self.addCleanup(patch.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.manager = codex_accounts.Manager(Path(temporary.name) / "profiles")
@@ -64,6 +67,21 @@ class AccountHttpTests(unittest.TestCase):
                 self.assertEqual(self.request("/add", {"email": "one@example.com"}, headers)[0], 403)
         self.assertEqual(self.request(headers={"X-Agent-Monitor": None})[0], 403)
         self.assertEqual(self.manager.list()["accounts"], [])
+
+    def test_local_rate_release_uses_same_origin_guard_and_never_launches(self):
+        account = self.manager.add("local@example.com", "workspace-local")
+        directory = self.manager.directory(account["id"])
+        record = self.manager.read(directory)
+        record["restrictions"] = {"rate_limit": {"category": "rateLimitExceeded", "created_at": codex_accounts.now()}}
+        self.manager.save(directory, record)
+        with mock.patch.object(self.manager, "rpc_factory", side_effect=AssertionError("must not launch")) as factory:
+            status, _ = self.request("/release-rate-limit", {"id": account["id"]}, {"Origin": "https://other.example"})
+            self.assertEqual(status, 403)
+            self.assertIn("rate_limit", self.manager.view(directory)["restrictions"])
+            status, data = self.request("/release-rate-limit", {"id": account["id"]})
+            self.assertEqual(status, 200)
+            self.assertEqual(data["restrictions"], {})
+            factory.assert_not_called()
 
     def test_invalid_payloads_do_not_create_profiles_or_leak_errors(self):
         for body in ([], {"email": "invalid"}, {"email": "x" * 4097}):
