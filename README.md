@@ -110,6 +110,8 @@ Codex and Claude have independent local lanes under `state/upstream_controls`; p
 
 To inspect a machine-only pause, run `.venv/bin/python upstream_controls.py status claude` (or `codex`) from that deployment. After reviewing the original failure and provider guidance, run `.venv/bin/python upstream_controls.py resume claude --pause-id ID`, using the current ID shown by status. A stale ID is rejected. Neither command contacts a provider; resuming preserves the prior pause and does not trigger a query. Codex account restrictions are separately managed in Web UI.
 
+New machine quota failures retain the original stage, exception type and available HTTP/RPC status or process exit code in the pause record. Status and subsequent paused-query messages refer to that same pause ID. Legacy pauses report `原始诊断未记录`; upgrading cannot recover a missing historical cause. A skipped Hub machine names the earlier machine/provider that stopped the round; it did not make its own failed request. A recent quota observation from session logs can coexist with an active-query pause. See [failure investigation](docs/operations/services.md#failure-investigation) for the local evidence and correlation commands.
+
 Public network diagnostics share one running probe and cache success or failure for at least 60 seconds in each Web server process, even with force refresh. A readable Retry-After extends that cache. Standalone CLI processes, other hosts and server restarts do not share this public cache. HTTP failures are not treated as successful JSON, redirects are not followed, and pricing TLS failures use bundled prices without disabling certificate verification.
 
 ## Stored Codex session quota

@@ -394,7 +394,13 @@ def _rate_limits(refresh=False):
             signed_out = True
             value = source.load_rate_limits() or RateLimits(None, None, None, None)
         except (quota_refresh.RefreshError, OSError) as exc:
-            error = str(exc) if isinstance(exc, quota_refresh.RefreshError) else "配额读取进程无法启动，请检查这台机器的安装。"
+            if isinstance(exc, quota_refresh.RefreshError):
+                error = str(exc)
+            else:
+                import diagnostics
+                error = "配额采集失败：" + diagnostics.failure_summary(diagnostics.failure_details(exc))
+                if getattr(exc, "diagnostic_save_error", None):
+                    error += "；暂停诊断保存失败：" + exc.diagnostic_save_error
             value = source.load_rate_limits() or RateLimits(None, None, None, None)
         block = _rate_limit_block(value, account)
         block["refresh_error"] = error

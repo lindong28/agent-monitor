@@ -71,6 +71,9 @@ class QuotaLifetimeTests(unittest.TestCase):
                         self.assertEqual(output.strip(), '12')
                     elif mode in ('deadline', 'delayed_start'):
                         self.assertEqual(output.strip(), 'failed')
+                        state = json.loads((root / 'state/upstream_controls/codex.json').read_text())
+                        self.assertEqual(state['pause']['failure']['kind'], 'timeout')
+                        self.assertEqual(state['pause']['failure']['stage'], 'child_result')
                 finally:
                     if parent.poll() is None:
                         parent.kill()

@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+import diagnostics
 
 
 class Paused(RuntimeError):
@@ -20,6 +21,10 @@ class Paused(RuntimeError):
 
 class Busy(RuntimeError):
     pass
+
+
+def pause_summary(pause):
+    return "暂停标识：%s；%s" % (pause["id"], diagnostics.failure_summary(pause.get("failure")))
 
 
 class Controls:
@@ -93,7 +98,8 @@ class Controls:
                 state.pop("active", None)
                 self._save(provider, state)
             if state.get("pause"):
-                raise Paused("本机已暂停该服务的自动请求，请先核对原始失败并明确解除本地暂停。")
+                raise Paused("本机已暂停该服务的自动请求；%s。请先核对原始失败并明确解除本地暂停。" %
+                             pause_summary(state["pause"]))
             delay = max(0, state.get("released_at", 0) + interval - time.time())
             if cancelled.wait(min(delay, interval)):
                 raise Busy("操作已取消，未开始新的上游请求。")
@@ -125,9 +131,11 @@ class Lease:
     def __init__(self, controls, provider, handle, state):
         self.controls, self.provider, self.handle, self.state = controls, provider, handle, state
 
-    def pause(self, reason="unknown"):
+    def pause(self, reason="unknown", *, failure=None):
         # Only fixed internal categories belong here; never upstream bodies/tokens.
         self.state["pause"] = {"id": uuid.uuid4().hex, "reason": reason, "at": time.time()}
+        if failure:
+            self.state["pause"]["failure"] = diagnostics.safe_failure(failure)
         self.controls._save(self.provider, self.state)
 
     def close(self, *, completed=True):
@@ -165,7 +173,7 @@ def main(argv=None):
     state = controls.read(args.provider)
     pause = state.get("pause")
     if pause:
-        print(f"{args.provider} 本机请求已暂停。原因：{pause.get('reason', 'unknown')}；暂停标识：{pause['id']}。")
+        print(f"{args.provider} 本机请求已暂停。原因：{pause.get('reason', 'unknown')}；{pause_summary(pause)}。")
         print("请先核对原始失败、账号状态与服务端要求；确认后用 resume 和 --pause-id 解除本地暂停。")
     elif state.get("active"):
         print(f"{args.provider} 有未闭合的操作记录；可能仍在运行。异常退出后，下次调用将暂停，不会自动重试。")

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import functools
 import json
+import math
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -12,6 +13,76 @@ from pathlib import Path
 import threading
 import time
 import uuid
+
+
+# Only protocol facts and internal vocabulary cross the failure boundary.
+# Exception text, argv, response bodies and filenames are deliberately absent.
+_STAGES = {"unknown", "account_api", "admission", "child_start", "child_result",
+           "credentials", "profile_read", "quota_read", "initialize", "account_check",
+           "quota_parse", "cleanup", "remote_prepare", "remote_export", "transfer",
+           "network_start", "quota_worker", "pause_save"}
+_KINDS = {"exception", "rpc_error", "http_error", "timeout", "process_exit",
+          "invalid_result", "account_missing", "account_mismatch", "missing_windows"}
+_ERROR_TYPES = {"Exception", "RuntimeError", "RefreshError", "NotSignedIn", "LocalUnavailable",
+                "OSError", "PermissionError", "FileNotFoundError", "TimeoutError", "TimeoutExpired",
+                "CalledProcessError", "HTTPError", "URLError", "JSONDecodeError", "ValueError",
+                "KeyError", "TypeError", "BrokenPipeError", "ConnectionError", "ConnectionResetError"}
+_SOURCE_FILES = {"server.py", "codex_accounts.py", "upstream_controls.py", "quota_refresh.py",
+                 "quota_sync.py", "sync.py", "diagnostics.py"}
+
+
+def safe_failure(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key, allowed in (("stage", _STAGES), ("kind", _KINDS), ("error_type", _ERROR_TYPES)):
+        item = value.get(key)
+        if isinstance(item, str) and item in allowed:
+            result[key] = item
+    for key in ("errno", "http_status", "rpc_code", "returncode"):
+        item = value.get(key)
+        if type(item) is int and abs(item) <= 2**31:
+            result[key] = item
+    item = value.get("timeout_seconds")
+    if type(item) in (int, float) and math.isfinite(item) and 0 <= item <= 86400:
+        result["timeout_seconds"] = round(item, 3)
+    for key in ("account_fingerprint", "reader_sha256"):
+        item = value.get(key)
+        if isinstance(item, str) and len(item) == 64 and all(c in "0123456789abcdef" for c in item):
+            result[key] = item
+    frames = value.get("frames")
+    if isinstance(frames, list):
+        result["frames"] = [{"file": f["file"], "line": f["line"]} for f in frames[-5:]
+                            if isinstance(f, dict) and isinstance(f.get("file"), str) and f["file"] in _SOURCE_FILES
+                            and type(f.get("line")) is int and 0 < f["line"] < 100000]
+    return result
+
+
+def failure_details(exc, *, stage="unknown", kind="exception", **facts):
+    value = {"stage": stage, "kind": kind, "error_type": type(exc).__name__}
+    if value["error_type"] not in _ERROR_TYPES:
+        value["error_type"] = "Exception"
+    for attribute, key in (("errno", "errno"), ("code", "http_status"),
+                           ("returncode", "returncode"), ("timeout", "timeout_seconds")):
+        value[key] = getattr(exc, attribute, None)
+    value.update(facts)
+    frames = []
+    trace = exc.__traceback__
+    while trace is not None:
+        path = Path(trace.tb_frame.f_code.co_filename)
+        if path.parent == Path(__file__).parent and path.name in _SOURCE_FILES:
+            frames.append({"file": path.name, "line": trace.tb_lineno})
+        trace = trace.tb_next
+    if frames:
+        value["frames"] = frames[-5:]
+    value.update(safe_failure(getattr(exc, "failure", None)))
+    return safe_failure(value)
+
+
+def failure_summary(value):
+    facts = safe_failure(value)
+    return "，".join(f"{key}={item}" for key, item in facts.items()
+                    if key not in {"account_fingerprint", "reader_sha256", "frames"}) or "原始诊断未记录"
 
 
 def timestamp(value):
@@ -72,6 +143,21 @@ class Monitor:
         if len(self.events) == self.limit:
             self.events_dropped += 1
         self.events.append({"instance_id": self.instance_id, "at": time.time(), **event})
+
+    def record_failure(self, operation, exc):
+        failure_id = uuid.uuid4().hex
+        event = {"kind": "failure", "failure_id": failure_id,
+                 "failure": failure_details(exc, stage=operation)}
+        with self.lock:
+            self._event(event)
+        # Also leave a safe immediate record if the observer cannot persist.
+        try:
+            logging.getLogger(__name__).error("diagnostic_failure %s", json.dumps(event))
+        except Exception:
+            # A broken logging sink must not replace the business exception.
+            with self.lock:
+                self.persistence_error = "failure_log_write_failed; inspect diagnostic sinks"
+        return failure_id
 
     def finish(self, token, outcome="success"):
         with self.lock:

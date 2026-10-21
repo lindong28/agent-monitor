@@ -9,6 +9,7 @@ from unittest import mock
 
 import codex_accounts
 import server
+import diagnostics
 
 
 class AccountHttpTests(unittest.TestCase):
@@ -58,6 +59,26 @@ class AccountHttpTests(unittest.TestCase):
         self.assertEqual(self.request()[1]["accounts"][0]["id"], account["id"])
         self.assertEqual(self.request("/forget-login", {"id": account["id"]})[0], 200)
         self.assertEqual(self.request("/start", {"id": "../../outside"})[0], 400)
+
+    def test_unexpected_failure_can_be_found_by_http_diagnostic_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            monitor = diagnostics.Monitor()
+            monitor.path = Path(directory)
+            self.addCleanup(monitor.close)
+            with mock.patch.object(diagnostics, "monitor", monitor), \
+                    mock.patch.object(self.manager, "discover", side_effect=PermissionError(13, "secret-fixture")):
+                with self.assertLogs("diagnostics", level="ERROR"):
+                    status, body = self.request()
+            self.assertEqual(status, 500)
+            failure_id = body["error"].split("诊断标识：")[1]
+            monitor.tick()
+            events = (monitor.path / "events.jsonl").read_text()
+            event = next(json.loads(line) for line in events.splitlines()
+                         if json.loads(line).get("failure_id") == failure_id)
+            self.assertEqual(event["failure"]["errno"], 13)
+            self.assertIn("server.py", str(event["failure"]["frames"]))
+            self.assertNotIn("secret-fixture", events + json.dumps(body))
+            self.assertEqual(self.request()[0], 200)
 
     def test_cross_origin_missing_header_and_rebinding_are_refused(self):
         for headers in ({"Origin": "https://other.example"}, {"Origin": None},

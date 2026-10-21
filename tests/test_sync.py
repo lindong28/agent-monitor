@@ -264,7 +264,8 @@ class SyncTests(unittest.TestCase):
             self.assertIs(results["macbook"].generation, sentinel)
             self.assertIsNone(results["macbook"].error)
             self.assertIsNone(results["dgx"].generation)
-            self.assertEqual(results["dgx"].error, "timeout")
+        self.assertIn("TimeoutExpired", results["dgx"].error)
+        self.assertIn("timeout_seconds=30", results["dgx"].error)
 
     def test_sync_all_reports_the_remote_exporter_stderr_as_the_failure_reason(self):
         """`str(CalledProcessError)` is the command line plus an exit status; the

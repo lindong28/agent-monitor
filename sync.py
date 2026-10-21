@@ -241,8 +241,8 @@ def sync_all(
                 finally:
                     current.close()
                 current = updated
-        except subprocess.TimeoutExpired:
-            return SyncResult(error="timeout")
+        except subprocess.TimeoutExpired as exc:
+            return SyncResult(error=_timeout_reason(exc))
         except subprocess.CalledProcessError as exc:
             return SyncResult(error=_command_failure_reason(exc))
         except (
@@ -277,7 +277,7 @@ def sync_quota(machine, current, *, root=generation.DEFAULT_GENERATIONS_ROOT,
         else:
             result = _run(runner, [*_SSH_PREFIX, machine.ssh_host,
                 "~/.local/bin/agent-monitor export --quota-only" + (" --gui-quota" if hub.enabled() else "")],
-                time.monotonic() + timeout)
+                time.monotonic() + timeout, stage="quota_read")
             payload = json.loads(result.stdout)
         if (not isinstance(payload, dict)
                 or set(payload) != {"schema_version", "source_host_identity", "exporter_commit", "rate_limits"}
@@ -291,7 +291,8 @@ def sync_quota(machine, current, *, root=generation.DEFAULT_GENERATIONS_ROOT,
             raise SyncError("quota response identity or schema does not match this machine")
         limits = payload["rate_limits"]
     except (OSError, ValueError, subprocess.SubprocessError, SyncError, exporter.ExportError) as exc:
-        reason = _command_failure_reason(exc) if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        reason = (_timeout_reason(exc) if isinstance(exc, subprocess.TimeoutExpired) else
+                  _command_failure_reason(exc) if isinstance(exc, subprocess.CalledProcessError) else str(exc))
         limits = copy.deepcopy(current.meta.get("rate_limits") or {})
         for provider in ("claude", "codex"):
             block = limits.get(provider)
@@ -337,12 +338,12 @@ def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refres
         _run(
             runner,
             [*_SSH_PREFIX, ssh_host, _REMOTE_REAPER],
-            deadline,
+            deadline, stage="remote_prepare",
         )
         created = _run(
             runner,
             [*_SSH_PREFIX, ssh_host, "mktemp -d /tmp/agent-monitor-export.XXXXXXXX"],
-            deadline,
+            deadline, stage="remote_prepare",
         )
         remote_temp = created.stdout.strip()
         if not _REMOTE_TEMP.fullmatch(remote_temp):
@@ -359,12 +360,12 @@ def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refres
                     *((["--gui-quota"] if hub.enabled() else []) if quota_refresh else ["--cached-quota"]),
                 ),
             ],
-            deadline,
+            deadline, stage="remote_export",
         )
         _run(
             runner,
             [*_RSYNC_PREFIX, "%s:%s/bundle/" % (ssh_host, remote_temp), str(local_bundle) + "/"],
-            deadline,
+            deadline, stage="transfer",
         )
         try:
             source_manifest = json.loads(exported.stdout)
@@ -389,17 +390,21 @@ def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refres
                     raise SyncError("remote export cleanup failed") from exc
 
 
-def _run(runner, args, deadline):
+def _timeout_reason(exc):
+    import diagnostics
+    return "同步超时：" + diagnostics.failure_summary(diagnostics.failure_details(
+        exc, stage=getattr(exc, "stage", "unknown"), kind="timeout"))
+
+
+def _run(runner, args, deadline, *, stage="unknown"):
     remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise subprocess.TimeoutExpired(args, 0)
-    return runner(
-        args,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=remaining,
-    )
+    try:
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(args, 0)
+        return runner(args, check=True, capture_output=True, text=True, timeout=remaining)
+    except subprocess.TimeoutExpired as exc:
+        exc.stage = stage
+        raise
 
 
 def install_export_bundle(

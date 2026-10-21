@@ -126,6 +126,7 @@ class SerialQuotaRoundTests(unittest.TestCase):
         self.assertEqual(calls, ["fake-0", "fake-1"])
         self.assertIsNone(results[2]["payload"])
         self.assertIn("尚未尝试", results[2]["error"])
+        self.assertIn("1 / codex：refused", results[2]["error"])
         self.assertEqual(results[-1], {"done": True})
 
     def test_parent_wait_budget_tracks_number_of_selected_machines(self):

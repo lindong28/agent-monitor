@@ -115,6 +115,9 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("private", message)
         self.assertNotIn("example.test", message)
         self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)
+        self.assertEqual(caught.exception.failure["stage"], "quota_read")
+        self.assertEqual(caught.exception.failure["http_status"], 401)
+        self.assertEqual(caught.exception.failure["rpc_code"], -32603)
 
     def test_codex_only_unsupported_rpc_recommends_cli_update(self):
         for request_id in (1, 2):
@@ -129,6 +132,7 @@ class ProviderTests(unittest.TestCase):
                     self.assertNotIn("private", str(caught.exception))
                     self.assertNotIn("重新登录", str(caught.exception))
                     self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)
+                    self.assertEqual(caught.exception.failure["stage"], "initialize" if request_id == 1 else "quota_read")
 
     def test_codex_rejects_other_account_and_missing_identity(self):
         for identity in ("other", None):
@@ -210,6 +214,8 @@ class ProviderTests(unittest.TestCase):
                                              "tok-b": {"account": {"uuid": "acct-1"}}})
                 self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)
                 self.assertEqual(self.claude_requests.call_count, 1)
+                self.assertEqual(caught.exception.failure["stage"], "profile_read")
+                self.assertEqual(caught.exception.failure["http_status"], status)
 
     def test_a_claude_http_error_that_is_not_an_auth_refusal_stays_a_failure(self):
         """A 500 from a reachable endpoint is not a sign-out."""

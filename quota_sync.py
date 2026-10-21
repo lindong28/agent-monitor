@@ -298,22 +298,25 @@ def _worker():
                 payload = json.loads(result.stdout)
             _validate(payload)
             return {"machine": machine.name, "payload": payload, "error": None}
-        except Exception:
-            return {"machine": machine.name, "payload": None, "error": "配额查询失败，请检查该机器的采集器后重试"}
+        except Exception as exc:
+            return {"machine": machine.name, "payload": None, "error": "配额查询失败：" +
+                    diagnostics.failure_summary(diagnostics.failure_details(exc, stage="quota_worker"))}
 
     with redirect_stdout(sys.stderr):
         # This conservative stop applies to this combined round only. Provider
         # pauses remain local to each machine; there is no distributed lock.
-        stopped = False
+        stopped = None
         for machine in machines:
             if stopped:
                 result = {"machine": machine.name, "payload": None,
-                          "error": "本轮前序机器查询异常；本机尚未尝试，请先核对原始失败。"}
+                          "error": "本轮前序机器查询异常；本机尚未尝试。触发原因：" + stopped}
             else:
                 result = query(machine)
-                stopped = bool(result["error"] or any(
-                    block.get("refresh_error") for block in
-                    (result["payload"] or {}).get("rate_limits", {}).values()))
+                causes = ([result["error"]] if result["error"] else [
+                    provider + "：" + str(block["refresh_error"]) for provider, block in
+                    result["payload"]["rate_limits"].items() if block.get("refresh_error")])
+                if causes:
+                    stopped = machine.name + " / " + "；".join(causes)
             output.write(json.dumps(result) + "\n")
             output.flush()
         output.write(json.dumps({"done": True}) + "\n")

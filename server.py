@@ -631,8 +631,9 @@ def _run_network_report():
             "installed": True,
             "verdict": "unknown",
         }
-    except OSError:
-        return {"error": "无法启动 ip-check", "installed": True, "verdict": "unknown"}
+    except OSError as exc:
+        return {"error": "无法启动 ip-check：" + diagnostics.failure_summary(
+            diagnostics.failure_details(exc, stage="network_start")), "installed": True, "verdict": "unknown"}
 
 
 ROUTES = {
@@ -823,8 +824,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(result)
         except codex_accounts.ActionError as exc:
             self._send_json({"error": str(exc)}, status=exc.status, send_body=send_body)
-        except Exception:
-            self._send_json({"error": "账号操作失败，请检查服务主机的状态目录。"}, status=500, send_body=send_body)
+        except Exception as exc:
+            failure_id = diagnostics.monitor.record_failure("account_api", exc)
+            self._send_json({"error": "账号操作失败，请检查服务主机的诊断事件；诊断标识：" + failure_id},
+                            status=500, send_body=send_body)
 
     def _handle_account_memory_remove(self):
         # Browser admission is shared by every mutation in do_POST.
