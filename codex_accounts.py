@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import selectors
+import secrets
 import shutil
 import signal
 import subprocess
@@ -20,9 +21,10 @@ from urllib.parse import urlparse
 from parsers.accounts import codex_account
 from parsers.codex import select_codex_rate_limit
 from upstream_controls import Controls, Paused, Busy
+from codex_messages import MESSAGES
 
 
-MESSAGE = "Please reply with OK."
+MESSAGE = f"从 {len(MESSAGES)} 条日常短消息中独立随机抽取一条，可能重复。"
 ACTIVE = {"queued", "checking", "login_queued", "login", "sending", "reading"}
 LOGIN_SECONDS = 600
 SEND_SECONDS = 120
@@ -961,8 +963,9 @@ class Manager:
             identifiers = {"thread_id": safe_protocol_id(thread_id)} if safe_protocol_id(thread_id) else {}
             # Commit unknown before transmission: lost acknowledgement is not proof of no usage.
             self.update(directory, record, stage="sending", message_status="unknown", diagnostics=identifiers,
+                        message=secrets.choice(MESSAGES),
                         detail="正在发送一条短消息；中断后不会自动重发。")
-            turn = rpc.request("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": MESSAGE}],
+            turn = rpc.request("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": record["operation"]["message"]}],
                                               "environments": []}, deadline)
             turn_id = turn["turn"]["id"]
             if safe_protocol_id(turn_id):

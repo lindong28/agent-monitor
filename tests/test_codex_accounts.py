@@ -162,6 +162,61 @@ class AccountActionsTests(unittest.TestCase):
         self.assertEqual(methods.count("account/login/start"), 1)
         self.assertEqual(methods.count("turn/start"), 2)
 
+    def test_message_pool_has_100_unique_short_messages(self):
+        self.assertEqual(len(ca.MESSAGES), 100)
+        self.assertEqual(len(set(ca.MESSAGES)), 100)
+        for message in ca.MESSAGES:
+            self.assertTrue(message.strip())
+            self.assertNotIn("\n", message)
+        for example in ("你好！", "现在几点了？", "今天天气如何？"):
+            self.assertIn(example, ca.MESSAGES)
+
+    def test_selected_message_is_saved_before_send_and_survives_outcomes(self):
+        real_request = ca.Rpc.request
+        seen = []
+
+        def observe(rpc, method, params, deadline):
+            if method == "turn/start":
+                record = self.manager.read(directory)
+                seen.append(record["operation"])
+                self.assertEqual(record["operation"]["message_status"], "unknown")
+                self.assertEqual(params["input"], [{"type": "text", "text": record["operation"]["message"]}])
+            return real_request(rpc, method, params, deadline)
+
+        for index, scenario in enumerate(("success", "disconnect")):
+            with self.subTest(scenario=scenario):
+                account = self.account(f"message{index}@example.com", f"message-workspace-{index}")
+                directory = self.manager.directory(account["id"])
+                self.scenario = scenario
+                selected = ca.MESSAGES[index * 99]
+                with mock.patch.object(ca.secrets, "choice", return_value=selected) as choose, \
+                     mock.patch.object(ca.Rpc, "request", observe):
+                    self.manager.start(account["id"])
+                    result = self.wait(account["id"])
+                choose.assert_called_once_with(ca.MESSAGES)
+                self.assertEqual(result["operation"]["message"], selected)
+                self.assertEqual(result["operation"]["message_status"], "succeeded" if scenario == "success" else "unknown")
+                turns = [c for c in self.calls(account) if c.get("method") == "turn/start"]
+                self.assertEqual(len(turns), 1)
+                self.assertEqual(turns[0]["params"]["input"][0]["text"], selected)
+                observer = ca.Manager(self.manager.root)
+                try:
+                    restored = observer.view(directory)
+                    self.assertEqual(restored["operation"]["message"], selected)
+                finally:
+                    observer.close()
+        self.assertEqual(len(seen), 2)
+
+    def test_quota_and_login_only_do_not_draw_messages(self):
+        account = self.account()
+        with mock.patch.object(ca.secrets, "choice") as choose:
+            for mode in ({"refresh_only": True}, {"login_only": True}):
+                self.manager.start(account["id"], **mode)
+                result = self.wait(account["id"])
+                self.assertNotIn("message", result["operation"])
+            choose.assert_not_called()
+        self.assertFalse(any(c.get("method") == "turn/start" for c in self.calls(account)))
+
     def test_configuration_is_verified_before_any_turn(self):
         for scenario in ("unsafe_config", "unsafe_sandbox", "wrong_profile", "custom_profile"):
             with self.subTest(scenario=scenario):

@@ -4,6 +4,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261021-d39a: account message pool](20261021-d39a-account-message-pool.md) | Accepted; 100 everyday messages, independent uniform selection and saved operation text |
 | [20261019-8e3a: Pulse workspace UI](20261019-8e3a-pulse-reference-ui.md) | Accepted; supersedes Ark appearance and shell placement, preserving Monitor behavior |
 | [20261019-f3a1: conversation result reuse](20261019-f3a1-sessions-conversation-reuse.md) | Accepted; content-bound incremental recomputation across generations |
 | [20261019-d8f4: Sessions result reuse](20261019-d8f4-sessions-result-reuse.md) | Accepted; bounded source/signature/window reuse after complete reads, unchanged freshness |

@@ -77,6 +77,34 @@ class BatchTests(unittest.TestCase):
         for pid in ids:
             self.assertEqual(self.calls(pid), 2)
 
+    def test_each_account_draws_again_only_on_explicit_new_round(self):
+        ids = [self.add(i) for i in range(2)]
+        selected = [ca.MESSAGES[0], ca.MESSAGES[-1], ca.MESSAGES[10], ca.MESSAGES[20]]
+        with mock.patch.object(ca.secrets, "choice", side_effect=selected) as choose:
+            batch_id = self.manager.start_batch(None)["batch"]["id"]
+            data = self.wait()
+            first = {a["id"]: a["operation"]["message"] for a in data["accounts"]}
+            self.assertEqual(set(first.values()), set(selected[:2]))
+            self.manager.start_batch(None)
+            self.manager.retry_batch(batch_id)
+            self.assertEqual(choose.call_count, 2)
+            self.manager.start(ids[0], refresh_only=True)
+            refreshed = self.wait()
+            account = next(a for a in refreshed["accounts"] if a["id"] == ids[0])
+            self.assertNotIn("message", account["operation"])
+            self.assertEqual(account["batch_result"]["message"], first[ids[0]])
+            self.assertEqual(choose.call_count, 2)
+            self.manager.start_batch(batch_id)
+            data = self.wait()
+            self.assertEqual({a["operation"]["message"] for a in data["accounts"]}, set(selected[2:]))
+            self.assertEqual(choose.call_args_list, [mock.call(ca.MESSAGES)] * 4)
+        for pid in ids:
+            calls = [json.loads(line) for line in (self.manager.directory(pid) / "calls.jsonl").read_text().splitlines()]
+            sent = [c["params"]["input"][0]["text"] for c in calls if c.get("method") == "turn/start"]
+            self.assertEqual(len(sent), 2)
+            self.assertEqual(sent[0], first[pid])
+            self.assertEqual(sent[1], next(a["operation"]["message"] for a in data["accounts"] if a["id"] == pid))
+
     def test_entire_account_and_peer_cleanup_finish_before_next_account_starts(self):
         first, second = self.add(1), self.add(2)
         cleanup_started = threading.Event()

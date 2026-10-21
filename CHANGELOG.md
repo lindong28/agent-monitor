@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-21
+
+- Select each explicit Codex account message independently from 100 predefined Chinese everyday messages. Show the selected text in operation and retained batch details; preserve request pauses and no-replay rules.
+
 ## 2026-10-19
 
 - Remove Overview’s local jump links and two general scope paragraphs; group Explore’s query controls and shared explanations in one card.

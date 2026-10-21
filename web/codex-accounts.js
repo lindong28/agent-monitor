@@ -137,7 +137,7 @@ export function init() {
       const targets = accounts.filter(a => payload.profile_ids.includes(a.id));
       if (!targets.length) return;
       const identities = targets.map(a => `${a.email}（${a.account_id}）`).join("\n");
-      if (!window.confirm(`开始新一轮，向以下 ${targets.length} 个账号各发送一条 “Please reply with OK.”？\n\n${identities}\n\n会使用账号额度；这不是继续未发送账号，之前已发送的账号也会再次发送。暂停中的账号不会发送；发送不保证固定或重置额度窗口。`)) return;
+      if (!window.confirm(`开始新一轮，从 100 条日常短消息中为以下 ${targets.length} 个账号各随机抽取并发送一条（可能重复）？\n\n${identities}\n\n会使用账号额度；这不是继续未发送账号，之前已发送的账号也会再次发送。暂停中的账号不会发送；发送不保证固定或重置额度窗口。`)) return;
     }
     submittingBatch = true;
     render();
@@ -295,9 +295,17 @@ export function init() {
       if (batchItem && !sharedSuccess) heading.append(element("span", `本批：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
       const retained = account.batch_result;
       if (retained && retained.batch_id !== batch?.id) details.append(element("p", `保留的批次结果：${MESSAGE_STATUS[retained.message_status] || "状态未知"} · 开始于 ${timestamp(retained.started_at)}`, "quota-scope"));
+      const shownMessageIds = new Set([op?.id]);
+      for (const batchMessage of [retained, batchItem?.operation]) {
+        if (batchMessage?.message && !shownMessageIds.has(batchMessage.id)) {
+          details.append(element("p", `保留的批次消息：${batchMessage.message}`, "quota-scope"));
+          shownMessageIds.add(batchMessage.id);
+        }
+      }
       if (op) {
         if (op.stage !== "succeeded") card.append(element("p", op.detail));
         details.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
+        if (op.message) details.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
         if (op.failure) details.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
         const diag = op.diagnostics;
         if (diag?.last_request) details.append(element("p", `最后请求：${diag.last_request} · ${timestamp(diag.last_request_at)}`, "quota-scope"));

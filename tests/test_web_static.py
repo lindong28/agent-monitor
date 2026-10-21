@@ -363,13 +363,13 @@ class Node {
 const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count"].map(id => [id, new Node()]));
 const root = new Node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag), createTextNode: text => {const n=new Node();n.textContent=text;return n;}};
-global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x}};
+global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x, latestCodexQuotaReading: () => null}};
 let source = fs.readFileSync("web/codex-accounts.js", "utf8").replace("export function init()", "function init()");
-source = source.replace("  load();\n  window.AgentMonitor.pageInterval(load, 30000);", "  window.testRender = values => {accounts = values; selectedIds = new Set(values.map(a => a.id)); render();};");
+source = source.replace("  load();\n  window.AgentMonitor.pageInterval(load, 30000);", "  window.testRender = (values, currentBatch = null) => {accounts = values; batch = currentBatch; selectedIds = new Set(values.map(a => a.id)); render();};");
 eval(source); init();
 const oldTime = "2026-10-08T02:00:00.000Z";
 const values = [
-  {id: "a", email: "a@example.test", has_credentials: true, operation: {stage: "succeeded", message_status: "succeeded", started_at: oldTime, after: {seven_day_used_pct: 8, observed_at: oldTime}}},
+  {id: "a", email: "a@example.test", has_credentials: true, operation: {id: "send-a", stage: "succeeded", message: "现在几点了？", message_status: "succeeded", started_at: oldTime, after: {seven_day_used_pct: 8, observed_at: oldTime}}},
   {id: "b", email: "b@example.test", has_credentials: true, operation: {stage: "failed", message_status: "unknown", detail: "失败；结果未知", started_at: oldTime, after: {seven_day_used_pct: null, observed_at: oldTime}}},
 ];
 const text = n => n.textContent + n.children.map(text).join(" ");
@@ -378,6 +378,8 @@ window.testRender(values);
 const list = nodes["#codex-account-list"], card = list.children[0];
 assert(!visible(card).includes("7 天"), "quota comparison belongs in the table");
 assert(text(card.querySelector("details")).includes(oldTime), "operation observation time remains in details");
+assert(text(card.querySelector("details")).includes("本次抽取的消息：现在几点了？"));
+assert(!text(list.children[1].querySelector("details")).includes("抽取的消息"), "legacy records must not invent selected text");
 assert(visible(list.children[1]).includes("失败；结果未知"));
 assert(text(list.children[1].querySelector("details")).includes("服务端未返回"));
 assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
@@ -399,6 +401,27 @@ first.checked = false; first.listeners.change();
 nodes["#codex-select-none"].listeners.click();
 assert.deepEqual(selected(), [false, false]);
 assert(nodes["#codex-selection-count"].textContent.includes("0 / 2"));
+values[0].batch_result = {...values[0].operation, batch_id: "old-batch"};
+values[0].operation = {id: "refresh-a", stage: "succeeded", refresh_only: true, started_at: oldTime};
+window.testRender(values);
+assert(text(list.children[0].querySelector("details")).includes("保留的批次消息：现在几点了？"));
+assert(!text(list.children[0].querySelector("details")).includes("本次抽取的消息"), "quota refresh does not select another message");
+for (const stage of ["failed", "succeeded"]) {
+  const op = {id: `new-${stage}`, batch_id: "new-batch", stage, started_at: oldTime,
+    message_status: stage === "succeeded" ? "succeeded" : "not_sent",
+    ...(stage === "succeeded" ? {message: "你好！"} : {})};
+  values[0].operation = op;
+  window.testRender(values, {id: "new-batch", created_at: oldTime, items: [{profile_id: "a", operation: op}]});
+  const detailText = text(list.children[0].querySelector("details"));
+  assert(detailText.includes("保留的批次结果"));
+  assert(detailText.includes("保留的批次消息：现在几点了？"), `${stage}: previous batch text must remain visible`);
+  assert.equal(detailText.includes("本次抽取的消息：你好！"), stage === "succeeded");
+  assert(!detailText.includes("保留的批次消息：你好！"), "current operation must not be repeated as retained");
+}
+values[0].batch_result = values[0].operation;
+window.testRender(values, {id: "new-batch", created_at: oldTime, items: [{profile_id: "a", operation: values[0].operation}]});
+assert(!text(list.children[0].querySelector("details")).includes("保留的批次消息"), "the same operation is shown only once");
+
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
