@@ -14,6 +14,7 @@ from unittest import mock
 
 import codex_accounts as ca
 import server
+from tests.test_codex_accounts import seed_auth
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -108,6 +109,10 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(all(a["eligible"] for a in data["accounts"]))
         self.assertEqual(self.memory.read_bytes(), before)
         self.assertTrue(all(self.calls(a) == 0 for a in data["accounts"]))
+        # Discovery only imports identity metadata. Sending requires separately
+        # saved credentials; these are synthetic fixture tokens, never real login.
+        for account in data["accounts"]:
+            seed_auth(self.manager, account)
         self.assertEqual(self.request("/batch-start", {"expected_batch_id": None})[0], 200)
         self.wait()
         self.request("/batch-start", {"expected_batch_id": None})
@@ -118,6 +123,8 @@ class DiscoveryTests(unittest.TestCase):
         self.source("live", "live@example.com")
         self.history([("past", "past@example.com")])
         accounts = self.request()[1]["accounts"]
+        for account in accounts:
+            seed_auth(self.manager, account)
         first, second = accounts
         status, data = self.request("/batch-start", {"expected_batch_id": None, "profile_ids": [first["id"]]})
         self.assertEqual(status, 200)
@@ -145,16 +152,17 @@ class DiscoveryTests(unittest.TestCase):
     def test_removal_excludes_next_round_and_retry_but_keeps_results(self):
         self.source("live", "live@example.com")
         self.history([("past", "past@example.com")])
-        self.scenarios["past@example.com"] = "wait_login"
         data = self.request()[1]
         past = next(a for a in data["accounts"] if a["email"] == "past@example.com")
+        live = next(a for a in data["accounts"] if a["email"] == "live@example.com")
+        seed_auth(self.manager, live)
         batch = self.request("/batch-start", {"expected_batch_id": None})[1]["batch"]
-        deadline = time.monotonic() + 5
-        while self.manager.view(self.manager.directory(past["id"]))["operation"]["stage"] != "login":
-            self.assertLess(time.monotonic(), deadline)
-            time.sleep(.02)
-        self.request("/cancel", {"id": past["id"]})
         self.wait()
+        # The unsigned historical account remains definitely unsent, eligible
+        # for retry until its source identity is removed.
+        result = self.manager.view(self.manager.directory(past["id"]))
+        self.assertEqual(result["operation"]["failure"]["category"], "needsLogin")
+        self.assertEqual(self.calls(live), 1)
         self.history([])
         data = self.request()[1]
         self.assertFalse(next(a for a in data["accounts"] if a["id"] == past["id"])["eligible"])
@@ -166,6 +174,7 @@ class DiscoveryTests(unittest.TestCase):
         self.wait()
         self.assertEqual(len(next_batch["items"]), 1)
         self.assertEqual(self.calls(past), 0)
+        self.assertEqual(self.calls(live), 2)
 
     def test_missing_email_is_visible_and_unknown_machine_is_not_an_account(self):
         self.source("no-email", None)

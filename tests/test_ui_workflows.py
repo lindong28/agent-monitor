@@ -76,7 +76,10 @@ class ScopeTests(unittest.TestCase):
             for query in ({"force":["1"]}, {}):
                 self.assertEqual(server.network(query)["checked_host"], "fixture-host")
             run.side_effect = FileNotFoundError()
-            self.assertEqual(server.network({"force":["1"]})["checked_host"], "fixture-host")
+            server._NETWORK_CACHE["data"] = None
+            failed = server.network({"force":["1"]})
+            self.assertEqual(failed["checked_host"], "fixture-host")
+            self.assertFalse(failed["installed"])
 
     def test_large_session_detail_negotiates_lossless_compression(self):
         import gzip

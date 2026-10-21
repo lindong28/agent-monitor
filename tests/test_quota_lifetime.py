@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+import process_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 PARENT = r"""
@@ -13,6 +14,7 @@ import os, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import quota_refresh as qr
 from parsers.accounts import Account
+qr.ROOT = qr.Path(os.environ['LIFETIME_TEST_ROOT'])
 qr.TIMEOUT = 1.5 if os.environ['LIFETIME_TEST_MODE'] in ('deadline', 'delayed_start') else 5
 real = subprocess.Popen
 def spawn(command, **kwargs):
@@ -29,6 +31,7 @@ except qr.RefreshError:
 
 class QuotaLifetimeTests(unittest.TestCase):
     def test_parent_alive_dead_and_deadline(self):
+        self.assertIsNotNone(process_identity.identity(os.getpid()))
         for mode in ('normal', 'parent_dead', 'deadline', 'delayed_start', 'stuck_cleanup'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -54,15 +57,16 @@ class QuotaLifetimeTests(unittest.TestCase):
                         time.sleep(.01)
                     if mode != 'stuck_cleanup':
                         self.assertTrue((root / 'helper-reaped').exists(), 'helper was not reaped by reader')
-                    # wait() above proves our parent terminal; ps distinguishes orphan zombies from running.
+                    # Native process identity works inside the network-denied
+                    # sandbox and distinguishes orphan zombies from live work.
                     for pid in (child_pid, helper_pid):
                         end = time.monotonic() + 3
                         while time.monotonic() < end:
-                            state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
-                            if not state or state.startswith('Z'):
+                            state = process_identity.identity(pid)
+                            if state is None:
                                 break
                             time.sleep(.01)
-                        self.assertTrue(not state or state.startswith('Z'), 'owned descendant still running')
+                        self.assertIsNone(state, 'owned descendant still running')
                     if mode == 'normal':
                         self.assertEqual(output.strip(), '12')
                     elif mode in ('deadline', 'delayed_start'):

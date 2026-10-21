@@ -8,7 +8,6 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +16,14 @@ import hub
 import sync_process
 import diagnostics
 from parsers.accounts import quota_identity
+
+
+MACHINE_TIMEOUT = 140
+
+
+def round_timeout(machines):
+    # Each selected machine owns one existing bounded query, plus worker cleanup.
+    return max(1, len(machines)) * MACHINE_TIMEOUT + 20
 
 
 def _time(value):
@@ -50,7 +57,7 @@ def run_queries(machines, complete):
     with sync_process.supervised_worker(__file__, text=False) as process:
         process.stdin.write((json.dumps([m.as_config_dict() for m in machines]) + "\n").encode())
         process.stdin.flush()
-        deadline = time.monotonic() + 160
+        deadline = time.monotonic() + round_timeout(machines)
         buffer = b""
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
@@ -123,8 +130,13 @@ class Manager:
         with self.condition:
             if self.stopping:
                 raise RuntimeError("配额刷新正在关闭，请稍后重试")
+            machines = tuple(machines)
+            if self.running:
+                if machines != self.machines:
+                    raise RuntimeError("已有配额刷新正在运行；本轮结束后再刷新新的机器范围。")
+                return self.requested
             self.requested += 1
-            self.machines = tuple(machines)
+            self.machines = machines
             ticket = self.requested
             if not self.running:
                 self.running = True
@@ -146,8 +158,10 @@ class Manager:
                     "pending_machines": list(self.pending), "errors": dict(self.errors),
                     "revision": self.revision, "cache_error": self.load_error}
 
-    def wait(self, ticket, timeout=340):
+    def wait(self, ticket, timeout=None):
         with self.condition:
+            if timeout is None:
+                timeout = round_timeout(self.machines) + 5
             return self.condition.wait_for(lambda: self.completed >= ticket, timeout=timeout)
 
     def shutdown(self):
@@ -280,7 +294,7 @@ def _worker():
             else:
                 result = subprocess.run([*sync._SSH_PREFIX, machine.ssh_host,
                     "~/.local/bin/agent-monitor export --quota-only --gui-quota"],
-                    capture_output=True, text=True, timeout=140, check=True)
+                    capture_output=True, text=True, timeout=MACHINE_TIMEOUT, check=True)
                 payload = json.loads(result.stdout)
             _validate(payload)
             return {"machine": machine.name, "payload": payload, "error": None}
@@ -288,11 +302,20 @@ def _worker():
             return {"machine": machine.name, "payload": None, "error": "配额查询失败，请检查该机器的采集器后重试"}
 
     with redirect_stdout(sys.stderr):
-        # Distinct hosts have independent provider clients; one round per manager.
-        with ThreadPoolExecutor(max_workers=max(1, min(8, len(machines)))) as pool:
-            for future in as_completed([pool.submit(query, m) for m in machines]):
-                output.write(json.dumps(future.result()) + "\n")
-                output.flush()
+        # This conservative stop applies to this combined round only. Provider
+        # pauses remain local to each machine; there is no distributed lock.
+        stopped = False
+        for machine in machines:
+            if stopped:
+                result = {"machine": machine.name, "payload": None,
+                          "error": "本轮前序机器查询异常；本机尚未尝试，请先核对原始失败。"}
+            else:
+                result = query(machine)
+                stopped = bool(result["error"] or any(
+                    block.get("refresh_error") for block in
+                    (result["payload"] or {}).get("rate_limits", {}).values()))
+            output.write(json.dumps(result) + "\n")
+            output.flush()
         output.write(json.dumps({"done": True}) + "\n")
         output.flush()
 

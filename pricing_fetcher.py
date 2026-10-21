@@ -208,14 +208,8 @@ def _with_bundled_supplements(data):
 def _fetch_litellm_pricing():
     context = ssl.create_default_context()
     request = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "agent-monitor/0.1"})
-    try:
-        with urllib.request.urlopen(request, timeout=10, context=context) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except ssl.SSLCertVerificationError:
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(request, timeout=10, context=context) as response:
-            return json.loads(response.read().decode("utf-8"))
+    with urllib.request.urlopen(request, timeout=10, context=context) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def _fallback_pricing():

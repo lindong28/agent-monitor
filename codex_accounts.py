@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 from parsers.accounts import codex_account
 from parsers.codex import select_codex_rate_limit
+from upstream_controls import Controls, Paused, Busy
 
 
 MESSAGE = "Please reply with OK."
@@ -62,14 +63,12 @@ TURN_FAILURES = {
     "badRequest": "服务端拒绝了请求参数。",
 }
 
-RECOVERABLE_FAILURES = {"unknown", "timeout", "processExited", "httpConnectionFailed",
-                        "responseStreamConnectionFailed", "responseStreamDisconnected",
-                        "responseTooManyFailedAttempts"}
 REACHED_LIMITS = {"rate_limit_reached", "workspace_owner_credits_depleted",
                   "workspace_member_credits_depleted", "workspace_owner_usage_limit_reached",
                   "workspace_member_usage_limit_reached"}
 RESTRICTION_DETAILS = {
-    "authentication": "认证被拒绝，已暂停此账号操作。请在详情中清除本页登录态，再重新授权；这不代表账号已恢复。",
+    "authentication": "认证被拒绝，已暂停此账号操作。请先核对账号状态；清除登录态不会解除暂停。",
+    "unknown": "上次操作结果未能安全确认，已暂停此账号。请核对原始结果后明确解除本地暂停；不会自动重发。",
     "quota": "服务端明确限制了额度使用，已暂停发送。可仅刷新配额；只有服务端明确允许使用后才解除此暂停，0% 或重置时间经过不代表恢复。",
     "rate_limit": "消息请求遇到限流，已暂停此账号操作。请按服务端指引等待，再解除本地限流暂停。",
     "login_rate_limit": "登录服务遇到限流，已暂停此账号操作。请按服务端指引等待，再解除本地限流暂停。",
@@ -267,7 +266,7 @@ class Rpc:
         shim = Path.home() / ".local/libexec/agent-shims/codex"
         executable = str(shim) if shim.is_file() else shutil.which("codex", path=env["PATH"])
         if not executable:
-            raise ActionError("服务所在机器未找到 Codex CLI，请安装后重试。", 503)
+            raise ActionError("服务所在机器未找到 Codex CLI，请安装后重试。", 503, "missingCli")
         config = {
             "cli_auth_credentials_store": '"file"', "forced_login_method": '"chatgpt"',
             "model_provider": '"agent-monitor-http"', "web_search": '"disabled"',
@@ -277,6 +276,8 @@ class Rpc:
             "model_providers.agent-monitor-http.wire_api": '"responses"',
             "model_providers.agent-monitor-http.requires_openai_auth": "true",
             "model_providers.agent-monitor-http.supports_websockets": "false",
+            "model_providers.agent-monitor-http.request_max_retries": "0",
+            "model_providers.agent-monitor-http.stream_max_retries": "0",
             "features.shell_tool": "false", "features.code_mode": "false",
             "features.code_mode_host": "false", "features.multi_agent": "false",
             "features.hooks": "false", "features.apps": "false", "features.plugins": "false",
@@ -467,7 +468,8 @@ class Manager:
         self.guard = threading.RLock()
         self.jobs = {}
         self.stopping = False
-        self.slots = threading.BoundedSemaphore(8)
+        self.slots = threading.BoundedSemaphore(1)
+        self.controls = Controls(self.root.parent / "upstream_controls")
         self.login_slot = threading.BoundedSemaphore(1)
         self.login_generation = 0
         self.start_interval = START_INTERVAL_SECONDS
@@ -512,7 +514,7 @@ class Manager:
     def check_restrictions(record):
         restrictions = record.get("restrictions", {})
         for key in RESTRICTION_DETAILS:
-            if key in restrictions and not (key == "quota" and record["operation"]["refresh_only"]):
+            if key in restrictions and not (key == "quota" and (record["operation"]["refresh_only"] or record["operation"].get("login_only"))):
                 raise ActionError(RESTRICTION_DETAILS[key], 409, "locallyPaused")
 
     def directory(self, profile_id):
@@ -622,7 +624,8 @@ class Manager:
                             if account["id"] in eligible_ids | retained or account["busy"]]
                 for account in accounts:
                     account["eligible"] = account["id"] in eligible_ids
-            return {"accounts": accounts, "message": MESSAGE, "batch": batch}
+            return {"accounts": accounts, "message": MESSAGE, "batch": batch,
+                    "upstream_pause": self.controls.read("codex").get("pause")}
 
     def read_batch(self):
         path = self.root / "batch.json"
@@ -641,7 +644,7 @@ class Manager:
                 return operation
         return None
 
-    def prepare(self, profile_id, *, published_id=None, batch_id=None, refresh_only=False):
+    def prepare(self, profile_id, *, published_id=None, batch_id=None, refresh_only=False, login_only=False):
         if self.stopping:
             raise ActionError("服务正在停止，请稍后重试；本次未启动账号操作。", 503)
         directory = self.directory(profile_id)
@@ -652,10 +655,17 @@ class Manager:
             record = self.read(directory)
             retain_quota(record)
             previous = record.get("operation")
+            if previous and previous.get("failure") and previous["failure"].get("category") != "locallyPaused":
+                record.setdefault("last_failure", copy.deepcopy(previous))
+            if (previous and previous.get("message_status") == "unknown"
+                    and record.get("reviewed_operation_id") != previous.get("id")):
+                record.setdefault("restrictions", {}).setdefault("unknown", {
+                    "category": "unknown", "created_at": now()})
+                record.setdefault("last_failure", copy.deepcopy(previous))
             if previous and published_id and previous.get("batch_id") == published_id:
                 record["batch_result"] = previous
             record["operation"] = {"id": str(uuid.uuid4()), "stage": "queued", "started_at": now(),
-                                   "refresh_only": refresh_only, "message_status": "not_sent",
+                                   "refresh_only": refresh_only, "login_only": login_only, "message_status": "not_sent",
                                    "quota_status": "not_read", "detail": "已排队，等待处理。"}
             if batch_id:
                 record["operation"]["batch_id"] = batch_id
@@ -663,7 +673,7 @@ class Manager:
                 if (record.get("batch_result") or {}).get("batch_id") == batch_id:
                     record.pop("batch_result")
             self.save(directory, record)
-            return directory, record, {"cancelled": threading.Event(), "authorization": {},
+            return directory, record, {"cancelled": threading.Event(), "done": threading.Event(), "authorization": {},
                                        "login_generation": self.login_generation}, lock
         except Exception:
             lock.close()
@@ -683,15 +693,16 @@ class Manager:
                 self.update(directory, record, stage="failed", detail="未能启动操作；消息未发送，可重试。")
             finally:
                 lock.close()
+                job["done"].set()
 
-    def start(self, profile_id, *, refresh_only=False):
+    def start(self, profile_id, *, refresh_only=False, login_only=False):
         with self.guard:
             directory = self.directory(profile_id)
             with lock_file(self.root / ".catalog.lock"):
                 batch = self.read_batch()
-                if not refresh_only and batch and profile_id in batch["profile_ids"]:
+                if not refresh_only and not login_only and batch and profile_id in batch["profile_ids"]:
                     raise ActionError("这个账号已纳入当前批次。请使用「继续未发送账号」或明确开始新一轮，避免重复发送。", 409)
-                self.launch(self.prepare(profile_id, refresh_only=refresh_only, published_id=batch["id"] if batch else None))
+                self.launch(self.prepare(profile_id, refresh_only=refresh_only, login_only=login_only, published_id=batch["id"] if batch else None))
                 return self.view(directory)
 
     def start_batch(self, expected_batch_id, eligible_ids=None):
@@ -704,7 +715,7 @@ class Manager:
                 published_id = current["id"] if current else None
                 if expected_batch_id != published_id:
                     return self.list()
-                accounts = self.list()["accounts"]
+                accounts = sorted(self.list()["accounts"], key=lambda a: (a["email"].casefold(), a["id"]))
                 if any(account["busy"] for account in accounts):
                     raise ActionError("还有账号正在操作，请等待完成或取消后再开始新一轮。", 409)
                 if eligible_ids is not None:
@@ -733,8 +744,7 @@ class Manager:
                     for *_, lock in prepared:
                         lock.close()
                     raise
-                for item in prepared:
-                    self.launch(item)
+                self.launch_sequence(prepared)
                 return self.list()
 
     def retry_batch(self, batch_id, eligible_ids=None):
@@ -744,15 +754,34 @@ class Manager:
                 batch = self.read_batch()
                 if not batch or batch["id"] != batch_id:
                     raise ActionError("批次已变化，请刷新后查看。", 409)
-                for pid in batch["profile_ids"]:
-                    if eligible_ids is not None and pid not in eligible_ids:
-                        continue
-                    account = self.view(self.directory(pid))
-                    operation = self.batch_operation(account, batch_id)
-                    if account["busy"] or (operation and operation["message_status"] != "not_sent"):
-                        continue
-                    self.launch(self.prepare(pid, published_id=batch_id, batch_id=batch_id))
+                if any(account["busy"] for account in self.list()["accounts"]):
+                    raise ActionError("还有账号正在操作，请等待本轮结束再继续。", 409)
+                prepared = []
+                try:
+                    for pid in batch["profile_ids"]:
+                        if eligible_ids is not None and pid not in eligible_ids:
+                            continue
+                        account = self.view(self.directory(pid))
+                        operation = self.batch_operation(account, batch_id)
+                        if account["busy"] or (operation and operation["message_status"] != "not_sent"):
+                            continue
+                        prepared.append(self.prepare(pid, published_id=batch_id, batch_id=batch_id))
+                except Exception:
+                    for *_, lock in prepared:
+                        lock.close()
+                    raise
+                self.launch_sequence(prepared)
                 return self.list()
+
+    def launch_sequence(self, prepared):
+        predecessor = None
+        stopped = threading.Event()
+        for item in prepared:
+            job = item[2]
+            job["predecessor"] = predecessor
+            job["batch_stopped"] = stopped
+            predecessor = job["done"]
+            self.launch(item)
 
     def cancel(self, profile_id):
         with self.guard:
@@ -769,7 +798,27 @@ class Manager:
             with lock_file(directory / ".lock"):
                 (directory / "codex/auth.json").unlink(missing_ok=True)
                 record = self.read(directory)
-                record.get("restrictions", {}).pop("authentication", None)
+                self.save(directory, record)
+                return self.view(directory)
+
+    def resume(self, profile_id, operation_id, pause_id=None):
+        """An explicit acknowledgement; never schedules a provider operation."""
+        with self.guard:
+            directory = self.directory(profile_id)
+            with lock_file(directory / ".lock"):
+                record = self.read(directory)
+                if (record.get("operation") or {}).get("id") != operation_id:
+                    raise ActionError("账号结果已变化，请刷新并重新核对。", 409)
+                try:
+                    if pause_id is not None:
+                        self.controls.resume("codex", pause_id)
+                except (Paused, Busy) as exc:
+                    raise ActionError(str(exc), 409, "locallyPaused") from None
+                for key in ("authentication", "unknown", "rate_limit", "login_rate_limit"):
+                    record.get("restrictions", {}).pop(key, None)
+                # Retain the failed operation, and remember explicit acknowledgement
+                # so prepare does not recreate an already reviewed unknown hold.
+                record["reviewed_operation_id"] = operation_id
                 self.save(directory, record)
                 return self.view(directory)
 
@@ -806,6 +855,7 @@ class Manager:
 
     def run(self, directory, record, job, lock):
         rpc = None
+        lease = None
         thread_id = turn_id = None
         slot = False
         login_slot = False
@@ -821,15 +871,41 @@ class Manager:
                 if job["login_generation"] != self.login_generation:
                     raise ActionError("OpenAI 登录服务刚刚限流，本账号尚未申请设备码。请稍后点击继续未发送账号，或重试单账号操作。", 429)
         try:
+            predecessor = job.get("predecessor")
+            while predecessor and not predecessor.wait(.1):
+                if job["cancelled"].is_set():
+                    raise Cancelled("操作已取消。")
+            if job.get("batch_stopped") and job["batch_stopped"].is_set():
+                raise ActionError("本轮前序账号出现异常，已停止后续账号；本账号未发出请求。", 409, "locallyPaused")
+            if any(key in record.get("restrictions", {}) for key in ("unknown", "authentication", "rate_limit", "login_rate_limit")):
+                # Migrate pre-control account holds without any provider call.
+                try:
+                    migration = self.controls.acquire("codex")
+                except (Paused, Busy):
+                    pass
+                else:
+                    try:
+                        migration.pause("previousAccountFailure")
+                    finally:
+                        migration.close()
             self.check_restrictions(record)
+            if not record["operation"].get("login_only") and not (directory / "codex/auth.json").is_file():
+                raise ActionError("本页尚未保存登录态。请单独登录；授权完成后需重新点击发送或刷新。", 409, "needsLogin")
             acquire_slot()
             slot = True
+            try:
+                lease = self.controls.acquire("codex", cancelled=job["cancelled"], timeout=0,
+                                              interval=self.start_interval)
+            except (Paused, Busy) as exc:
+                if job["cancelled"].is_set():
+                    raise Cancelled("操作已取消。") from None
+                raise ActionError(str(exc), 409, "locallyPaused") from None
             self.update(directory, record, stage="checking", detail="正在检查登录状态。")
             rpc = self.open_rpc(directory, job)
             rpc.initialize()
             if not self.identity(rpc, directory, record):
-                self.slots.release()
-                slot = False
+                if not record["operation"].get("login_only"):
+                    raise ActionError("登录态不可用，请单独登录；本次未发送消息。", 409, "needsLogin")
                 self.update(directory, record, stage="login_queued", detail="等待逐个授权；轮到此账号后显示设备码，已有登录态的账号会继续处理。")
                 while not login_slot:
                     check_login_queue()
@@ -851,11 +927,11 @@ class Manager:
                     raise ActionError("官方授权未完成，本次设备码已停止使用。请重新发起操作获取新码；本次未发送消息。", 502)
                 self.login_slot.release()
                 login_slot = False
-                self.update(directory, record, stage="queued", detail="授权已完成，等待发送名额。")
-                acquire_slot()
-                slot = True
                 if not self.identity(rpc, directory, record):
                     raise ActionError("授权后仍未取得登录态，请重试。", 502)
+            if record["operation"].get("login_only"):
+                self.update(directory, record, stage="succeeded", detail="已完成登录，本次未发送消息或查询配额。请重新选择后续操作。")
+                return
             if record["operation"]["refresh_only"]:
                 self.update(directory, record, stage="reading", detail="正在查询配额，本次不发送消息。")
                 after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
@@ -871,6 +947,8 @@ class Manager:
                 raise ActionError("发送前未取得目标 Codex 配额，未发送消息。可仅刷新配额重查。", 502)
             if quota_denied(before):
                 raise ActionError("发送前服务端明确限制了额度使用；本次未发送消息，可仅刷新配额查看。", 409, "usageLimitExceeded")
+            if any(before.get(key) is not None and before[key] >= 100 for key in ("five_hour_used_pct", "seven_day_used_pct")):
+                raise ActionError("发送前目标窗口已显示 100%，本次保守跳过发送；这不是服务端明确拒绝。可稍后仅刷新配额。", 409, "quotaAtCapacity")
             configuration = rpc.request("config/read", {"includeLayers": True, "cwd": str(directory / "work")},
                                         min(deadline, time.monotonic() + 20))
             options, profile = restricted_thread_options(configuration)
@@ -905,26 +983,57 @@ class Manager:
                 has_reset = after["seven_day_resets_at"] is not None
                 self.update(directory, record, stage="succeeded" if has_reset else "partial", quota_status="observed", after=after,
                             detail="消息已完成，已读取服务端重置时间；这不保证窗口已固定或重置。" if has_reset else "消息已完成，但服务端未返回七天窗口重置时间。")
-            except ActionError:
-                self.update(directory, record, stage="partial", quota_status="failed", detail="消息已完成，但配额查询未成功。不要为了查询结果重复发送。")
+            except ActionError as exc:
+                failure = {"category": exc.category, "stage": "reading"}
+                self.restrict(directory, record, failure)
+                if lease:
+                    lease.pause("quotaReadFailed")
+                if job.get("batch_stopped") is not None:
+                    job["batch_stopped"].set()
+                self.update(directory, record, stage="partial", quota_status="failed", failure=failure,
+                            detail="消息已完成，但配额查询未成功，已暂停后续请求。不要为了查询结果重复发送。")
+                record["last_failure"] = copy.deepcopy(record["operation"])
+                self.save(directory, record)
         except Cancelled:
+            if rpc:
+                record.setdefault("restrictions", {})["unknown"] = {"category": "cancelled", "created_at": now()}
+                if lease:
+                    lease.pause("cancelled")
+                if job.get("batch_stopped") is not None:
+                    job["batch_stopped"].set()
             self.update(directory, record, stage="cancelled", detail="操作已取消。若消息已发出，额度消耗不会撤回；发送结果见下方。")
+            if rpc:
+                record["last_failure"] = copy.deepcopy(record["operation"])
+                self.save(directory, record)
         except Exception as exc:
             if isinstance(exc, LoginRateLimited):
                 with self.guard:
                     self.login_generation += 1
             detail = str(exc) if isinstance(exc, ActionError) else "操作未完成，请检查 Codex CLI 或服务状态目录。"
             if record["operation"]["message_status"] == "unknown":
-                detail += " 发送结果未知，可能已消耗额度，不会自动重发。可以仅刷新配额查看服务端读数。"
+                detail += " 发送结果未知，可能已消耗额度，已暂停后续请求；请先核对原始结果。"
             failure = record["operation"].get("failure") or {
                 "stage": record["operation"]["stage"],
                 "category": exc.category if isinstance(exc, ActionError) else "unknown",
             }
             self.restrict(directory, record, failure)
+            if record["operation"]["message_status"] == "unknown":
+                record.setdefault("restrictions", {})["unknown"] = {"category": failure["category"], "created_at": now()}
+            benign = failure["category"] in ("needsLogin", "missingCli", "usageLimitExceeded", "quotaAtCapacity", "locallyPaused")
+            if not benign:
+                if lease:
+                    lease.pause("operationFailed")
+                if job.get("batch_stopped") is not None:
+                    job["batch_stopped"].set()
             diagnostics = copy.deepcopy(getattr(rpc, "diagnostics", {}))
             rejections = rpc.rejections(thread_id, turn_id) if rpc else []
             for rejection in rejections:
                 self.restrict(directory, record, rejection)
+                if restriction_key(rejection) != "quota":
+                    if lease:
+                        lease.pause("upstreamRejected")
+                    if job.get("batch_stopped") is not None:
+                        job["batch_stopped"].set()
             if rejections:
                 diagnostics["rejections"] = rejections
             for name, value in (("thread_id", thread_id), ("turn_id", turn_id)):
@@ -938,29 +1047,9 @@ class Manager:
                     diagnostics["interrupt"] = "unconfirmed"
             self.update(directory, record, diagnostics=diagnostics)
             self.update(directory, record, stage="failed", detail=detail, failure=failure)
-            if (record["operation"]["message_status"] in ("failed", "unknown")
-                    and failure["category"] in RECOVERABLE_FAILURES and not restriction_key(failure)
-                    and not record.get("restrictions") and not job["cancelled"].is_set()):
-                # The original result remains authoritative. A fresh owned peer
-                # avoids a broken send channel; no login or turn is ever started.
-                try:
-                    if rpc:
-                        rpc.close()
-                        rpc = None
-                    with self.guard:
-                        job["rpc"] = None
-                    rpc = self.open_rpc(directory, job)
-                    self.update(directory, record, detail=detail + " 正在补查配额，不会重发消息。")
-                    rpc.initialize()  # 20s; identity and quota each also cap at 20s.
-                    if not self.identity(rpc, directory, record):
-                        raise ActionError("登录态不可用。")
-                    after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
-                    self.observe_permission(directory, record, after)
-                    self.update(directory, record, quota_status="observed", after=after,
-                                detail=detail + " 已补查服务端配额；原消息结果不变。")
-                except Exception:
-                    self.update(directory, record, quota_status="failed",
-                                detail=detail + (" 配额补查已取消。" if job["cancelled"].is_set() else " 配额补查未成功，可仅刷新配额。"))
+            if failure["category"] != "locallyPaused":
+                record["last_failure"] = copy.deepcopy(record["operation"])
+                self.save(directory, record)
         finally:
             try:
                 if rpc:
@@ -969,15 +1058,25 @@ class Manager:
                 job["cleanup_error"] = exc
                 raise
             finally:
-                if login_slot:
-                    self.login_slot.release()
-                if slot:
-                    self.slots.release()
-                with self.guard:
-                    job["authorization"] = {}
-                    if "cleanup_error" not in job:
-                        self.jobs.pop(record["id"], None)
-                    lock.close()
+                try:
+                    if lease:
+                        lease.close(completed="cleanup_error" not in job)
+                except Exception as exc:
+                    job["cleanup_error"] = exc
+                    raise
+                finally:
+                    if login_slot:
+                        self.login_slot.release()
+                    if slot:
+                        self.slots.release()
+                    with self.guard:
+                        job["authorization"] = {}
+                        if "cleanup_error" not in job:
+                            self.jobs.pop(record["id"], None)
+                        elif job.get("batch_stopped") is not None:
+                            job["batch_stopped"].set()
+                        lock.close()
+                        job["done"].set()
 
     def close(self):
         with self.guard:

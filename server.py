@@ -56,6 +56,7 @@ GUIDE_PAGES = {
 logger = logging.getLogger("agent-monitor")
 _NETWORK_CACHE = {"ts": 0.0, "data": None}
 _NETWORK_TTL = 60.0
+_NETWORK_LOCK = threading.Lock()
 _SESSION_CACHE = SessionCache()
 _CONVERSATION_CACHE = ConversationCache()
 _SYNC_DUE_AFTER_SECONDS = 600
@@ -581,10 +582,24 @@ def network(query):
 
 
 def _network_report(query):
-    force = query.get("force", [None])[0] == "1"
-    now = time.time()
-    if (not force) and _NETWORK_CACHE["data"] and (now - _NETWORK_CACHE["ts"] < _NETWORK_TTL):
-        return _NETWORK_CACHE["data"]
+    # A refresh click shares the same request budget as polling. Hold the lock
+    # through the bounded child call so concurrent clients share failures too.
+    with _NETWORK_LOCK:
+        now = time.monotonic()
+        if (_NETWORK_CACHE["data"] is not None
+                and now - _NETWORK_CACHE["ts"] < _NETWORK_CACHE.get("ttl", _NETWORK_TTL)):
+            return _NETWORK_CACHE["data"]
+        data = _run_network_report()
+        delay = data.get("retry_after_seconds")
+        ttl = _NETWORK_TTL
+        if (not isinstance(delay, bool) and isinstance(delay, (int, float))
+                and math.isfinite(delay) and delay >= 0):
+            ttl = max(ttl, delay)
+        _NETWORK_CACHE.update(ts=time.monotonic(), data=data, ttl=ttl)
+        return data
+
+
+def _run_network_report():
     try:
         result = subprocess.run(["ip-check", "--json"], capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
@@ -594,8 +609,8 @@ def _network_report(query):
                 "verdict": "unknown",
             }
         data = json.loads(result.stdout)
-        _NETWORK_CACHE["ts"] = now
-        _NETWORK_CACHE["data"] = data
+        if not isinstance(data, dict):
+            return {"error": "ip-check returned an invalid report", "installed": True, "verdict": "unknown"}
         return data
     except FileNotFoundError:
         return {
@@ -616,6 +631,8 @@ def _network_report(query):
             "installed": True,
             "verdict": "unknown",
         }
+    except OSError:
+        return {"error": "无法启动 ip-check", "installed": True, "verdict": "unknown"}
 
 
 ROUTES = {
@@ -791,6 +808,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = manager.start(payload.get("id"))
             elif path == "/api/codex-accounts/refresh":
                 result = manager.start(payload.get("id"), refresh_only=True)
+            elif path == "/api/codex-accounts/login":
+                result = manager.start(payload.get("id"), login_only=True)
+            elif path == "/api/codex-accounts/resume":
+                result = manager.resume(payload.get("id"), payload.get("operation_id"), payload.get("pause_id"))
             elif path == "/api/codex-accounts/cancel":
                 result = manager.cancel(payload.get("id"))
             elif path == "/api/codex-accounts/forget-login":

@@ -379,16 +379,7 @@ def _rate_limits(refresh=False):
         error = None
         signed_out = False
         try:
-            for attempt in range(2):
-                try:
-                    value = quota_refresh.load_rate_limits(provider, account)
-                    break
-                except quota_refresh.NotSignedIn:
-                    raise
-                except (quota_refresh.RefreshError, OSError):
-                    if attempt:
-                        raise
-                    time.sleep(2)
+            value = quota_refresh.load_rate_limits(provider, account)
         except quota_refresh.NotSignedIn:
             # A state, not a failure: this machine does not use this provider, or
             # its sign-in has lapsed. It is published as a state so the server can

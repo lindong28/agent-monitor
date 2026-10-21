@@ -25,6 +25,7 @@ from pathlib import Path
 from parsers import RateLimits
 from parsers.codex import select_codex_rate_limit
 import claude_oauth
+import upstream_controls
 
 ROOT = Path(__file__).resolve().parent
 TIMEOUT = 35
@@ -44,19 +45,27 @@ class NotSignedIn(RefreshError):
     (timeouts, a missing CLI, an HTTP error from a reachable endpoint) stay
     RefreshError.
 
-    Both ways to have no usable sign-in land here, because they are the same
-    fact from the reader's side: no credential file at all, and a credential
-    the provider no longer accepts.
+    Upstream credential rejection remains a failure; it must not silently
+    become an ordinary local sign-out or permit trying another credential.
     """
+
+
+class LocalUnavailable(RefreshError):
+    """A local prerequisite is missing; no upstream attempt was made."""
 
 
 def load_rate_limits(provider, account):
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
-    deadline = time.monotonic() + TIMEOUT
-    parent_read, parent_write = os.pipe()
-    child = None
     try:
+        lease = upstream_controls.Controls(ROOT / "state/upstream_controls").acquire(provider)
+    except (upstream_controls.Paused, upstream_controls.Busy) as exc:
+        raise RefreshError(str(exc)) from None
+    child = None
+    parent_read = parent_write = None
+    try:
+        deadline = time.monotonic() + TIMEOUT
+        parent_read, parent_write = os.pipe()
         child = subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), provider, str(parent_read), str(deadline)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -65,13 +74,10 @@ def load_rate_limits(provider, account):
         os.close(parent_read)
         parent_read = None
         try:
-            # The child owns the same absolute provider deadline. Two seconds
-            # are reserved for its existing helper terminate/wait cleanup.
+            # The lease remains held through the bounded child's cleanup.
             output, _ = child.communicate(json.dumps(dataclasses.asdict(account)),
                                           timeout=max(0, deadline - time.monotonic()) + 2)
         except BaseException:
-            # Only signal while Popen still owns an unreaped leader; an
-            # interrupted communicate may already have collected its status.
             try:
                 if child.returncode is None:
                     os.killpg(child.pid, signal.SIGKILL)
@@ -79,23 +85,30 @@ def load_rate_limits(provider, account):
                 pass
             child.communicate()
             raise
-    except subprocess.TimeoutExpired:
-        raise RefreshError("配额请求超时，请重新刷新。") from None
+        try:
+            payload = json.loads(output)
+            if not isinstance(payload, dict):
+                raise ValueError()
+            if child.returncode or payload.get("error"):
+                kind = (NotSignedIn if payload.get("signed_out") is True else
+                        LocalUnavailable if payload.get("local_unavailable") is True else RefreshError)
+                raise kind(payload.get("error") or "配额读取失败，请核对后解除本地暂停。")
+            return RateLimits(**payload["reading"])
+        except (ValueError, KeyError, TypeError):
+            raise RefreshError("配额读取返回了无效结果，请核对后解除本地暂停。") from None
+    except (NotSignedIn, LocalUnavailable):
+        raise
+    except BaseException as exc:
+        if child is not None:
+            lease.pause("quotaRefreshFailed")
+        if isinstance(exc, subprocess.TimeoutExpired):
+            raise RefreshError("配额请求超时，本机已暂停该服务的后续请求。") from None
+        raise
     finally:
-        if parent_read is not None:
-            os.close(parent_read)
-        os.close(parent_write)
-    try:
-        payload = json.loads(output)
-        if child.returncode or payload.get("error"):
-            # The child reports which of the two it was; the distinction cannot be
-            # recovered from the message text, and guessing it by matching strings
-            # would turn every future wording change into a silent reclassification.
-            kind = NotSignedIn if payload.get("signed_out") is True else RefreshError
-            raise kind(payload.get("error") or "配额读取失败，请重新刷新。")
-        return RateLimits(**payload["reading"])
-    except (ValueError, KeyError, TypeError):
-        raise RefreshError("配额读取返回了无效结果，请更新 agent-monitor 后重试。") from None
+        for fd in (parent_read, parent_write):
+            if fd is not None:
+                os.close(fd)
+        lease.close(completed=child is None or child.returncode is not None)
 
 
 @contextmanager
@@ -174,7 +187,9 @@ def _reading(five, seven, *, plan=None):
 
 def _claude(account):
     helper = claude_oauth
+    attempted = False
     for token in helper.read_tokens():
+        attempted = True
         try:
             request = urllib.request.Request(
                 "https://api.anthropic.com/api/oauth/profile",
@@ -187,16 +202,16 @@ def _claude(account):
                 continue
             payload = helper.fetch(token)
         except urllib.error.HTTPError as exc:
-            if exc.code in (401, 403):
-                continue
-            raise RefreshError("Claude 配额请求失败（HTTP %s），请重新刷新。" % exc.code) from None
+            raise RefreshError("Claude 配额请求失败（HTTP %s）；已停止，不会换凭据重试。" % exc.code) from None
 
         def window(name):
             value = payload.get(name) or {}
             return _number(value.get("utilization")), helper.to_epoch(value.get("resets_at")) or None
 
         return _reading(window("five_hour"), window("seven_day"))
-    raise NotSignedIn("这台机器上没有与当前账号匹配的可用 Claude 凭据。")
+    if not attempted:
+        raise NotSignedIn("这台机器上没有可用的 Claude 凭据。")
+    raise RefreshError("Claude 返回的账号与当前账号不匹配；未采用配额读数。")
 
 
 def _codex_rpc_error(error, request_id):
@@ -227,10 +242,13 @@ def _codex(account):
     shim = Path.home() / ".local/libexec/agent-shims/codex"
     command = str(shim) if shim.is_file() else shutil.which("codex", path=env["PATH"])
     if not command:
-        raise RefreshError("Codex CLI 不可用，请在这台机器上安装后刷新。")
-    process = subprocess.Popen([command, "app-server", "--listen", "stdio://"],
-                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL, env=env)
+        raise LocalUnavailable("Codex CLI 不可用，请在这台机器上安装后刷新。")
+    try:
+        process = subprocess.Popen([command, "app-server", "--listen", "stdio://"],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, env=env)
+    except OSError:
+        raise LocalUnavailable("Codex CLI 无法启动，请检查这台机器上的安装。") from None
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
     buffer = b""
@@ -273,7 +291,7 @@ def _codex(account):
         if reported_account != account["account_id"]:
             # A different account really is a sign-in mismatch: whatever this
             # machine is signed in as now, it is not the credential we read.
-            raise NotSignedIn("Codex 当前登录的账号与这台机器的凭据不是同一个。")
+            raise RefreshError("Codex 当前登录的账号与这台机器的凭据不是同一个。")
         limit = select_codex_rate_limit(result) or {}
         windows = [limit.get(key) or {} for key in ("primary", "secondary")]
 
@@ -304,7 +322,8 @@ if __name__ == "__main__":
     except RefreshError as exc:
         # `signed_out` is the class, carried as data because the parent runs in a
         # different process and only sees this line.
-        print(json.dumps({"error": str(exc), "signed_out": isinstance(exc, NotSignedIn)}))
+        print(json.dumps({"error": str(exc), "signed_out": isinstance(exc, NotSignedIn),
+                          "local_unavailable": isinstance(exc, LocalUnavailable)}))
         sys.exit(1)
     except Exception:
         # External errors can contain request headers or provider payloads.

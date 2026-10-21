@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,16 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import codex_accounts as ca
+
+
+def seed_auth(manager, account):
+    """Write a synthetic identity only; no real credential store is consulted."""
+    directory = manager.directory(account["id"])
+    ca.private_dir(directory / "codex")
+    claims = {"email": account["email"], "https://api.openai.com/auth": {"chatgpt_account_id": account["account_id"]}}
+    token = "fixture." + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=") + ".fixture"
+    ca.write_record(directory / "codex/auth.json", {"tokens": {"account_id": account["account_id"],
+        "id_token": token, "access_token": "SECRET_FIXTURE_TOKEN"}})
 
 
 class AccountActionsTests(unittest.TestCase):
@@ -30,7 +41,10 @@ class AccountActionsTests(unittest.TestCase):
 
         def spawn(command, **kwargs):
             self.spawned.append((command, dict(kwargs["env"])))
-            kwargs["env"]["FAKE_SCENARIO"] = self.scenario
+            directory = Path(kwargs["env"]["CODEX_HOME"]).parent
+            record = self.manager.read(directory)
+            kwargs["env"].update(FAKE_SCENARIO=self.scenario, FAKE_EMAIL=record["email"],
+                                 FAKE_ACCOUNT=record.get("account_id") or "workspace-one")
             return real_popen([sys.executable, str(ROOT / "tests/fixtures/codex_account_server.py")], **kwargs)
 
         self.patch = mock.patch.object(ca.subprocess, "Popen", side_effect=spawn)
@@ -39,8 +53,15 @@ class AccountActionsTests(unittest.TestCase):
         self.manager = ca.Manager(self.root / "profiles")
         self.addCleanup(self.manager.close)
 
-    def account(self, email="one@example.com", account_id="workspace-one"):
-        return self.manager.add(email, account_id)
+    def account(self, email="one@example.com", account_id="workspace-one", signed_in=True):
+        account = self.manager.add(email, account_id)
+        if signed_in:
+            seed_auth(self.manager, account)
+        return account
+
+    def acknowledge(self, account):
+        pause = self.manager.list().get("upstream_pause")
+        return self.manager.resume(account["id"], account["operation"]["id"], pause["id"] if pause else None)
 
     def test_shutdown_refuses_new_account_work(self):
         account = self.account()
@@ -97,15 +118,24 @@ class AccountActionsTests(unittest.TestCase):
         path = self.manager.directory(account["id"]) / "calls.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()]
 
-    def run_case(self, scenario):
+    def run_case(self, scenario, *, login_only=False):
+        # Independent cases have independent persisted provider controls. Tests
+        # of restart and acknowledgement explicitly reuse this same manager root.
+        self.manager.close()
+        self.manager = ca.Manager(self.root / ("case-" + str(len(self.spawned))) / "profiles")
+        self.addCleanup(self.manager.close)
         self.scenario = scenario
-        account = self.account()
-        self.manager.start(account["id"])
+        account = self.account(signed_in=not login_only)
+        self.manager.start(account["id"], login_only=login_only)
         return self.wait(account["id"])
 
     def test_login_send_and_reuse_are_separate_from_default_home(self):
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "DONT_INHERIT", "CODEX_AUTH_TOKEN": "DONT_INHERIT"}):
-            account = self.run_case("success")
+            account = self.run_case("success", login_only=True)
+            self.assertEqual(account["operation"]["message_status"], "not_sent")
+            self.assertNotIn("account/rateLimits/read", [c.get("method") for c in self.calls(account)])
+            self.manager.start(account["id"])
+            account = self.wait(account["id"])
         self.assertEqual(account["operation"]["message_status"], "succeeded")
         self.assertEqual(account["operation"]["after"]["seven_day_resets_at"], 1900000002)
         self.assertEqual(account["operation"]["after"]["seven_day_used_pct"], 0)
@@ -118,6 +148,8 @@ class AccountActionsTests(unittest.TestCase):
         self.assertTrue(env["HOME"].startswith(str(self.root)))
         self.assertIn('model_provider="agent-monitor-http"', command)
         self.assertIn('model_providers.agent-monitor-http.supports_websockets=false', command)
+        self.assertIn('model_providers.agent-monitor-http.request_max_retries=0', command)
+        self.assertIn('model_providers.agent-monitor-http.stream_max_retries=0', command)
         self.assertIn('features.shell_tool=false', command)
         self.assertIn('project_doc_max_bytes=0', command)
         path = self.manager.directory(account["id"])
@@ -142,11 +174,8 @@ class AccountActionsTests(unittest.TestCase):
     def test_wrong_email_and_workspace_never_send(self):
         for scenario in ("wrong_email", "wrong_workspace"):
             with self.subTest(scenario=scenario):
-                self.scenario = scenario
-                account = self.account()
-                self.manager.forget_login(account["id"])
-                self.manager.start(account["id"])
-                result = self.wait(account["id"])
+                result = self.run_case(scenario, login_only=True)
+                account = result
                 self.assertEqual(result["operation"]["message_status"], "not_sent")
                 self.assertIn("不一致", result["operation"]["detail"])
                 self.assertNotIn("turn/start", [c.get("method") for c in self.calls(account)])
@@ -154,8 +183,7 @@ class AccountActionsTests(unittest.TestCase):
     def test_login_rate_limits_are_visible_without_misdiagnosing_settings(self):
         for scenario in ("login_start_rate_limit", "login_poll_rate_limit", "login_unknown_failure"):
             with self.subTest(scenario=scenario):
-                self.manager.release_rate_limit(self.account()["id"])
-                result = self.run_case(scenario)
+                result = self.run_case(scenario, login_only=True)
                 op = result["operation"]
                 self.assertEqual(op["stage"], "failed")
                 self.assertEqual(op["message_status"], "not_sent")
@@ -174,6 +202,7 @@ class AccountActionsTests(unittest.TestCase):
         self.assertEqual(result["operation"]["quota_status"], "failed")
         self.assertNotIn("SECRET_FIXTURE_TOKEN", json.dumps(result))
         self.scenario = "success"
+        self.acknowledge(result)
         self.manager.start(result["id"], refresh_only=True)
         refreshed = self.wait(result["id"])
         self.assertEqual(refreshed["operation"]["quota_status"], "observed")
@@ -237,20 +266,21 @@ class AccountActionsTests(unittest.TestCase):
         result = self.run_case("failed_turn")
         self.assertEqual(result["operation"]["message_status"], "failed")
 
-    def test_failed_send_recovers_quota_once_without_replaying(self):
+    def test_failed_send_retains_before_without_recovery_or_replay(self):
         for scenario, status in (("failed_turn", "failed"), ("disconnect", "unknown")):
             with self.subTest(scenario=scenario):
                 result = self.run_case(scenario)
                 op = result["operation"]
                 self.assertEqual(op["message_status"], status)
                 self.assertEqual(op["stage"], "failed")
-                self.assertEqual(op["quota_status"], "observed")
-                self.assertGreater(op["after"]["observed_at"], op["before"]["observed_at"])
-                self.assertEqual(result["last_quota"], op["after"])
+                self.assertEqual(op["quota_status"], "not_read")
+                self.assertNotIn("after", op)
+                self.assertEqual(result["last_quota"], op["before"])
                 methods = [c.get("method") for c in self.calls(result)]
-                # The account is reused between subcases; each adds exactly one turn.
-                self.assertEqual(methods.count("turn/start"), 1 if scenario == "failed_turn" else 2)
-                self.assertEqual(methods.count("account/login/start"), 1)
+                self.assertEqual(methods.count("turn/start"), 1)
+                self.assertEqual(methods.count("account/rateLimits/read"), 1)
+                self.assertEqual(methods.count("account/read"), 1)
+                self.assertEqual(methods.count("account/login/start"), 0)
 
     def test_structured_failure_is_safe_and_survives_recovery_failure(self):
         for scenario, category in (("usage_limit", "usageLimitExceeded"),
@@ -267,15 +297,16 @@ class AccountActionsTests(unittest.TestCase):
                 if scenario == "stream_error":
                     self.assertEqual(failure.get("http_status"), 503)
                 if scenario == "recovery_failure":
-                    self.assertEqual(result["operation"]["quota_status"], "failed")
+                    self.assertEqual(result["operation"]["quota_status"], "not_read")
                     self.assertEqual(result["last_quota"], result["operation"]["before"])
 
-    def test_recovery_rechecks_identity_without_login_or_quota(self):
+    def test_failure_does_not_open_recovery_identity_or_quota_requests(self):
         result = self.run_case("recovery_identity")
-        self.assertEqual(result["operation"]["quota_status"], "failed")
+        self.assertEqual(result["operation"]["quota_status"], "not_read")
         methods = [c.get("method") for c in self.calls(result)]
         self.assertEqual(methods.count("turn/start"), 1)
-        self.assertEqual(methods.count("account/login/start"), 1)
+        self.assertEqual(methods.count("account/login/start"), 0)
+        self.assertEqual(methods.count("account/read"), 1)
         self.assertEqual(methods.count("account/rateLimits/read"), 1)
         self.assertEqual(result["last_quota"], result["operation"]["before"])
 
@@ -304,15 +335,15 @@ class AccountActionsTests(unittest.TestCase):
     def test_official_link_validation_and_redacted_error(self):
         for scenario in ("bad_url", "login_error"):
             with self.subTest(scenario=scenario):
-                result = self.run_case(scenario)
+                result = self.run_case(scenario, login_only=True)
                 self.assertEqual(result["operation"]["message_status"], "not_sent")
                 self.assertNotIn("SECRET_FIXTURE_TOKEN", json.dumps(result))
                 self.assertNotIn("evil.example", json.dumps(result))
 
     def test_pending_login_polling_duplicate_lock_and_cancellation(self):
         self.scenario = "wait_login"
-        account = self.account()
-        self.manager.start(account["id"])
+        account = self.account(signed_in=False)
+        self.manager.start(account["id"], login_only=True)
         pending = self.wait(account["id"], "login")
         self.assertEqual(pending["operation"]["user_code"], "TEST-CODE")
         directory = self.manager.directory(account["id"])
@@ -336,38 +367,32 @@ class AccountActionsTests(unittest.TestCase):
         self.assertEqual(result["operation"]["message_status"], "unknown")
         self.assertFalse(self.manager.jobs)
         self.assertEqual(result["operation"]["failure"]["category"], "timeout")
-        self.assertEqual(result["operation"]["quota_status"], "observed")
+        self.assertEqual(result["operation"]["quota_status"], "not_read")
         self.assertEqual([c.get("method") for c in self.calls(result)].count("turn/start"), 1)
 
-    def test_cancel_during_recovery_keeps_send_failure_and_reaps_peer(self):
-        ready = threading.Event()
-        original_factory = self.manager.rpc_factory
-        peers = []
-        def factory(directory, cancelled):
-            rpc = original_factory(directory, cancelled)
-            peers.append(rpc.process)
-            if len(peers) == 2:
-                initialize = rpc.initialize
-                def wait_for_cancel():
-                    ready.set()
-                    if not cancelled.wait(3):
-                        raise AssertionError("test cancellation missing")
-                    initialize()
-                rpc.initialize = wait_for_cancel
-            return rpc
-        self.manager.rpc_factory = factory
-        self.scenario = "failed_turn"
+    def test_cancel_unknown_send_keeps_result_and_reaps_only_peer(self):
+        self.scenario = "wait_completion"
         account = self.account()
         self.manager.start(account["id"])
-        self.assertTrue(ready.wait(3))
+        self.wait(account["id"], "sending")
         self.manager.cancel(account["id"])
         result = self.wait(account["id"])
-        self.assertEqual(result["operation"]["message_status"], "failed")
-        self.assertEqual(result["operation"]["quota_status"], "failed")
-        self.assertIn("补查已取消", result["operation"]["detail"])
-        self.assertEqual(len(peers), 2)
-        self.assertTrue(all(peer.poll() is not None for peer in peers))
-        self.assertEqual([c.get("method") for c in self.calls(result)].count("turn/start"), 1)
+        self.assertEqual(result["operation"]["message_status"], "unknown")
+        self.assertEqual(result["operation"]["quota_status"], "not_read")
+        self.assertEqual(result["operation"]["stage"], "cancelled")
+        self.assertIn("unknown", result["restrictions"])
+        self.assertEqual(len(self.spawned), 1)
+        self.assertFalse(self.manager.jobs)
+        self.assertEqual([c.get("method") for c in self.calls(result)].count("account/rateLimits/read"), 1)
+
+    def test_missing_login_send_and_refresh_never_start_a_peer(self):
+        account = self.account(signed_in=False)
+        for refresh_only in (False, True):
+            self.manager.start(account["id"], refresh_only=refresh_only)
+            result = self.wait(account["id"])
+            self.assertEqual(result["operation"]["failure"]["category"], "needsLogin")
+            self.assertEqual(result["operation"]["message_status"], "not_sent")
+        self.assertEqual(self.spawned, [])
 
     def test_restart_is_visible_without_new_work(self):
         account = self.account()
@@ -398,7 +423,7 @@ class AccountActionsTests(unittest.TestCase):
 
     def test_email_only_form_reuses_profile_after_workspace_is_bound(self):
         account = self.manager.add("one@example.com")
-        self.manager.start(account["id"])
+        self.manager.start(account["id"], login_only=True)
         self.wait(account["id"])
         self.assertEqual(self.manager.add("ONE@example.com")["id"], account["id"])
         self.assertEqual(self.account()["id"], account["id"])

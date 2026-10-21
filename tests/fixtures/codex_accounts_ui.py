@@ -58,6 +58,9 @@ def main():
                     "failure": {"category": category, "stage": "sending"}}
                 manager.save(directory, record)
 
+        # An uncredentialed synthetic profile exercises the separate login UI.
+        manager.add("unsigned@example.test", "workspace-unsigned")
+
         ca.manager = manager
         server._codex_action_catalog = lambda: [{"account_state": "known", "account_label": a["email"],
             "account_id": a["account_id"]} for a in manager.list()["accounts"]]

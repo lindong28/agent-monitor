@@ -218,6 +218,8 @@ class EgressSessionTests(unittest.TestCase):
         seen = {}
 
         class Response:
+            status_code = 200
+
             @staticmethod
             def json():
                 return {"success": 1, "ip": {"appears": 0}}
@@ -260,16 +262,16 @@ class OneRouteQerRoundTests(unittest.TestCase):
             seen.append(route["address"])
             return requests.Session()
 
-        def fake_public(route=None):
+        def fake_public(route=None, on_retry_after=None):
             fake_session(route)
             return {"status": "success", "query": "203.0.113.9", "country": "SG",
                     "proxy": True, "hosting": False, "timezone": "Asia/Singapore"}
 
-        def fake_risk(ip, route=None):
+        def fake_risk(ip, route=None, on_retry_after=None):
             fake_session(route)
             return "", None
 
-        def fake_spam(ip, route=None):
+        def fake_spam(ip, route=None, on_retry_after=None):
             fake_session(route)
             return [""]
 
@@ -293,11 +295,11 @@ class OneRouteQerRoundTests(unittest.TestCase):
         """两个独立的慢查询要相互重叠，不能继续串行挤占 30 秒总预算。"""
         barrier = threading.Barrier(2)
 
-        def fake_risk(ip, route=None):
+        def fake_risk(ip, route=None, on_retry_after=None):
             barrier.wait(timeout=1)
             return "0/100 low", 0
 
-        def fake_spam(ip, route=None):
+        def fake_spam(ip, route=None, on_retry_after=None):
             barrier.wait(timeout=1)
             return ["未收录  低风险 ✓"]
 

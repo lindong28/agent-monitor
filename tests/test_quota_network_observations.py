@@ -126,6 +126,7 @@ class ObservationTests(unittest.TestCase):
         for payload, valid in cases:
             with self.subTest(payload=payload):
                 session = mock.Mock()
+                session.get.return_value.status_code = 200
                 session.get.return_value.json.return_value = payload
                 with mock.patch.object(cli, "_egress_session", return_value=session):
                     lines = cli.get_stopforumspam("203.0.113.9")

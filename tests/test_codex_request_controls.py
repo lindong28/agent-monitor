@@ -12,6 +12,7 @@ class RequestControlsTests(unittest.TestCase):
     account = actions.AccountActionsTests.account
     wait = actions.AccountActionsTests.wait
     calls = actions.AccountActionsTests.calls
+    acknowledge = actions.AccountActionsTests.acknowledge
     run_case = actions.AccountActionsTests.run_case
 
     def setUp(self):
@@ -23,7 +24,7 @@ class RequestControlsTests(unittest.TestCase):
     def test_identity_reads_never_force_refresh(self):
         result = self.run_case("disconnect")
         reads = [c for c in self.calls(result) if c.get("method") == "account/read"]
-        self.assertGreaterEqual(len(reads), 3)  # initial, authorized, recovery
+        self.assertEqual(len(reads), 1)  # signed-in initial identity only; no recovery
         self.assertTrue(all(c["params"] == {"refreshToken": False} for c in reads))
 
     def test_prequota_failure_or_explicit_refusal_never_sends(self):
@@ -34,8 +35,12 @@ class RequestControlsTests(unittest.TestCase):
                 self.assertEqual(result["operation"]["message_status"], "not_sent")
                 self.assertNotIn("turn/start", [c.get("method") for c in self.calls(result)])
 
-    def test_percentage_alone_does_not_refuse_a_send(self):
-        self.assertEqual(self.run_case("rounded_full")["operation"]["message_status"], "succeeded")
+    def test_full_percentage_is_local_preventive_skip_not_provider_refusal(self):
+        result = self.run_case("rounded_full")
+        self.assertEqual(result["operation"]["message_status"], "not_sent")
+        self.assertEqual(result["operation"]["failure"]["category"], "quotaAtCapacity")
+        self.assertNotIn("turn/start", [c.get("method") for c in self.calls(result)])
+        self.assertIsNone(self.manager.list()["upstream_pause"])
 
     def test_refusals_do_not_recover_or_start_again_after_restart(self):
         for scenario, key in (("usage_limit", "quota"), ("unauthorized", "authentication"),
@@ -75,9 +80,11 @@ class RequestControlsTests(unittest.TestCase):
             "authentication": {"category": "unauthorized", "created_at": ca.now()}})
         self.manager.save(directory, record)
         calls = self.calls(result)
-        self.manager.release_rate_limit(result["id"])
+        self.manager.forget_login(result["id"])
+        self.assertEqual(set(self.manager.view(directory)["restrictions"]), {"quota", "authentication", "rate_limit"})
+        self.acknowledge(result)
         updated = self.manager.view(directory)
-        self.assertEqual(set(updated["restrictions"]), {"quota", "authentication"})
+        self.assertEqual(set(updated["restrictions"]), {"quota"})
         self.assertEqual(updated["operation"], record["operation"])
         self.assertEqual(self.calls(result), calls)
         self.manager.forget_login(result["id"])
@@ -119,18 +126,12 @@ class RequestControlsTests(unittest.TestCase):
         self.assertEqual(self.wait(account["id"])["operation"]["stage"], "cancelled")
         self.assertEqual(len(starts), 3)
 
-    def test_recovery_uses_same_start_gate(self):
-        self.manager.start_interval = .12
-        starts = []
-        original = self.manager.rpc_factory
-        def factory(*args):
-            starts.append(time.monotonic())
-            return original(*args)
-        self.manager.rpc_factory = factory
+    def test_unknown_failure_never_starts_a_recovery_peer(self):
         result = self.run_case("disconnect")
-        self.assertEqual(result["operation"]["quota_status"], "observed")
-        self.assertEqual(len(starts), 2)
-        self.assertGreaterEqual(starts[1] - starts[0], .115)
+        self.assertEqual(result["operation"]["quota_status"], "not_read")
+        self.assertEqual(len(self.spawned), 1)
+        self.assertIn("unknown", result["restrictions"])
+        self.assertIsNotNone(self.manager.list()["upstream_pause"])
 
     def test_quota_clear_requires_target_bucket_and_cannot_clear_rate_pause(self):
         result = self.run_case("usage_limit")
@@ -156,6 +157,6 @@ class RequestControlsTests(unittest.TestCase):
                 self.assertEqual(result["operation"]["message_status"], "unknown")
                 methods = [c.get("method") for c in self.calls(result)]
                 self.assertEqual(methods.count("turn/start"), 1)
-                self.assertEqual(methods.count("account/rateLimits/read"), 1 if key else 2)
-                self.assertEqual(set(result.get("restrictions", {})), {key} if key else set())
+                self.assertEqual(methods.count("account/rateLimits/read"), 1)
+                self.assertEqual(set(result.get("restrictions", {})), {"unknown", key} if key else {"unknown"})
                 self.assertNotIn("SECRET_FIXTURE_TOKEN", json.dumps(result))

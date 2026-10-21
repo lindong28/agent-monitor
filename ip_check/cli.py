@@ -15,6 +15,8 @@ import datetime
 import re
 import platform
 import math
+import threading
+from email.utils import parsedate_to_datetime
 
 import requests
 from urllib.parse import urlsplit as _urlsplit
@@ -368,25 +370,55 @@ def _egress_session(route=None):
     return session
 
 
-def get_public_info(route=None):
+def _require_success(response, on_retry_after=None):
+    if 200 <= response.status_code < 300:
+        return
+    raw = response.headers.get("Retry-After", "")
+    delay = None
+    if isinstance(raw, str) and len(raw) <= 128:
+        value = raw.strip()
+        if value.isascii() and value.isdecimal() and len(value) <= 20:
+            delay = int(value)
+        elif value:
+            try:
+                date = parsedate_to_datetime(value)
+                if date.tzinfo is not None:
+                    delay = max(0, math.ceil((date - datetime.datetime.now(datetime.timezone.utc)).total_seconds()))
+            except (ValueError, TypeError, OverflowError):
+                pass
+    message = f"HTTP {response.status_code}，未重试"
+    if delay is not None:
+        message += f"；服务端 Retry-After：至少 {delay} 秒后再试"
+        if on_retry_after is not None:
+            on_retry_after(delay)
+    elif raw:
+        message += "；服务端 Retry-After 无法解析"
+    raise ValueError(message)
+
+
+def get_public_info(route=None, on_retry_after=None):
     try:
         resp = _egress_session(route).get(
             "http://ip-api.com/json/",
             params={"fields": "status,message,country,regionName,city,isp,org,proxy,hosting,query,timezone"},
             timeout=6,
+            allow_redirects=False,
         )
+        _require_success(resp, on_retry_after)
         return resp.json()
     except Exception as e:
         return {"status": "fail", "message": str(e)}
 
 
-def get_ip_risk(ip, route=None):
+def get_ip_risk(ip, route=None, on_retry_after=None):
     try:
         resp = _egress_session(route).get(
             f"https://proxycheck.io/v2/{ip}",
             params={"risk": 1, "vpn": 1, "asn": 1},
             timeout=6,
+            allow_redirects=False,
         )
+        _require_success(resp, on_retry_after)
         data = resp.json().get(ip, {})
         risk  = data.get("risk")
         itype = data.get("type", "")
@@ -407,13 +439,15 @@ def get_ip_risk(ip, route=None):
         return warn(f"查询失败（{e}）"), None
 
 
-def get_stopforumspam(ip, route=None):
+def get_stopforumspam(ip, route=None, on_retry_after=None):
     try:
         resp = _egress_session(route).get(
             "https://api.stopforumspam.org/api",
             params={"json": 1, "ip": ip},
             timeout=(6, 10),
+            allow_redirects=False,
         )
+        _require_success(resp, on_retry_after)
         payload = resp.json()
         if not isinstance(payload, dict) or payload.get("success") != 1:
             raise ValueError("信誉库未返回成功结果")
@@ -439,7 +473,7 @@ def get_stopforumspam(ip, route=None):
         return [warn(f"查询失败（{e}）")]
 
 
-def _collect_risk_probes(ip, route=None):
+def _collect_risk_probes(ip, route=None, on_retry_after=None):
     """Run the two independent reputation lookups with a bounded fan-out."""
     results = {}
     futures = {}
@@ -450,7 +484,7 @@ def _collect_risk_probes(ip, route=None):
                 ("spam", get_stopforumspam),
             ):
                 try:
-                    futures[name] = executor.submit(probe, ip, route)
+                    futures[name] = executor.submit(probe, ip, route, on_retry_after=on_retry_after)
                 except Exception as exc:
                     results[name] = (None, exc)
         for name, future in futures.items():
@@ -587,6 +621,13 @@ def collect_all() -> dict:
         return spam
 
     errors = []
+    retry_delays = []
+    retry_lock = threading.Lock()
+
+    def record_retry_after(delay):
+        with retry_lock:
+            retry_delays.append(delay)
+
     out = {
         "version": _pkg_version,
         "timestamp": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -632,7 +673,7 @@ def collect_all() -> dict:
     }
 
     try:
-        pub = get_public_info(route)
+        pub = get_public_info(route, on_retry_after=record_retry_after)
         if pub.get("status") == "success":
             tz_name = pub.get("timezone")
             tz_off = None
@@ -665,7 +706,7 @@ def collect_all() -> dict:
     pub_data = out.get("public") or {}
     if pub_data.get("ok") and pub_data.get("ip") and (pub_data.get("proxy") or pub_data.get("hosting")):
         ip = pub_data.get("ip")
-        probes = _collect_risk_probes(ip, route)
+        probes = _collect_risk_probes(ip, route, on_retry_after=record_retry_after)
         risk_result, risk_error = probes["risk"]
         if risk_error is None:
             risk_display, risk_score = risk_result
@@ -684,6 +725,10 @@ def collect_all() -> dict:
             out["spam"] = _parse_spam_lines(spam_lines)
         else:
             errors.append({"section": "spam", "message": str(spam_error)})
+
+    if retry_delays:
+        # Conservative whole-round wait: never shorten any endpoint's instruction.
+        out["retry_after_seconds"] = max(retry_delays)
 
     try:
         out["proxy_envs"] = get_proxy_envs()

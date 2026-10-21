@@ -36,6 +36,8 @@ def factory(directory, cancelled):
 manager = ca.Manager(root / 'profiles', rpc_factory=factory)
 server.codex_accounts.manager = manager
 account = manager.add('fixture@example.com', 'fixture-workspace')
+from tests.test_codex_accounts import seed_auth
+seed_auth(manager, account)
 manager.start(account['id'], refresh_only=True)
 assert ready.wait(3)
 

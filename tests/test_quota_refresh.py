@@ -16,11 +16,18 @@ from parsers import RateLimits, accounts
 
 class ProviderTests(unittest.TestCase):
     def setUp(self):
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.root = Path(root.name)
+        for module in (quota_refresh, exporter):
+            patcher = mock.patch.object(module, "ROOT", self.root)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         sleeper = mock.patch("exporter.time.sleep")
         self.sleep = sleeper.start()
         self.addCleanup(sleeper.stop)
 
-    def test_retry_is_bounded_per_provider_and_success_clears_persisted_error(self):
+    def test_one_attempt_per_provider_and_success_clears_persisted_error(self):
         old = RateLimits(3, None, 20, None, updated_at="2026-08-01T00:00:00Z")
         fresh = dataclasses.replace(old, seven_day_pct=0, updated_at="2026-09-29T00:00:00Z")
         for outcome in (fresh, quota_refresh.RefreshError("still offline"),
@@ -41,8 +48,6 @@ class ProviderTests(unittest.TestCase):
                         return fresh
                     if isinstance(outcome, quota_refresh.NotSignedIn):
                         raise outcome
-                    if calls[provider] == 1:
-                        raise quota_refresh.RefreshError("timed out")
                     if isinstance(outcome, Exception):
                         raise outcome
                     return outcome
@@ -58,8 +63,8 @@ class ProviderTests(unittest.TestCase):
                     result = exporter._rate_limits(refresh=True)["claude"]
                     passive = exporter._rate_limits(refresh=False)["claude"]
                 signed_out = isinstance(outcome, quota_refresh.NotSignedIn)
-                self.assertEqual(calls, {"claude": 1 if signed_out else 2, "codex": 1})
-                self.assertEqual(self.sleep.call_args_list, [] if signed_out else [mock.call(2)])
+                self.assertEqual(calls, {"claude": 1, "codex": 1})
+                self.sleep.assert_not_called()
                 written = json.loads(cache.read_text())["claude"]
                 if isinstance(outcome, RateLimits):
                     for block in (result, written, passive):
@@ -166,7 +171,7 @@ class ProviderTests(unittest.TestCase):
         helper = types.ModuleType("agent_monitor_usage")
         helper.OAUTH_BETA = "beta"
         helper.TIMEOUT_S = 5
-        helper.read_tokens = lambda: list(responses)
+        helper.read_tokens = lambda: iter(responses)
         helper.fetch = lambda token: {"five_hour": {"utilization": 11},
                                       "seven_day": {"utilization": 22}}
         helper.to_epoch = lambda value: None
@@ -180,37 +185,31 @@ class ProviderTests(unittest.TestCase):
                 return _Response(json.dumps(outcome))
 
         helper._OPENER = _Opener()
+        helper._OPENER.open = mock.Mock(wraps=helper._OPENER.open)
+        self.claude_requests = helper._OPENER.open
         with mock.patch("quota_refresh.claude_oauth", helper):
             return quota_refresh._claude({"account_id": account_id})
 
-    def test_no_claude_credential_matching_this_account_is_a_sign_out(self):
-        """The Claude fall-through, which nothing held.
-
-        Deleting that `raise` left the whole suite green — the function fell off
-        the end and returned None, and every caller treats a reading it cannot
-        use the same way it treats no reading at all. The three cases below are
-        what the guard actually separates.
-        """
-        import urllib.error
-        unauthorized = urllib.error.HTTPError("u", 401, "Unauthorized", {}, None)
-
-        # Every credential belongs to some other account.
-        with self.assertRaises(quota_refresh.NotSignedIn):
-            self.claude_with_tokens({"tok-a": {"account": {"uuid": "someone-else"}}})
-        # Every credential is rejected outright.
-        with self.assertRaises(quota_refresh.NotSignedIn):
-            self.claude_with_tokens({"tok-a": unauthorized, "tok-b": unauthorized})
-        # There are no credentials at all to try.
+    def test_missing_claude_credentials_and_mismatched_identity_remain_distinct(self):
         with self.assertRaises(quota_refresh.NotSignedIn):
             self.claude_with_tokens({})
-
-        # And it is a fall-through, not an unconditional raise: a matching
-        # credential later in the list still produces a reading.
-        reading = self.claude_with_tokens({
-            "tok-a": unauthorized,
-            "tok-b": {"account": {"uuid": "acct-1"}},
-        })
+        with self.assertRaises(quota_refresh.RefreshError) as caught:
+            self.claude_with_tokens({"tok-a": {"account": {"uuid": "someone-else"}}})
+        self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)
+        reading = self.claude_with_tokens({"tok-a": {"account": {"uuid": "someone-else"}},
+                                          "tok-b": {"account": {"uuid": "acct-1"}}})
         self.assertEqual((reading.five_hour_pct, reading.seven_day_pct), (11, 22))
+
+    def test_claude_refusal_never_rotates_credentials(self):
+        import urllib.error
+        for status in (401, 403, 429):
+            with self.subTest(status=status):
+                refusal = urllib.error.HTTPError("u", status, "refused", {}, None)
+                with self.assertRaises(quota_refresh.RefreshError) as caught:
+                    self.claude_with_tokens({"tok-a": refusal,
+                                             "tok-b": {"account": {"uuid": "acct-1"}}})
+                self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)
+                self.assertEqual(self.claude_requests.call_count, 1)
 
     def test_a_claude_http_error_that_is_not_an_auth_refusal_stays_a_failure(self):
         """A 500 from a reachable endpoint is not a sign-out."""
@@ -237,11 +236,6 @@ class ProviderTests(unittest.TestCase):
         }
         for label, response in cases.items():
             with self.subTest(label):
-                if label == "a result naming another account":
-                    # A different account is a genuine sign-in mismatch.
-                    with self.assertRaises(quota_refresh.NotSignedIn):
-                        self.codex_cli(response)
-                    continue
                 with self.assertRaises(quota_refresh.RefreshError) as caught:
                     self.codex_cli(response)
                 self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)

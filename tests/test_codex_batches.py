@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 
 import codex_accounts as ca
+from tests.test_codex_accounts import seed_auth
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,8 +41,10 @@ class BatchTests(unittest.TestCase):
         self.addCleanup(patch.stop)
         self.addCleanup(self.manager.close)
 
-    def add(self, index, scenario="success"):
+    def add(self, index, scenario="success", signed_in=True):
         account = self.manager.add(f"account{index}@example.com", f"workspace-{index}")
+        if signed_in:
+            seed_auth(self.manager, account)
         self.scenarios[account["id"]] = scenario
         return account["id"]
 
@@ -74,6 +77,43 @@ class BatchTests(unittest.TestCase):
         for pid in ids:
             self.assertEqual(self.calls(pid), 2)
 
+    def test_entire_account_and_peer_cleanup_finish_before_next_account_starts(self):
+        first, second = self.add(1), self.add(2)
+        cleanup_started = threading.Event()
+        permit_cleanup = threading.Event()
+        second_started = threading.Event()
+        original = self.manager.rpc_factory
+        order = []
+
+        def factory(directory, cancelled):
+            pid = self.manager.read(directory)["id"]
+            order.append(pid)
+            if pid == second:
+                second_started.set()
+            rpc = original(directory, cancelled)
+            close = rpc.close
+            if pid == first:
+                def hold_cleanup():
+                    cleanup_started.set()
+                    if not permit_cleanup.wait(3):
+                        raise AssertionError("test did not release peer cleanup")
+                    close()
+                    self.assertIsNotNone(rpc.process.poll())
+                rpc.close = hold_cleanup
+            return rpc
+
+        self.manager.rpc_factory = factory
+        try:
+            self.manager.start_batch(None)
+            self.assertTrue(cleanup_started.wait(3))
+            self.assertFalse(second_started.wait(.1))
+            self.assertEqual(self.calls(second, "initialize"), 0)
+        finally:
+            permit_cleanup.set()
+        self.wait()
+        self.assertEqual(order, [first, second])
+        self.assertEqual([self.calls(first), self.calls(second)], [1, 1])
+
     def test_subset_round_retains_excluded_account_result_through_quota_refresh(self):
         first, second = self.add(1), self.add(2)
         old = self.manager.start_batch(None)["batch"]["id"]
@@ -104,106 +144,87 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(self.calls(first), 1)
         self.assertEqual(self.calls(second), 1)
 
-    def test_mixed_outcomes_and_quota_refresh_keep_message_results(self):
+    def test_first_failure_stops_remaining_accounts_and_preserves_send_result(self):
         good = self.add(1)
         partial = self.add(2, "quota_failure")
         unknown = self.add(3, "disconnect")
         failed = self.add(4, "failed_turn")
         batch_id = self.manager.start_batch(None)["batch"]["id"]
-        self.wait()
+        data = self.wait()
+        statuses = {item["profile_id"]: item["operation"]["message_status"] for item in data["batch"]["items"]}
+        self.assertEqual(statuses, {good: "succeeded", partial: "succeeded", unknown: "not_sent", failed: "not_sent"})
+        self.assertEqual([self.calls(pid) for pid in (good, partial, unknown, failed)], [1, 1, 0, 0])
         self.scenarios[partial] = "success"
+        original = next(a for a in data["accounts"] if a["id"] == partial)
+        self.manager.resume(partial, original["operation"]["id"], data["upstream_pause"]["id"])
         self.manager.start(partial, refresh_only=True)
         data = self.wait()
         statuses = {item["profile_id"]: item["operation"]["message_status"] for item in data["batch"]["items"]}
-        self.assertEqual(statuses, {good: "succeeded", partial: "succeeded", unknown: "unknown", failed: "failed"})
-        self.manager.retry_batch(batch_id)
-        for pid in statuses:
-            self.assertEqual(self.calls(pid), 1)
-            with self.assertRaises(ca.ActionError):
-                self.manager.start(pid)
+        self.assertEqual(statuses[partial], "succeeded")
+        self.assertEqual(self.calls(partial), 1)
         self.assertNotIn("SECRET_FIXTURE_TOKEN", json.dumps(data))
 
-    def test_authorization_waits_release_slots_and_resume_without_extra_click(self):
-        self.manager.slots = threading.BoundedSemaphore(2)
-        pending = [self.add(i, "deferred_login") for i in range(3)]
+    def test_missing_authorizations_are_skipped_without_device_codes(self):
+        missing = [self.add(i, "deferred_login", signed_in=False) for i in range(3)]
         good = self.add(4)
-        self.manager.start(good)
-        self.wait()
         self.manager.start_batch(None)
-        data = self.wait(lambda data: sum(a["operation"]["stage"] == "login" for a in data["accounts"]) == 1
-                  and sum(a["operation"]["stage"] == "login_queued" for a in data["accounts"]) == 2
-                  and any(a["id"] == good and not a["busy"] for a in data["accounts"]))
-        self.assertEqual(self.calls(good), 2)
-        for pid in pending:
-            self.assertEqual(self.calls(pid), 0)
-        for remaining in range(3, 0, -1):
-            data = self.wait(lambda data: sum(a["operation"]["stage"] == "login" for a in data["accounts"]) == 1)
-            active = next(a for a in data["accounts"] if a["operation"]["stage"] == "login")
-            for _ in range(3):
-                observed = next(a for a in self.manager.list()["accounts"] if a["id"] == active["id"])
-                self.assertEqual(observed["operation"]["user_code"], active["operation"]["user_code"])
-                self.assertEqual(observed["operation"]["id"], active["operation"]["id"])
-            self.assertEqual(sum(a["operation"]["stage"] == "login_queued" for a in data["accounts"]), remaining - 1)
-            (self.manager.directory(active["id"]) / "authorize").touch()
-            self.wait(lambda data: next(a for a in data["accounts"] if a["id"] == active["id"])["operation"]["message_status"] == "succeeded")
-        self.wait()
-        for pid in pending:
-            self.assertEqual(self.calls(pid), 1)
+        data = self.wait()
+        for pid in missing:
+            account = next(a for a in data["accounts"] if a["id"] == pid)
+            self.assertEqual(account["operation"]["failure"]["category"], "needsLogin")
+            self.assertEqual(self.calls(pid, "account/login/start"), 0)
+            self.assertEqual(self.calls(pid, "initialize"), 0)
+        self.assertEqual(self.calls(good), 1)
+        self.assertIsNone(data["upstream_pause"])
 
-    def test_rate_limit_stops_pending_authorizations_until_explicit_retry(self):
+    def test_explicit_login_rate_limit_pauses_other_saved_accounts(self):
         for scenario in ("login_start_rate_limit", "login_poll_rate_limit"):
             with self.subTest(scenario=scenario):
-                self.scenarios = {}
-                ids = [self.add(f"{scenario}-{i}", scenario) for i in range(3)]
-                good = self.add(f"{scenario}-saved")
+                pending = self.add(scenario, scenario, signed_in=False)
+                good = self.add(scenario + "-saved")
+                self.manager.start(pending, login_only=True)
+                data = self.wait()
+                result = next(a for a in data["accounts"] if a["id"] == pending)
+                self.assertEqual(self.calls(pending, "account/login/start"), 1)
+                self.assertEqual(self.calls(pending), 0)
+                self.assertIsNotNone(data["upstream_pause"])
                 self.manager.start(good)
                 self.wait()
-                current = self.manager.read_batch()
-                batch = self.manager.start_batch(current["id"] if current else None, set(ids + [good]))["batch"]["id"]
-                data = self.wait()
-                self.assertEqual(sum(self.calls(pid, "account/login/start") for pid in ids), 1)
-                for account in data["accounts"]:
-                    if account["id"] in ids:
-                        self.assertEqual(account["operation"]["stage"], "failed")
-                        self.assertEqual(account["operation"]["message_status"], "not_sent")
-                        self.assertIn("限流", account["operation"]["detail"])
-                        self.assertNotIn("user_code", account["operation"])
-                self.assertEqual(self.calls(good), 2)
-                self.scenarios.update({pid: "success" for pid in ids})
-                for pid in ids:
-                    self.manager.release_rate_limit(pid)
-                self.manager.retry_batch(batch)
+                self.assertEqual(self.calls(good, "initialize"), 0)
+                self.manager.resume(pending, result["operation"]["id"], data["upstream_pause"]["id"])
+                self.scenarios[pending] = "success"
+                self.manager.start(pending, login_only=True)
                 self.wait()
-                self.assertEqual(self.calls(good), 2)
-                for pid in ids:
-                    self.assertEqual(self.calls(pid), 1)
+                self.assertEqual(self.calls(pending), 0)
+                self.manager.start(good)
+                self.wait()
+                self.assertEqual(self.calls(good), 1)
 
-    def test_cancel_waiting_and_active_login_releases_the_queue(self):
-        ids = [self.add(i, "deferred_login") for i in range(3)]
+    def test_cancel_queued_account_never_starts_peer_and_unknown_stops_successor(self):
+        active = self.add(1, "wait_completion")
+        queued = self.add(2)
+        successor = self.add(3)
         self.manager.start_batch(None)
-        data = self.wait(lambda data: sum(a["operation"]["stage"] == "login_queued" for a in data["accounts"]) == 2
-                         and sum(a["operation"]["stage"] == "login" for a in data["accounts"]) == 1)
-        active = next(a["id"] for a in data["accounts"] if a["operation"]["stage"] == "login")
-        queued = next(a["id"] for a in data["accounts"] if a["operation"]["stage"] == "login_queued")
+        self.wait(lambda data: next(a for a in data["accounts"] if a["id"] == active)["operation"]["stage"] == "sending")
         self.manager.cancel(queued)
         self.wait(lambda data: next(a for a in data["accounts"] if a["id"] == queued)["operation"]["stage"] == "cancelled")
-        self.assertEqual(self.calls(queued, "account/login/start"), 0)
+        self.assertEqual(self.calls(queued, "initialize"), 0)
         self.manager.cancel(active)
-        remaining = next(pid for pid in ids if pid not in (active, queued))
-        self.wait(lambda data: next(a for a in data["accounts"] if a["id"] == remaining)["operation"]["stage"] == "login")
-        (self.manager.directory(remaining) / "authorize").touch()
-        self.wait()
-        self.assertEqual(self.calls(remaining), 1)
-        self.assertEqual(self.calls(active), 0)
+        data = self.wait()
+        self.assertEqual(self.calls(active), 1)
+        self.assertEqual(self.calls(successor, "initialize"), 0)
+        self.assertIsNotNone(data["upstream_pause"])
 
-    def test_cancel_retry_only_definitely_unsent_accounts(self):
+    def test_retry_only_definitely_unsent_accounts_after_separate_login(self):
         good = self.add(1)
-        pending = self.add(2, "wait_login")
+        pending = self.add(2, signed_in=False)
         batch_id = self.manager.start_batch(None)["batch"]["id"]
-        self.wait(lambda data: any(a["id"] == pending and a["operation"]["stage"] == "login" for a in data["accounts"]))
-        self.manager.cancel(pending)
         self.wait()
-        self.scenarios[pending] = "success"
+        self.assertEqual(self.calls(good), 1)
+        self.assertEqual(self.calls(pending), 0)
+        self.manager.start(pending, login_only=True)
+        self.wait()
+        self.assertEqual(self.calls(pending), 0)
         self.manager.retry_batch(batch_id)
         self.wait()
         self.assertEqual(self.calls(good), 1)

@@ -90,7 +90,7 @@ class IndependentQuotaTests(unittest.TestCase):
         self.assertEqual(result["seven_day_pct"], 90)
         self.assertIsNone(result["refresh_error"])
 
-    def test_repeated_requests_coalesce_and_wait_for_their_own_round(self):
+    def test_repeated_requests_share_active_round_without_tail_retry(self):
         manager = quota_sync.Manager(self.path)
         entered, release = threading.Event(), threading.Event()
         calls = []
@@ -108,7 +108,8 @@ class IndependentQuotaTests(unittest.TestCase):
             self.assertFalse(manager.wait(last, timeout=.01))
             release.set()
             self.assertTrue(manager.wait(last, timeout=2))
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(first, last)
         self.assertEqual(manager.status()["completed"], last)
 
     def test_shutdown_closes_admission_and_drains_owned_worker(self):

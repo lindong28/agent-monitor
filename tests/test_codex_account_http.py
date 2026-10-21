@@ -68,20 +68,38 @@ class AccountHttpTests(unittest.TestCase):
         self.assertEqual(self.request(headers={"X-Agent-Monitor": None})[0], 403)
         self.assertEqual(self.manager.list()["accounts"], [])
 
-    def test_local_rate_release_uses_same_origin_guard_and_never_launches(self):
+    def test_reviewed_resume_checks_origin_and_revision_without_launch(self):
         account = self.manager.add("local@example.com", "workspace-local")
         directory = self.manager.directory(account["id"])
         record = self.manager.read(directory)
-        record["restrictions"] = {"rate_limit": {"category": "rateLimitExceeded", "created_at": codex_accounts.now()}}
+        record["operation"] = {"id": "original-operation", "stage": "failed", "message_status": "unknown"}
+        record["restrictions"] = {"rate_limit": {"category": "rateLimitExceeded", "created_at": codex_accounts.now()},
+                                  "quota": {"category": "usageLimitExceeded", "created_at": codex_accounts.now()}}
         self.manager.save(directory, record)
+        lease = self.manager.controls.acquire("codex")
+        lease.pause("operationFailed")
+        lease.close()
+        pause = self.manager.list()["upstream_pause"]
+        payload = {"id": account["id"], "operation_id": "original-operation", "pause_id": pause["id"]}
         with mock.patch.object(self.manager, "rpc_factory", side_effect=AssertionError("must not launch")) as factory:
-            status, _ = self.request("/release-rate-limit", {"id": account["id"]}, {"Origin": "https://other.example"})
-            self.assertEqual(status, 403)
+            self.assertEqual(self.request("/resume", payload, {"Origin": "https://other.example"})[0], 403)
+            self.assertEqual(self.request("/resume", {**payload, "operation_id": "stale"})[0], 409)
+            self.assertEqual(self.request("/resume", {**payload, "pause_id": "stale"})[0], 409)
             self.assertIn("rate_limit", self.manager.view(directory)["restrictions"])
-            status, data = self.request("/release-rate-limit", {"id": account["id"]})
+            status, data = self.request("/resume", payload)
             self.assertEqual(status, 200)
-            self.assertEqual(data["restrictions"], {})
+            self.assertEqual(set(data["restrictions"]), {"quota"})
+            self.assertEqual(data["operation"], record["operation"])
+            self.assertIsNone(self.manager.list()["upstream_pause"])
             factory.assert_not_called()
+
+    def test_login_route_is_explicit_and_has_same_origin_admission(self):
+        account = self.manager.add("login@example.com", "workspace-login")
+        with mock.patch.object(self.manager, "start", return_value={"accepted": True}) as start:
+            self.assertEqual(self.request("/login", {"id": account["id"]}, {"Origin": "https://other.example"})[0], 403)
+            start.assert_not_called()
+            self.assertEqual(self.request("/login", {"id": account["id"]})[0], 200)
+            start.assert_called_once_with(account["id"], login_only=True)
 
     def test_invalid_payloads_do_not_create_profiles_or_leak_errors(self):
         for body in ([], {"email": "invalid"}, {"email": "x" * 4097}):
