@@ -660,6 +660,11 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.quota-table th:nth-child(n + 2):nth-child(-n + 6),
+.quota-table .quota-row > td:nth-child(n + 2):nth-child(-n + 6) {
+  text-align: center;
+}
+
 
 
 .quota-provider-cell,
@@ -676,7 +681,7 @@ button:disabled {
 .quota-account-cell > .quota-history-note { flex-basis: 100%; }
 .quota-row.unattributed .quota-account-cell { flex-wrap: wrap; }
 .quota-account-links { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-.quota-provider-cell { align-items: flex-start; flex-direction: column; }
+.quota-provider-cell { align-items: center; flex-direction: column; }
 .quota-table .quota-provider-cell .pill, .status-pill.identity { background: var(--surface-sunken); color: var(--ink-muted); border: 0; white-space: nowrap; }
 
 .quota-account-label {
@@ -757,7 +762,8 @@ button:disabled {
 .quota-window-line {
   display: grid;
   /* Reserve room for 100%; every row uses the same track origin and scale. */
-  grid-template-columns: 3rem 72px max-content;
+  grid-template-columns: 3rem 72px;
+  justify-content: center;
   align-items: center;
   gap: 8px;
 }
@@ -832,6 +838,11 @@ button:disabled {
 
 .quota-window-reset {
   margin-top: 0;
+}
+
+.quota-window-line .quota-window-reset {
+  grid-column: 1 / -1;
+  text-align: center;
 }
 
 .quota-observation-details > summary { cursor: pointer; white-space: nowrap; }
@@ -1984,10 +1995,6 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 .overview-main .codex-account-actions { padding-inline: 16px; }
 .session-day-toggle { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
 .session-day-total { margin-left: auto; font-variant-numeric: tabular-nums; }
-@media (max-width: 1200px) {
-  .quota-window-line { grid-template-columns: 3rem 72px; }
-  .quota-window-line .quota-window-reset { grid-column: 1 / -1; }
-}
 @media (max-width: 600px) {
   .ranking-heading { gap: 8px; }
   .ranking-dimensions { grid-template-columns: minmax(0, 1fr); }
