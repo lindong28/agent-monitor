@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-22 — Quota meter alignment
+
+- Align quota progress tracks across account rows using consistent percentage and track widths on desktop and narrow screens.
+
 ## 2026-10-22 — Claude quota validity
 
 - Separate actual quota observation time from statusline receipt time; keep legacy time unknown and preserve historical readings.

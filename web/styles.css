@@ -756,7 +756,8 @@ button:disabled {
 
 .quota-window-line {
   display: grid;
-  grid-template-columns: max-content minmax(40px, 72px) max-content;
+  /* Reserve room for 100%; every row uses the same track origin and scale. */
+  grid-template-columns: 3rem 72px max-content;
   align-items: center;
   gap: 8px;
 }
@@ -1984,7 +1985,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 .session-day-toggle { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
 .session-day-total { margin-left: auto; font-variant-numeric: tabular-nums; }
 @media (max-width: 1200px) {
-  .quota-window-line { grid-template-columns: max-content minmax(40px, 72px); }
+  .quota-window-line { grid-template-columns: 3rem 72px; }
   .quota-window-line .quota-window-reset { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
