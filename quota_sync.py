@@ -244,17 +244,26 @@ class Manager:
         if payload is not None and payload["source_host_identity"] != current.meta["source_host_identity"]:
             payload = None
             error = "配额来源身份与已确认机器不符，请检查机器配置"
+        skipped = bool(error and error.startswith("本轮前序机器查询异常；本机尚未尝试"))
         for provider in ("claude", "codex"):
             base = result.get(provider)
             if not isinstance(base, dict):
                 base = {}
             if _time(base.get("updated_at")) > _time(record["attempted_at"]):
                 continue
+            # Publication is not a query timestamp: passive snapshots may carry
+            # cached outcomes. Only an unattempted round can yield to this
+            # explicit published state; actual query failures keep precedence.
+            published_state = None
+            if (skipped and _time(current.meta.get("generated_at")) > _time(record["attempted_at"])
+                    and (base.get("signed_out") is True or base.get("refresh_error"))):
+                published_state = (base.get("signed_out", False), base.get("refresh_error"))
             incoming = (payload or {}).get("rate_limits", {}).get(provider)
             if incoming is not None:
                 identity = lambda block: quota_identity(provider, block.get("account_id"), block.get("account_label"))
                 if identity(incoming) != identity(base):
                     provider_error = "登录账号已变化，等待统计同步确认"
+                    published_state = None
                 else:
                     provider_error = incoming.get("refresh_error")
                     if _time(incoming.get("updated_at")) >= _time(base.get("updated_at")):
@@ -271,7 +280,9 @@ class Manager:
                     base["refresh_error"] = provider_error
                 if provider_error:
                     base["refresh_error"] = provider_error
-            if error:
+            if published_state is not None:
+                base["signed_out"], base["refresh_error"] = published_state
+            elif error:
                 base["refresh_error"] = error
                 base["signed_out"] = False
             result[provider] = base

@@ -1077,6 +1077,14 @@
     updateSyncOverviewLink();
   }
 
+  function quotaFailureKind(reason) {
+    const text = String(reason || "");
+    if (text.startsWith("本轮前序机器查询异常；本机尚未尝试")) return "skipped";
+    if (text.startsWith("本机已暂停该服务的自动请求")) return "paused";
+    if (text.startsWith("同一服务已有操作，本次未发出请求。")) return "busy";
+    return "error";
+  }
+
   function quotaFailureDetails(provider, failures) {
     const body = document.createElement("tbody");
     const row = document.createElement("tr");
@@ -1087,11 +1095,7 @@
     const summary = document.createElement("summary");
     const counts = { paused: 0, skipped: 0, busy: 0, error: 0 };
     failures.forEach(({ reason }) => {
-      const text = String(reason || "");
-      if (text.startsWith("本轮前序机器查询异常；本机尚未尝试")) counts.skipped += 1;
-      else if (text.startsWith("本机已暂停该服务的自动请求")) counts.paused += 1;
-      else if (text.startsWith("同一服务已有操作，本次未发出请求。")) counts.busy += 1;
-      else counts.error += 1;
+      counts[quotaFailureKind(reason)] += 1;
     });
     const labels = [["paused", "暂停"], ["skipped", "本轮未尝试"],
       ["busy", "通道占用未查询"], ["error", "查询异常"]];
@@ -1120,6 +1124,14 @@
       && !(block?.signed_out_machines || []).includes(account.reading_from);
     const fresh = Number.isFinite(Date.parse(account.updated_at)) && !quotaIsStale(account.updated_at);
     if (sourceHealthy && fresh && hasValue) return null;
+    const kinds = new Set((block?.refresh_errors || [])
+      .filter(({ machine }) => (account.machines || []).includes(machine))
+      .map(({ reason }) => quotaFailureKind(reason)));
+    const state = kinds.has("paused") ? "查询已暂停" : kinds.has("skipped") ? "上次查询未执行"
+      : kinds.has("busy") ? "查询通道占用" : null;
+    if (state) {
+      return `${hasValue ? "更新延迟，保留上次读数" : "暂不可用"}；${state}，请展开“${provider.label} 采集详情”核对原因`;
+    }
     return hasValue ? "更新延迟，保留上次读数；可点击刷新重试" : "暂不可用，可点击刷新重试";
   }
 

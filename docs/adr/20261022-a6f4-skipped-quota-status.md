@@ -1,0 +1,13 @@
+# Prefer published provider state to an older skipped query
+
+Accepted 2026-10-22 after one independent decision review and a scope correction. The user requested repair of five dashboard messages saying later machines had not been queried.
+
+The Hub retained a combined-query round from 2026-10-21T13:10:07Z. Its skipped-machine errors overlaid snapshots published on October 22: macmini and tencent-webserver-china reported signed-out states for both providers, while macstudio reported a specific Claude pause. Comparing only the quota observation time left all five old messages visible. A snapshot publication time is not an active-query outcome time: passive exports can republish cached errors and login states.
+
+Only an older whole-machine error with the project's fixed skipped-query prefix may yield to a later admitted snapshot's explicit signed-out state or nonempty provider error. Keep source and account mismatch checks, whole-observation selection, and the persistent query record. A later publication alone cannot clear a failure. Successful queries, real transport failures and provider failures retain their existing precedence. This changes display composition, not admission or recovery policy, snapshot schemas, collection cadence or provider requests.
+
+Deleting the cache would lose evidence and leave the recurrence; refreshing all machines would create unnecessary provider requests; changing wording alone would still hide the specific state. A new outcome timestamp would support broader ordering but is unnecessary for this narrowly identified skipped-query case. The initial proposal covered every cached error; independent review identified cached snapshot outcomes as a counterexample, and the decision was narrowed before implementation.
+
+Account-row notices distinguish a pause, an unattempted query and an occupied channel from a retryable-looking generic failure. They point to the existing provider collection details without claiming that refresh bypasses a pause. This refines the display behavior in [independent quota refresh](20261011-64e1-independent-quota-refresh.md) and [bounded recovery](20261022-8c27-paused-quota-probe.md), preserving [upstream prevention](20261021-6bd2-upstream-prevention.md).
+
+Validation must distinguish older/equal/newer publications, explicit state versus unknown outcome, skipped versus actual failure, and matching versus mismatching source/account identity; retain original values and history across reload. UI checks cover the corresponding reader guidance. Implementation and production acceptance remain separate from this decision. No provider recovery or historical pause cause is established here.

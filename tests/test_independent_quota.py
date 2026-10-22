@@ -90,6 +90,63 @@ class IndependentQuotaTests(unittest.TestCase):
         self.assertEqual(result["seven_day_pct"], 90)
         self.assertIsNone(result["refresh_error"])
 
+    def test_new_published_state_replaces_old_skipped_query_without_new_quota(self):
+        skipped = (
+            "本轮前序机器查询异常；本机尚未尝试，请先核对原始失败。",
+            "本轮前序机器查询异常；本机尚未尝试。触发原因：first / paused",
+        )
+        for message in skipped:
+            for signed_out, error in ((True, None), (False, "本机已暂停该服务的自动请求；暂停标识：fixture")):
+                with self.subTest(message=message, signed_out=signed_out):
+                    manager = quota_sync.Manager(self.path)
+                    self.run_query(manager, self.payload())
+                    self.run_query(manager, error=message)
+                    manager.records["mini"]["attempted_at"] = "2026-10-11T01:30:00Z"
+                    quota_sync.hub._write_quota_message(self.path, {"version": 1, "machines": manager.records})
+                    current = copy.deepcopy(self.current)
+                    current.meta["generated_at"] = "2026-10-11T02:00:00Z"
+                    for provider in ("claude", "codex"):
+                        current.meta["rate_limits"][provider].update(signed_out=signed_out, refresh_error=error)
+                    for source in (manager, quota_sync.Manager(self.path)):
+                        for block in source.merge(current, self.machine).values():
+                            self.assertEqual(block["signed_out"], signed_out)
+                            self.assertEqual(block["refresh_error"], error)
+                            self.assertEqual(block["updated_at"], "2026-10-11T01:00:00Z")
+                            self.assertEqual(block["seven_day_pct"], 80)
+                        self.assertEqual(source.records["mini"]["error"], message)
+
+    def test_published_state_does_not_erase_actual_failures_or_identity_checks(self):
+        skipped = "本轮前序机器查询异常；本机尚未尝试，请先核对原始失败。"
+        for case in ("older", "equal", "unknown", "transport", "provider", "success", "source", "account"):
+            with self.subTest(case=case):
+                manager = quota_sync.Manager(self.path)
+                payload = self.payload(refresh_error="real provider failure" if case == "provider" else None)
+                self.run_query(manager, payload)
+                if case not in ("provider", "success"):
+                    self.run_query(manager, error="real transport failure" if case == "transport" else skipped)
+                manager.records["mini"]["attempted_at"] = "2026-10-11T01:30:00Z"
+                current = copy.deepcopy(self.current)
+                current.meta["generated_at"] = {"older": "2026-10-11T01:00:00Z", "equal": "2026-10-11T01:30:00Z"}.get(case, "2026-10-11T02:00:00Z")
+                for block in current.meta["rate_limits"].values():
+                    block.update(signed_out=case != "unknown", refresh_error=None)
+                    if case == "unknown":
+                        block.pop("refresh_error")
+                    if case == "account":
+                        block["account_label"] = "changed@example.test"
+                if case == "source":
+                    current.meta["source_host_identity"] = "other-source"
+                result = manager.merge(current, self.machine)["codex"]
+                if case == "source":
+                    self.assertIn("来源身份", result["refresh_error"])
+                elif case == "provider":
+                    self.assertEqual(result["refresh_error"], "real provider failure")
+                elif case == "success":
+                    self.assertFalse(result["signed_out"])
+                    self.assertIsNone(result["refresh_error"])
+                else:
+                    self.assertEqual(result["refresh_error"], "real transport failure" if case == "transport" else skipped)
+                    self.assertFalse(result["signed_out"])
+
     def test_repeated_requests_share_active_round_without_tail_retry(self):
         manager = quota_sync.Manager(self.path)
         entered, release = threading.Event(), threading.Event()

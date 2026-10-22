@@ -2175,6 +2175,24 @@ class SignedOutMachinesReadAsStateNotFailureTests(unittest.TestCase):
         recovered = self.render_with([], [], refresh_errors=failures, recover=True)
         self.assertNotIn("采集详情", recovered["tableText"])
 
+    def test_account_notice_does_not_recommend_retry_for_a_pause_or_skip(self):
+        account = {"account_id": "a", "account_label": "a@example.test", "account_state": "known",
+                   "presence": "in_use", "machines": ["macbook"], "reading_from": "macbook",
+                   "updated_at": "2026-01-01T00:00:00Z", "seven_day_used_pct": 20}
+        for reason, expected in (
+            ("本机已暂停该服务的自动请求；暂停标识：fixture", "查询已暂停"),
+            ("本轮前序机器查询异常；本机尚未尝试，请先核对原始失败。", "上次查询未执行"),
+            ("本轮前序机器查询异常；本机尚未尝试。触发原因：first / 本机已暂停该服务的自动请求", "上次查询未执行"),
+            ("同一服务已有操作，本次未发出请求。", "查询通道占用"),
+        ):
+            with self.subTest(reason=reason):
+                result = self.render_with([], [], [{"machine": "macbook", "reason": reason}], [account])
+                row = result["rows"][0]
+                self.assertIn(expected, row)
+                self.assertIn("Claude 采集详情", row)
+                self.assertNotIn("可点击刷新重试", row)
+                self.assertIn(reason, result["details"][0]["text"])
+
     def test_legacy_skips_are_not_inferred_to_be_pauses(self):
         result = self.render_with([], [], refresh_errors=[
             {"machine": "m", "reason": "本轮前序机器查询异常；本机尚未尝试，请先核对原始失败。"},
