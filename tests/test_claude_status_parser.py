@@ -8,6 +8,28 @@ from parsers import claude_status
 
 
 class ClaudeStatusParserTests(unittest.TestCase):
+    def test_received_time_does_not_refresh_carried_quota(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tt-status.json"
+            self._write_status(path, {
+                "_received_at": "2026-10-22T10:00:00+00:00",
+                "_quota_observed_at": "2026-10-16T10:00:00+00:00",
+                "rate_limits": {"seven_day": {"used_percentage": 7}},
+            })
+            reading = claude_status.load_rate_limits(path)
+        self.assertEqual(reading.updated_at, "2026-10-16T10:00:00+00:00")
+
+    def test_legacy_received_time_is_not_a_quota_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tt-status.json"
+            self._write_status(path, {
+                "_received_at": "2026-10-22T10:00:00+00:00",
+                "rate_limits": {"seven_day": {"used_percentage": 7}},
+            })
+            reading = claude_status.load_rate_limits(path)
+        self.assertEqual(reading.seven_day_pct, 7)
+        self.assertEqual(reading.updated_at, "")
+
     def test_happy_path_loads_rate_limits_model_and_timestamp(self):
         with tempfile.TemporaryDirectory() as tmp:
             status_file = Path(tmp) / "tt-status.json"
@@ -15,6 +37,7 @@ class ClaudeStatusParserTests(unittest.TestCase):
                 status_file,
                 {
                     "_received_at": "2026-05-19T22:41:23+00:00",
+                    "_quota_observed_at": "2026-05-19T22:41:23+00:00",
                     "model": {"id": "claude-opus-4-7[1m]"},
                     "rate_limits": {
                         "five_hour": {"used_percentage": 14.5, "resets_at": self.future_ts(5)},

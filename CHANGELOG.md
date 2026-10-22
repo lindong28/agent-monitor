@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-22 — Claude quota validity
+
+- Separate actual quota observation time from statusline receipt time; keep legacy time unknown and preserve historical readings.
+- Show user-confirmed lack of subscription as inapplicable quota, skip ordinary requests, retain failure diagnostics and protected explicit recovery. Codex event-time ordering remains unchanged.
+
+
 ## 2026-10-21
 
 - Select each explicit Codex account message independently from 100 predefined Chinese everyday messages. Show the selected text in operation and retained batch details; preserve request pauses and no-replay rules.

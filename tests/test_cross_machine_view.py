@@ -180,9 +180,10 @@ class CrossMachineOverviewTests(unittest.TestCase):
         claude = limits["claude"]["accounts"]
         self.assertEqual(len(claude), 1)
         self.assertEqual(claude[0]["account_id"], "claude-A")
-        self.assertEqual(claude[0]["five_hour_used_pct"], 20)
+        self.assertIsNone(claude[0]["five_hour_used_pct"])
+        self.assertEqual(claude[0]["last_observation"]["five_hour_used_pct"], 20)
         self.assertEqual(claude[0]["machines"], ["dgx0023", "macbook", "macmini"])
-        self.assertNotEqual(claude[0]["five_hour_used_pct"], 10 + 20 + 99)
+        self.assertNotEqual(claude[0]["last_observation"]["five_hour_used_pct"], 10 + 20 + 99)
 
         codex = {entry["account_id"]: entry for entry in limits["codex"]["accounts"]}
         self.assertEqual(set(codex), {"codex-X", "codex-Y"})

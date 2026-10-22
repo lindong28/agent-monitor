@@ -52,6 +52,7 @@ class RateLimits:
     # value the event carried. Codex fills it; Claude's status file
     # carries no plan, so it stays None there. See ADR 20260822-586a.
     plan: Optional[str] = None
+    quota_observation: Optional[dict] = None
 
 
 USAGE_QUALITIES = frozenset(("unknown", "incomplete", "observed"))

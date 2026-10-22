@@ -84,6 +84,13 @@ class AccountMemoryTests(unittest.TestCase):
                 if entry["account_state"] != "known":
                     continue
                 key = server._account_key(provider, entry)
+                if provider == "claude":
+                    self.assertIsNone(entry["updated_at"])
+                    self.assertEqual(entry["quota_status"], "unverified")
+                    for field in server._ACCOUNT_MEMORY_NUMERIC_FIELDS:
+                        self.assertEqual(payload["accounts"][key][field], entry["last_observation"][field])
+                    self.assertEqual(payload["accounts"][key]["observed_at"], entry["last_observation"]["recorded_at"])
+                    continue
                 self.assertEqual(
                     payload["accounts"][key],
                     {
@@ -205,10 +212,11 @@ class AccountMemoryTests(unittest.TestCase):
         self.assertEqual(remembered["claude:claude-new"]["machines"], [])
         self.assertIsNone(remembered["claude:claude-new"]["this_machine"])
         self.assertEqual(
-            remembered["claude:claude-new"]["updated_at"],
+            remembered["claude:claude-new"]["last_observation"]["recorded_at"],
             "2026-08-20T07:30:00+00:00",
         )
-        self.assertEqual(remembered["claude:claude-new"]["five_hour_used_pct"], 40)
+        self.assertIsNone(remembered["claude:claude-new"]["five_hour_used_pct"])
+        self.assertEqual(remembered["claude:claude-new"]["last_observation"]["five_hour_used_pct"], 40)
 
     def test_remembered_account_returns_to_live_section_without_a_duplicate(self):
         self.write_memory(
@@ -230,7 +238,8 @@ class AccountMemoryTests(unittest.TestCase):
         self.assertEqual(len(accounts), 1)
         self.assertEqual(accounts[0]["account_id"], "claude-a")
         self.assertEqual(accounts[0]["presence"], "in_use")
-        self.assertEqual(accounts[0]["five_hour_used_pct"], 40)
+        self.assertIsNone(accounts[0]["five_hour_used_pct"])
+        self.assertEqual(accounts[0]["last_observation"]["five_hour_used_pct"], 40)
         self.assertEqual(accounts[0]["machines"], ["macbook"])
 
     def test_malformed_quota_values_cannot_escape_memory_or_break_overview_json(self):

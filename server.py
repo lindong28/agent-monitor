@@ -39,6 +39,7 @@ import process_identity
 import query_view
 import quota_sync
 import diagnostics
+import quota_applicability
 from aggregators import extract_metric, load_all_entries
 from parsers import claude_status, codex
 from parsers.accounts import quota_identity
@@ -306,7 +307,9 @@ def collection_endpoint(_query):
     """Read existing collection and quota observations without usage aggregation."""
     with _query_admission() as admission:
         status = _sync_status(admission=admission)
-        return {"sync": status, "rate_limits": _live_rate_limits_from_admission(admission, sync_status=status)}
+        limits = _live_rate_limits_from_admission(admission, sync_status=status)
+        _apply_quota_applicability(limits)
+        return {"sync": status, "rate_limits": limits}
 
 
 def cost_diagnostics_endpoint(query):
@@ -1918,6 +1921,7 @@ def _rate_limits_from_admission(
             result, expected_delete_epoch=expected_delete_epoch
         )
     _merge_remembered_rate_limit_accounts(result)
+    _apply_quota_applicability(result)
     return result
 
 
@@ -1997,12 +2001,16 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
                 value = block["refresh_error"]
                 refresh_error = value if isinstance(value, str) and value.strip() else "配额刷新状态无效，请更新这台机器的 agent-monitor exporter 后重试。"
             if refresh_error is not None:
-                refresh_errors[provider].append({"machine": current.host, "reason": refresh_error})
+                failure_entry = {"machine": current.host, "reason": refresh_error}
+                if provider == "claude" and isinstance(block, dict) and diagnostics.safe_failure(block.get("refresh_failure")):
+                    failure_entry.update(account_id=_account_id(block), failure=diagnostics.safe_failure(block.get("refresh_failure")))
+                refresh_errors[provider].append(failure_entry)
             if not isinstance(block, dict):
                 continue
-            updated_at = _observed_at(block.get("updated_at"))
+            evidence = quota_applicability.observation(block.get("quota_observation"))
+            updated_at = _observed_at(evidence["observed_at"] if evidence and evidence["observed_at"] else block.get("updated_at"))
             if updated_at is None:
-                if not (refresh_error and _account_id(block)):
+                if not (_account_id(block) and (refresh_error or provider == "claude")):
                     continue
                 # A failed quota request does not sign the current account out.
                 # Keep its presence so account memory can supply an older value.
@@ -2021,12 +2029,24 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
                     # the number in front of the reader belongs to.
                     "latest_host": current.host,
                     "machines": [current.host],
+                    "confirmations": [],
+                    "failures": [],
                 }
             else:
                 bucket["machines"].append(current.host)
-                if updated_at > bucket["latest"][0]:
+                old_observation = quota_applicability.observation(bucket["latest"][1].get("quota_observation"))
+                new_observation = quota_applicability.observation(block.get("quota_observation"))
+                old_trusted = bool(provider == "claude" and old_observation and old_observation["observed_at"])
+                new_trusted = bool(provider == "claude" and new_observation and new_observation["observed_at"])
+                if (new_trusted, updated_at) > (old_trusted, bucket["latest"][0]):
                     bucket["latest"] = (updated_at, block)
                     bucket["latest_host"] = current.host
+            bucket = buckets[key]
+            note = quota_applicability.confirmation(block.get("subscription_confirmation"))
+            if note:
+                bucket["confirmations"].append(note)
+            if block.get("refresh_failure"):
+                bucket["failures"].append(block["refresh_failure"])
 
     self_machine = _self_machine_name(admission)
     result = {}
@@ -2042,6 +2062,11 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
             )
             for bucket in ordered
         ]
+        for entry, bucket in zip(entries, ordered):
+            if bucket["confirmations"]:
+                entry["subscription_confirmation"] = max(bucket["confirmations"], key=quota_applicability.confirmation_time)
+            if any(failure.get("http_status") == 403 for failure in bucket["failures"] if isinstance(failure, dict)):
+                entry["quota_access_refused"] = True
         result[provider] = {
             "accounts": entries,
             "refresh_errors": refresh_errors[provider],
@@ -2130,14 +2155,21 @@ def _merge_remembered_rate_limit_accounts(rate_limits):
             if record is None or not failed_machines.intersection(entry.get("machines", ())):
                 continue
             live_time = _observed_at(entry.get("updated_at"))
-            if live_time is not None and live_time >= _observed_at(record["observed_at"]):
+            live_evidence = quota_applicability.observation(entry.get("quota_observation"))
+            stored_evidence = quota_applicability.observation(record.get("quota_observation"))
+            live_rank = (bool(provider == "claude" and live_evidence and live_evidence["observed_at"]), live_time or datetime.min.replace(tzinfo=timezone.utc))
+            stored_rank = (bool(provider == "claude" and stored_evidence and stored_evidence["observed_at"]), _observed_at(record["observed_at"]))
+            if live_rank >= stored_rank:
                 continue
             for field in _ACCOUNT_MEMORY_NUMERIC_FIELDS:
                 entry[field] = _quota_number(record[field])
             entry["updated_at"] = record["observed_at"]
+            entry["quota_observation"] = stored_evidence
+            if record.get("legacy_observation"):
+                entry["legacy_observation"] = record["legacy_observation"]
             # Account memory does not retain a machine source. The replaced
             # live reading's host cannot vouch for these remembered numbers.
-            entry["reading_from"] = None
+            entry["reading_from"] = record.get("reading_from")
             # Memory has no reading-plan provenance. Keep today's credential
             # plan separate rather than attach a stale cache's plan to its quota.
             entry["reading_plan"] = None
@@ -2153,6 +2185,71 @@ def _merge_remembered_rate_limit_accounts(rate_limits):
             if record["provider"] == provider
             and _account_key(provider, record) not in live_account_ids
         )
+
+
+def _apply_quota_applicability(rate_limits):
+    """Separate current quota from retained facts after whole-reading selection."""
+    block = rate_limits.get("claude")
+    if not isinstance(block, dict):
+        return
+    try:
+        applicability_store = quota_applicability.Store(_ACCOUNT_MEMORY_PATH.parent)
+        notes = applicability_store.read()
+        state_error = False
+    except (OSError, ValueError):
+        notes, state_error = {}, True
+        logger.warning("quota applicability state unreadable; current Claude quotas withheld")
+    now = time.time()
+    for account in block.get("accounts", ()):
+        evidence = quota_applicability.observation(account.get("quota_observation"))
+        observed = evidence.get("observed_at") if evidence else None
+        candidates = [quota_applicability.confirmation(account.get("subscription_confirmation")),
+                      notes.get("claude:" + str(account.get("account_id")))]
+        candidates = [item for item in candidates if item]
+        note = max(candidates, key=quota_applicability.confirmation_time) if candidates else None
+        if note and not state_error:
+            # Only the explicit recovery path produces restored_at. A normal
+            # request already in flight when the user confirms cannot retire it.
+            try:
+                note = applicability_store.adopt("claude", account["account_id"], note)
+            except (OSError, ValueError):
+                state_error = True
+                logger.warning("quota applicability evidence could not be persisted")
+            account["subscription_confirmation"] = note
+        historical = {key: account.get(key) for key in (*_ACCOUNT_MEMORY_NUMERIC_FIELDS, "reading_from")}
+        historical.update(observed_at=observed, recorded_at=account.get("updated_at"),
+                          source=evidence["source"] if evidence else "legacy_unknown",
+                          account_plan=account.get("account_plan"))
+        account["last_observation"] = historical
+        if state_error:
+            status, reason = "unverified", "订阅确认记录无法读取，当前配额未核实；请检查服务主机状态文件。"
+        elif quota_applicability.unavailable(note):
+            status, reason = "no_subscription", "无有效 Claude Code 订阅（用户已确认）；历史配额不适用于当前账号。"
+            account["subscription_confirmation"] = note
+        elif account.get("quota_access_refused") and account.get("refresh_error"):
+            status, reason = "access_denied", "配额访问被拒绝（HTTP 403），原因未确认；历史读数不能代表当前额度。"
+        elif not observed:
+            status, reason = "unverified", "配额观测时间未核实；旧记录接收时间不能证明额度已更新。"
+        elif not quota_applicability.current_window(account, now):
+            status, reason = "historical", "没有当前窗口的配额读数，历史记录仅供参考。"
+        else:
+            status, reason = "current", None
+        if status == "no_subscription":
+            expected = [failure for failure in block.get("refresh_errors", ())
+                        if failure.get("account_id") == account.get("account_id")
+                        and (failure.get("failure") or {}).get("http_status") == 403]
+            account["historical_query_failures"] = expected
+            block["refresh_errors"] = [failure for failure in block.get("refresh_errors", ()) if failure not in expected]
+        account["quota_status"] = status
+        account["quota_status_reason"] = reason
+        # A credential tier never proves a current paid entitlement.
+        account["plan_verification"] = "unverified"
+        account["updated_at"] = observed if status == "current" else None
+        for prefix in ("five_hour", "seven_day"):
+            reset = account.get(prefix + "_resets_at")
+            if status != "current" or type(reset) not in (int, float) or not math.isfinite(reset) or reset <= now:
+                account[prefix + "_used_pct"] = None
+                account[prefix + "_resets_at"] = None
 
 
 def _remembered_rate_limit_entry(record):
@@ -2178,7 +2275,9 @@ def _remembered_rate_limit_entry(record):
         # Null, and present: a remembered row has no machine behind it at all,
         # which is a different thing from a live row whose source this server is
         # too old to name. Omitting the key would conflate them at the consumer.
-        "reading_from": None,
+        "reading_from": record.get("reading_from"),
+        "quota_observation": quota_applicability.observation(record.get("quota_observation")),
+        "legacy_observation": record.get("legacy_observation"),
         "this_machine": None,
     }
 
@@ -2242,8 +2341,15 @@ def _upsert_account_memory(rate_limits, *, expected_delete_epoch):
             if existing is not None:
                 candidate_time = _observed_at(candidate["observed_at"])
                 existing_time = _observed_at(existing["observed_at"])
-                if candidate_time <= existing_time:
+                old = quota_applicability.observation(existing.get("quota_observation"))
+                new = quota_applicability.observation(candidate.get("quota_observation"))
+                old_trusted, new_trusted = bool(candidate["provider"] == "claude" and old and old["observed_at"]), bool(candidate["provider"] == "claude" and new and new["observed_at"])
+                if (new_trusted, candidate_time) <= (old_trusted, existing_time):
                     continue
+                if new_trusted and not old_trusted:
+                    candidate["legacy_observation"] = {field: existing[field] for field in _ACCOUNT_MEMORY_ENTRY_FIELDS}
+                elif existing.get("legacy_observation"):
+                    candidate["legacy_observation"] = existing["legacy_observation"]
             accounts[key] = candidate
             changed = True
         if not changed:
@@ -2351,7 +2457,8 @@ def _account_memory_entry(provider, entry):
     if not isinstance(entry, dict) or entry.get("account_state") != "known":
         return None
     account_id = entry.get("account_id")
-    observed_at = _observed_at(entry.get("updated_at"))
+    evidence = quota_applicability.observation(entry.get("quota_observation"))
+    observed_at = _observed_at(evidence["observed_at"] if evidence and evidence["observed_at"] else entry.get("updated_at"))
     if (
         provider not in ("claude", "codex")
         or not isinstance(account_id, str)
@@ -2371,6 +2478,10 @@ def _account_memory_entry(provider, entry):
         "seven_day_resets_at": _quota_number(entry.get("seven_day_resets_at")),
         "observed_at": observed_at.astimezone(timezone.utc).isoformat(),
     }
+    evidence = quota_applicability.observation(entry.get("quota_observation"))
+    if evidence and evidence["observed_at"]:
+        record["quota_observation"] = evidence
+        record["reading_from"] = _text(entry.get("reading_from"))
     return _account_key(provider, record), record
 
 
@@ -2416,7 +2527,14 @@ def _valid_account_memory(payload):
     for key, record in accounts.items():
         if not isinstance(key, str) or not isinstance(record, dict):
             return False
-        if set(record) != _ACCOUNT_MEMORY_ENTRY_FIELDS:
+        if not _ACCOUNT_MEMORY_ENTRY_FIELDS <= set(record) or not set(record) <= _ACCOUNT_MEMORY_ENTRY_FIELDS | {"quota_observation", "reading_from", "legacy_observation"}:
+            return False
+        if "quota_observation" in record and quota_applicability.observation(record["quota_observation"]) is None:
+            return False
+        if "reading_from" in record and record["reading_from"] is not None and not isinstance(record["reading_from"], str):
+            return False
+        if "legacy_observation" in record and (not isinstance(record["legacy_observation"], dict)
+                or set(record["legacy_observation"]) != _ACCOUNT_MEMORY_ENTRY_FIELDS):
             return False
         provider = record.get("provider")
         account_id = record.get("account_id")
@@ -2593,7 +2711,9 @@ def _account_entry(block, machines, self_machine=None, reading_from=None):
         "five_hour_resets_at": _quota_number(block.get("five_hour_resets_at")),
         "seven_day_used_pct": _quota_number(block.get("seven_day_pct")),
         "seven_day_resets_at": _quota_number(block.get("seven_day_resets_at")),
-        "updated_at": block.get("updated_at"),
+        "updated_at": (quota_applicability.observation(block.get("quota_observation")) or {}).get("observed_at") or block.get("updated_at"),
+        "quota_observation": quota_applicability.observation(block.get("quota_observation")),
+        "refresh_error": _text(block.get("refresh_error")),
         "machines": sorted(machines),
         # Marked so a row can say which account the session in front of the
         # reader is spending. Three e-mail addresses do not tell them that; the

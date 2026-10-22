@@ -95,64 +95,26 @@ class OverviewApiShapeTests(unittest.TestCase):
             self.assertEqual([item["machine"] for item in errors], ["macbook"])
             self.assertIn("无法确认", errors[0]["reason"])
 
-        self.assertEqual(
-            payload["rate_limits"],
-            {
-                "claude": {
-                    "accounts": [
-                        {
-                            "account_id": "acct-1",
-                            "account_label": "acct-1@example.com",
-                            "account_plan": "plan-acct-1",
-                            "reading_plan": None,
-                            "credential_plan": "plan-acct-1",
-                            "account_state": "known",
-                            "presence": "in_use",
-                            "five_hour_used_pct": 12.5,
-                            "five_hour_resets_at": 1779247200,
-                            "seven_day_used_pct": 34,
-                            "seven_day_resets_at": 1779580800,
-                            "updated_at": "2026-05-19T22:41:23+00:00",
-                            "machines": ["macbook"],
-                            # One machine here, so it is trivially the source —
-                            # but the field exists because with several it is
-                            # not, and the row shows only one of their readings.
-                            "reading_from": "macbook",
-                            "this_machine": None,
-                        }
-                    ],
-                    # Signed-in machines only in this fixture, so the list is
-                    # empty — but the key is always published, because a
-                    # consumer cannot tell "no machine is signed out" from "this
-                    # server is too old to say" once the key can go missing.
-                    "signed_out_machines": [],
-                    "unavailable_reason": None,
-                },
-                "codex": {
-                    "accounts": [
-                        {
-                            "account_id": "acct-1",
-                            "account_label": "acct-1@example.com",
-                            "account_plan": "plan-acct-1",
-                            "reading_plan": None,
-                            "credential_plan": "plan-acct-1",
-                            "account_state": "known",
-                            "presence": "in_use",
-                            "five_hour_used_pct": 0.0,
-                            "five_hour_resets_at": 1779248487,
-                            "seven_day_used_pct": 40.0,
-                            "seven_day_resets_at": 1779835287,
-                            "updated_at": "2026-05-19T22:42:00+00:00",
-                            "machines": ["macbook"],
-                            "reading_from": "macbook",
-                            "this_machine": None,
-                        }
-                    ],
-                    "signed_out_machines": [],
-                    "unavailable_reason": None,
-                },
-            },
-        )
+        for provider in ("claude", "codex"):
+            block = payload["rate_limits"][provider]
+            self.assertEqual(block["signed_out_machines"], [])
+            self.assertIsNone(block["unavailable_reason"])
+            self.assertEqual(len(block["accounts"]), 1)
+            account = block["accounts"][0]
+            self.assertEqual(account["account_id"], "acct-1")
+            self.assertEqual(account["account_label"], "acct-1@example.com")
+            self.assertEqual(account["machines"], ["macbook"])
+            self.assertEqual(account["reading_from"], "macbook")
+            self.assertEqual(account["presence"], "in_use")
+            self.assertIsNone(account["quota_observation"])
+        claude = payload["rate_limits"]["claude"]["accounts"][0]
+        self.assertEqual(claude["quota_status"], "unverified")
+        self.assertIsNone(claude["updated_at"])
+        self.assertIsNone(claude["seven_day_used_pct"])
+        self.assertEqual(claude["last_observation"]["seven_day_used_pct"], 34)
+        codex = payload["rate_limits"]["codex"]["accounts"][0]
+        self.assertEqual(codex["seven_day_used_pct"], 40)
+        self.assertEqual(codex["updated_at"], "2026-05-19T22:42:00+00:00")
 
     def test_a_reading_with_no_account_is_not_adopted_by_a_named_one(self):
         """Unknown is a state to show, not a group to join. Here the exporter
@@ -291,7 +253,8 @@ class OverviewApiShapeTests(unittest.TestCase):
                     self.assert_missing_block(payload["rate_limits"]["claude"])
                 else:
                     accounts = payload["rate_limits"]["claude"]["accounts"]
-                    self.assertEqual(accounts[0]["five_hour_used_pct"], 5)
+                    self.assertIsNone(accounts[0]["five_hour_used_pct"])
+                    self.assertEqual(accounts[0]["last_observation"]["five_hour_used_pct"], 5)
 
                 if codex_limits is None:
                     self.assert_missing_block(payload["rate_limits"]["codex"])

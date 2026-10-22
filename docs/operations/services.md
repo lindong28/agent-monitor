@@ -648,3 +648,24 @@ Source `observed_age_seconds` describes the snapshot's collection observation, a
 `persistence_error` on HTTP indicates the file writer failed; inspect disk space and permissions. A stale `sampled_at`/`last_written_at` means the file cannot establish current health. The process-local observer cannot detect its own entire-process freeze or death, and no external notification is sent. The service maintainer owns the external probe/delivery follow-up in ISSUE-PERF-20261013-observer. Keep the files private alongside state; they contain configured machine names and operational timing. Detailed evidence and growth limits: [performance-20261013.md](../performance-20261013.md).
 
 Session lists and details negotiate gzip for JSON bodies of at least 64 KiB. Clients without gzip support (including `gzip;q=0`) retain identity responses. Use the browser resource transfer size or curl with `--compressed` when measuring the ordinary browser path; an identity-only client still pays for the uncompressed body.
+
+## Claude subscription confirmation
+
+After the account owner confirms that a Claude account has no quota-bearing subscription, record that fact on the Hub and collectors with the same account ID and timezone-qualified confirmation time. Obtain the account ID from `/api/collection` or the existing quota snapshot, and use the deployed primary checkout and its `.venv/bin/python`:
+
+```sh
+.venv/bin/python quota_applicability.py no-subscription --account-id ACCOUNT_ID --confirmed-at ISO_TIMESTAMP
+.venv/bin/python quota_applicability.py status --account-id ACCOUNT_ID --json
+```
+
+These two commands do not contact Claude. The confirmation survives restart. Ordinary collection skips that account; its original percentages remain in Web history, and pre-existing provider pauses remain intact. A known 403 for the confirmed account moves into historical diagnostics; unrelated failures remain actionable. A missing confirmation does not prove subscription availability. Invalid state files are preserved and reported rather than silently reset.
+
+After renewal, obtain explicit approval for one provider check and verify the current account label/ID and local pause ID using the existing controls. Then, on that machine only:
+
+```sh
+.venv/bin/python quota_applicability.py check-restored --account-id ACCOUNT_ID --expected-label ACCOUNT_LABEL --pause-id PAUSE_ID
+```
+
+Omit `--pause-id` when no local pause exists; if a pause exists or appears before admission, its exact ID is still required. This is a real bounded query. The account must match before and after it, and its new active result must contain a numeric quota window with a future reset. Expired, empty, failed or mismatched results preserve the pause. On success the reading and recovery receipt are saved before the specified local pause is resumed. The Hub can adopt the newer receipt through normal snapshot collection; this does not clear any other machine’s local confirmation or pause. Inspect and explicitly recover those separately if they should resume querying. The receipt proves quota query availability, not an exact paid plan tier. A later expired window becomes historical without reviving the older no-subscription confirmation.
+
+Deploy Monitor readers before the statusline producer change in ai-agent-config. Extended account-memory records retain old observations but cannot be read by the old exact-field validator; a rollback must retain a compatible Monitor reader. This repair’s acceptance uses isolated synthetic responses and the real Web display; it does not prove an actual account renewal.

@@ -2,6 +2,8 @@
 
 ## [open] ISSUE-TEST-20261019-c7b2: Baseline test expectations drift
 
+- 2026-10-22 scoped recheck: isolated `git archive 08c87d5` reproduces 14 failures in 66 tests across `test_cross_machine_view`, `test_metric_web`, `test_progressive_freshness` and `test_runtime_boundaries`. These include outdated metric/status expectations, browser fixtures missing current state/style, and the network cached/fresh expectation. Evidence: `/Users/lindong/task-artifacts/quota-validity-20261022/baseline-tests.log`. They predate the quota-validity change and remain with the test maintainer; this repair does not broaden into those unrelated flows.
+
 - Owner: agent-monitor test maintainer.
 - Evidence: Pulse UI redesign full suite ran 1036 tests with 10 failures. Re-running the seven affected methods from an isolated `git archive f20e4c0` reproduces the same ten failures: three AdmissionStatusTests methods (one has four reason subcases) expect payloads before `unknown_cost`; three FrontendStatusRenderTests methods expect earlier snapshot/attention wording; one ProgressiveFreshnessTests method expects the removed pricing-coverage suffix. Exact names, actual/expected output and interpreter/source boundaries are retained in `/Users/lindong/task-artifacts/agent-monitor-pulse-ui-20261020/unittest.log` and `baseline-failures.log`.
 - Disposition: not introduced by the visual redesign; no runtime behavior was changed to satisfy older assertions. The test maintainer should reconcile expectations against current contracts in a separate scoped maintenance change. This record does not claim the whole suite passes.

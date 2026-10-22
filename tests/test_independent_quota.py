@@ -47,6 +47,13 @@ class IndependentQuotaTests(unittest.TestCase):
             self.assertEqual(result["codex"]["updated_at"], "2026-10-11T01:00:00Z")
         self.assertEqual(self.current.meta["rate_limits"]["codex"]["seven_day_pct"], 20)
 
+    def test_codex_newer_event_is_not_out_ranked_by_active_query_metadata(self):
+        manager = quota_sync.Manager(self.path)
+        self.current.meta["rate_limits"]["codex"]["quota_observation"] = {
+            "source": "active_query", "observed_at": self.block["updated_at"]}
+        self.run_query(manager, self.payload())
+        self.assertEqual(manager.merge(self.current, self.machine)["codex"]["seven_day_pct"], 80)
+
     def test_signed_out_outcome_does_not_depend_on_fallback_reading_age(self):
         for observed_at in ("2026-10-11T00:00:00Z", "2026-10-10T23:00:00Z"):
             with self.subTest(observed_at=observed_at):

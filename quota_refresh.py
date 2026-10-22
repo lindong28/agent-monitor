@@ -29,6 +29,7 @@ from parsers.accounts import quota_identity
 import claude_oauth
 import upstream_controls
 import diagnostics
+import quota_applicability
 
 ROOT = Path(__file__).resolve().parent
 TIMEOUT = 35
@@ -68,14 +69,30 @@ class LocalUnavailable(RefreshError):
     """A local prerequisite is missing; no upstream attempt was made."""
 
 
-def load_rate_limits(provider, account, *, probe_pause_id=None):
+class NoSubscription(RefreshError):
+    """The user confirmed this account has no quota-bearing subscription."""
+
+
+def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None):
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
+    if recovery_account_id is not None and (provider != "claude" or recovery_account_id != account.account_id):
+        raise RefreshError("恢复检查账号不一致，未发出请求。")
+    if (provider == "claude" and probe_pause_id is None and recovery_account_id is None
+            and quota_applicability.unavailable(quota_applicability.Store(ROOT / "state").get(provider, account.account_id))):
+        raise NoSubscription("用户已确认此账号无有效 Claude Code 订阅；未请求配额。")
     try:
         options = {} if probe_pause_id is None else {"probe_pause_id": probe_pause_id}
         lease = upstream_controls.Controls(ROOT / "state/upstream_controls").acquire(provider, **options)
     except (upstream_controls.Paused, upstream_controls.Busy) as exc:
-        raise RefreshError(str(exc)) from None
+        failure = None
+        if isinstance(exc, upstream_controls.Paused):
+            state = upstream_controls.Controls(ROOT / "state/upstream_controls").read(provider)
+            candidate = diagnostics.safe_failure((state.get("pause") or {}).get("failure"))
+            expected = hashlib.sha256(quota_identity(provider, account.account_id, account.label).encode()).hexdigest()
+            if candidate and candidate.get("account_fingerprint") == expected:
+                failure = candidate
+        raise RefreshError(str(exc), failure=failure) from None
     except OSError as exc:
         exc.failure = diagnostics.failure_details(exc, stage="admission")
         raise
@@ -115,7 +132,9 @@ def load_rate_limits(provider, account, *, probe_pause_id=None):
                         LocalUnavailable if payload.get("local_unavailable") is True else RefreshError)
                 raise kind(payload.get("error") or "配额读取失败，请核对后解除本地暂停。",
                            failure=diagnostics.safe_failure(payload.get("failure")))
-            return RateLimits(**payload["reading"])
+            reading = RateLimits(**payload["reading"])
+            return dataclasses.replace(reading, quota_observation={
+                "source": "active_query", "observed_at": reading.updated_at})
         except (ValueError, KeyError, TypeError):
             raise RefreshError("配额读取返回了无效结果，请核对后解除本地暂停。",
                                failure={"stage": stage, "kind": "invalid_result"}) from None

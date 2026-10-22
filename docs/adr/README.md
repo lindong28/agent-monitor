@@ -4,6 +4,7 @@
 
 | Decision | Status |
 | --- | --- |
+| [20261022-c6e9: quota applicability](20261022-c6e9-quota-applicability.md) | Accepted; distinguish confirmed no subscription, actual observation time and historical quota; protected recovery retains its receipt |
 | [20261022-a6f4: skipped quota status](20261022-a6f4-skipped-quota-status.md) | Accepted; explicit published provider states supersede older unattempted-query messages, preserving real failures and pauses |
 | [20261021-d39a: account message pool](20261021-d39a-account-message-pool.md) | Accepted; 100 everyday messages, independent uniform selection and saved operation text |
 | [20261019-8e3a: Pulse workspace UI](20261019-8e3a-pulse-reference-ui.md) | Accepted; supersedes Ark appearance and shell placement, preserving Monitor behavior |

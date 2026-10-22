@@ -23,6 +23,7 @@ class ObservationTests(unittest.TestCase):
                     path = Path(tmp) / "status.json"
                     path.write_text(json.dumps({
                         "_received_at": "2026-05-19T22:41:23+00:00",
+                        "_quota_observed_at": "2026-05-19T22:41:23+00:00",
                         "rate_limits": {
                             "five_hour": {"used_percentage": 41, "resets_at": reset},
                             "seven_day": {"used_percentage": used, "resets_at": reset},

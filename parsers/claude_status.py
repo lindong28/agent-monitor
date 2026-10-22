@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import quota_applicability
 from pathlib import Path
 from typing import Optional
 
@@ -48,13 +49,17 @@ def load_rate_limits(status_file: Optional[str] = None) -> Optional[RateLimits]:
     if not isinstance(model, dict):
         model = {}
 
+    observed_at = data.get("_quota_observed_at")
+    if quota_applicability.timestamp(observed_at) is None:
+        observed_at = None
     return RateLimits(
         five_hour_pct=five_pct,
         five_hour_resets_at=five_reset,
         seven_day_pct=seven_pct,
         seven_day_resets_at=seven_reset,
         model=model.get("id") or "",
-        updated_at=data.get("_received_at") or "",
+        updated_at=observed_at or "",
+        quota_observation={"source": "claude_statusline", "observed_at": observed_at},
     )
 
 

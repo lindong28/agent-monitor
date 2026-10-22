@@ -1025,7 +1025,7 @@
       const known = matches.filter(({ account }) => account.account_state === "known");
       const current = known.filter(({ account }) => quotaPresence(account) === "in_use").length;
       const history = known.filter(({ account }) => quotaPresence(account) === "remembered").length;
-      count.textContent = `匹配 ${matches.length} / ${allEntries.length} 个账号 · 在用账号 ${current} · 历史账号 ${history}`;
+      count.textContent = `匹配 ${matches.length} / ${allEntries.length} 个账号 · 机器关联 ${current} · 历史账号 ${history}`;
     }
     QUOTA_PROVIDERS.forEach((provider) => {
       const block = rateLimits?.[provider.key];
@@ -1114,6 +1114,7 @@
   }
 
   function quotaRefreshNotice(provider, account) {
+    if (account.quota_status_reason) return account.quota_status_reason;
     const block = renderedQuotaRateLimits?.[provider.key];
     const failed = new Set((block?.refresh_errors || []).map((failure) => failure.machine));
     if (quotaPresence(account) !== "in_use" || !(account.machines || []).some((name) => failed.has(name))) {
@@ -1241,8 +1242,9 @@
       row.dataset.provider = provider.key;
       row.dataset.accountId = account.account_id;
       row.dataset.accountLabel = JSON.stringify(account.account_label ?? null);
-      if (typeof account.updated_at === "string" && account.updated_at) {
-        row.dataset.observedAt = account.updated_at;
+      const recordTime = account.last_observation?.recorded_at || account.updated_at;
+      if (typeof recordTime === "string" && recordTime) {
+        row.dataset.observedAt = recordTime;
       }
     }
     if (account.account_state !== "known") {
@@ -1280,6 +1282,14 @@
 
   function quotaPlanCell(account) {
     const cell = document.createElement("td");
+    if (account.quota_status === "no_subscription") {
+      cell.textContent = "无有效订阅";
+      return cell;
+    }
+    if (account.plan_verification === "unverified") {
+      cell.textContent = "套餐未核实";
+      return cell;
+    }
     if (!account.account_plan) {
       cell.textContent = "—";
       return cell;
@@ -1369,6 +1379,7 @@
   }
 
   function quotaRemovalReading(account) {
+    account = account.last_observation || account;
     const sevenDay = quotaUsage(account.seven_day_used_pct);
     if (sevenDay.known) {
       return `7 天已用 ${sevenDay.used}%`;
@@ -1407,7 +1418,7 @@
           quotaPresence(account) === "remembered" &&
           account.account_id === accountId &&
           (providerKey !== "codex" || (account.account_label ?? null) === accountLabel) &&
-          account.updated_at === observedAt
+          (account.last_observation?.recorded_at || account.updated_at) === observedAt
         ),
       );
       if (remaining.length !== accounts.length) {
@@ -1451,10 +1462,11 @@
 
   async function removeRememberedAccount(button, provider, account) {
     const accountName = quotaAccountName(account);
-    const observedAt = formatDate(account.updated_at);
+    const recordTime = account.last_observation?.recorded_at || account.updated_at;
+    const observedAt = formatDate(recordTime);
     const confirmed = window.confirm(
       `移除 ${accountName} 的记录？\n` +
-        `最后观测 ${observedAt}，${quotaRemovalReading(account)}。\n` +
+        `保存的记录时间 ${observedAt}，${quotaRemovalReading(account)}。\n` +
         "此操作不可恢复。"
     );
     if (!confirmed) {
@@ -1469,7 +1481,7 @@
           provider: provider.key,
           account_id: account.account_id,
           account_label: account.account_label ?? null,
-          observed_at: account.updated_at,
+          observed_at: recordTime,
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -1478,7 +1490,7 @@
         button.disabled = false;
         return;
       }
-      removeRenderedAccount(provider.key, account.account_id, account.updated_at, account.account_label ?? null);
+      removeRenderedAccount(provider.key, account.account_id, recordTime, account.account_label ?? null);
     } catch (error) {
       window.alert(`移除失败：${error && error.message ? error.message : error}`);
       button.disabled = false;
@@ -1522,6 +1534,10 @@
   function quotaWindowCell(provider, spec, account) {
     const cell = document.createElement("td");
     cell.className = "numeric quota-window-cell";
+    if (account.quota_status === "no_subscription") {
+      cell.textContent = "不适用";
+      return cell;
+    }
 
     // Matched by key, not object identity: identity holds only while every
     // provider's `windows` points at these same literals, and the day one is
@@ -1683,14 +1699,39 @@
     details.dataset.observationKey = JSON.stringify([provider.key, account.account_id, account.account_label,
       account.account_state, account.account_state === "known" ? null : [...(account.machines || [])].sort()]);
     const summary = document.createElement("summary");
-    summary.textContent = quotaObservationAge(account.updated_at);
+    const historicalOnly = account.quota_status && account.quota_status !== "current";
+    summary.textContent = historicalOnly ? "历史配额与状态" : quotaObservationAge(account.updated_at);
     summary.setAttribute("aria-label", `配额更新：${summary.textContent}，查看时间与来源`);
     details.appendChild(summary);
     const exact = document.createElement("span");
     exact.className = "quota-history-note";
-    const knownTime = typeof account.updated_at === "string" && account.updated_at && Number.isFinite(Date.parse(account.updated_at));
-    exact.textContent = knownTime ? `观测时间：${formatDate(account.updated_at)}` : "未取得观测时间";
+    const observationTime = account.updated_at || account.last_observation?.observed_at;
+    const knownTime = typeof observationTime === "string" && observationTime && Number.isFinite(Date.parse(observationTime));
+    exact.textContent = knownTime ? `${historicalOnly ? "历史观测" : "观测时间"}：${formatDate(observationTime)}` : "未取得观测时间";
     details.appendChild(exact);
+    if (account.last_observation) {
+      const history = account.last_observation;
+      const retained = document.createElement("span");
+      retained.className = "quota-history-note";
+      const percent = (value) => quotaUsage(value).known ? `${value}%` : "未知";
+      retained.textContent = `历史配额：5 小时已用 ${percent(history.five_hour_used_pct)}；7 天已用 ${percent(history.seven_day_used_pct)}。`
+        + (history.observed_at ? `原始观测：${formatDate(history.observed_at)}。` : "原始观测时间未核实。")
+        + (history.reading_from ? `来源机器：${history.reading_from}。` : "来源机器未记录。")
+        + (history.account_plan ? `保存的套餐信息：${quotaPlanLabel(history.account_plan)}（不代表当前订阅）。` : "");
+      details.appendChild(retained);
+      if (account.subscription_confirmation && !account.subscription_confirmation.restored_at) {
+        const confirmation = document.createElement("span");
+        confirmation.className = "quota-history-note";
+        confirmation.textContent = `用户确认无订阅：${formatDate(account.subscription_confirmation.confirmed_at)}。续订后需明确检查新的有效配额；各机器的本地暂停需分别核对，旧缓存不会恢复当前额度。`;
+        details.appendChild(confirmation);
+      }
+    }
+    for (const failure of account.historical_query_failures || []) {
+      const diagnostic = document.createElement("span");
+      diagnostic.className = "quota-history-note";
+      diagnostic.textContent = `历史查询诊断（无订阅时的预期拒绝）：${failure.machine}：${failure.reason}`;
+      details.appendChild(diagnostic);
+    }
     if (quotaPresence(account) === "remembered") {
       const membership = document.createElement("span");
       membership.className = "quota-history-note";
@@ -1822,11 +1863,13 @@
       const machines = (account.machines || []).join("、") || account.reading_from || "机器未知";
       heading.textContent = `${machines} · ${provider.label} · ${account.account_state === "signed_out" ? "未登录" : "账号未识别"}`;
       record.appendChild(heading);
-      const values = [account.updated_at ? `观测于 ${formatDate(account.updated_at)}` : "观测时间未知"];
+      const historical = account.last_observation || account;
+      const observedAt = account.last_observation ? historical.observed_at : account.updated_at;
+      const values = [observedAt ? `观测于 ${formatDate(observedAt)}` : "观测时间未知"];
       if (account.account_plan) values.push(`采集时套餐：${quotaPlanLabel(account.account_plan)}`);
       provider.windows.forEach((spec) => {
-        const reading = quotaUsage(account[spec.used]);
-        const reset = account[spec.reset];
+        const reading = quotaUsage(historical[spec.used]);
+        const reset = historical[spec.reset];
         const resetDate = typeof reset === "number" && Number.isFinite(reset) && reset > 0
           ? new Date(reset * 1000) : null;
         const resetText = !resetDate ? "重置时间未知" : Number.isFinite(resetDate.getTime())

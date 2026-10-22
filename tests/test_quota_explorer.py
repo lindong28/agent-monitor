@@ -47,6 +47,23 @@ function account(id,state='known',presence='in_use',machine='alpha') {
     machines:[machine],reading_from:machine,five_hour_used_pct:91,seven_day_used_pct:37,
     five_hour_resets_at:4102444800,seven_day_resets_at:4102444800,updated_at:'2026-01-01T00:00:00Z'};
 }
+// Confirmed lack of a subscription must not look like available current quota.
+const unsubscribed = {...account('unsubscribed'), quota_status:'no_subscription',
+  quota_status_reason:'无有效 Claude Code 订阅（用户已确认）', plan_verification:'unverified',
+  five_hour_used_pct:null, seven_day_used_pct:null, updated_at:null,
+  last_observation:{five_hour_used_pct:0,seven_day_used_pct:7,observed_at:null,source:'legacy_unknown'}};
+ui.renderQuotaAccounts({claude:{accounts:[unsubscribed]}});
+const unsubscribedRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='unsubscribed');
+assert(unsubscribedRow.cells[2].textContent.includes('无有效订阅'));
+assert.equal(unsubscribedRow.cells[4].textContent,'不适用');
+assert(unsubscribedRow.cells[6].textContent.includes('历史配额'));
+assert(unsubscribedRow.cells[6].textContent.includes('7%'));
+assert(!unsubscribedRow.cells[6].textContent.includes('分钟前'));
+ui.renderQuotaAccounts({claude:{accounts:[{...unsubscribed,account_id:null,account_label:null,account_state:'signed_out',
+  last_observation:{five_hour_used_pct:0,seven_day_used_pct:7,five_hour_resets_at:1,seven_day_resets_at:2,observed_at:null}}]}});
+assert(nodes['#quota-machine-records'].textContent.includes('已用 7%'));
+assert(nodes['#quota-machine-records'].textContent.includes('观测时间未知'));
+assert(!nodes['#quota-machine-records'].children[0].textContent.includes('余量偏低'));
 // An account table must not turn a machine observation into an account.
 for (const state of ['unstamped', 'signed_out', 'known']) {
   for (const size of [1,2]) {
@@ -246,7 +263,7 @@ assert(!document.querySelector('#quota-past-accounts').hidden,'new action observ
 descendants(table).find(n=>n.className.includes('quota-past-toggle')).click();
 ui.updateCodexQuotaReadings([]);
 ui.renderQuotaAccounts(data);
-assert(count().includes('匹配 3 / 3')); assert(count().includes('在用账号 2')); assert(count().includes('历史账号 1')); assert(!count().includes('机器记录'));
+assert(count().includes('匹配 3 / 3')); assert(count().includes('机器关联 2')); assert(count().includes('历史账号 1')); assert(!count().includes('机器记录'));
 assert(!table.tBodies.some(b=>b.className==='quota-unknown')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
 assert(table.tBodies.find(b=>b.className==='quota-history').hidden);
 buttons[2].click();
@@ -257,7 +274,7 @@ ui.renderQuotaAccounts(data); assert.equal(rows().length,1); assert.equal(button
 search('nobody'); assert(table.textContent.includes('没有匹配的配额记录')); assert(table.textContent.includes('fixture failure'));
 nodes['#quota-clear'].click(); assert.equal(nodes['#quota-search'].value,''); assert(count().includes('匹配 3 / 3'));
 search('PRO alice'); assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'alice');
-search('old-b'); assert(count().includes('匹配 0 / 3')); assert(count().includes('在用账号 0')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
+search('old-b'); assert(count().includes('匹配 0 / 3')); assert(count().includes('机器关联 0')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
 search('past'); assert(table.textContent.includes('移除')); assert.strictEqual(ui.snapshot(),data);
 // The delete request can finish after the user hides its row with a filter.
 search('bob'); assert.equal(rows().length,1);

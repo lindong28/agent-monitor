@@ -18,6 +18,7 @@ import rollup
 import quota_refresh
 import statistics_snapshot
 from parsers import RateLimits
+import quota_applicability
 from parsers import accounts, claude_status, codex
 
 
@@ -339,6 +340,15 @@ def _rate_limits(refresh=False):
     def read(provider):
         source = claude_status if provider == "claude" else codex
         account = accounts.claude_account() if provider == "claude" else accounts.codex_account()
+        note = quota_applicability.Store(ROOT / "state").get(provider, account.account_id) if account else None
+        if quota_applicability.unavailable(note):
+            value = source.load_rate_limits() or RateLimits(None, None, None, None)
+            block = _rate_limit_block(value, account)
+            previous = cached.get(provider)
+            if previous and previous.get("account_id") == account.account_id and _quota_time(previous, provider) > _quota_time(block, provider):
+                block = dict(previous)
+            block.update(subscription_confirmation=note, refresh_error=None, signed_out=False)
+            return provider, block
         if not refresh:
             block = _rate_limit_block(source.load_rate_limits(), account)
             if block is None and account is None:
@@ -358,11 +368,12 @@ def _rate_limits(refresh=False):
             if previous and account and accounts.quota_identity(
                 provider, previous.get("account_id"), previous.get("account_label")
             ) == accounts.quota_identity(provider, account.account_id, account.label):
-                if block is None or _quota_time(previous) > _quota_time(block):
+                if block is None or _quota_time(previous, provider) > _quota_time(block, provider):
                     block = previous
                 elif "refresh_error" in previous:
                     # A newer local reading does not make another active query.
                     block["refresh_error"] = previous["refresh_error"]
+                    block["refresh_failure"] = previous.get("refresh_failure")
             if block is not None:
                 # `refresh_error` is deliberately not defaulted alongside it.
                 # Absent means "this export ran no active query"; null means "it
@@ -377,9 +388,13 @@ def _rate_limits(refresh=False):
                 block.setdefault("signed_out", account is None)
             return provider, block
         error = None
+        failure = None
         signed_out = False
         try:
             value = quota_refresh.load_rate_limits(provider, account)
+        except quota_refresh.NoSubscription:
+            # The confirmation may have arrived after this export's precheck.
+            value = source.load_rate_limits() or RateLimits(None, None, None, None)
         except quota_refresh.NotSignedIn:
             # A state, not a failure: this machine does not use this provider, or
             # its sign-in has lapsed. It is published as a state so the server can
@@ -394,6 +409,7 @@ def _rate_limits(refresh=False):
             signed_out = True
             value = source.load_rate_limits() or RateLimits(None, None, None, None)
         except (quota_refresh.RefreshError, OSError) as exc:
+            failure = getattr(exc, "failure", None)
             if isinstance(exc, quota_refresh.RefreshError):
                 error = str(exc)
             else:
@@ -404,12 +420,18 @@ def _rate_limits(refresh=False):
             value = source.load_rate_limits() or RateLimits(None, None, None, None)
         block = _rate_limit_block(value, account)
         block["refresh_error"] = error
+        block["refresh_failure"] = failure
         block["signed_out"] = signed_out
         return provider, block
 
     # There are two independent provider endpoints, each with one bounded child.
     with ThreadPoolExecutor(max_workers=2) as pool:
         result = dict(pool.map(read, ("claude", "codex")))
+    claude = result.get("claude")
+    if claude and claude.get("account_id"):
+        note = quota_applicability.Store(ROOT / "state").get("claude", claude["account_id"])
+        if note:
+            claude["subscription_confirmation"] = note
     if refresh and hub.enabled():
         _save_quota_cache(cache_path, result)
     return result
@@ -425,7 +447,7 @@ def _save_quota_cache(cache_path, result):
             if block is not None and (old is None or accounts.quota_identity(
                     provider, block.get("account_id"), block.get("account_label")) != accounts.quota_identity(
                     provider, old.get("account_id"), old.get("account_label"))
-                                      or _quota_time(block) >= _quota_time(old)):
+                                      or _quota_time(block, provider) >= _quota_time(old, provider)):
                 previous[provider] = block
             elif block is not None:
                 # Keep the newer reading, but report this query's outcome —
@@ -437,6 +459,8 @@ def _save_quota_cache(cache_path, result):
                     **old,
                     "refresh_error": block["refresh_error"],
                     "signed_out": block.get("signed_out", False),
+                    "refresh_failure": block.get("refresh_failure"),
+                    "subscription_confirmation": block.get("subscription_confirmation"),
                 }
         staging = cache_path.with_name(cache_path.name + "." + uuid.uuid4().hex)
         try:
@@ -468,6 +492,36 @@ def recover_codex_quota(expected_label, pause_id):
     return block
 
 
+def recover_claude_quota(expected_id, expected_label, pause_id):
+    """One explicitly approved probe, retaining the pause until a usable result."""
+    from upstream_controls import Controls
+    account = accounts.claude_account()
+    if not expected_id or not expected_label or account is None or (account.account_id, account.label) != (expected_id, expected_label):
+        raise quota_refresh.RefreshError("当前 Claude 账号与批准目标不一致，未开始探测。")
+    store = quota_applicability.Store(ROOT / "state")
+    note_before = store.get("claude", expected_id)
+    started = datetime.now(timezone.utc).isoformat()
+    value = quota_refresh.load_rate_limits("claude", account, probe_pause_id=pause_id, recovery_account_id=expected_id)
+    current = accounts.claude_account()
+    if current is None or (current.account_id, current.label) != (expected_id, expected_label):
+        raise quota_refresh.RefreshError("探测期间账号已变化；未保存读数，暂停保留。")
+    block = _rate_limit_block(value, account)
+    block.update(refresh_error=None, refresh_failure=None, signed_out=False)
+    if not quota_applicability.supersedes(block, {"confirmed_at": started}):
+        raise quota_refresh.RefreshError("未取得本次查询的有效配额窗口，未解除订阅标记或暂停。")
+    store = quota_applicability.Store(ROOT / "state")
+    # Save before clearing the marker. A crash leaves the conservative state.
+    _save_quota_cache(ROOT / "state/quota_snapshot.json", {"claude": block})
+    note = store.get("claude", expected_id)
+    if note != note_before or (quota_applicability.unavailable(note) and not store.restore("claude", expected_id, block, expected_note=note_before)):
+        raise quota_refresh.RefreshError("订阅确认已变化，暂停保留；请重新核对。")
+    block["subscription_confirmation"] = store.get("claude", expected_id)
+    _save_quota_cache(ROOT / "state/quota_snapshot.json", {"claude": block})
+    if pause_id is not None:
+        Controls(ROOT / "state/upstream_controls").resume("claude", pause_id)
+    return block
+
+
 def _read_quota_cache(path):
     try:
         data = json.loads(path.read_text())
@@ -478,11 +532,13 @@ def _read_quota_cache(path):
     return {}
 
 
-def _quota_time(block):
+def _quota_time(block, provider="claude"):
+    evidence = quota_applicability.observation(block.get("quota_observation")) if provider == "claude" else None
     try:
-        return datetime.fromisoformat(block["updated_at"].replace("Z", "+00:00")).timestamp()
+        return (1 if evidence and evidence["observed_at"] else 0,
+                datetime.fromisoformat((evidence["observed_at"] if evidence and evidence["observed_at"] else block["updated_at"]).replace("Z", "+00:00")).timestamp())
     except (KeyError, TypeError, ValueError, AttributeError):
-        return 0
+        return (0, 0)
 
 
 def _rate_limit_block(value, account=None):

@@ -15,6 +15,7 @@ from pathlib import Path
 import hub
 import sync_process
 import diagnostics
+import quota_applicability
 from parsers.accounts import quota_identity
 
 
@@ -256,7 +257,8 @@ class Manager:
             # explicit published state; actual query failures keep precedence.
             published_state = None
             if (skipped and _time(current.meta.get("generated_at")) > _time(record["attempted_at"])
-                    and (base.get("signed_out") is True or base.get("refresh_error"))):
+                    and (base.get("signed_out") is True or base.get("refresh_error")
+                         or quota_applicability.unavailable(quota_applicability.confirmation(base.get("subscription_confirmation"))))):
                 published_state = (base.get("signed_out", False), base.get("refresh_error"))
             incoming = (payload or {}).get("rate_limits", {}).get(provider)
             if incoming is not None:
@@ -266,10 +268,18 @@ class Manager:
                     published_state = None
                 else:
                     provider_error = incoming.get("refresh_error")
-                    if _time(incoming.get("updated_at")) >= _time(base.get("updated_at")):
+                    incoming_evidence = quota_applicability.observation(incoming.get("quota_observation"))
+                    base_evidence = quota_applicability.observation(base.get("quota_observation"))
+                    if (bool(provider == "claude" and incoming_evidence and incoming_evidence["observed_at"]), _time(incoming_evidence["observed_at"] if incoming_evidence and incoming_evidence["observed_at"] else incoming.get("updated_at"))) >= (bool(provider == "claude" and base_evidence and base_evidence["observed_at"]), _time(base_evidence["observed_at"] if base_evidence and base_evidence["observed_at"] else base.get("updated_at"))):
                         # Only the observation moves; membership/plan come from admission.
-                        for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at"):
+                        for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation"):
                             base[field] = incoming.get(field)
+                    incoming_note = quota_applicability.confirmation(incoming.get("subscription_confirmation"))
+                    base_note = quota_applicability.confirmation(base.get("subscription_confirmation"))
+                    if incoming_note and (not base_note or quota_applicability.confirmation_time(incoming_note) > quota_applicability.confirmation_time(base_note)):
+                        base["subscription_confirmation"] = incoming_note
+                    if "refresh_failure" in incoming:
+                        base["refresh_failure"] = incoming["refresh_failure"]
                     # Login state is the latest query outcome, not the age of
                     # the quota reading returned as its fallback.
                     base["signed_out"] = incoming.get("signed_out", False)
