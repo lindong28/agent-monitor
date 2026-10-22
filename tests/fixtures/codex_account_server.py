@@ -36,6 +36,19 @@ for line in sys.stdin:
         continue
     result = {}
     if method == "account/read":
+        read_errors = {
+            "account_read_auth": "workspace routing discovery unauthorized (401)",
+            "account_read_workspace": "selected workspace missing from routing discovery",
+            "account_read_transport": "workspace routing discovery failed",
+            "account_read_timeout": "workspace routing discovery timed out",
+            "account_read_unsafe": "workspace routing discovery failed SECRET_FIXTURE_TOKEN https://secret.example/path",
+        }
+        if scenario in read_errors or scenario == "account_read_malformed":
+            error = {"code": -32603, "message": read_errors.get(scenario)}
+            if scenario == "account_read_malformed":
+                error = ["SECRET_FIXTURE_TOKEN"]
+            emit({"id": message["id"], "error": error})
+            continue
         result = {"account": {"type": "chatgpt", "email": "wrong@example.com" if scenario == "wrong_email" or (recovery and scenario == "recovery_identity") else email}
                   if (home / "auth.json").exists() else None}
     elif method == "account/login/start":

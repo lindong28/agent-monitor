@@ -78,3 +78,5 @@ Earlier decisions remain in the source repository at the immutable commit linked
 - [20261018-8c42: nominal geography and cost diagnostics](20261018-8c42-cost-diagnostics.md) — preserve valuation evidence and move repeated coverage into diagnostics.
 
 - [20261021-a84c — Codex request controls](20261021-a84c-codex-request-controls.md): accepted; classified recovery, persistent pauses, local release and paced startup; local validation only, no deployment.
+
+- [20261023-b72e — Codex account-read diagnostics](20261023-b72e-account-read-diagnostics.md): retain safe workspace-routing reasons without changing pause or recovery behavior.

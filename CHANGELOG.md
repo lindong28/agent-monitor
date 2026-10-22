@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-23 — Codex account-read diagnostics
+
+- Preserve safe, recognized reasons for Codex identity-read failures and display them with the protocol error code. Unknown reasons remain explicit without exposing upstream text or suggesting that every failure requires a CLI upgrade. Existing pauses and retained failure history remain unchanged.
+
 ## 2026-10-22 — Quota meter alignment
 
 - Align quota progress tracks across account rows using consistent percentage and track widths on desktop and narrow screens.

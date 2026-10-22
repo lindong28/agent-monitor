@@ -49,6 +49,35 @@ class LoginRateLimited(ActionError):
         super().__init__("OpenAI 登录服务限流（429），本次授权已停止，设备码不可再用于此操作。请按服务端指引等待，再解除本地限流暂停；本次未发送消息。", 429, "loginRateLimited")
 
 
+# Exact, data-free WorkspaceRoutingError strings from Codex 0.162.1,
+# 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d. See ADR 20261023-b72e.
+# These explain a failure; they never decide admission, retry or recovery.
+ACCOUNT_READ_ERRORS = {
+    "failed to load workspace requirements": ("requirementsLoad", "无法加载工作区配置要求，请检查服务主机的 Codex 配置。"),
+    "workspace routing requires a ChatGPT account id": ("missingAccountId", "登录态缺少 ChatGPT 工作区标识，请核对所选账号的登录状态。"),
+    "workspace routing discovery cancelled": ("discoveryCancelled", "工作区路由查询已取消。"),
+    "account changed during workspace routing discovery": ("accountChanged", "查询期间登录账号发生变化，请先核对当前账号。"),
+    "workspace routing discovery unauthorized (401)": ("discoveryUnauthorized", "工作区路由查询的认证被拒绝（401），请核对账号登录状态；此错误不能证明账号被封禁。"),
+    "workspace routing discovery failed": ("discoveryFailed", "工作区路由查询失败，上游未提供更具体原因；请检查服务主机到 OpenAI 的连接及账号状态。"),
+    "selected workspace missing from routing discovery": ("missingWorkspace", "返回的工作区列表中没有所选工作区，请核对登录账号与工作区访问权限。"),
+    "duplicate workspace in routing discovery": ("duplicateWorkspace", "上游返回了重复的工作区，无法安全确定账号路由。"),
+    "failed to reload workspace requirements": ("requirementsReload", "无法重新加载工作区配置要求，请检查服务主机的 Codex 配置。"),
+    "configuration changed during workspace routing discovery; retry account/read": ("configurationChanged", "查询期间 Codex 配置发生变化，请先确认配置稳定；本次未自动重试。"),
+    "invalid model provider URL": ("invalidProviderUrl", "模型服务地址无效，请检查服务主机的 Codex 配置。"),
+    "invalid ChatGPT backend URL": ("invalidBootstrapUrl", "ChatGPT 服务地址无效，请检查服务主机的 Codex 配置。"),
+    "invalid session ChatGPT backend URL": ("invalidSessionBootstrapUrl", "会话的 ChatGPT 服务地址无效，请检查服务主机的 Codex 配置。"),
+    "ChatGPT backend changed; start a new thread before sending more content": ("sessionBackendChanged", "ChatGPT 服务地址已变化，原会话不能继续发送；本次未自动创建会话。"),
+    "workspace routing discovery cancelled during shutdown": ("shutdown", "Codex 正在关闭，工作区路由查询已取消。"),
+    "workspace routing discovery timed out": ("discoveryTimeout", "工作区路由查询超时，请检查服务主机到 OpenAI 的连接；超时不能证明账号状态异常。"),
+    "workspace routing discovery missing backend origin": ("missingBackendOrigin", "工作区路由响应缺少服务地址，无法安全继续。"),
+    "workspace routing discovery has invalid account routing override": ("invalidRoutingOverride", "工作区路由响应中的路由设置无效，无法安全继续。"),
+    "workspace routing discovery must return an origin": ("backendIsNotOrigin", "工作区路由响应中的服务地址格式不符合要求，无法安全继续。"),
+    "required ChatGPT backend conflicts with workspace routing": ("backendConflict", "配置要求的 ChatGPT 服务地址与工作区路由冲突，请核对服务主机配置。"),
+    "invalid workspace backend URL": ("invalidBackendUrl", "工作区返回的服务地址无效，无法安全继续。"),
+    "workspace backend must use an HTTPS origin without credentials": ("invalidBackendOrigin", "工作区服务地址不符合 HTTPS 安全要求，无法安全继续。"),
+}
+
+
 # Only structured protocol discriminants enter public/persisted failure data.
 TURN_FAILURES = {
     "usageLimitExceeded": "账号额度已用尽。",
@@ -348,7 +377,19 @@ class Rpc:
             value = self.receive(deadline)
             if value.get("id") == request_id:
                 if "error" in value:
-                    code = value["error"].get("code")
+                    error = value["error"]
+                    if method == "account/read":
+                        code = error.get("code") if isinstance(error, dict) else None
+                        message = error.get("message") if isinstance(error, dict) else None
+                        if type(code) is int:
+                            self.diagnostics["rpc_error_code"] = code
+                        reason, detail = "unrecognized", "具体原因未识别；上游原文未保存，以免泄露凭据。请保留本次诊断记录再排查。"
+                        if type(code) is int and code == -32603 and isinstance(message, str):
+                            reason, detail = ACCOUNT_READ_ERRORS.get(message, (reason, detail))
+                        self.diagnostics["rpc_error_reason"] = reason
+                        suffix = "（错误码 %s）" % code if type(code) is int else "（错误码未知）"
+                        raise ActionError("Codex 身份读取失败（account/read）%s：%s" % (suffix, detail), 502)
+                    code = error.get("code")
                     if type(code) is int:
                         self.diagnostics["rpc_error_code"] = code
                     # Upstream messages can contain tokens, URLs or configuration.
