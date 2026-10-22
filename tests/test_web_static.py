@@ -2161,6 +2161,27 @@ class SignedOutMachinesReadAsStateNotFailureTests(unittest.TestCase):
     empty are the reason the table exists.
     """
 
+    def test_collection_summary_distinguishes_pause_skip_busy_and_other_errors(self):
+        failures = [
+            {"machine": "first", "reason": "本机已暂停该服务的自动请求；原始诊断未记录"},
+            {"machine": "second", "reason": "本轮前序机器查询异常；本机尚未尝试。触发原因：first / 本机已暂停该服务的自动请求"},
+            {"machine": "third", "reason": "同一服务已有操作，本次未发出请求。"},
+            {"machine": "fourth", "reason": "远端响应异常"},
+        ]
+        result = self.render_with([], [], refresh_errors=failures)
+        self.assertIn("1 台暂停，1 台本轮未尝试，1 台通道占用未查询，1 台查询异常", result["tableText"])
+        for failure in failures:
+            self.assertIn(failure["reason"], result["tableText"])
+        recovered = self.render_with([], [], refresh_errors=failures, recover=True)
+        self.assertNotIn("采集详情", recovered["tableText"])
+
+    def test_legacy_skips_are_not_inferred_to_be_pauses(self):
+        result = self.render_with([], [], refresh_errors=[
+            {"machine": "m", "reason": "本轮前序机器查询异常；本机尚未尝试，请先核对原始失败。"},
+            {"machine": "n", "reason": "unknown: 本机已暂停该服务的自动请求"},
+        ])
+        self.assertIn("1 台本轮未尝试，1 台查询异常", result["tableText"])
+
     def render_with(self, claude_signed_out, codex_signed_out, refresh_errors=(), claude_accounts=(), recover=False, diagnostic=True):
         script = r'''
 const fs = require("fs");

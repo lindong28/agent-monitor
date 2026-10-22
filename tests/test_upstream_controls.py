@@ -112,6 +112,48 @@ class UpstreamControlsTests(unittest.TestCase):
             self.assertEqual(main(["resume", "claude", "--pause-id", pause, *args]), 1)
         self.assertNotIn("active", self.controls.read("claude"))
 
+    def test_paused_probe_is_durable_once_only_and_excludes_other_callers(self):
+        for completed in (True, False):
+            with self.subTest(completed=completed):
+                root = self.root / str(completed)
+                controls = Controls(root)
+                lease = controls.acquire("codex")
+                lease.pause("quotaRefreshFailed")
+                lease.close()
+                pause_id = controls.read("codex")["pause"]["id"]
+                with self.assertRaises(Paused):
+                    controls.acquire("codex", probe_pause_id="stale")
+                probe = controls.acquire("codex", probe_pause_id=pause_id)
+                self.assertIn("probe_attempt", Controls(root).read("codex")["pause"])
+                with self.assertRaises(Busy):
+                    Controls(root).acquire("codex")
+                probe.close(completed=completed)
+                for options in ({}, {"probe_pause_id": pause_id}):
+                    with self.assertRaises(Paused):
+                        Controls(root).acquire("codex", **options)
+
+    def test_failed_probe_retains_original_pause_and_consumed_attempt(self):
+        lease = self.controls.acquire("codex")
+        lease.pause("original")
+        lease.close()
+        original = self.controls.read("codex")["pause"]["id"]
+        probe = self.controls.acquire("codex", probe_pause_id=original)
+        probe.pause("quotaRefreshFailed", failure={"stage": "quota_read", "kind": "timeout"})
+        probe.close()
+        state = self.controls.read("codex")
+        self.assertEqual(state["last_pause"]["id"], original)
+        self.assertIn("probe_attempt", state["last_pause"])
+        self.assertNotEqual(state["pause"]["id"], original)
+        with self.assertRaises(Paused):
+            self.controls.resume("codex", original)
+
+    def test_probe_requires_readable_existing_pause(self):
+        with self.assertRaises(Paused):
+            self.controls.acquire("codex", probe_pause_id="missing")
+        (self.root / "codex.json").write_text("broken")
+        with self.assertRaises(Paused):
+            self.controls.acquire("codex", probe_pause_id="unreadable")
+
     def test_pre_control_failed_operation_survives_new_round(self):
         import codex_accounts as ca
         manager = ca.Manager(self.root / "profiles")

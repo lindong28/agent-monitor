@@ -1085,7 +1085,18 @@
     const details = document.createElement("details");
     details.className = "note-disclosure";
     const summary = document.createElement("summary");
-    summary.textContent = `${provider.label} 采集详情（${failures.length} 台机器最近查询未成功）`;
+    const counts = { paused: 0, skipped: 0, busy: 0, error: 0 };
+    failures.forEach(({ reason }) => {
+      const text = String(reason || "");
+      if (text.startsWith("本轮前序机器查询异常；本机尚未尝试")) counts.skipped += 1;
+      else if (text.startsWith("本机已暂停该服务的自动请求")) counts.paused += 1;
+      else if (text.startsWith("同一服务已有操作，本次未发出请求。")) counts.busy += 1;
+      else counts.error += 1;
+    });
+    const labels = [["paused", "暂停"], ["skipped", "本轮未尝试"],
+      ["busy", "通道占用未查询"], ["error", "查询异常"]];
+    const status = labels.filter(([key]) => counts[key]).map(([key, label]) => `${counts[key]} 台${label}`).join("，");
+    summary.textContent = `${provider.label} 采集详情（${status}）`;
     details.appendChild(summary);
     failures.forEach((failure) => {
       const note = document.createElement("p");

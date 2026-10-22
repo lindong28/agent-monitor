@@ -411,39 +411,61 @@ def _rate_limits(refresh=False):
     with ThreadPoolExecutor(max_workers=2) as pool:
         result = dict(pool.map(read, ("claude", "codex")))
     if refresh and hub.enabled():
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with cache_path.with_suffix(".lock").open("a") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            previous = _read_quota_cache(cache_path)
-            for provider, block in result.items():
-                old = previous.get(provider)
-                if block is not None and (old is None or accounts.quota_identity(
-                        provider, block.get("account_id"), block.get("account_label")) != accounts.quota_identity(
-                        provider, old.get("account_id"), old.get("account_label"))
-                                          or _quota_time(block) >= _quota_time(old)):
-                    previous[provider] = block
-                elif block is not None:
-                    # Keep the newer reading, but report this query's outcome —
-                    # both halves of it. `{**old, ...}` alone carried the old
-                    # `signed_out` forward under the new error, so a machine
-                    # that timed out once went on being republished as "not
-                    # signed in" every round while its error was dropped.
-                    previous[provider] = {
-                        **old,
-                        "refresh_error": block["refresh_error"],
-                        "signed_out": block.get("signed_out", False),
-                    }
-            staging = cache_path.with_name(cache_path.name + "." + uuid.uuid4().hex)
-            try:
-                with staging.open("x") as handle:
-                    os.chmod(staging, 0o600)
-                    json.dump(previous, handle, allow_nan=False)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                staging.replace(cache_path)
-            finally:
-                staging.unlink(missing_ok=True)
+        _save_quota_cache(cache_path, result)
     return result
+
+
+def _save_quota_cache(cache_path, result):
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with cache_path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        previous = _read_quota_cache(cache_path)
+        for provider, block in result.items():
+            old = previous.get(provider)
+            if block is not None and (old is None or accounts.quota_identity(
+                    provider, block.get("account_id"), block.get("account_label")) != accounts.quota_identity(
+                    provider, old.get("account_id"), old.get("account_label"))
+                                      or _quota_time(block) >= _quota_time(old)):
+                previous[provider] = block
+            elif block is not None:
+                # Keep the newer reading, but report this query's outcome —
+                # both halves of it. `{**old, ...}` alone carried the old
+                # `signed_out` forward under the new error, so a machine
+                # that timed out once went on being republished as "not
+                # signed in" every round while its error was dropped.
+                previous[provider] = {
+                    **old,
+                    "refresh_error": block["refresh_error"],
+                    "signed_out": block.get("signed_out", False),
+                }
+        staging = cache_path.with_name(cache_path.name + "." + uuid.uuid4().hex)
+        try:
+            with staging.open("x") as handle:
+                os.chmod(staging, 0o600)
+                json.dump(previous, handle, allow_nan=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            staging.replace(cache_path)
+        finally:
+            staging.unlink(missing_ok=True)
+
+
+def recover_codex_quota(expected_label, pause_id):
+    """Explicit operator recovery; never called by Web or scheduled collectors."""
+    from upstream_controls import Controls
+    account = accounts.codex_account()
+    if not expected_label or account is None or account.label != expected_label:
+        raise quota_refresh.RefreshError("当前 Codex 账号与批准目标不一致，未开始探测。")
+    value = quota_refresh.load_rate_limits("codex", account, probe_pause_id=pause_id)
+    current = accounts.codex_account()
+    if current is None or accounts.quota_identity("codex", current.account_id, current.label) != accounts.quota_identity(
+            "codex", account.account_id, account.label):
+        raise quota_refresh.RefreshError("探测期间账号已变化；未保存读数，暂停保留。")
+    block = _rate_limit_block(value, account)
+    block.update(refresh_error=None, signed_out=False)
+    _save_quota_cache(ROOT / "state/quota_snapshot.json", {"codex": block})
+    Controls(ROOT / "state/upstream_controls").resume("codex", pause_id)
+    return block
 
 
 def _read_quota_cache(path):

@@ -88,7 +88,7 @@ class Controls:
             handle.close()
             raise
 
-    def acquire(self, provider, *, cancelled=None, timeout=0, interval=0):
+    def acquire(self, provider, *, cancelled=None, timeout=0, interval=0, probe_pause_id=None):
         cancelled = cancelled or threading.Event()
         handle = self._lock(provider, cancelled, timeout)
         try:
@@ -97,7 +97,15 @@ class Controls:
                 state["pause"] = {"id": uuid.uuid4().hex, "reason": "interrupted", "at": time.time()}
                 state.pop("active", None)
                 self._save(provider, state)
-            if state.get("pause"):
+            if probe_pause_id is not None:
+                pause = state.get("pause")
+                if not pause or pause["id"] != probe_pause_id or pause["id"] == "unreadable":
+                    raise Paused("暂停状态已变化或无法读取，未开始探测。")
+                if "probe_attempt" in pause or state.get("active"):
+                    raise Paused("该暂停的探测机会已使用或有未闭合操作，未开始新的请求。")
+                # Consumed in the same durable write as active, before any child.
+                pause["probe_attempt"] = {"id": uuid.uuid4().hex, "at": time.time()}
+            elif state.get("pause"):
                 raise Paused("本机已暂停该服务的自动请求；%s。请先核对原始失败并明确解除本地暂停。" %
                              pause_summary(state["pause"]))
             delay = max(0, state.get("released_at", 0) + interval - time.time())
@@ -133,6 +141,8 @@ class Lease:
 
     def pause(self, reason="unknown", *, failure=None):
         # Only fixed internal categories belong here; never upstream bodies/tokens.
+        if self.state.get("pause"):
+            self.state["last_pause"] = self.state["pause"]
         self.state["pause"] = {"id": uuid.uuid4().hex, "reason": reason, "at": time.time()}
         if failure:
             self.state["pause"]["failure"] = diagnostics.safe_failure(failure)

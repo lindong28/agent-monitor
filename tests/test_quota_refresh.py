@@ -27,6 +27,68 @@ class ProviderTests(unittest.TestCase):
         self.sleep = sleeper.start()
         self.addCleanup(sleeper.stop)
 
+    def test_recovery_keeps_pause_until_cache_saved_and_reads_only_codex(self):
+        from upstream_controls import Controls, Paused
+        controls = Controls(self.root / "state/upstream_controls")
+        lease = controls.acquire("codex")
+        lease.pause("original")
+        lease.close()
+        pause_id = controls.read("codex")["pause"]["id"]
+        account = accounts.Account("workspace", "expected@example.test")
+        reading = RateLimits(5, None, 20, None, updated_at="2026-10-22T00:00:00Z")
+        payload = json.dumps({"reading": dataclasses.asdict(reading)})
+        child = SimpleNamespace(pid=0, returncode=0, communicate=lambda *a, **k: (payload, ""))
+        cache = self.root / "state/quota_snapshot.json"
+        cache.write_text(json.dumps({"claude": {"account_id": "other", "refresh_error": "retained"}}))
+        save = exporter._save_quota_cache
+
+        def save_while_paused(path, result):
+            self.assertEqual(set(result), {"codex"})
+            with self.assertRaises(Paused):
+                controls.acquire("codex")
+            save(path, result)
+
+        with mock.patch("exporter.accounts.codex_account", return_value=account), \
+                mock.patch("quota_refresh.subprocess.Popen", return_value=child) as spawn, \
+                mock.patch("exporter._save_quota_cache", side_effect=save_while_paused):
+            exporter.recover_codex_quota(account.label, pause_id)
+        self.assertEqual(spawn.call_count, 1)
+        state = controls.read("codex")
+        self.assertNotIn("pause", state)
+        self.assertEqual(state["last_pause"]["id"], pause_id)
+        self.assertIn("probe_attempt", state["last_pause"])
+        stored = json.loads(cache.read_text())
+        self.assertEqual(stored["claude"]["refresh_error"], "retained")
+        self.assertIsNone(stored["codex"]["refresh_error"])
+        self.assertEqual(stored["codex"]["account_label"], account.label)
+
+    def test_recovery_mismatch_failure_and_cache_failure_keep_pause(self):
+        from upstream_controls import Controls
+        account = accounts.Account("workspace", "expected@example.test")
+        other = accounts.Account("workspace", "other@example.test")
+        reading = RateLimits(5, None, 20, None, updated_at="2026-10-22T00:00:00Z")
+        for mode in ("before", "after", "upstream", "cache"):
+            with self.subTest(mode=mode):
+                controls = Controls(self.root / "state/upstream_controls")
+                controls.root.mkdir(parents=True, exist_ok=True)
+                controls._save("codex", {"version": 1, "pause": {"id": mode, "reason": "original"}})
+                payload = {"error": "fixture failure"} if mode == "upstream" else {"reading": dataclasses.asdict(reading)}
+                child = SimpleNamespace(pid=0, returncode=0, communicate=lambda *a, **k: (json.dumps(payload), ""))
+                identities = [other] if mode == "before" else [account, other if mode == "after" else account]
+                with mock.patch("exporter.accounts.codex_account", side_effect=identities), \
+                        mock.patch("quota_refresh.subprocess.Popen", return_value=child) as spawn, \
+                        mock.patch("exporter._save_quota_cache", side_effect=OSError("fixture cache failure")) as save:
+                    with self.assertRaises((quota_refresh.RefreshError, OSError)):
+                        exporter.recover_codex_quota(account.label, mode)
+                self.assertEqual(spawn.call_count, 0 if mode == "before" else 1)
+                self.assertEqual(save.call_count, 1 if mode == "cache" else 0)
+                state = controls.read("codex")
+                self.assertIn("pause", state)
+                if mode == "upstream":
+                    self.assertEqual(state["last_pause"]["id"], mode)
+                elif mode != "before":
+                    self.assertIn("probe_attempt", state["pause"])
+
     def test_one_attempt_per_provider_and_success_clears_persisted_error(self):
         old = RateLimits(3, None, 20, None, updated_at="2026-08-01T00:00:00Z")
         fresh = dataclasses.replace(old, seven_day_pct=0, updated_at="2026-09-29T00:00:00Z")

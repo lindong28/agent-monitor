@@ -68,11 +68,12 @@ class LocalUnavailable(RefreshError):
     """A local prerequisite is missing; no upstream attempt was made."""
 
 
-def load_rate_limits(provider, account):
+def load_rate_limits(provider, account, *, probe_pause_id=None):
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
     try:
-        lease = upstream_controls.Controls(ROOT / "state/upstream_controls").acquire(provider)
+        options = {} if probe_pause_id is None else {"probe_pause_id": probe_pause_id}
+        lease = upstream_controls.Controls(ROOT / "state/upstream_controls").acquire(provider, **options)
     except (upstream_controls.Paused, upstream_controls.Busy) as exc:
         raise RefreshError(str(exc)) from None
     except OSError as exc:
