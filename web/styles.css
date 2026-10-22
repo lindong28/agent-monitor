@@ -660,8 +660,8 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-.quota-table th:nth-child(n + 2):nth-child(-n + 6),
-.quota-table .quota-row > td:nth-child(n + 2):nth-child(-n + 6) {
+.quota-table th:is(:nth-child(2), :nth-child(4), :nth-child(5)),
+.quota-table .quota-row > td:is(:nth-child(2), :nth-child(4), :nth-child(5)) {
   text-align: center;
 }
 
@@ -760,10 +760,18 @@ button:disabled {
 }
 
 .quota-window-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.quota-window-usage {
   display: grid;
   /* Reserve room for 100%; every row uses the same track origin and scale. */
   grid-template-columns: 3rem 72px;
-  justify-content: center;
+  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
 }
@@ -841,7 +849,9 @@ button:disabled {
 }
 
 .quota-window-line .quota-window-reset {
-  grid-column: 1 / -1;
+  /* Share the remaining row width without letting reset wording shift meters. */
+  flex: 0 0 clamp(4rem, calc(100% - 3rem - 88px), 7rem);
+  max-width: 100%;
   text-align: center;
 }
 
@@ -1888,11 +1898,15 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 /* Keep the row's identity and observation beside horizontally scrolled windows. */
 #quota-accounts { overflow: visible; }
 #quota-accounts .quota-identity {
-  position: sticky; left: 0; z-index: 1; min-width: 220px; width: 240px; max-width: 240px; background: var(--surface);
+  position: sticky; left: 0; z-index: 1; min-width: 220px; width: auto; background: var(--surface);
   box-shadow: 1px 0 var(--line);
 }
 #quota-accounts th.quota-identity { z-index: 2; }
-#quota-accounts .quota-account-label { overflow-wrap: anywhere; white-space: normal; }
+#quota-accounts .quota-account-label { min-width: max-content; white-space: nowrap; }
+
+@media (min-width: 901px) {
+  #quota-accounts .quota-window-cell { width: 18%; }
+}
 
 .session-back { display: inline-flex; align-items: center; gap: 8px; }
 .pager button{ gap: 8px; }
@@ -1960,7 +1974,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   #quota-accounts .quota-identity { position: static; width: auto; min-width: 0; max-width: none; box-shadow: none; }
   #quota-accounts td:first-child, #quota-accounts td:last-child, #quota-accounts td[colspan] { grid-column: 1 / -1; }
   #quota-accounts td:nth-child(6) { grid-column: 1 / -1; }
-  #quota-accounts .quota-account-label { white-space: normal; overflow-wrap: anywhere; }
+  #quota-accounts .quota-account-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   #quota-accounts .quota-window { min-width: 0; }
   #quota-accounts .quota-window-reason { max-width: none; }
   #sync-summary { overflow-wrap: anywhere; }
@@ -2004,7 +2018,4 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 
 @media (max-width: 900px) {
   .overview-main .codex-account-actions { padding-inline: 12px; }
-}
-@media (min-width: 1600px) {
-  #quota-accounts .quota-identity { width: 300px; max-width: 300px; }
 }

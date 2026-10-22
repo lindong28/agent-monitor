@@ -1575,17 +1575,21 @@
     const line = document.createElement("div");
     line.className = "quota-window-line";
 
+    const usage = document.createElement("div");
+    usage.className = "quota-window-usage";
+
     const amount = document.createElement("span");
     amount.className = "quota-window-value";
     amount.textContent = known ? `${used}%` : "—";
     if (known) {
       amount.title = `本窗口已用 ${used}%`;
     }
-    line.appendChild(amount);
+    usage.appendChild(amount);
 
     if (known) {
-      line.appendChild(quotaMeter(used));
+      usage.appendChild(quotaMeter(used));
     }
+    line.appendChild(usage);
     cell.appendChild(line);
 
     const reset = document.createElement("div");

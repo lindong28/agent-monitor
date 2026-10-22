@@ -3,7 +3,7 @@
 ## 2026-10-22 — Quota meter alignment
 
 - Align quota progress tracks across account rows using consistent percentage and track widths on desktop and narrow screens.
-- Center provider, plan, quota windows and machines beneath their column headings; keep reset times below the centered quota meters.
+- Center provider and quota windows beneath their headings; keep plan and machine columns left-aligned. Reset times sit beside quota meters when the cell has room and wrap below on narrower cells. Account emails stay on one line in the desktop table and can wrap on narrow-screen cards.
 
 ## 2026-10-22 — Claude quota validity
 
