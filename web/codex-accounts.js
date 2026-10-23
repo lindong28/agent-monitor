@@ -1,3 +1,8 @@
+async function previewEgress(...args) {
+  const preview = await import("./account-egress.js");
+  return preview.previewEgress(...args);
+}
+
 const STAGES = {
   queued: "排队中",
   checking: "检查登录", login_queued: "等待授权排队", login: "等待官方授权", sending: "正在发送", reading: "读取配额",
@@ -38,6 +43,7 @@ export function init() {
   const batchRetry = root.querySelector("#codex-batch-retry");
   const batchStatus = root.querySelector("#codex-batch-status");
   const batchHelp = root.querySelector("#codex-batch-help");
+  const egressPreview = root.querySelector("#codex-egress-preview");
   let timer;
   let loading = false;
   let reloadPending = false;
@@ -133,17 +139,15 @@ export function init() {
     const payload = action === "batch-start"
       ? { expected_batch_id: batch?.id ?? null, profile_ids: ids || [...selectedIds] }
       : { batch_id: batch.id };
-    if (action === "batch-start") {
-      const targets = accounts.filter(a => payload.profile_ids.includes(a.id));
-      if (!targets.length) return;
-      const identities = targets.map(a => `${a.email}（${a.account_id}）`).join("\n");
-      if (!window.confirm(`开始新一轮，从 100 条日常短消息中为以下 ${targets.length} 个账号各随机抽取并发送一条（可能重复）？\n\n${identities}\n\n会使用账号额度；这不是继续未发送账号，之前已发送的账号也会再次发送。暂停中的账号不会发送；发送不保证固定或重置额度窗口。`)) return;
-    }
+    const targets = action === "batch-start" ? accounts.filter(a => payload.profile_ids.includes(a.id)) : null;
+    if (targets && !targets.length) return;
     submittingBatch = true;
     render();
-    notice.textContent = "正在提交批次…";
     let failure = "";
     try {
+      if (targets && !await previewEgress(request, targets, controller.signal)) return;
+      if (!current()) return;
+      notice.textContent = "正在提交批次…";
       await request(action, payload);
       if (current()) notice.textContent = "";
     } catch (error) {
@@ -167,6 +171,7 @@ export function init() {
     batchNext.hidden = !batch;
     batchNext.textContent = `开始新一轮 · 所选 ${count} 个账号`;
     batchNext.disabled = submittingBatch || busy || !count || Boolean(upstreamPause);
+    if (egressPreview) egressPreview.disabled = submittingBatch;
     batchRetry.hidden = true;
     if (!batch) {
       batchStatus.textContent = eligible.length ? `${eligible.length} 个可操作账号；发送前会检查登录状态。` : "尚未发现可发送的 Codex 登录账号。";
@@ -220,6 +225,16 @@ export function init() {
   batchStart.addEventListener("click", () => performBatch("batch-start"));
   batchNext.addEventListener("click", () => performBatch("batch-start"));
   batchRetry.addEventListener("click", () => performBatch("batch-retry"));
+  egressPreview?.addEventListener("click", async () => {
+    if (submittingBatch) return;
+    submittingBatch = true;
+    render();
+    try { await previewEgress(request, null, controller.signal); }
+    catch (error) {
+      if (current() && error.name !== "AbortError") notice.textContent = "出口预览未能打开，请重试。";
+    }
+    finally { submittingBatch = false; if (current()) render(); }
+  });
   root.querySelector("#codex-select-all").addEventListener("click", () => {
     selectedIds = new Set(accounts.filter(a => a.eligible !== false).map(a => a.id));
     render();

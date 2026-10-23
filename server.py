@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import codex_accounts
 import network_policy
+import account_egress
 from urllib.parse import parse_qs, unquote, urlparse
 from zoneinfo import ZoneInfo
 
@@ -786,7 +787,9 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError()
             except (ValueError, UnicodeDecodeError):
                 raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
-            if path == "/api/codex-accounts/add":
+            if path == "/api/codex-accounts/egress-preview":
+                result = account_egress.preview()
+            elif path == "/api/codex-accounts/add":
                 result = manager.add(payload.get("email"), payload.get("account_id"))
             elif path == "/api/codex-accounts/batch-start":
                 if "expected_batch_id" not in payload:

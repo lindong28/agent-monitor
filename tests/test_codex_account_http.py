@@ -60,6 +60,24 @@ class AccountHttpTests(unittest.TestCase):
         self.assertEqual(self.request("/forget-login", {"id": account["id"]})[0], 200)
         self.assertEqual(self.request("/start", {"id": "../../outside"})[0], 400)
 
+    def test_egress_preview_admission_never_discovers_or_runs_accounts(self):
+        with mock.patch.object(server.account_egress, 'preview', return_value={'targets': []}) as preview, \
+                mock.patch.object(self.manager, 'discover') as discover, \
+                mock.patch.object(self.manager, 'start') as start:
+            self.assertEqual(self.request('/egress-preview', {}, {'Origin': 'https://other.example'})[0], 403)
+            preview.assert_not_called()
+            self.assertEqual(self.request('/egress-preview', {})[0], 200)
+            connection = http.client.HTTPConnection('127.0.0.1', self.http.server_port, timeout=3)
+            try:
+                connection.request('GET', '/api/codex-accounts/egress-preview')
+                response = connection.getresponse()
+                self.assertEqual(response.status, 404)
+                response.read()
+            finally:
+                connection.close()
+            preview.assert_called_once()
+            discover.assert_not_called(); start.assert_not_called()
+
     def test_unexpected_failure_can_be_found_by_http_diagnostic_id(self):
         with tempfile.TemporaryDirectory() as directory:
             monitor = diagnostics.Monitor()

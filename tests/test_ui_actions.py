@@ -7,6 +7,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ActionTests(unittest.TestCase):
+    def test_standalone_preview_reports_module_load_failure(self):
+        script = r'''
+const fs=require('fs'),assert=require('assert');
+const source=fs.readFileSync('web/codex-accounts.js','utf8');
+let handler,submittingBatch=false,renders=0;
+const egressPreview={addEventListener:(_event,callback)=>handler=callback};
+const current=()=>true, render=()=>renders++,request=()=>{},controller=new AbortController(),notice={textContent:''};
+const previewEgress=async()=>{throw Error('fixture module load failure');};
+eval(source.slice(source.indexOf('  egressPreview?.addEventListener('),source.indexOf('  root.querySelector("#codex-select-all")')));
+(async()=>{await handler();assert(notice.textContent.includes('请重试'));assert.equal(submittingBatch,false);assert.equal(renders,2);})()
+.catch(error=>{console.error(error);process.exitCode=1;});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=ROOT, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_only_same_successful_operation_collapses_batch_status(self):
         script = r'''
 const fs=require('fs'),assert=require('assert');
@@ -74,7 +89,8 @@ let accounts=[{id:'a',email:'a@example.test',account_id:'workspace-a'}, {id:'b',
 const notice={textContent:''}, calls=[]; let accept=false, fail=false;
 const current=()=>true, render=()=>{}, load=async()=>{notice.textContent='';};
 const request=async(action,payload)=>{calls.push({action,payload}); if(fail)throw Error('selection expired');};
-global.window={confirm(message){assert(message.includes('a@example.test'));assert(!message.includes('b@example.test')); selectedIds=new Set(['b']);batch={id:'new'};return accept;}};
+const controller=new AbortController();
+const previewEgress=async(request,targets,signal)=>{assert.deepEqual(targets.map(a=>a.id),['a']);selectedIds=new Set(['b']);batch={id:'new'};return accept;};
 eval(source.slice(source.indexOf('  async function performBatch('),source.indexOf('  function renderBatch(')));
 (async()=>{
  await performBatch('batch-start');assert.equal(calls.length,0,'cancel sends nothing');

@@ -80,3 +80,5 @@ Earlier decisions remain in the source repository at the immutable commit linked
 - [20261021-a84c — Codex request controls](20261021-a84c-codex-request-controls.md): accepted; classified recovery, persistent pauses, local release and paced startup; local validation only, no deployment.
 
 - [20261023-b72e — Codex account-read diagnostics](20261023-b72e-account-read-diagnostics.md): retain safe workspace-routing reasons without changing pause or recovery behavior.
+
+- [20261023-a7c1 — Account egress preview](20261023-a7c1-account-egress-preview.md): show target-specific exit IP/country before a new round; China is red, unknown remains explicit.
