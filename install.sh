@@ -182,6 +182,12 @@ case "$SERVICE" in
 esac
 
 install_runtime
+if ! proxy_runtime_state="$("$VENV_PY" "$ROOT_DIR/proxy_runtime/install.py")"; then
+  emit_install_ledger artifact "agent-monitor system proxy runtime" failed "resolver installation failed; existing services unchanged"
+  exit 1
+fi
+echo "agent-monitor system proxy runtime: $proxy_runtime_state (Chromium system resolver)"
+emit_install_ledger artifact "agent-monitor system proxy runtime" "$proxy_runtime_state" "Electron 45.0.0; system proxy resolver"
 if [ "$SERVICE" = hub ]; then
   "$VENV_PY" "$ROOT_DIR/hub.py" configure "$2"
 fi

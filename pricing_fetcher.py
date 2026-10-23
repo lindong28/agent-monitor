@@ -4,6 +4,7 @@ import math
 import ssl
 import time
 import urllib.request
+import network_policy
 from dataclasses import replace
 from pathlib import Path
 
@@ -208,7 +209,7 @@ def _with_bundled_supplements(data):
 def _fetch_litellm_pricing():
     context = ssl.create_default_context()
     request = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "agent-monitor/0.1"})
-    with urllib.request.urlopen(request, timeout=10, context=context) as response:
+    with network_policy.opener(urllib.request.HTTPSHandler(context=context)).open(request, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

@@ -55,6 +55,7 @@ _RUNTIME_AUTHORITY_PATHS = (
     "install.sh",
     "requirements.txt",
     ":(glob)lib/**",
+    ":(glob)proxy_runtime/**",
 )
 
 

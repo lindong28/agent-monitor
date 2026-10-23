@@ -22,6 +22,7 @@ from parsers.accounts import codex_account
 from parsers.codex import select_codex_rate_limit
 from upstream_controls import Controls, Paused, Busy
 from codex_messages import MESSAGES
+import network_policy
 
 
 MESSAGE = f"从 {len(MESSAGES)} 条日常短消息中独立随机抽取一条，可能重复。"
@@ -268,7 +269,7 @@ def lock_file(path):
     return handle
 
 
-def child_environment(home):
+def child_environment(home, scope=None):
     # Inherit network transport settings, not API keys, alternate auth or a
     # parent's Codex session/configuration. Resolve executables before HOME changes.
     names = ("PATH", "LANG", "LC_ALL", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
@@ -278,7 +279,7 @@ def child_environment(home):
     env["PATH"] = os.pathsep.join([str(Path.home() / ".local/bin"), "/opt/homebrew/bin",
                                   "/usr/local/bin", env.get("PATH", "/usr/bin:/bin")])
     env.update(HOME=str(home / "home"), CODEX_HOME=str(home / "codex"))
-    return env
+    return network_policy.child_environment(env, scope=scope)
 
 
 class Rpc:
@@ -293,7 +294,11 @@ class Rpc:
         self.process_guard = threading.Lock()
         for name in ("home", "codex", "work"):
             private_dir(home / name)
-        env = child_environment(home)
+        try:
+            env = child_environment(home, scope=uuid.uuid4().hex)
+        except network_policy.NetworkPolicyError as exc:
+            raise ActionError(str(exc), 503, "networkPolicyUnavailable") from None
+        self.network_route = env[network_policy.INTERNAL]
         shim = Path.home() / ".local/libexec/agent-shims/codex"
         executable = str(shim) if shim.is_file() else shutil.which("codex", path=env["PATH"])
         if not executable:
@@ -310,6 +315,7 @@ class Rpc:
             "model_providers.agent-monitor-http.request_max_retries": "0",
             "model_providers.agent-monitor-http.stream_max_retries": "0",
             "features.shell_tool": "false", "features.code_mode": "false",
+            "features.respect_system_proxy": "false",
             "features.code_mode_host": "false", "features.multi_agent": "false",
             "features.hooks": "false", "features.apps": "false", "features.plugins": "false",
             "project_doc_max_bytes": "0",
@@ -1063,13 +1069,16 @@ class Manager:
             self.restrict(directory, record, failure)
             if record["operation"]["message_status"] == "unknown":
                 record.setdefault("restrictions", {})["unknown"] = {"category": failure["category"], "created_at": now()}
-            benign = failure["category"] in ("needsLogin", "missingCli", "usageLimitExceeded", "quotaAtCapacity", "locallyPaused")
+            benign = failure["category"] in ("needsLogin", "missingCli", "networkPolicyUnavailable", "usageLimitExceeded", "quotaAtCapacity", "locallyPaused")
             if not benign:
                 if lease:
                     lease.pause("operationFailed")
                 if job.get("batch_stopped") is not None:
                     job["batch_stopped"].set()
             diagnostics = copy.deepcopy(getattr(rpc, "diagnostics", {}))
+            route = getattr(rpc, "network_route", None)
+            if isinstance(route, str):
+                diagnostics["network"] = network_policy.observations(route)
             rejections = rpc.rejections(thread_id, turn_id) if rpc else []
             for rejection in rejections:
                 self.restrict(directory, record, rejection)

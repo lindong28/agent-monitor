@@ -429,12 +429,19 @@ class ExporterTests(unittest.TestCase):
             (root / "machines.json").write_text('{}\n')
             (root / "exporter.py").write_text('# source\n')
             (root / "claude_oauth.py").write_text('# read-only credentials\n')
+            (root / 'proxy_runtime').mkdir()
+            (root / 'proxy_runtime/bridge.cjs').write_text('// transport\n')
             git("add", "machines.json", "exporter.py", "claude_oauth.py")
+            git('add', 'proxy_runtime/bridge.cjs')
             git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture")
             commit = git("rev-parse", "HEAD")
             (root / "machines.json").write_text('# disabled remote\n{}\n')
             with mock.patch("exporter.ROOT", root):
                 self.assertEqual(exporter.exporter_version(), commit)
+                (root / 'proxy_runtime/bridge.cjs').write_text('// modified transport\n')
+                with self.assertRaisesRegex(exporter.ExportError, 'differs from HEAD'):
+                    exporter.exporter_version()
+                (root / 'proxy_runtime/bridge.cjs').write_text('// transport\n')
                 (root / "claude_oauth.py").write_text('# modified credentials reader\n')
                 with self.assertRaisesRegex(exporter.ExportError, "differs from HEAD"):
                     exporter.exporter_version()

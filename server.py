@@ -23,6 +23,7 @@ from project_alias import canonical_project
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import codex_accounts
+import network_policy
 from urllib.parse import parse_qs, unquote, urlparse
 from zoneinfo import ZoneInfo
 
@@ -604,7 +605,8 @@ def _network_report(query):
 
 def _run_network_report():
     try:
-        result = subprocess.run(["ip-check", "--json"], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(["ip-check", "--json"], capture_output=True, text=True, timeout=30,
+                                env=network_policy.child_environment(os.environ))
         if result.returncode != 0:
             return {
                 "error": result.stderr or "ip-check exited non-zero",
@@ -615,6 +617,8 @@ def _run_network_report():
         if not isinstance(data, dict):
             return {"error": "ip-check returned an invalid report", "installed": True, "verdict": "unknown"}
         return data
+    except network_policy.NetworkPolicyError as exc:
+        return {"error": str(exc), "installed": True, "verdict": "unknown"}
     except FileNotFoundError:
         return {
             "error": "PATH 里找不到 ip-check 命令",

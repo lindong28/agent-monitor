@@ -98,7 +98,8 @@ def collect(force=False):
             request = urllib.request.Request(url, method="POST", headers={
                 "Origin": "http://127.0.0.1:%d" % port, "X-Agent-Monitor": "action",
             }) if force else url
-            with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT) as response:
+            # Administrative loopback, matching Chrome's implicit local bypass.
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=FETCH_TIMEOUT) as response:
                 return json.load(response), "agent-monitor 服务 (:%d) 的缓存快照，与 /network 页面同源" % port
         except (urllib.error.URLError, OSError, ValueError) as exc:
             detour = "agent-monitor 服务在 :%d 但取数失败（%s），已改为本进程直接检测" % (port, exc)
@@ -522,7 +523,11 @@ def render_details(snapshot, gaps, lines):
     # 生效的那条（发布方尚未上线，文件由人手工维护，陈旧值与新值同形）；也不留"发布
     # 文件""未接管"这类只有实现者懂的说法，路径直接写出来，读者才知道去哪看、改什么。
     path = effective.get("path") or "~/.config/agent-proxy/current-proxy"
-    if source == "published":
+    if source == "system":
+        lines.append(_kv("出站策略", "执行主机的系统代理；按每个目标解析"))
+        lines.append(_kv("公网 IP 探测目标", effective.get("probe_url") or "未记录"))
+        lines.append(_kv("出口范围", "该 IP 只属于本次探测；账号及其他目标的公网出口未由此核实"))
+    elif source == "published":
         address = effective.get("address")
         lines.append(_kv(
             "本次探测出口",

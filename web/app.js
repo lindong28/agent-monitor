@@ -2520,11 +2520,13 @@
     const location = [pub.country, pub.region, pub.city].filter(Boolean).join(" / ") || "—";
     const timezone = pub.timezone ? `${escapeHtml(pub.timezone)} (${escapeHtml(pub.tz_offset || "—")})` : "—";
     qs("#network-public").innerHTML = [
-      kvRow("IP", escapeHtml(pub.ip || "—")),
+      kvRow("本次探测 IP", escapeHtml(pub.ip || "—")),
+      kvRow("探测目标", escapeHtml(pub.probe_url || data.proxy_effective?.probe_url || "旧记录未保存目标")),
       kvRow("位置", escapeHtml(location)),
       kvRow("运营商", escapeHtml(pub.isp || "—")),
       kvRow("机构", escapeHtml(pub.org || "—")),
       kvRow("时区", timezone),
+      '<p class="scope-note">这个 IP 属于本次探测。不同目标可能走不同代理，不能据此确认账号请求的公网 IP。</p>',
     ].join("");
   }
 
@@ -2559,9 +2561,12 @@
       kvRow("机房 IP", booleanReading(pub.hosting)),
       '<p class="scope-note">代理标记与机房判定来自 ip-api。</p></div>',
       provider("stopforumspam · 举报", "spam", spamRows, spam?.raw_lines || [], [!present(spam?.score) && "垃圾评分", !present(spam?.frequency) && "举报次数", !present(spam?.last_seen) && "最近举报"].filter(Boolean)),
-      '<div class="network-provider"><h3>服务端代理环境</h3>',
+      '<div class="network-provider"><h3>服务端出站策略</h3>',
+      kvRow("策略", data.proxy_effective?.source === "system"
+        ? "执行主机的系统代理，按每个目标解析"
+        : data.proxy_effective?.source === "published" ? "旧记录：个人代理文件指定" : "旧记录未保存有效系统策略"),
       kvRow("环境变量", envs),
-      '<p class="scope-note">读自服务端主机 shell。</p></div>',
+      `<p class="scope-note">环境变量读自服务进程，不代表请求实际选用的代理。${data.proxy_effective?.source === "system" ? "账号操作与探测采用同一系统策略，目标不同仍可能使用不同出口。" : "这条旧记录不能确认当前账号请求的出口。"}</p></div>`,
     ].join("");
   }
 

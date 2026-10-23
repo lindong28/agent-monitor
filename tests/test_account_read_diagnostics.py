@@ -18,6 +18,25 @@ class AccountReadDiagnosticsTests(unittest.TestCase):
     run_case = actions.AccountActionsTests.run_case
     acknowledge = actions.AccountActionsTests.acknowledge
 
+    def test_local_network_failure_does_not_pause_provider_or_start_cli(self):
+        with mock.patch.object(ca.network_policy, 'endpoint', side_effect=ca.network_policy.NetworkPolicyError('runtime_missing')):
+            result = self.run_case('success')
+        self.assertEqual(result['operation']['failure']['category'], 'networkPolicyUnavailable')
+        self.assertEqual(result['operation']['message_status'], 'not_sent')
+        self.assertEqual(len(self.spawned), 0)
+        self.assertIsNone(self.manager.list()['upstream_pause'])
+
+    def test_network_connection_facts_survive_restart_with_original_failure(self):
+        facts = {"policy": "chromium-system", "coverage": "recent_connections_only", "events": [
+            {"target": "https://fixture.invalid", "route": "PROXY 127.0.0.1:9", "result": "proxy_connect_failed"}]}
+        with mock.patch.object(ca.network_policy, "observations", return_value=facts):
+            result = self.run_case("account_read_transport")
+        self.manager.close()
+        self.manager = ca.Manager(self.manager.root)
+        self.addCleanup(self.manager.close)
+        restored = self.manager.view(self.manager.directory(result["id"]))
+        self.assertEqual(restored["last_failure"]["diagnostics"]["network"], facts)
+
     def test_known_reason_survives_restart_resume_and_replacement(self):
         for scenario, reason, wording in (
             ("account_read_auth", "discoveryUnauthorized", "认证"),

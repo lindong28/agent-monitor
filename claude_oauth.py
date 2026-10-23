@@ -17,6 +17,7 @@ from pathlib import Path
 import time
 import urllib.error
 import urllib.request
+import network_policy
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
@@ -218,7 +219,7 @@ class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_OPENER = urllib.request.build_opener(_RefuseRedirect)
+_OPENER = network_policy.opener(_RefuseRedirect)
 
 
 def fetch(token: str) -> object:

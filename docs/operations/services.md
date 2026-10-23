@@ -2,6 +2,8 @@
 
 ## Current deployment source
 
+System-proxy runtime installation and host prerequisites are documented in [README](../../README.md#system-proxy-requirements). A missing library, unusable Linux sandbox or helper startup failure stops installation before service replacement. Keep account pauses across this upgrade; installer startup verification makes no account request. Failed account connection facts are retained in the existing private profile's `last_failure.diagnostics.network`. They are a bounded connection tail, not proof of provider-visible public IP or account recovery.
+
 Use `./deploy.py --expect <full-release-sha>` from the primary main checkout after publishing and reading back live `origin/main`. Keep one release SHA for each rollout; the entry checks source identity before invoking `install.sh`. On 2026-10-13 MacMini was moved from its temporary deployment worktree back to ~/research/agent-monitor after the approved history reconciliation in 06db5d9. Its CLI and rollup launchd job both reference that main checkout; persistent state is unchanged. See [deployment evidence](../product-boundary-separation.md#macmini-main-deployment-correction-2026-10-13).
 
 ## Product UI rollout, 2026-10-15

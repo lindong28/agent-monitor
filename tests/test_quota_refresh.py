@@ -15,7 +15,20 @@ from parsers import RateLimits, accounts
 
 
 class ProviderTests(unittest.TestCase):
+    def test_network_prerequisite_failure_is_local_and_never_starts_child(self):
+        from upstream_controls import Controls
+        account = accounts.Account('workspace', 'fixture@example.invalid')
+        with mock.patch.object(quota_refresh.network_policy, 'endpoint', side_effect=quota_refresh.network_policy.NetworkPolicyError('runtime_missing')), \
+                mock.patch('quota_refresh.subprocess.Popen') as spawn:
+            with self.assertRaises(quota_refresh.LocalUnavailable):
+                quota_refresh.load_rate_limits('codex', account)
+        spawn.assert_not_called()
+        self.assertNotIn('pause', Controls(self.root / 'state/upstream_controls').read('codex'))
+
     def setUp(self):
+        route = mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9")
+        route.start()
+        self.addCleanup(route.stop)
         root = tempfile.TemporaryDirectory()
         self.addCleanup(root.cleanup)
         self.root = Path(root.name)
@@ -150,7 +163,8 @@ class ProviderTests(unittest.TestCase):
                             "  reply={'error':error} if error is not None and m['id']==error_id else {'result':{} if m['id']==1 else response}\n"
                             "  print(json.dumps({'id':m['id'],**reply}),flush=True)\n")
             shim.chmod(0o700)
-            with mock.patch("quota_refresh.Path.home", return_value=home):
+            with mock.patch("quota_refresh.Path.home", return_value=home), \
+                    mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"):
                 return quota_refresh._codex({"account_id": account_id})
 
     def test_codex_uses_window_duration_and_matching_account(self):

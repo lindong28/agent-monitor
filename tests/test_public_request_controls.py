@@ -18,20 +18,20 @@ class PublicRequestControlsTests(unittest.TestCase):
     def test_verified_tls_success_keeps_upstream_pricing(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = b'{"fixture": {"rate": 1}}'
-        with mock.patch.object(pricing_fetcher.urllib.request, 'urlopen', return_value=response) as request:
+        with mock.patch.object(pricing_fetcher.network_policy, 'opener', return_value=mock.Mock(open=mock.Mock(return_value=response))) as request:
             self.assertEqual(pricing_fetcher._fetch_litellm_pricing(), {'fixture': {'rate': 1}})
         request.assert_called_once()
-        self.assertTrue(request.call_args.kwargs['context'].check_hostname)
+        self.assertTrue(request.call_args.args[0]._context.check_hostname)
 
     def test_certificate_failure_uses_fallback_without_an_unverified_retry(self):
         error = ssl.SSLCertVerificationError('fixture certificate rejected')
         with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(pricing_fetcher.urllib.request, 'urlopen', side_effect=error) as request, \
+                mock.patch.object(pricing_fetcher.network_policy, 'opener', return_value=mock.Mock(open=mock.Mock(side_effect=error))) as request, \
                 mock.patch.object(pricing_fetcher, '_fallback_pricing', return_value={'fixture': {}}):
             result = pricing_fetcher.get_pricing(Path(directory) / 'cache.json', persist=False)
         self.assertIn('fixture', result)
         self.assertEqual(request.call_count, 1)
-        context = request.call_args.kwargs['context']
+        context = request.call_args.args[0]._context
         self.assertTrue(context.check_hostname)
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
 

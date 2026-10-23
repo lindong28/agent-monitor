@@ -343,14 +343,14 @@ class CollectTests(unittest.TestCase):
         response = mock.MagicMock()
         response.__enter__.return_value = io.BytesIO(b'{"verdict": "low"}')
         with mock.patch.object(network_report, "_live_server_port", return_value=39001):
-            with mock.patch.object(network_report.urllib.request, "urlopen", return_value=response):
+            with mock.patch.object(network_report.urllib.request, "build_opener", return_value=mock.Mock(open=mock.Mock(return_value=response))):
                 _, note = network_report.collect()
         self.assertIn("缓存快照", note)
         self.assertNotIn("同一份快照", note)
 
     def test_unreachable_server_falls_back_and_says_so(self):
         with mock.patch.object(network_report, "_live_server_port", return_value=39001):
-            with mock.patch.object(network_report.urllib.request, "urlopen", side_effect=OSError("refused")):
+            with mock.patch.object(network_report.urllib.request, "build_opener", return_value=mock.Mock(open=mock.Mock(side_effect=OSError("refused")))):
                 with mock.patch.dict("sys.modules", {"server": mock.Mock(network=lambda _query: {"verdict": "low"})}):
                     _, note = network_report.collect()
         self.assertIn("取数失败", note)

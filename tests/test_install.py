@@ -42,6 +42,8 @@ class RollupInstallerTests(unittest.TestCase):
             'if [ "$1" = "-c" ]; then exit 0; fi\n'
             + 'exec ' + __import__("shlex").quote(__import__("sys").executable) + ' "$@"\n'
         )
+        (self.component / "proxy_runtime").mkdir()
+        (self.component / "proxy_runtime/install.py").write_text("print('present')\n")
         shutil.copy2(ROOT / "requirements.txt", self.component / "requirements.txt")
         shutil.copy2(ROOT / "hub.py", self.component / "hub.py")
         shutil.copy2(ROOT / "hub.json", self.component / "hub.json")

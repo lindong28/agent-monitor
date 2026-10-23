@@ -28,6 +28,7 @@ def seed_auth(manager, account):
 class AccountActionsTests(unittest.TestCase):
     def setUp(self):
         for patch in (mock.patch.object(ca, "START_INTERVAL_SECONDS", 0),
+                      mock.patch.object(ca.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"),
                       mock.patch.object(ca.shutil, "which", return_value=sys.executable)):
             patch.start()
             self.addCleanup(patch.stop)

@@ -26,6 +26,7 @@ from pathlib import Path
 from parsers import RateLimits
 from parsers.codex import select_codex_rate_limit
 from parsers.accounts import quota_identity
+import network_policy
 import claude_oauth
 import upstream_controls
 import diagnostics
@@ -107,6 +108,7 @@ def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account
             [sys.executable, str(Path(__file__).resolve()), provider, str(parent_read), str(deadline)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, start_new_session=True, pass_fds=(parent_read,),
+            env=network_policy.child_environment(os.environ),
         )
         os.close(parent_read)
         parent_read = None
@@ -138,6 +140,8 @@ def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account
         except (ValueError, KeyError, TypeError):
             raise RefreshError("配额读取返回了无效结果，请核对后解除本地暂停。",
                                failure={"stage": stage, "kind": "invalid_result"}) from None
+    except network_policy.NetworkPolicyError as exc:
+        raise LocalUnavailable(str(exc), failure={"stage": stage, "kind": exc.kind}) from None
     except (NotSignedIn, LocalUnavailable):
         raise
     except BaseException as exc:
@@ -331,7 +335,10 @@ def _rpc_failure(error, request_id):
 
 
 def _codex(account):
-    env = os.environ.copy()
+    try:
+        env = network_policy.child_environment(os.environ)
+    except network_policy.NetworkPolicyError as exc:
+        raise LocalUnavailable(str(exc)) from None
     # SSH/launchd do not load shell rc files. Supply installed user binary paths
     # to the existing shim as well as to its backend lookup.
     env["PATH"] = os.pathsep.join([str(Path.home() / ".local/bin"),
@@ -341,7 +348,8 @@ def _codex(account):
     if not command:
         raise LocalUnavailable("Codex CLI 不可用，请在这台机器上安装后刷新。")
     try:
-        process = subprocess.Popen([command, "app-server", "--listen", "stdio://"],
+        process = subprocess.Popen([command, "app-server", "--listen", "stdio://",
+                                    "-c", "features.respect_system_proxy=false"],
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL, env=env)
     except OSError as exc:
