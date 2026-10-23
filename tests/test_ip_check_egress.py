@@ -18,6 +18,15 @@ from ip_check import cli
 
 
 class ResolveRouteTests(unittest.TestCase):
+    def test_environment_report_excludes_bridge_capability_and_proxy_secrets(self):
+        bridge = 'http://agent-monitor:PRIVATE-CAPABILITY@127.0.0.1:45678'
+        with mock.patch.dict(os.environ, {cli.network_policy.INTERNAL: bridge, 'HTTP_PROXY': bridge,
+                'HTTPS_PROXY': 'https://private-user:PRIVATE-PASSWORD@proxy.example:443/path?token=PRIVATE-QUERY'}, clear=True):
+            report = cli.get_proxy_envs()
+        self.assertNotIn('HTTP_PROXY', report)
+        self.assertEqual(report, {'HTTPS_PROXY': 'https://proxy.example:443'})
+        self.assertNotIn('PRIVATE', str(report))
+
     def test_policy_does_not_use_personal_proxy_or_claim_one_exit(self):
         with mock.patch.dict(os.environ, {"HTTP_PROXY": "http://secret:fixture@127.0.0.1:1", "NO_PROXY": "*"}):
             route = cli.resolve_route()

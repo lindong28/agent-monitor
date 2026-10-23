@@ -16,6 +16,7 @@ import re
 import platform
 import math
 import threading
+from urllib.parse import urlsplit
 from email.utils import parsedate_to_datetime
 
 import requests
@@ -388,11 +389,24 @@ def _collect_risk_probes(ip, route=None, on_retry_after=None):
 
 def get_proxy_envs():
     seen = {}
+    internal = os.environ.get(network_policy.INTERNAL)
     for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
                 "http_proxy", "https_proxy", "all_proxy"]:
         val = os.environ.get(key)
-        if val and val not in seen.values():
-            seen[key.upper()] = val
+        if not val or val == internal:
+            continue
+        try:
+            parsed = urlsplit(val)
+            if not parsed.scheme or not parsed.hostname:
+                raise ValueError()
+            host = parsed.hostname
+            if ':' in host:
+                host = '[' + host + ']'
+            safe = parsed.scheme + '://' + host + (':' + str(parsed.port) if parsed.port else '')
+        except ValueError:
+            safe = 'configured (address unavailable)'
+        if safe not in seen.values():
+            seen[key.upper()] = safe
     return seen
 
 

@@ -14,7 +14,7 @@
 
 session `01a165ef-51d4-7340-bc3d-feae991b6917`，root PID9171。产品私树与harness私树见plan，均持续占用；产品token aa210a5bac1f4b5e9a76fec25209261c，harness token f6dc71431702439395022f2d6d61f568。普通写入在这两树，保留主树和旧恢复功能树WIP。
 
-产品与 harness 实现及必要文档已完成，均未提交发布。Electron45.0.0/Chromium156.0.8078.48 在私树 .runtime。真实 Chromium PAC/固定代理对照、Node 10 项 socket 子测试、Python 消费者与账号诊断合计10项通过。全量1123项耗时111.587秒，13项失败；基线7e36446隔离重跑对应19项，同样13项失败，属于既有跨机器状态/前端fixture问题，保留未修。基线证据 /Users/lindong/.codex/diagnostics/agent-monitor-system-proxy-baseline-tests-20261023.log。页面真实浏览器验收含当前/旧记录、390x844无横向溢出，浏览器已关闭。
+以下为实施历史；最新状态以末尾发布记录为准。产品与 harness 实现及必要文档已完成。Electron45.0.0/Chromium156.0.8078.48 在私树 .runtime。真实 Chromium PAC/固定代理对照、Node 10 项 socket 子测试、Python 消费者与账号诊断合计10项通过。全量1123项耗时111.587秒，13项失败；基线7e36446隔离重跑对应19项，同样13项失败，属于既有跨机器状态/前端fixture问题，保留未修。基线证据 /Users/lindong/.codex/diagnostics/agent-monitor-system-proxy-baseline-tests-20261023.log。页面真实浏览器验收含当前/旧记录、390x844无横向溢出，浏览器已关闭。
 
 开放：独立V1实现审查交回4项，均接受待修：HIGH代理TLS protocol_version失败未回退；MEDIUM本地网络前置失败分类、exporter运行身份遗漏proxy_runtime、安装账本非法state。修后做HIGH两问复核。实际Codex消费者、MacStudio部署及账号暂停保留读数待取得；真实系统配置通知端到端尚未核实。
 
@@ -35,3 +35,11 @@ Linux Ubuntu24.04 在远端自有 /tmp/agent-monitor-system-proxy-probe-01a165ef
 MacStudio当前Python3.9；Codex暂停f23c058162ab49d88adfdace97c1be13/cancelled，Claude暂停9807013aff124fa8ab5bd36a8f1ffa63/quotaRefreshFailed；7账号busy0。部署计划 --no-services 安装后仅重启Web，不启动collector或解除暂停。旧恢复功能WIP不纳入。
 
 账号暂停最后确认id `f23c058162ab49d88adfdace97c1be13`；不得因为重启或新HOME解除。原account/read错误证据与未发布重新授权WIP保持原归属，不纳入代理提交。
+
+## 发布与上线记录（恢复锚点）
+
+产品主体51df8ed267ebbfd85d2179b56023244e1e2422c6已提交、整合、push并在MacStudio通过deploy.py --expect部署；--no-services，随后仅重启Web。Python3.9、Electron45/Chromium156启动检查成功。实际 /api/health?asset_watch=1 为ok且stale=false；网络探测成功，执行主机macstudio，system策略，本次ip-api.com出口70.231.54.232。这不代表账号目标出口。7账号busy=0、暂停保留；未执行真实账号请求。Linux自有临时探针目录已删除，未修改系统包或配置。
+
+上线发现proxy_envs会输出内部桥能力URL，现已定点脱敏：隐藏内部URL，其他代理只保留scheme/host/port。23项相关测试通过，独立V1复核5类输入通过，无新增finding。该补丁待提交发布、重启以失效旧能力、真实API与页面复验。此处覆盖前文“产品未上线”、Linux目录待清理及早期无效Codex探针的状态；有效synthetic JWT探针才是CLI消费者证据。
+
+剩余已知边界：全量既有13失败不在本修复范围；原生系统配置变更端到端未实测；Linux生产sandbox前提未完成；歧义TLS认证错误保守终止，不宣称所有Chrome传输错误完全等价。详见ADR和上述证据。本任务未修复账号封禁或执行重新授权。
