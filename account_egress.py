@@ -87,15 +87,20 @@ def _run_probe(host, env):
         return unknown(host, "无法完成出口探测，未重试")
 
 
-def preview():
+def preview(route=None):
     # Share successful and failed observations across tabs/users. A preview
     # never clears provider pauses and has no path to the account manager.
-    with _lock:
+    cache = route.egress_cache if route else _cache
+    lock = route.egress_lock if route else _lock
+    if route:
+        route.require()
+    with lock:
         now = time.monotonic()
-        due = [host for host in TARGETS if host not in _cache or _cache[host][0] <= now]
+        due = [host for host in TARGETS if host not in cache or cache[host][0] <= now]
         if due:
             try:
-                env = network_policy.child_environment(os.environ)
+                with network_policy.using_route(route.endpoint if route else None):
+                    env = network_policy.child_environment(os.environ)
                 with ThreadPoolExecutor(max_workers=len(due)) as pool:
                     results = list(pool.map(lambda host: _run_probe(host, env), due))
             except network_policy.NetworkPolicyError:
@@ -104,10 +109,12 @@ def preview():
                 delay = result.get("retry_after_seconds", 0)
                 if not isinstance(delay, (int, float)) or isinstance(delay, bool) or not math.isfinite(delay):
                     delay = 0
-                _cache[host] = (time.monotonic() + max(60, delay), result)
-        return {"checked_host": socket.gethostname(), "targets": [
-            dict(_cache[host][1], cached=host not in due,
-                 retry_after_seconds=max(0, math.ceil(_cache[host][0] - time.monotonic())))
+                cache[host] = (time.monotonic() + max(60, delay), result)
+        if route:
+            route.require()
+        return {"checked_host": route.label if route else socket.gethostname(), "targets": [
+            dict(cache[host][1], cached=host not in due,
+                 retry_after_seconds=max(0, math.ceil(cache[host][0] - time.monotonic())))
             for host in TARGETS]}
 
 

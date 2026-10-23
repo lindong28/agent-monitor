@@ -25,6 +25,7 @@ from pathlib import Path
 import codex_accounts
 import network_policy
 import account_egress
+import client_network
 from urllib.parse import parse_qs, unquote, urlparse
 from zoneinfo import ZoneInfo
 
@@ -541,6 +542,7 @@ def _schedule_reexec():
         # Keep observation alive if cleanup/exec fails; successful exec replaces
         # all threads and the observer's non-inheritable file descriptors.
         codex_accounts.manager.close()
+        client_network.hub.close()
         QUOTA_REFRESH.shutdown()
         if QUERY_VIEW is not None:
             QUERY_VIEW.close()
@@ -716,6 +718,8 @@ class Handler(BaseHTTPRequestHandler):
         # Some actions have no body; never reuse their unread input as a request.
         self.close_connection = True
         parsed = urlparse(self.path)
+        if client_network.handle(self):
+            return
         if (parsed.path.startswith("/api/codex-accounts/") or parsed.path in
                 ("/api/account-memory/remove", "/api/restart", "/api/refresh", "/api/network")):
             header = "codex-accounts" if parsed.path.startswith("/api/codex-accounts/") else "action"
@@ -740,6 +744,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "刷新失败，请检查服务状态。"}, status=500)
             return
         self.send_error(404)
+
+    def do_CONNECT(self):
+        if not client_network.handle(self):
+            self.send_error(404)
 
     def _check_browser_boundary(self, header, *, require_origin=False, send_body=True):
         # This remains a trusted personal-network service. These checks stop
@@ -788,7 +796,17 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, UnicodeDecodeError):
                 raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
             if path == "/api/codex-accounts/egress-preview":
-                result = account_egress.preview()
+                route = client_network.hub.browser_route(payload.get("connection"))
+                selected = payload.get("profile_ids", [])
+                if (not isinstance(selected, list) or len(selected) > 200
+                        or any(not isinstance(pid, str) or len(pid) > 128 for pid in selected)):
+                    raise codex_accounts.ActionError("预览账号选择无效。")
+                result = account_egress.preview(route)
+                if selected:
+                    result["confirmation"] = route.issue(selected, payload.get("expected_batch_id"))
+            elif path == "/api/codex-accounts/network-status":
+                route = client_network.hub.browser_route(payload.get("connection"))
+                result = {"label": route.label, "connected": True}
             elif path == "/api/codex-accounts/add":
                 result = manager.add(payload.get("email"), payload.get("account_id"))
             elif path == "/api/codex-accounts/batch-start":
@@ -805,18 +823,23 @@ class Handler(BaseHTTPRequestHandler):
                     if not set(requested).issubset(ids):
                         raise codex_accounts.ActionError("所选账号已不在当前登录记录中，请刷新后重新选择。", 409)
                     selected = set(requested)
-                manager.start_batch(payload["expected_batch_id"], selected)
+                if not selected:
+                    raise codex_accounts.ActionError("尚未发现可发送的 Codex 登录账号。")
+                route = client_network.hub.browser_route(payload.get("connection"))
+                route.consume(payload.get("confirmation"), selected, payload["expected_batch_id"])
+                manager.start_batch(payload["expected_batch_id"], selected, network_route=route)
                 result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/batch-retry":
+                batch = manager.read_batch()
+                route = client_network.hub.browser_route(payload.get("connection"))
+                if not batch or (batch.get("network_device") or {}).get("id") != route.id:
+                    raise codex_accounts.ActionError("请连接本轮原设备；旧版批次需重新查看出口并明确开始新一轮。", 409)
                 ids, unavailable = manager.discover(_codex_action_catalog())
                 manager.retry_batch(payload.get("batch_id"), ids)
                 result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/start":
                 manager.directory(payload.get("id"))
-                ids, _ = manager.discover(_codex_action_catalog())
-                if payload.get("id") not in ids:
-                    raise codex_accounts.ActionError("这个账号已不在当前登录记录中，请刷新查看。", 409)
-                result = manager.start(payload.get("id"))
+                raise codex_accounts.ActionError("请通过开始新一轮查看设备出口并确认后发送。", 409)
             elif path == "/api/codex-accounts/refresh":
                 result = manager.start(payload.get("id"), refresh_only=True)
             elif path == "/api/codex-accounts/login":
@@ -832,7 +855,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 raise codex_accounts.ActionError("未找到此接口。", 404)
             self._send_json(result)
-        except codex_accounts.ActionError as exc:
+        except (codex_accounts.ActionError, client_network.NetworkError) as exc:
             self._send_json({"error": str(exc)}, status=exc.status, send_body=send_body)
         except Exception as exc:
             failure_id = diagnostics.monitor.record_failure("account_api", exc)
@@ -2855,6 +2878,7 @@ def main():
         try:
             codex_accounts.manager.close()
         finally:
+            client_network.hub.close()
             QUOTA_REFRESH.shutdown()
             if QUERY_VIEW is not None:
                 QUERY_VIEW.close()

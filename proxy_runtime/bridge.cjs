@@ -300,6 +300,11 @@ function createBridge(resolve, token, options) {
     client.on('close', () => controller.abort()); client.on('error', () => controller.abort());
     try {
       const target = destination(req.url, true);
+      // Authenticated product connectors may tunnel the hub's HTTP control
+      // protocol. Resolve its actual scheme instead of applying HTTPS PAC rules.
+      const scheme = req.headers['x-agent-monitor-target-scheme'];
+      if (scheme && !['http', 'https'].includes(scheme)) throw new RouteError('invalid_target');
+      if (scheme) target.url = new URL(`${scheme}://${req.url}/`);
       const {socket} = await router.connect(target, true, controller.signal, scope);
       controller.signal.addEventListener('abort', () => socket.destroy(), {once: true});
       if (controller.signal.aborted) { socket.destroy(); return; }

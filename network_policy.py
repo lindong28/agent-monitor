@@ -5,6 +5,8 @@ the helper. Descendants inherit the capability rather than creating an engine.
 """
 import atexit
 import base64
+from contextlib import contextmanager
+from contextvars import ContextVar
 import json
 import os
 import platform
@@ -141,7 +143,22 @@ class _Runtime:
         self.directory.cleanup()
 
 
+_selected_route = ContextVar("product_network_route", default=None)
+
+
+@contextmanager
+def using_route(route):
+    """Bind only this execution context; never mutate process-global proxy env."""
+    token = _selected_route.set(_validate_endpoint(route) if route else None)
+    try:
+        yield
+    finally:
+        _selected_route.reset(token)
+
+
 def endpoint():
+    if _selected_route.get():
+        return _selected_route.get()
     inherited = os.environ.get(INTERNAL)
     if inherited:
         return _validate_endpoint(inherited)

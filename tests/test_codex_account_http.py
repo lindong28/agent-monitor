@@ -10,6 +10,7 @@ from unittest import mock
 import codex_accounts
 import server
 import diagnostics
+import client_network
 
 
 class AccountHttpTests(unittest.TestCase):
@@ -39,6 +40,9 @@ class AccountHttpTests(unittest.TestCase):
             self.manager.close()
         self.addCleanup(close)
         self.host = "127.0.0.1:%s" % self.http.server_port
+        self.route = client_network.hub.register("fixture-browser-device")
+        self.addCleanup(self.route.close)
+        self.connection = {"id": self.route.id, "capability": self.route.browser}
 
     def request(self, path="", body=None, headers=None, method=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.http.server_port, timeout=3)
@@ -66,7 +70,8 @@ class AccountHttpTests(unittest.TestCase):
                 mock.patch.object(self.manager, 'start') as start:
             self.assertEqual(self.request('/egress-preview', {}, {'Origin': 'https://other.example'})[0], 403)
             preview.assert_not_called()
-            self.assertEqual(self.request('/egress-preview', {})[0], 200)
+            self.assertEqual(self.request('/egress-preview', {})[0], 403)
+            self.assertEqual(self.request('/egress-preview', {'connection': self.connection})[0], 200)
             connection = http.client.HTTPConnection('127.0.0.1', self.http.server_port, timeout=3)
             try:
                 connection.request('GET', '/api/codex-accounts/egress-preview')
@@ -154,8 +159,12 @@ class AccountHttpTests(unittest.TestCase):
         self.assertEqual(self.request("/batch-start", {"expected_batch_id": None})[0], 400)
         for email in ("one@example.com", "two@example.com"):
             self.request("/add", {"email": email, "account_id": "workspace-" + email})
+        ids = [a["id"] for a in self.manager.list()["accounts"]]
+        def start_payload():
+            return {"expected_batch_id": None, "profile_ids": ids, "connection": self.connection,
+                    "confirmation": self.route.issue(ids, None)}
         with mock.patch.object(self.manager, "rpc_factory", side_effect=codex_accounts.ActionError("fixture: not signed in")):
-            status, data = self.request("/batch-start", {"expected_batch_id": None})
+            status, data = self.request("/batch-start", start_payload())
             self.assertEqual(status, 200)
             batch_id = data["batch"]["id"]
             with self.manager.guard:
@@ -163,11 +172,27 @@ class AccountHttpTests(unittest.TestCase):
             for job in jobs:
                 job["thread"].join(3)
                 self.assertFalse(job["thread"].is_alive())
-            status, duplicate = self.request("/batch-start", {"expected_batch_id": None})
+            status, duplicate = self.request("/batch-start", start_payload())
             self.assertEqual(status, 200)
             self.assertEqual(duplicate["batch"]["id"], batch_id)
             self.assertEqual(len(duplicate["batch"]["items"]), 2)
-            self.assertEqual(self.request("/batch-retry", {"batch_id": "old"})[0], 409)
-            self.assertEqual(self.request("/batch-retry", {"batch_id": batch_id})[0], 200)
+            self.assertEqual(self.request("/batch-retry", {"batch_id": "old", "connection": self.connection})[0], 409)
+            self.assertEqual(self.request("/batch-retry", {"batch_id": batch_id, "connection": self.connection})[0], 200)
             self.manager.close()
         self.assertEqual(self.request("/batch-start", {"expected_batch_id": batch_id}, {"Origin": "https://other.example"})[0], 403)
+
+    def test_confirmation_is_required_bound_and_single_use(self):
+        account = self.request("/add", {"email": "one@example.test", "account_id": "workspace-one"})[1]
+        ids = [account["id"]]
+        payload = {"expected_batch_id": None, "profile_ids": ids, "connection": self.connection}
+        with mock.patch.object(self.manager, "start_batch") as start:
+            self.assertEqual(self.request("/batch-start", payload)[0], 409)
+            payload["confirmation"] = self.route.issue(["different"], None)
+            self.assertEqual(self.request("/batch-start", payload)[0], 409)
+            start.assert_not_called()
+            payload["confirmation"] = self.route.issue(ids, None)
+            self.assertEqual(self.request("/batch-start", payload)[0], 200)
+            self.assertEqual(self.request("/batch-start", payload)[0], 409)
+            start.assert_called_once()
+            self.assertIs(start.call_args.kwargs["network_route"], self.route)
+        self.assertEqual(self.request("/start", {"id": account["id"]})[0], 409)

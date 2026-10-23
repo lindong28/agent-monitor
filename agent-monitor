@@ -31,7 +31,7 @@ AGENT_MONITOR_PYTHON="${AGENT_MONITOR_PYTHON:-$(
 : "${AGENT_MONITOR_PYTHON:=python3}"
 
 usage() {
-  echo "usage: agent-monitor {start|stop|restart|status|open|refresh|network [--json] [--force]|session-quota SESSION_ID [--json]|export (--out PATH|--version)|machines (accept NAME [--yes]|retire NAME...)|rollup [--check [--json]|adopt-timezone|blockers|recover|recover-reviewed]}"
+  echo "usage: agent-monitor {start|stop|restart|status|open|refresh|connect --server URL|network [--json] [--force]|session-quota SESSION_ID [--json]|export (--out PATH|--version)|machines (accept NAME [--yes]|retire NAME...)|rollup [--check [--json]|adopt-timezone|blockers|recover|recover-reviewed]}"
 }
 
 is_running() {
@@ -784,6 +784,10 @@ case "${1:-}" in
   session-quota)
     shift
     run_session_quota "$@"
+    ;;
+  connect)
+    shift
+    exec "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/client_connector.py" "$@"
     ;;
   export)
     shift

@@ -177,6 +177,12 @@
             <details id="codex-account-actions" class="codex-account-actions">
               <summary>Codex 账号操作<span id="codex-batch-status" role="status" aria-live="polite">正在读取账号…</span></summary>
               <div class="codex-batch-summary">
+                <div id="codex-device-network" class="quota-scope">
+                  <p id="codex-device-status" role="status">批次使用浏览器所在设备的网络。请先在这台设备运行连接命令，再连接本机网络。</p>
+                  <p><code id="codex-device-command"></code></p>
+                  <button id="codex-device-connect" type="button" class="btn">连接本机网络</button>
+                  <p>仅批次发送、继续未发送账号及出口预览使用此连接；单独登录、刷新配额和网络诊断仍在服务器执行。需已安装 agent-monitor，并保持连接命令运行。</p>
+                </div>
                 <p class="quota-scope">这里的选择独立于上方配额筛选。从 100 条日常短消息中为每个选中账号独立随机抽取并发送一条，可能重复；会使用账号额度。抽取的内容可在账号与操作详情中查看。</p>
                 <div class="codex-account-controls">
                   <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>

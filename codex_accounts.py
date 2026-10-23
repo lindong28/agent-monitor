@@ -23,6 +23,7 @@ from parsers.codex import select_codex_rate_limit
 from upstream_controls import Controls, Paused, Busy
 from codex_messages import MESSAGES
 import network_policy
+import client_network
 
 
 MESSAGE = f"从 {len(MESSAGES)} 条日常短消息中独立随机抽取一条，可能重复。"
@@ -524,6 +525,7 @@ class Manager:
         self.start_interval = START_INTERVAL_SECONDS
         self.next_start = 0
         self.start_guard = threading.Lock()
+        self.batch_routes = {}
 
     def open_rpc(self, directory, job):
         # All initial and recovery peers share this lane. Do not hold the state
@@ -538,7 +540,12 @@ class Manager:
                         if job["cancelled"].is_set():
                             raise Cancelled("操作已取消。")
                         self.next_start = time.monotonic() + self.start_interval
-                        rpc = self.rpc_factory(directory, job["cancelled"])
+                        route = job.get("network_route")
+                        try:
+                            with network_policy.using_route(route.endpoint if route else None):
+                                rpc = self.rpc_factory(directory, job["cancelled"])
+                        except client_network.NetworkError as exc:
+                            raise ActionError(str(exc), exc.status, "clientNetworkDisconnected") from None
                         job["rpc"] = rpc
                         return rpc
                 finally:
@@ -754,7 +761,7 @@ class Manager:
                 self.launch(self.prepare(profile_id, refresh_only=refresh_only, login_only=login_only, published_id=batch["id"] if batch else None))
                 return self.view(directory)
 
-    def start_batch(self, expected_batch_id, eligible_ids=None):
+    def start_batch(self, expected_batch_id, eligible_ids=None, *, network_route=None):
         if expected_batch_id is not None and not isinstance(expected_batch_id, str):
             raise ActionError("批次标识无效。")
         with self.guard:
@@ -772,6 +779,9 @@ class Manager:
                 if not accounts:
                     raise ActionError("尚未发现可发送的 Codex 登录账号，请刷新来源机器的账号记录。")
                 batch = {"id": str(uuid.uuid4()), "created_at": now(), "profile_ids": [a["id"] for a in accounts]}
+                if network_route:
+                    network_route.require()
+                    batch["network_device"] = {"id": network_route.id, "label": network_route.label}
                 prepared = []
                 try:
                     # A subset round can leave a former member outside the new
@@ -788,11 +798,14 @@ class Manager:
                                     self.save(directory, record)
                     for pid in batch["profile_ids"]:
                         prepared.append(self.prepare(pid, published_id=published_id, batch_id=batch["id"]))
+                        if network_route:
+                            prepared[-1][2]["network_route"] = network_route
                     write_record(self.root / "batch.json", batch)
                 except Exception:
                     for *_, lock in prepared:
                         lock.close()
                     raise
+                self.batch_routes = {batch["id"]: network_route} if network_route else {}
                 self.launch_sequence(prepared)
                 return self.list()
 
@@ -803,6 +816,11 @@ class Manager:
                 batch = self.read_batch()
                 if not batch or batch["id"] != batch_id:
                     raise ActionError("批次已变化，请刷新后查看。", 409)
+                network_route = self.batch_routes.get(batch_id)
+                if batch.get("network_device"):
+                    if not network_route:
+                        raise ActionError("本轮设备连接已失效，请连接本机网络后明确开始新一轮；不会切换出口重发。", 409)
+                    network_route.require()
                 if any(account["busy"] for account in self.list()["accounts"]):
                     raise ActionError("还有账号正在操作，请等待本轮结束再继续。", 409)
                 prepared = []
@@ -815,6 +833,8 @@ class Manager:
                         if account["busy"] or (operation and operation["message_status"] != "not_sent"):
                             continue
                         prepared.append(self.prepare(pid, published_id=batch_id, batch_id=batch_id))
+                        if network_route:
+                            prepared[-1][2]["network_route"] = network_route
                 except Exception:
                     for *_, lock in prepared:
                         lock.close()
@@ -1070,6 +1090,12 @@ class Manager:
             if record["operation"]["message_status"] == "unknown":
                 record.setdefault("restrictions", {})["unknown"] = {"category": failure["category"], "created_at": now()}
             benign = failure["category"] in ("needsLogin", "missingCli", "networkPolicyUnavailable", "usageLimitExceeded", "quotaAtCapacity", "locallyPaused")
+            if failure["category"] == "clientNetworkDisconnected" and rpc is None:
+                # A missing device before RPC creation is a local prerequisite,
+                # not evidence of an upstream failure. Stop only this batch.
+                benign = True
+                if job.get("batch_stopped") is not None:
+                    job["batch_stopped"].set()
             if not benign:
                 if lease:
                     lease.pause("operationFailed")

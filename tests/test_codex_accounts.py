@@ -72,6 +72,33 @@ class AccountActionsTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 503)
         self.assertEqual(self.spawned, [])
 
+    def test_device_loss_before_rpc_stops_batch_without_provider_pause(self):
+        import client_network
+        route = client_network.Route('fixture device')
+        self.addCleanup(route.close)
+        accounts = [self.account(email=f'{i}@example.com', account_id=f'workspace-{i}') for i in range(2)]
+        original = self.manager.open_rpc
+        def disconnected(directory, job):
+            route.close()
+            return original(directory, job)
+        with mock.patch.object(self.manager, 'open_rpc', side_effect=disconnected):
+            self.manager.start_batch(None, [a['id'] for a in accounts], network_route=route)
+            finished = [self.wait(a['id']) for a in accounts]
+        self.assertEqual(self.spawned, [])
+        self.assertEqual([a['operation']['failure']['category'] for a in finished],
+                         ['clientNetworkDisconnected', 'locallyPaused'])
+        self.assertIsNone(self.manager.list()['upstream_pause'])
+
+    def test_device_error_after_rpc_start_still_pauses_provider(self):
+        account = self.account()
+        peer = mock.Mock(diagnostics={}, network_route=None)
+        peer.initialize.side_effect = ca.ActionError('fixture disconnected', 409, 'clientNetworkDisconnected')
+        peer.rejections.return_value = []
+        self.manager.rpc_factory = mock.Mock(return_value=peer)
+        self.manager.start(account['id'])
+        self.wait(account['id'])
+        self.assertIsNotNone(self.manager.list()['upstream_pause'])
+
     def test_shutdown_reaps_a_peer_that_blocks_protocol_writes(self):
         account = self.account()
         ready = threading.Event()

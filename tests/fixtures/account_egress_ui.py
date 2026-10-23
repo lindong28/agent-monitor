@@ -4,8 +4,13 @@ import json
 from pathlib import Path
 import threading
 import time
+import sys
+import socket
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+import client_network
+from client_connector import Connector
 
 
 def main():
@@ -51,6 +56,11 @@ def main():
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
             if self.path == '/api/codex-accounts/egress-preview':
+                try:
+                    route = client_network.hub.browser_route(payload.get('connection'))
+                except client_network.NetworkError as exc:
+                    self.send(dict(error=str(exc)), status=exc.status)
+                    return
                 state['previews'] += 1
                 time.sleep(state['delay'])
                 if state['mode'] == 'failure':
@@ -61,8 +71,17 @@ def main():
                            [('chatgpt.com', '8.8.8.8', 'CN'), ('auth.openai.com', '1.1.1.1', 'US')]]
                 if state['mode'] == 'partial':
                     targets[1].update(ip=None, country_code=None, error='合成超时')
-                self.send(dict(checked_host='fixture-only', targets=targets))
+                self.send(dict(checked_host='fixture-browser-device', targets=targets,
+                               confirmation=route.issue(payload.get('profile_ids', []), payload.get('expected_batch_id'))))
+            elif self.path == '/api/codex-accounts/network-status':
+                try:
+                    route = client_network.hub.browser_route(payload.get('connection'))
+                    self.send(dict(label=route.label, connected=True))
+                except client_network.NetworkError as exc:
+                    self.send(dict(error=str(exc)), status=exc.status)
             elif self.path == '/api/codex-accounts/batch-start':
+                route = client_network.hub.browser_route(payload.get('connection'))
+                route.consume(payload.get('confirmation'), payload.get('profile_ids'), payload.get('expected_batch_id'))
                 state['starts'].append(payload)
                 self.send({})
             elif self.path == '/fixture/config':
@@ -76,16 +95,28 @@ def main():
             else:
                 self.send({}, status=404)
 
-    http = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    http = ThreadingHTTPServer(('0.0.0.0', 0), Handler)
+    origin = f'http://{socket.gethostname().split(".")[0]}:{http.server_port}'
+    route = client_network.hub.register('fixture-browser-device')
+    connector = Connector.__new__(Connector)
+    connector.server, connector.stopped = origin, threading.Event()
+    connector.registration = {'connection': {'id': route.id, 'capability': route.browser, 'label': route.label}}
+    pair = ThreadingHTTPServer(('127.0.0.1', 39002), connector.pair_handler())
+    threading.Thread(target=pair.serve_forever, daemon=True).start()
+    def heartbeat():
+        while not connector.stopped.wait(1): route.last_seen = time.monotonic()
+    threading.Thread(target=heartbeat, daemon=True).start()
     timer = threading.Timer(600, http.shutdown)
     timer.daemon = True
     timer.start()
-    print(json.dumps(dict(url=f'http://127.0.0.1:{http.server_port}', lifetime_seconds=600)), flush=True)
+    print(json.dumps(dict(url=origin, lifetime_seconds=600)), flush=True)
     try:
         http.serve_forever()
     finally:
         timer.cancel()
         http.server_close()
+        connector.stopped.set()
+        pair.shutdown(); pair.server_close(); route.close()
 
 
 if __name__ == '__main__':

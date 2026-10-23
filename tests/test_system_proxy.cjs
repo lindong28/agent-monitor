@@ -31,10 +31,10 @@ function get(port, url, auth = authorization) {
     request.on('error', reject); request.setTimeout(3000, () => request.destroy(new Error('test timeout')));
   });
 }
-async function tunnel(port, target) {
+async function tunnel(port, target, scheme) {
   const socket = net.connect(port, '127.0.0.1');
   await once(socket, 'connect');
-  socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: ${authorization}\r\n\r\n`);
+  socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: ${authorization}\r\n${scheme ? `X-Agent-Monitor-Target-Scheme: ${scheme}\r\n` : ''}\r\n`);
   const [data] = await once(socket, 'data');
   return {socket, response: data.toString()};
 }
@@ -153,6 +153,16 @@ test('CONNECT passes opaque bytes and an existing tunnel survives invalidation',
   result.socket.write(payload);
   assert.deepEqual((await once(result.socket, 'data'))[0], payload);
   assert.equal(urls[0], `https://127.0.0.1:${port}/`);
+});
+
+test('connector control tunnels resolve their actual HTTP or HTTPS scheme', async t => {
+  const urls = [];
+  const proxy = await bridge(t, async url => { urls.push(url); throw new Error('fixture resolution stops before dial'); });
+  for (const scheme of ['http', 'https']) {
+    const result = await tunnel(proxy.port, 'hub.invalid:443', scheme);
+    assert.match(result.response, /502/); result.socket.destroy();
+  }
+  assert.deepEqual(urls, ['http://hub.invalid:443/', 'https://hub.invalid/']);
 });
 
 test('SOCKS5 sends the unresolved destination to the proxy', async t => {

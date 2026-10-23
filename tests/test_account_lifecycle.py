@@ -23,7 +23,7 @@ def factory(directory, cancelled):
     def spawn(*args, **kwargs):
         return original_popen([sys.executable, '-c',
             "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(20)"], **kwargs)
-    with mock.patch.object(ca.shutil, 'which', return_value=sys.executable), mock.patch.object(ca.subprocess, 'Popen', side_effect=spawn):
+    with mock.patch.object(ca.shutil, 'which', return_value=sys.executable), mock.patch.object(ca.subprocess, 'Popen', side_effect=spawn), mock.patch.object(ca.network_policy, 'endpoint', return_value='http://agent-monitor:fixture@127.0.0.1:1'):
         rpc = ca.Rpc(directory, cancelled)
     rpc.process.stdout.readline()
     peers.append(rpc.process)

@@ -12,8 +12,9 @@ export function countryName(code) {
   catch { return code; }
 }
 
-export async function previewEgress(request, targets, signal) {
+export async function previewEgress(request, targets, signal, payload = {}) {
   const sending = Array.isArray(targets);
+  let receipt = null;
   const dialog = node("dialog", undefined, "account-egress-dialog");
   dialog.setAttribute("aria-labelledby", "account-egress-title");
   const title = node("h2", sending ? "发送前确认出口" : "查看账号请求出口");
@@ -47,7 +48,7 @@ export async function previewEgress(request, targets, signal) {
       signal.removeEventListener("abort", abort);
       const accepted = dialog.returnValue === "send" && !signal.aborted;
       dialog.remove();
-      resolve(accepted);
+      resolve(accepted ? receipt : null);
     }, { once: true });
   });
   confirm.addEventListener("click", () => { if (!confirm.disabled) dialog.close("send"); });
@@ -55,10 +56,12 @@ export async function previewEgress(request, targets, signal) {
   if (signal.aborted) dialog.close();
   // Do not await the probe before returning the close promise: Cancel/Escape
   // must remain immediate, and late results must not reopen a dismissed dialog.
-  request("egress-preview", {}).then(data => {
+  request("egress-preview", payload).then(data => {
     if (!dialog.open) return;
     if (!Array.isArray(data.targets) || !data.targets.length) throw new Error("未取得出口信息");
-    status.textContent = `执行主机：${data.checked_host} · 探测不会登录、发送消息或读取额度。`;
+    if (sending && !data.confirmation) throw new Error("服务未返回本轮出口确认，请重新预览");
+    receipt = data.confirmation || null;
+    status.textContent = `出站设备：${data.checked_host} · 探测不会登录、发送消息或读取额度。`;
     for (const target of data.targets) {
       const row = node("section", undefined, "account-egress-target");
       row.append(node("h3", target.host === "chatgpt.com" ? "ChatGPT 业务 · chatgpt.com" : "认证 · auth.openai.com"));
@@ -76,8 +79,8 @@ export async function previewEgress(request, targets, signal) {
   }).catch(error => {
     if (!dialog.open) return;
     status.textContent = `出口 IP 和地区未知：${error.message}。尚未发送账号消息。`;
-    confirm.textContent = "出口未知，仍然发送";
-    confirm.disabled = false;
+    confirm.textContent = "未能确认设备出口，请关闭后重试";
+    confirm.disabled = true;
   });
   return closed;
 }

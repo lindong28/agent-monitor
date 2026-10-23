@@ -14,6 +14,7 @@ Current usage and installation belong in the root README; current architecture a
 | [architecture.md](architecture.md) | Runtime ownership, data flow and independent dependencies |
 | [adr/20261023-9c4e-system-proxy.md](adr/20261023-9c4e-system-proxy.md) | Product system-proxy resolution, transparent transport and account-isolation boundaries |
 | [adr/20261023-a7c1-account-egress-preview.md](adr/20261023-a7c1-account-egress-preview.md) | Account send confirmation with target-specific exit IP/country observations |
+| [adr/20261023-d4f2-browser-device-egress.md](adr/20261023-d4f2-browser-device-egress.md) | Browser-device pairing, reverse transport and batch confirmation boundaries |
 | [references/metrics.md](references/metrics.md) | User-visible metric definitions, source versions, derivation arguments, coverage and unknowns; read before changing a statistic |
 | [references/metrics-operations.md](references/metrics-operations.md) | Maintenance CLI, snapshot/export and runtime diagnostic field definitions |
 | [references/upstream-contracts.md](references/upstream-contracts.md) | Versioned correctness arguments and bounded counterexamples for protocol, identity, storage, isolation and lifecycle |

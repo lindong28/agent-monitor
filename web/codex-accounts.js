@@ -55,6 +55,61 @@ export function init() {
   let selectedIds = null;
   let lastBatchStatus = "";
   const controller = new AbortController();
+  let deviceConnection = null;
+  const deviceStatus = root.querySelector("#codex-device-status");
+  const deviceConnect = root.querySelector("#codex-device-connect");
+  const deviceCommand = root.querySelector("#codex-device-command");
+  if (deviceCommand) deviceCommand.textContent = `agent-monitor connect --server '${location.origin}'`;
+  let pairing = null;
+  function stopPairing() {
+    if (!pairing) return;
+    clearTimeout(pairing.timer);
+    window.removeEventListener("message", pairing.receive);
+    pairing = null;
+    if (deviceConnect) deviceConnect.disabled = false;
+  }
+  controller.signal.addEventListener("abort", stopPairing, { once: true });
+  deviceConnect?.addEventListener("click", () => {
+    if (submittingBatch) return;
+    stopPairing();
+    const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(n => n.toString(16).padStart(2, "0")).join("");
+    const popup = window.open(`http://127.0.0.1:39002/pair?origin=${encodeURIComponent(location.origin)}&nonce=${nonce}`, "agent-monitor-device", "width=520,height=240");
+    if (!popup) { deviceStatus.textContent = "浏览器阻止了连接窗口，请允许此页面打开弹窗后重试。"; return; }
+    deviceConnect.disabled = true;
+    deviceStatus.textContent = "正在连接本机；若新窗口无法打开，请先运行上方命令。";
+    const receive = async event => {
+      if (event.origin !== "http://127.0.0.1:39002" || event.source !== popup
+          || event.data?.type !== "agent-monitor-network" || event.data?.nonce !== nonce) return;
+      const connection = event.data.connection;
+      stopPairing();
+      try {
+        const result = await request("network-status", { connection });
+        if (!current()) return;
+        deviceConnection = connection;
+        deviceStatus.textContent = `已配对设备：${result.label}。每次操作会检查连接；断开后不会切回服务器出口。`;
+        notice.textContent = "";
+      } catch (error) {
+        deviceConnection = null;
+        if (current()) deviceStatus.textContent = error.message;
+      }
+    };
+    pairing = { receive, timer: setTimeout(() => {
+      stopPairing();
+      if (current()) deviceStatus.textContent = "未完成本机连接。请确认命令在浏览器所在设备运行，再点击连接本机网络。";
+    }, 20000) };
+    window.addEventListener("message", receive);
+  });
+
+  async function requireDevice() {
+    if (!deviceConnection) throw new Error("请先在浏览器所在设备运行上方连接命令，并点击「连接本机网络」。");
+    try { await request("network-status", { connection: deviceConnection }); }
+    catch (error) {
+      deviceConnection = null;
+      if (deviceStatus) deviceStatus.textContent = error.message;
+      throw error;
+    }
+    return deviceConnection;
+  }
 
   async function request(action, payload) {
     const response = await fetch("/api/codex-accounts" + (action ? "/" + action : ""), {
@@ -144,14 +199,20 @@ export function init() {
     submittingBatch = true;
     render();
     let failure = "";
+    let submitted = false;
     try {
-      if (targets && !await previewEgress(request, targets, controller.signal)) return;
+      payload.connection = await requireDevice();
+      if (targets) {
+        payload.confirmation = await previewEgress(request, targets, controller.signal, payload);
+        if (!payload.confirmation) return;
+      }
       if (!current()) return;
       notice.textContent = "正在提交批次…";
+      submitted = true;
       await request(action, payload);
       if (current()) notice.textContent = "";
     } catch (error) {
-      if (current() && error.name !== "AbortError") failure = error.message + " 刷新会保留已接收的批次，请先查看结果。";
+      if (current() && error.name !== "AbortError") failure = error.message + (submitted ? " 刷新会保留已接收的批次，请先查看结果。" : "");
     } finally {
       submittingBatch = false;
       if (current()) await load();
@@ -229,9 +290,12 @@ export function init() {
     if (submittingBatch) return;
     submittingBatch = true;
     render();
-    try { await previewEgress(request, null, controller.signal); }
+    try {
+      const connection = await requireDevice();
+      await previewEgress(request, null, controller.signal, { connection });
+    }
     catch (error) {
-      if (current() && error.name !== "AbortError") notice.textContent = "出口预览未能打开，请重试。";
+      if (current() && error.name !== "AbortError") notice.textContent = error.message;
     }
     finally { submittingBatch = false; if (current()) render(); }
   });
