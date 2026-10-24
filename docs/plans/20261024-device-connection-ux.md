@@ -27,4 +27,8 @@ MacBook连接端提供macOS LaunchAgent安装/状态/停用，复用已安装Pyt
 
 真实MacBook headless Chrome158、6合成账号：直接主动作配对/status/preview各1，取消后starts0；刷新再点，preview2，明确确认后starts1；配对错误与无响应取消仍starts1且preview2；恢复后preview3，Escape关闭。CN地址和警告computed color均rgb(196,43,43)。覆盖1台MacBook、1浏览器、1个6账号集合，以及成功/错误/取消/刷新状态；不声称全浏览器或真实账号覆盖。浏览器工具在popup自动关闭后部分命令回执超时，使用同一绑定页及fixture计数核实际结果，未盲重试发送；首次错误选择隐藏batch-start，随后改为实际可见batch-next，不算产品缺陷。
 
-当前剩余：提交发布、固定版本部署、MacBook正式服务启用及生产只配对验收。隔离fixture已停止；自有headless浏览器PID80875仍用于接续生产只配对验收，绑定记录位于本机diagnostics/connection-ux-browser-owned-20261024.json。真实账号请求不在验收范围。
+发布与现场验收：实现提交e1b82e1b890e7cf10412a11077161fbcda6ad8f9已快进整合并普通push；MacBook和MacStudio均从实时origin/main相同SHA执行deploy.py --expect及--no-services，MacStudio随后重启自有Hub。health为ok=true、stale=false、instance_id=2c41df8083424a97822d3a602bfafe66、signature=ca85af305f1d0de0、web_signature=45d5715e4e805274；线上JS逐字节匹配发布源码。
+
+真实MacBook LaunchAgent验收使用仅含连接端协议的回环hub与受控TCP echo，不导入账号store：后台系统代理通道往返262144字节相等；终结自有连接进程后KeepAlive产生不同PID并恢复连接。停用命令卸载任务及移除plist；测试最初要求20秒内管理端口消失的断言未满足，后续直接复查确认plist不存在、launchctl任务不存在、health不可达，记录为异步退出而非20秒验收通过。随后正式安装到http://macstudio:39001，安装命令退出后独立status仍connected=true，设备macbook、登录自动启动启用。
+
+生产浏览器只点击次级“检查本机连接”：实际页面显示“已连接当前设备：macbook”，主按钮“开始新一轮 · 所选6个账号”可用，notice为空。生产未点击发送或出口探测，未执行真实供应商请求；操作确认、CN红色及失败取消用上述隔离6账号验证。未执行注销/重启整机；登录自动启动依据LaunchAgent配置及真实bootstrap/恢复读数，不声称已做重启整机测试。测试fixture和自有浏览器已回收，正式后台连接保留。当前功能与页面验收完成，无未处置finding；本记录作为发布后的验收补记提交。
