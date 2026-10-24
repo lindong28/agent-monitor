@@ -19,6 +19,7 @@ if (args.help) {
 assert.ok(args['browser-tool'] && path.isAbsolute(args['browser-tool']) && fs.existsSync(args['browser-tool']), 'Supply an installed browser-task.mjs with --browser-tool');
 const tool = args['browser-tool'];
 const {cdp, inspect} = await import(pathToFileURL(tool));
+const {launchTestChrome} = await import(new URL('./test-chrome.mjs',pathToFileURL(tool)));
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const python = args.python || path.join(repo,'.venv/bin/python');
 const root = fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(),'monitor-accept-'));
@@ -26,7 +27,7 @@ const env = {...process.env, HOME:root, XDG_CACHE_HOME:path.join(root,'cache'), 
 const execute = promisify(execFile), children = [], runtimeDirs = [];
 const sleep = ms=>new Promise(r=>setTimeout(r,ms));
 const budget = new AbortController();
-let fixture, url, state, lifecycle;
+let fixture, url, state, lifecycle, browser;
 const interrupt = signal => {
   failure ||= new Error('Acceptance interrupted by '+signal);
   budget.abort(failure);
@@ -94,15 +95,9 @@ try {
   console.log('Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
   await startFixture();
   assert.equal((await fetch(url,{signal:AbortSignal.timeout(3000)})).status,200,'fixture page reachable');
-  const profile=path.join(root,'chrome');
-  const chrome=spawn(args.browser || '/Applications/Google Chrome Dev.app/Contents/MacOS/Google Chrome Dev',
-    ['--headless=new','--mute-audio','--no-first-run','--disable-background-networking','--no-proxy-server',
-      '--use-mock-keychain','--password-store=basic',
-      '--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{env,stdio:'ignore'});
-  children.push(chrome);
-  chrome.on('error',e=>{failure=e;});
-  await until('Chrome startup',()=>{if(failure)throw failure;return fs.existsSync(path.join(profile,'DevToolsActivePort'));});
-  const endpoint='http://127.0.0.1:'+fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];
+  browser=launchTestChrome({binary:args.browser,signal:budget.signal});
+  const endpoint=await browser.ready;
+  console.log('Test Chrome started: '+JSON.stringify(browser.diagnostics()));
   state=path.join(root,'browser.json');
   await bt('create',state,'--endpoint',endpoint,'--approval','isolated-project-acceptance',
     '--allow','open,eval,click,close','--json');
@@ -156,6 +151,11 @@ try {
 }
 finally {
   clearTimeout(timer);
+  try {
+    await browser?.stop();
+    if(browser)console.log('Test Chrome stopped: '+JSON.stringify(browser.diagnostics()));
+  } catch(error) {failure ||= error;console.error('Test Chrome cleanup failed: '+error.message);}
+  // A browser cleanup error must not skip the fixture and native daemon cleanup.
   try { await stopChildren();fs.rmSync(root,{recursive:true,force:true}); }
   catch(error) { failure ||= error;console.error('Cleanup incomplete; isolated evidence retained at '+root); }
 }
