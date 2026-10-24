@@ -1,4 +1,4 @@
-"""Foreground connector on the browser's machine; no account files are read."""
+"""Connector on the browser device; no account files are read."""
 import argparse
 import base64
 import contextlib
@@ -11,6 +11,10 @@ import socket
 import ssl
 import sys
 import threading
+import os
+from pathlib import Path
+import time
+import uuid
 from urllib.parse import parse_qs, urlsplit
 
 import client_network
@@ -46,22 +50,30 @@ def connect_via(route, target, *, scheme="https", scope=None):
 
 
 class Connector:
-    def __init__(self, server, label, local_route, pair_port=39002):
+    def __init__(self, server, label, local_route, pair_port=39002, state_file=None):
         parsed = urlsplit(server)
         if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
             raise client_network.NetworkError("--server 必须是服务的 http(s) 根地址。", 400)
         self.server = server.rstrip("/")
         self.address = parsed
         self.local_route = local_route
+        self.label = label
+        self.state_file = state_file
+        self.instance_id = uuid.uuid4().hex
+        self.last_contact = 0
         self.stopped = threading.Event()
         self.guard = threading.Lock()
         self.sockets, self.workers = set(), set()
         self.reports = queue.Queue(maxsize=16)
         self.registration = None
-        self.pair_server = ThreadingHTTPServer(("127.0.0.1", pair_port), self.pair_handler())
+        try:
+            self.pair_server = ThreadingHTTPServer(("127.0.0.1", pair_port), self.pair_handler())
+        except OSError as exc:
+            exc.failure = {"stage": "pair_listen", "error_type": type(exc).__name__, "errno": exc.errno}
+            raise
         try:
             self.registration = self.request("register", {"label": label})
-        except Exception:
+        except BaseException:
             self.pair_server.server_close()
             raise
 
@@ -79,13 +91,18 @@ class Connector:
                                         json=data or {}, headers=self.headers(),
                                         timeout=(client_network.CONNECT_SECONDS, client_network.CONTROL_SECONDS), allow_redirects=False)
                 if response.status_code != 200:
-                    raise client_network.NetworkError("服务拒绝了设备连接，请检查服务版本与连接状态。")
+                    error = client_network.NetworkError("服务拒绝了设备连接，请检查服务版本与连接状态。")
+                    error.failure = {"stage": action, "http_status": response.status_code}
+                    raise error
                 value = response.json()
                 if not isinstance(value, dict):
                     raise ValueError()
+                self.last_contact = time.monotonic()
                 return value
-        except (requests.RequestException, ValueError):
-            raise client_network.NetworkError("无法连接服务；设备转发已停止，请检查网络后重新运行连接命令。") from None
+        except (requests.RequestException, ValueError) as exc:
+            error = client_network.NetworkError("无法连接服务；设备转发已停止，请检查网络后重新运行连接命令。")
+            error.failure = {"stage": action, "error_type": type(exc).__name__}
+            raise error from None
 
     def pair_handler(self):
         connector = self
@@ -95,9 +112,23 @@ class Connector:
                 pass
 
             def do_GET(self):
+                expected_host = "127.0.0.1:" + str(self.server.server_port)
+                if self.path == "/health" and self.headers.get("Host") == expected_host:
+                    body = json.dumps({"service": "com.agent-monitor.connector",
+                        "source_root": str(Path(__file__).resolve().parent), "pid": os.getpid(),
+                        "server": connector.server, "label": connector.label,
+                        "instance_id": connector.instance_id,
+                        "connected": bool(connector.registration and not connector.stopped.is_set()
+                            and time.monotonic() - connector.last_contact < client_network.LEASE_SECONDS)}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 query = parse_qs(urlsplit(self.path).query)
                 origin, nonce = query.get("origin", [""])[0], query.get("nonce", [""])[0]
-                expected_host = "127.0.0.1:" + str(self.server.server_port)
                 if (urlsplit(self.path).path != "/pair" or self.headers.get("Host") != expected_host
                         or origin != connector.server or not re.fullmatch(r"[a-f0-9]{32}", nonce)
                         or connector.stopped.is_set() or not connector.registration):
@@ -180,8 +211,10 @@ class Connector:
     def run(self):
         threading.Thread(target=self.pair_server.serve_forever, daemon=True).start()
         threading.Thread(target=self.report_loop, daemon=True).start()
-        print(f"设备网络已连接到 {self.server}。请回到账号页面点击「连接本机网络」。", flush=True)
-        print("仅批次发送及其出口预览使用本机网络；保持此命令运行，Ctrl+C 断开。", flush=True)
+        from connector_service import record
+        record(self.state_file, "connected", server=self.server, instance_id=self.instance_id)
+        print(f"设备网络已连接到 {self.server}。可回到账号页面点击「开始新一轮」，页面会自动准备连接。", flush=True)
+        print("仅批次发送及其出口预览使用本机网络；前台模式需保持命令运行，后台服务由launchd管理。", flush=True)
         try:
             while not self.stopped.is_set():
                 task = self.request("next")
@@ -209,25 +242,46 @@ class Connector:
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in {"install", "status", "stop", "restart"}:
+        from connector_service import main as service_main
+        return service_main(sys.argv[1:])
     parser = argparse.ArgumentParser(description="让账号页面的批次使用这台机器的系统代理规则。")
     parser.add_argument("--server", required=True, help="账号页面所在服务，例如 http://macstudio:39001")
+    parser.add_argument("--state-file", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    connector = None
+    from connector_service import origin, record
+    try:
+        args.server = origin(args.server)
+    except ValueError:
+        parser.error("--server 必须是服务的 http(s) 根地址，不含凭据、路径或查询参数")
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    stage = "runtime_start"
     try:
         # This foreground process owns a local system resolver; never inherit a
         # server-side route accidentally from an invoking process.
+        record(args.state_file, "starting", server=args.server)
         runtime = network_policy._Runtime()
         try:
-            connector = Connector(args.server, socket.gethostname(), runtime.endpoint)
-            signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+            stage = "register"
+            connector = Connector(args.server, socket.gethostname(), runtime.endpoint, state_file=args.state_file)
+            stage = "control_poll"
             connector.run()
         finally:
             runtime.close()
     except KeyboardInterrupt:
+        record(args.state_file, "stopped", server=args.server)
         print("设备连接已关闭；后续批次不会切换到服务器出口。")
         return 0
-    except (OSError, network_policy.NetworkPolicyError, client_network.NetworkError):
+    except (OSError, network_policy.NetworkPolicyError, client_network.NetworkError) as exc:
+        failure = {"stage": stage, "error_type": type(exc).__name__}
+        if isinstance(exc, OSError):
+            failure["errno"] = exc.errno
+        if isinstance(exc, network_policy.NetworkPolicyError):
+            failure["kind"] = exc.kind
+        failure.update(getattr(exc, "failure", {}))
+        record(args.state_file, "failed", server=args.server, failure=failure)
         print("设备连接未能保持。请检查服务地址、系统代理及本机 39002 端口，再重新运行连接命令。账号请求不会自动重试。", file=sys.stderr)
+        print("诊断：" + json.dumps(failure, ensure_ascii=False), file=sys.stderr)
         return 1
     return 0
 

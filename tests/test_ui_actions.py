@@ -14,9 +14,10 @@ const source=fs.readFileSync('web/codex-accounts.js','utf8');
 let handler,submittingBatch=false,renders=0;
 const egressPreview={addEventListener:(_event,callback)=>handler=callback};
 const current=()=>true, render=()=>renders++,request=()=>{},controller=new AbortController(),notice={textContent:''};
+const requireDevice=async()=>({id:'fixture',capability:'fixture'});
 const previewEgress=async()=>{throw Error('fixture module load failure');};
 eval(source.slice(source.indexOf('  egressPreview?.addEventListener('),source.indexOf('  root.querySelector("#codex-select-all")')));
-(async()=>{await handler();assert(notice.textContent.includes('请重试'));assert.equal(submittingBatch,false);assert.equal(renders,2);})()
+(async()=>{await handler();assert(notice.textContent.includes('fixture module load failure'));assert.equal(submittingBatch,false);assert.equal(renders,2);})()
 .catch(error=>{console.error(error);process.exitCode=1;});
 '''
         result = subprocess.run(['node', '-e', script], cwd=ROOT, text=True, capture_output=True, timeout=15)
@@ -90,13 +91,14 @@ const notice={textContent:''}, calls=[]; let accept=false, fail=false;
 const current=()=>true, render=()=>{}, load=async()=>{notice.textContent='';};
 const request=async(action,payload)=>{calls.push({action,payload}); if(fail)throw Error('selection expired');};
 const controller=new AbortController();
+const connection={id:'fixture',capability:'fixture'},requireDevice=async()=>connection;
 const previewEgress=async(request,targets,signal)=>{assert.deepEqual(targets.map(a=>a.id),['a']);selectedIds=new Set(['b']);batch={id:'new'};return accept;};
 eval(source.slice(source.indexOf('  async function performBatch('),source.indexOf('  function renderBatch(')));
 (async()=>{
  await performBatch('batch-start');assert.equal(calls.length,0,'cancel sends nothing');
  selectedIds=new Set(['a']);batch={id:'old'};accept=true;
  await performBatch('batch-start');
- assert.deepEqual(calls[0],{action:'batch-start',payload:{expected_batch_id:'old',profile_ids:['a']}});
+ assert.deepEqual(calls[0],{action:'batch-start',payload:{expected_batch_id:'old',profile_ids:['a'],connection,confirmation:true}});
  fail=true;selectedIds=new Set(['a']);
  await performBatch('batch-start');assert(notice.textContent.includes('selection expired'));assert.equal(submittingBatch,false);
 })().catch(error=>{console.error(error);process.exitCode=1;});

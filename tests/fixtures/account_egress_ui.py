@@ -6,6 +6,7 @@ import threading
 import time
 import sys
 import socket
+from urllib.parse import urlsplit, parse_qs
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -16,7 +17,8 @@ from client_connector import Connector
 def main():
     accounts = [dict(id=str(i), email=f'fixture{i}@example.test', account_id=f'workspace-{i}',
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
-    state = dict(mode='mixed', delay=0, starts=[], previews=0, paused=False)
+    state = dict(mode='mixed', delay=0, starts=[], previews=0, paused=False,
+                 pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0)
     source = (ROOT / 'web/index.html').read_text()
     panel = source.split('<details id="codex-account-actions"', 1)[1].split('</section>', 1)[0]
     html = ('<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
@@ -43,8 +45,10 @@ def main():
             if self.path == '/':
                 self.send(html.encode(), 'text/html; charset=utf-8')
             elif self.path in ('/web/styles.css', '/web/codex-accounts.js', '/web/account-egress.js'):
-                self.send((ROOT / self.path.lstrip('/')).read_bytes(),
-                          'text/css' if self.path.endswith('.css') else 'text/javascript')
+                body = (ROOT / self.path.lstrip('/')).read_bytes()
+                if self.path.endswith('/codex-accounts.js'):
+                    body = body.replace(b'127.0.0.1:39002', f'127.0.0.1:{pair.server_port}'.encode())
+                self.send(body, 'text/css' if self.path.endswith('.css') else 'text/javascript')
             elif self.path == '/api/codex-accounts':
                 self.send(dict(accounts=accounts, batch=dict(id='fixture-old', items=[], created_at='2026-10-23T01:00:00Z'),
                                upstream_pause=dict(id='fixture-pause') if state['paused'] else None))
@@ -74,6 +78,10 @@ def main():
                 self.send(dict(checked_host='fixture-browser-device', targets=targets,
                                confirmation=route.issue(payload.get('profile_ids', []), payload.get('expected_batch_id'))))
             elif self.path == '/api/codex-accounts/network-status':
+                state['status_requests'] += 1
+                if state['status_mode'] == 'failure':
+                    self.send(dict(error='合成本机连接失效'), status=409)
+                    return
                 try:
                     route = client_network.hub.browser_route(payload.get('connection'))
                     self.send(dict(label=route.label, connected=True))
@@ -85,7 +93,7 @@ def main():
                 state['starts'].append(payload)
                 self.send({})
             elif self.path == '/fixture/config':
-                for key in ('mode', 'delay', 'paused'):
+                for key in ('mode', 'delay', 'paused', 'pair_mode', 'status_mode'):
                     if key in payload:
                         state[key] = payload[key]
                 self.send(state)
@@ -101,7 +109,24 @@ def main():
     connector = Connector.__new__(Connector)
     connector.server, connector.stopped = origin, threading.Event()
     connector.registration = {'connection': {'id': route.id, 'capability': route.browser, 'label': route.label}}
-    pair = ThreadingHTTPServer(('127.0.0.1', 39002), connector.pair_handler())
+    class Pair(connector.pair_handler()):
+        def do_GET(self):
+            state['pair_requests'] += 1
+            if state['pair_mode'] == 'ready':
+                return super().do_GET()
+            if state['pair_mode'] == 'error':
+                nonce = parse_qs(urlsplit(self.path).query).get('nonce', [''])[0]
+                payload = json.dumps(dict(type='agent-monitor-network', nonce=nonce,
+                                          error='合成连接端尚未连接服务器'))
+                body = (f'<script>window.opener.postMessage({payload},{json.dumps(origin)});window.close()</script>').encode()
+            else:
+                body = '<p>合成本机配对无响应；用于超时和取消验收。</p>'.encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    pair = ThreadingHTTPServer(('127.0.0.1', 0), Pair)
     threading.Thread(target=pair.serve_forever, daemon=True).start()
     def heartbeat():
         while not connector.stopped.wait(1): route.last_seen = time.monotonic()
@@ -109,7 +134,7 @@ def main():
     timer = threading.Timer(600, http.shutdown)
     timer.daemon = True
     timer.start()
-    print(json.dumps(dict(url=origin, lifetime_seconds=600)), flush=True)
+    print(json.dumps(dict(url=origin, pair_port=pair.server_port, lifetime_seconds=600)), flush=True)
     try:
         http.serve_forever()
     finally:

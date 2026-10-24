@@ -58,57 +58,101 @@ export function init() {
   let deviceConnection = null;
   const deviceStatus = root.querySelector("#codex-device-status");
   const deviceConnect = root.querySelector("#codex-device-connect");
+  const deviceCancel = root.querySelector("#codex-device-cancel");
+  const deviceHelp = root.querySelector("#codex-device-help");
   const deviceCommand = root.querySelector("#codex-device-command");
-  if (deviceCommand) deviceCommand.textContent = `agent-monitor connect --server '${location.origin}'`;
+  if (deviceCommand) deviceCommand.textContent = `agent-monitor connect install --server '${location.origin}'`;
   let pairing = null;
-  function stopPairing() {
-    if (!pairing) return;
-    clearTimeout(pairing.timer);
-    window.removeEventListener("message", pairing.receive);
-    pairing = null;
-    if (deviceConnect) deviceConnect.disabled = false;
+  function deviceFeedback(message, failed = false) {
+    if (!current()) return;
+    if (deviceStatus) deviceStatus.textContent = message;
+    if (failed && deviceHelp) deviceHelp.open = true;
   }
-  controller.signal.addEventListener("abort", stopPairing, { once: true });
-  deviceConnect?.addEventListener("click", () => {
+  controller.signal.addEventListener("abort", () => pairing?.finish(new DOMException("页面已离开", "AbortError")), { once: true });
+  deviceCancel?.addEventListener("click", () => pairing?.finish(new Error("已取消本机连接；本次操作未继续。需要时重新点击原操作即可。")));
+  deviceConnect?.addEventListener("click", async () => {
     if (submittingBatch) return;
-    stopPairing();
-    const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(n => n.toString(16).padStart(2, "0")).join("");
-    const popup = window.open(`http://127.0.0.1:39002/pair?origin=${encodeURIComponent(location.origin)}&nonce=${nonce}`, "agent-monitor-device", "width=520,height=240");
-    if (!popup) { deviceStatus.textContent = "浏览器阻止了连接窗口，请允许此页面打开弹窗后重试。"; return; }
-    deviceConnect.disabled = true;
-    deviceStatus.textContent = "正在连接本机；若新窗口无法打开，请先运行上方命令。";
-    const receive = async event => {
-      if (event.origin !== "http://127.0.0.1:39002" || event.source !== popup
-          || event.data?.type !== "agent-monitor-network" || event.data?.nonce !== nonce) return;
-      const connection = event.data.connection;
-      stopPairing();
-      try {
-        const result = await request("network-status", { connection });
-        if (!current()) return;
-        deviceConnection = connection;
-        deviceStatus.textContent = `已配对设备：${result.label}。每次操作会检查连接；断开后不会切回服务器出口。`;
-        notice.textContent = "";
-      } catch (error) {
-        deviceConnection = null;
-        if (current()) deviceStatus.textContent = error.message;
-      }
-    };
-    pairing = { receive, timer: setTimeout(() => {
-      stopPairing();
-      if (current()) deviceStatus.textContent = "未完成本机连接。请确认命令在浏览器所在设备运行，再点击连接本机网络。";
-    }, 20000) };
-    window.addEventListener("message", receive);
+    submittingBatch = true;
+    render();
+    try { await requireDevice(); }
+    catch (error) { if (current() && error.name !== "AbortError") notice.textContent = error.message; }
+    finally { submittingBatch = false; if (current()) render(); }
   });
 
-  async function requireDevice() {
-    if (!deviceConnection) throw new Error("请先在浏览器所在设备运行上方连接命令，并点击「连接本机网络」。");
-    try { await request("network-status", { connection: deviceConnection }); }
-    catch (error) {
-      deviceConnection = null;
-      if (deviceStatus) deviceStatus.textContent = error.message;
-      throw error;
+  function requireDevice() {
+    if (pairing) return pairing.promise;
+    if (controller.signal.aborted) return Promise.reject(new DOMException("页面已离开", "AbortError"));
+    // Keep window.open inside this user gesture, before any await/import/fetch.
+    // Re-pair on each action so a refresh or a restarted local service needs no
+    // separate connect click, and no capability is persisted in browser storage.
+    deviceConnection = null;
+    const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(n => n.toString(16).padStart(2, "0")).join("");
+    const popup = window.open(`http://127.0.0.1:39002/pair?origin=${encodeURIComponent(location.origin)}&nonce=${nonce}`, "agent-monitor-device", "width=520,height=240");
+    if (!popup) {
+      const message = "浏览器阻止了本机连接窗口。请允许此页面打开弹窗，再重试原操作；本次操作未继续。";
+      deviceFeedback(message, true);
+      return Promise.reject(new Error(message));
     }
-    return deviceConnection;
+    let resolve, reject;
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    const attempt = { promise, validating: false, finished: false, timer: null, poll: null, receive: null };
+    pairing = attempt;
+    attempt.finish = (error, connection, result) => {
+      if (attempt.finished) return;
+      attempt.finished = true;
+      clearTimeout(attempt.timer);
+      clearInterval(attempt.poll);
+      window.removeEventListener("message", attempt.receive);
+      window.removeEventListener("pagehide", attempt.leave);
+      popup.close();
+      if (pairing === attempt) pairing = null;
+      if (deviceCancel) deviceCancel.hidden = true;
+      if (deviceConnect) deviceConnect.disabled = false;
+      if (error) {
+        deviceFeedback(error.message, error.name !== "AbortError");
+        reject(error);
+      } else {
+        deviceConnection = connection;
+        deviceFeedback(`已连接当前设备：${result.label}。断开时停止操作，不会切回服务器出口。`);
+        if (current()) notice.textContent = "";
+        resolve(connection);
+      }
+    };
+    attempt.receive = async event => {
+      if (attempt.finished || attempt.validating || event.origin !== "http://127.0.0.1:39002" || event.source !== popup
+          || event.data?.type !== "agent-monitor-network" || event.data?.nonce !== nonce) return;
+      attempt.validating = true;
+      clearInterval(attempt.poll);
+      popup.close();
+      if (event.data.error) {
+        attempt.finish(new Error(`本机连接端未能完成配对：${event.data.error} 请按下方连接帮助恢复后重试。`));
+        return;
+      }
+      deviceFeedback("已收到本机响应，正在确认它与服务器的连接…");
+      try {
+        const connection = event.data.connection;
+        if (!connection || typeof connection.id !== "string" || typeof connection.capability !== "string") throw new Error("本机返回的配对信息不完整。");
+        const result = await request("network-status", { connection });
+        if (!result.connected) throw new Error("服务器尚未确认本机连接可用。");
+        if (!current()) { attempt.finish(new DOMException("页面已离开", "AbortError")); return; }
+        attempt.finish(null, connection, result);
+      } catch (error) {
+        attempt.finish(error.name === "AbortError" ? error : new Error(`本机与服务器的连接校验未通过：${error.message} 请在本机执行 agent-monitor connect status，恢复连接后重试原操作。`));
+      }
+    };
+    attempt.leave = () => attempt.finish(new DOMException("页面已离开", "AbortError"));
+    window.addEventListener("pagehide", attempt.leave);
+    window.addEventListener("message", attempt.receive);
+    attempt.timer = setTimeout(() => attempt.finish(new Error(attempt.validating
+      ? "本机与服务器的连接校验超时，本次操作未继续。请执行 agent-monitor connect status，恢复后重试原操作。"
+      : "未收到本机连接端的配对响应，本次操作未继续。请在当前设备按下方帮助启用或检查连接服务，再重试原操作。")), 20000);
+    attempt.poll = setInterval(() => {
+      if (popup.closed && !attempt.validating) attempt.finish(new Error("本机连接窗口已关闭，配对未完成；本次操作未继续。可重试原操作，或展开连接帮助检查服务。"));
+    }, 250);
+    if (deviceConnect) deviceConnect.disabled = true;
+    if (deviceCancel) deviceCancel.hidden = false;
+    deviceFeedback("正在连接当前设备的网络…首次使用需启用本机连接服务；完成连接后将继续当前操作。");
+    return promise;
   }
 
   async function request(action, payload) {
@@ -233,6 +277,7 @@ export function init() {
     batchNext.textContent = `开始新一轮 · 所选 ${count} 个账号`;
     batchNext.disabled = submittingBatch || busy || !count || Boolean(upstreamPause);
     if (egressPreview) egressPreview.disabled = submittingBatch;
+    if (deviceConnect) deviceConnect.disabled = submittingBatch;
     batchRetry.hidden = true;
     if (!batch) {
       batchStatus.textContent = eligible.length ? `${eligible.length} 个可操作账号；发送前会检查登录状态。` : "尚未发现可发送的 Codex 登录账号。";

@@ -93,6 +93,9 @@ class _Runtime:
         except Exception:
             self.close()
             raise NetworkPolicyError("runtime_start_failed") from None
+        except BaseException:
+            self.close()
+            raise
 
     def _write(self, value):
         with self.writes:
