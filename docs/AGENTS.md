@@ -12,6 +12,8 @@ Current usage and installation belong in the root README; current architecture a
 | [product-boundary-separation.md](product-boundary-separation.md) | Authorized product separation, gaps, migration constraints and execution evidence |
 | [usage-accounting-correction.md](usage-accounting-correction.md) | Pagination and streaming usage correction, bounded validation and recovery |
 | [architecture.md](architecture.md) | Runtime ownership, data flow and independent dependencies |
+| [references/connection-acceptance.md](references/connection-acceptance.md) | Repeatable synthetic-account browser and opt-in isolated macOS connector lifecycle acceptance |
+| [adr/20261024-f8c3-connection-acceptance-entry.md](adr/20261024-f8c3-connection-acceptance-entry.md) | Reusable no-provider connection acceptance scope and isolation decision |
 | [adr/20261023-9c4e-system-proxy.md](adr/20261023-9c4e-system-proxy.md) | Product system-proxy resolution, transparent transport and account-isolation boundaries |
 | [adr/20261023-a7c1-account-egress-preview.md](adr/20261023-a7c1-account-egress-preview.md) | Account send confirmation with target-specific exit IP/country observations |
 | [adr/20261023-d4f2-browser-device-egress.md](adr/20261023-d4f2-browser-device-egress.md) | Browser-device pairing, reverse transport and batch confirmation boundaries |

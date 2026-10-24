@@ -7,6 +7,7 @@ import time
 import sys
 import socket
 from urllib.parse import urlsplit, parse_qs
+import argparse
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -15,6 +16,9 @@ from client_connector import Connector
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--loopback', action='store_true', help='Use a loopback page origin for automated acceptance.')
+    args = parser.parse_args()
     accounts = [dict(id=str(i), email=f'fixture{i}@example.test', account_id=f'workspace-{i}',
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
     state = dict(mode='mixed', delay=0, starts=[], previews=0, paused=False,
@@ -104,7 +108,8 @@ def main():
                 self.send({}, status=404)
 
     http = ThreadingHTTPServer(('0.0.0.0', 0), Handler)
-    origin = f'http://{socket.gethostname().split(".")[0]}:{http.server_port}'
+    host = '127.0.0.1' if args.loopback else socket.gethostname().split('.')[0]
+    origin = f'http://{host}:{http.server_port}'
     route = client_network.hub.register('fixture-browser-device')
     connector = Connector.__new__(Connector)
     connector.server, connector.stopped = origin, threading.Event()

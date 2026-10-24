@@ -212,6 +212,8 @@ Reviewed recovery previews a batch unless `--apply` is given and refuses changed
 
 Use a disposable HOME when testing to isolate credentials and user files. Tests use temporary databases and mocked services; live deployment and browser acceptance are separate checks. [Architecture](docs/architecture.md), [documentation index](docs/AGENTS.md) and [changelog](CHANGELOG.md) are the maintenance entry points. `token_cost.py` retains the original byte-identical cross-project arithmetic contract, including its historical naming comments.
 
+For device-connection changes, use the [isolated browser and optional LaunchAgent acceptance entry](docs/references/connection-acceptance.md). It reuses six synthetic accounts, checks preview/cancel/confirmation request counts, and keeps real provider accounts and the formal connector outside the test.
+
 For backend cost diagnosis, run `.venv/bin/python scripts/benchmark_backend.py`. It creates isolated synthetic snapshots and reports admission, preparation and aggregate-query work across sizes and generations. Read [the diagnostic scope and regression entry](docs/proactive-performance.md); these measurements do not establish production latency or an SLA.
 
 ## Production deployment from published main
