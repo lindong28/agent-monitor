@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>agent-monitor 查找证据</title>
+    <link rel="stylesheet" href="/web/styles.css">
+    <script src="/web/vendor/chart.umd.min.js"></script>
+    <script src="/web/app.js"></script>
+    <script src="/web/pivot.js"></script>
+  </head>
+  <body>
+    <dialog id="page-search" class="page-search" aria-labelledby="page-search-title">
+      <div class="search-heading"><h2 id="page-search-title">搜索页面与帮助</h2><button type="button" id="close-page-search" aria-label="关闭搜索">关闭</button></div>
+      <p class="scope-note">查找功能入口和接入说明；账号与会话内容请使用各页面的筛选。</p>
+      <label class="sr-only" for="page-search-input">页面或帮助关键词</label>
+      <div class="search-input-row"><input id="page-search-input" type="search" placeholder="搜索总览、会话、安装…" autocomplete="off"><button type="button" id="clear-page-search">清空</button></div>
+      <p id="page-search-count" class="scope-note" role="status"></p>
+      <div id="page-search-results" class="search-results"></div>
+    </dialog>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <header class="app-header">
+          <a class="brand" data-preserve-range href="/">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-title">agent-monitor</span>
+          </a>
+          <nav class="top-nav" aria-label="区域导航">
+            <a data-area="console" href="/">控制台</a>
+            <a data-area="guide" aria-current="page" data-preserve-range href="/guide/sources">使用与接入</a>
+          </nav>
+          <button class="header-search" id="open-page-search" type="button" aria-haspopup="dialog" aria-controls="page-search"><span aria-hidden="true">⌕</span> 搜索页面与帮助</button>
+        </header>
+        <nav class="nav" aria-label="控制台导航" hidden>
+          <a data-nav href="/">总览</a>
+          <a data-nav href="/explore">透视</a>
+          <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/collection">采集与诊断</a>
+          <a data-nav href="/network">网络</a>
+        </nav>
+        <nav class="nav guide-nav" aria-label="使用与接入导航">
+          <a href="/guide/sources">数据来源</a>
+          <a href="/guide/collection">采集状态</a>
+          <a href="/guide/setup">首次接入</a>
+          <a href="/guide/questions" aria-current="page">查找证据</a>
+        </nav>
+      </aside>
+      <main class="main guide-main">
+        <div class="page-toolbar"><div class="page-location"><span class="workspace-label">使用与接入</span><span class="breadcrumb-separator" aria-hidden="true">/</span><h1 class="page-title">查找证据</h1></div></div>
+        <article class="guide-article">
+        <section class="panel" id="questions">
+          <h2>从问题找到证据</h2>
+          <ul>
+            <li><strong>查看成本变化：</strong>在总览展开<a href="/#period-comparison">周期比较</a>，核对两个周期的日期、金额和 token，再进入透视定位目录、模型或机器。金额未知的原因与记录见<a data-collection-link href="/collection#cost-diagnostics">费用诊断</a>。</li>
+            <li><strong>追溯某组用量：</strong>点击<a href="/explore">透视</a>排行的“查看会话”。列表只计匹配记录；打开详情可看全部留存记录。汇总比明细更完整时，差额不能当成查询错误或零成本。</li>
+            <li><strong>挑选账号：</strong>在总览的<a href="/#quota-explorer">配额与账号</a>中按配额窗口和剩余额度排序，同时核对更新时间。历史账号读数不代表当前可用。</li>
+            <li><strong>页面为空：</strong>先检查日期和筛选，再看机器采集状态与采集器版本。连接失败会保留最后成功快照；修复接入后再刷新。</li>
+          </ul>
+          <p class="scope-note">请在可信个人网络使用；账号操作的来源检查不等于用户认证。开源代码与公开运行中的仪表盘是两件事。</p>
+        </section>
+        </article>
+      </main>
+    </div>
+    <script>AgentMonitor.initClientNavigation(); AgentMonitor.initGuide();</script>
+  </body>
+</html>

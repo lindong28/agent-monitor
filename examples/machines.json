@@ -1,0 +1,6 @@
+{
+  "machines": [
+    {"name": "local", "ssh_host": "localhost", "self": true}
+  ],
+  "retired_names": []
+}

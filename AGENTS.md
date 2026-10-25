@@ -1,0 +1,12 @@
+# AGENTS.md
+
+This repository owns agent-monitor: CLI, Web dashboard, usage collection, snapshots, quota lookup and network diagnostics. Read [README.md](README.md) and [docs/public-architecture.md](docs/public-architecture.md) for runtime boundaries; read [docs/AGENTS.md](docs/AGENTS.md) before editing documentation.
+
+- Keep runtime dependencies independent of ai-agent-config and llm-gateway. Gateway calls belong to that separate product; do not reintroduce its reader, UI or service dependency.
+- Install with `./install.sh`; `.venv`, `state` and `web/vendor` are runtime files and stay untracked. Use `--no-services` for staging. Existing state may be a symlink; never replace it or its persistent locks during ordinary installation.
+- Preserve snapshot schemas, machine/account identities, archive retention and accounting semantics unless explicitly asked to change them. `token_cost.py` has a byte-identical cross-project contract; coordinate any arithmetic edit with its consumers.
+- Use isolated HOME/state for tests, and report live verification separately. Do not print credentials or read real provider stores in tests.
+- For backend development, inspect the affected consumers and costs in [architecture](docs/public-architecture.md). `scripts/benchmark_backend.py` uses isolated synthetic snapshots; one page's result does not establish whole-backend performance.
+- Preserve other writers' work and use an isolated development checkout. Deployment and provider actions require the operator's authorization; repository instructions do not grant access to their accounts or services. Deploy through `./deploy.py` from the primary main checkout at the verified live `origin/main` HEAD; use `--expect FULL_SHA` for a coordinated rollout. Development worktrees are not persistent deployment roots. Ordinary source edits are not deployment proof.
+- Customize ignored `machines.local.json` and `hub.local.json`; do not replace existing machine identities or state with examples. Restart after changing which configuration file is selected.
+- Before a commit, run the applicable review gate and the existing tests affected by the change. Use the repository's interpreter and Node for Web tests: `.venv/bin/python -m unittest discover -s tests`.

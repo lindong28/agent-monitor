@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>agent-monitor 会话</title>
+    <link rel="stylesheet" href="/web/styles.css">
+    <script src="/web/vendor/chart.umd.min.js"></script>
+    <script src="/web/app.js"></script>
+    <script src="/web/pivot.js"></script>
+  </head>
+  <body>
+    <dialog id="page-search" class="page-search" aria-labelledby="page-search-title">
+      <div class="search-heading"><h2 id="page-search-title">搜索页面与帮助</h2><button type="button" id="close-page-search" aria-label="关闭搜索">关闭</button></div>
+      <p class="scope-note">查找功能入口和接入说明；账号与会话内容请使用各页面的筛选。</p>
+      <label class="sr-only" for="page-search-input">页面或帮助关键词</label>
+      <div class="search-input-row"><input id="page-search-input" type="search" placeholder="搜索总览、会话、安装…" autocomplete="off"><button type="button" id="clear-page-search">清空</button></div>
+      <p id="page-search-count" class="scope-note" role="status"></p>
+      <div id="page-search-results" class="search-results"></div>
+    </dialog>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <header class="app-header">
+          <a class="brand" data-preserve-range href="/">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-title">agent-monitor</span>
+          </a>
+          <nav class="top-nav" aria-label="区域导航">
+            <a data-area="console" aria-current="page" href="/">控制台</a>
+            <a data-area="guide" data-preserve-range href="/guide/sources">使用与接入</a>
+          </nav>
+          <button class="header-search" id="open-page-search" type="button" aria-haspopup="dialog" aria-controls="page-search"><span aria-hidden="true">⌕</span> 搜索页面与帮助</button>
+        </header>
+        <nav class="nav" aria-label="控制台导航">
+          <a data-nav href="/">总览</a>
+          <a data-nav href="/explore">透视</a>
+          <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/collection">采集与诊断</a>
+          <a data-nav href="/network">网络</a>
+        </nav>
+        <nav class="nav guide-nav" aria-label="使用与接入导航" hidden>
+          <a href="/guide/sources">数据来源</a>
+          <a href="/guide/collection">采集状态</a>
+          <a href="/guide/setup">首次接入</a>
+          <a href="/guide/questions">查找证据</a>
+        </nav>
+      </aside>
+      <main class="main">
+        <div class="page-toolbar">
+          <div class="page-location"><span class="workspace-label">控制台</span><span class="breadcrumb-separator" aria-hidden="true">/</span><h1 class="page-title">会话</h1></div>
+          <div class="toolbar">
+            <select id="range" aria-label="时间范围">
+              <option value="7d">近 7 天</option>
+              <option value="30d" selected>近 30 天</option>
+              <option value="90d">近 90 天</option>
+              <option value="6m">近半年</option>
+              <option value="1y">近 1 年</option>
+              <option value="2y">近 2 年</option>
+              <option value="all">全部</option>
+              <option value="custom">自定义</option>
+            </select>
+            <span id="session-dates" hidden><label>起始 <input type="date" id="session-start"></label> <label>终止 <input type="date" id="session-end"></label></span>
+            <select id="sort" aria-label="排序">
+              <option value="time">按最近用量</option>
+              <option value="cost">按成本</option>
+              <option value="tokens">按 token</option>
+              <option value="duration">按观测跨度</option>
+            </select>
+            <button id="refresh" class="icon-btn" type="button" title="更新统计与配额" aria-busy="false">更新统计与配额</button>
+          </div>
+        </div>
+        <p><a id="sessions-diagnostics-return" href="/collection" hidden>返回费用诊断</a></p>
+        <section class="panel" id="session-list-panel">
+          <div class="panel-head">
+            <h2>会话明细</h2>
+            <span id="session-count" class="status-line">加载中…</span>
+          </div>
+          <details class="note-disclosure">
+            <summary>会话与金额怎么读</summary>
+            <p><strong>统计范围：</strong>汇集已纳入机器的会话，仅包含已采集的记录。各机器更新时间与历史覆盖可在<a data-collection-link href="/collection">采集与诊断</a>查看。</p>
+            <p><strong>会话：</strong>Codex 原生子代理按明确的父关系计入主会话；无法关联的记录保留独立显示。独立启动的进程和普通分叉不会自动合并。最近用量不代表会话是否仍在运行。</p>
+            <p><strong>模型与估算：</strong>Codex 模型名来自请求或配置，实际处理请求的模型未知。估算使用计算时的配置价格，不代表历史实际费率。</p>
+            <p><strong>会话目录：</strong>按启动目录归类，可能显示其 Git 仓库标识；同一会话中的跨项目工作不拆分费用。</p>
+            <p><strong>金额：</strong>仅合计可计价记录，全部无法计价时显示未知；估算金额非账单。详情展开后可查看模型与金额依据。</p>
+            <p><strong>用量事件数：</strong>记录中包含的用量事件合计。一条记录可能包含多个事件；事件数不是请求次数。</p>
+            <p><strong>历史留存：</strong>已采集的会话统计不随本地日志清理而丢失，但采集前就删掉的历史找不回来。未升级采集器的机器不在其中。</p>
+          </details>
+          <div class="controls sessions-controls">
+            <div class="field">
+              <label for="filter-machine">机器</label>
+              <select id="filter-machine" disabled><option value="">全部机器</option></select>
+            </div>
+            <div class="field">
+              <label for="filter-agent">Agent</label>
+              <select id="filter-agent" disabled><option value="">全部 Agent</option></select>
+            </div>
+            <div class="field">
+              <label for="filter-project">会话目录</label>
+              <select id="filter-project" disabled><option value="">全部会话目录</option></select>
+            </div>
+            <div class="field">
+              <label for="filter-model">模型</label>
+              <select id="filter-model" disabled><option value="">全部模型</option></select>
+            </div>
+            <div class="field">
+              <label for="filter-cost-status">成本状态</label>
+              <select id="filter-cost-status" disabled><option value="">全部成本状态</option><option value="unknown">仅未知成本条目</option></select>
+            </div>
+          </div>
+          <p class="scope-note">列表与详情默认仅计匹配记录；详情可切换全部留存记录。费用仅合计可计价记录，非账单。</p>
+          <div class="pager pager-top">
+            <button id="page-prev-top" type="button" disabled>上一页</button>
+            <span id="page-status-top" class="status-line">加载中…</span>
+            <button id="page-next-top" type="button" disabled>下一页</button>
+          </div>
+          <div class="table-wrap sticky-head">
+            <table>
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>会话</th>
+                  <th>最近用量</th>
+                  <th class="numeric">成本</th>
+                  <th class="numeric">token</th>
+                </tr>
+              </thead>
+              <tbody id="sessions-body" aria-busy="true">
+                <tr data-session-state="loading"><td class="empty-state" colspan="5">加载中…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="page-prev" type="button" disabled>上一页</button>
+            <span id="page-status" class="status-line">加载中…</span>
+            <button id="page-next" type="button" disabled>下一页</button>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      AgentMonitor.initClientNavigation();
+      AgentMonitor.initSessions().catch((error) => {
+        console.error(error);
+        document.querySelector("main").insertAdjacentHTML("beforeend",
+          '<p class="error">页面未能完整加载，请重新加载页面。</p>');
+      });
+    </script>
+  </body>
+</html>

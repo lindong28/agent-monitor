@@ -1,0 +1,2 @@
+-r requirements.txt
+# The test suite uses unittest and Node; no additional Python package is required.

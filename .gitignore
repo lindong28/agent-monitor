@@ -1,0 +1,12 @@
+__pycache__/
+.venv/
+.runtime/
+.pytest_cache/
+.DS_Store
+state
+web/vendor/
+machines.local.json
+hub.local.json
+.env
+.env.*
+!.env.example

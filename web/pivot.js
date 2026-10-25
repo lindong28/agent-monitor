@@ -1,0 +1,639 @@
+(function () {
+  const presets = {
+    "daily-cost": { x: "day", group: "agent", metric: "cost" },
+    "project-cost": { x: "project", group: "none", metric: "cost" },
+    "model-tokens": { x: "model", group: "agent", metric: "total" },
+    "agent-project": { x: "agent", group: "project", metric: "cost" },
+    cache: { x: "day", group: "agent", metric: "cache_read" },
+  };
+
+  const timeDims = new Set(["day", "week", "month"]);
+  const filterNames = ["agent", "project", "model", "machine"];
+  const filterAllLabels = { agent: "全部 Agent", project: "全部会话目录", model: "全部模型", machine: "全部机器" };
+  const dimLabels = { day: "天", week: "周", month: "月", agent: "Agent 类型", project: "会话目录", model: "模型", machine: "机器" };
+  let dimensions = [];
+  let xDimPinned = false;
+  let loadGeneration = 0;
+  let pageCurrent = () => true;
+  let projectOptions = [];
+
+  async function init() {
+    pageCurrent = AgentMonitor.pageScope();
+    const controls = ["#time-dim", "#metric", "#range", "#start-date", "#end-date"].map((selector) => AgentMonitor.qs(selector));
+    applyQuery();
+    let activeLoads = 0;
+    async function load(force, background = false) {
+      if (background && activeLoads) return;
+      activeLoads += 1;
+      try { await loadView(force); } finally { activeLoads -= 1; }
+    }
+    async function loadView(force) {
+      const generation = ++loadGeneration;
+      if (!validDates()) return;
+      AgentMonitor.qs("#pivot-status").textContent = "加载中…";
+      // Establish a generation boundary before queries can acquire a view.
+      // Otherwise an old pivot can be paired with two already-new statuses.
+      const before = await AgentMonitor.api("/api/sync-status");
+      if (!isCurrentLoad(generation)) return;
+      // URL filters are available before the option lists have arrived.
+      const initialFilters = Object.fromEntries(filterNames.map((name) => [name, desiredFilterValue(name)]).filter(([, value]) => value));
+      await Promise.all([
+        loadFilterOptions(force, undefined, generation),
+        loadPivot(false, false, generation, initialFilters),
+      ]);
+      if (!isCurrentLoad(generation)) return;
+      let status = await AgentMonitor.api("/api/sync-status");
+      if (!isCurrentLoad(generation)) return;
+      AgentMonitor.renderSyncStatus(status);
+      if (status.syncing) {
+        status = await AgentMonitor.waitForSyncTerminal(status, {
+          isCurrent: () => isCurrentLoad(generation),
+          includeQuota: false,
+          onProgress: async () => {
+            await Promise.all([loadFilterOptions(false, false, generation), loadPivot(false, false, generation)]);
+          },
+        });
+        if (!isCurrentLoad(generation)) return;
+        if (status.polling_error) return;
+      }
+      if (AgentMonitor.snapshotFingerprint(status, false) !== AgentMonitor.snapshotFingerprint(before, false)) {
+        await Promise.all([loadFilterOptions(false, false, generation), loadPivot(false, false, generation)]);
+      }
+    }
+    AgentMonitor.bindShell(load, { range: false });
+    AgentMonitor.watchPageData(() => load(false, true));
+    projectOptions = [];
+    AgentMonitor.qs("#project-search")?.addEventListener("input", () => populateFilter("project", projectOptions));
+    controls.forEach((control) => {
+      if (control) {
+        control.addEventListener("change", async () => {
+          updateDateControls();
+          if (control.id === "range" && !xDimPinned && control.value !== "custom") {
+            setDimensions([AgentMonitor.autoTimeDim(control.value), ...dimensions.filter((dim) => !timeDims.has(dim))]);
+          }
+          if (control.id === "time-dim") {
+            xDimPinned = true;
+            setDimensions([control.value, ...dimensions.filter((dim) => !timeDims.has(dim))]);
+          }
+          syncQuery();
+          await load(false);
+        });
+      }
+    });
+    AgentMonitor.qsa("[data-group-dim]").forEach((control) => {
+      control.addEventListener("change", async () => {
+        const dim = control.dataset.groupDim;
+        setDimensions(control.checked ? dimensions.concat(dim) : dimensions.filter((item) => item !== dim));
+        xDimPinned = true;
+        syncQuery();
+        await load(false);
+      });
+    });
+    AgentMonitor.qsa("[data-filter-control]").forEach((control) => {
+      control.addEventListener("change", async () => {
+        syncQuery();
+        await load(false);
+      });
+    });
+    AgentMonitor.qsa(".preset-btn").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const preset = presets[button.dataset.preset];
+        setDimensions([preset.x, preset.group]);
+        AgentMonitor.qs("#metric").value = preset.metric;
+        xDimPinned = true;
+        syncQuery();
+        await load(false);
+      });
+    });
+    await load(false);
+  }
+
+  function applyQuery() {
+    const query = AgentMonitor.params();
+    const range = query.get("range") || "30d";
+    xDimPinned = query.has("group_by") || query.has("x");
+    setDimensions(query.has("group_by") ? query.get("group_by").split(",")
+      : [query.get("x") || AgentMonitor.autoTimeDim(range), query.get("group") || "agent"]);
+    setValue("#metric", query.get("metric") || "cost");
+    setValue("#range", range);
+    setValue("#start-date", query.get("start") || "");
+    setValue("#end-date", query.get("end") || "");
+    updateDateControls();
+    applyFilterQuery();
+  }
+
+  function updateDateControls() {
+    const custom = AgentMonitor.getRange() === "custom";
+    AgentMonitor.qsa(".custom-date").forEach((field) => { field.hidden = !custom; });
+  }
+
+  function dateParams() {
+    return AgentMonitor.getRange() === "custom" ? {
+      start: AgentMonitor.qs("#start-date").value,
+      end: AgentMonitor.qs("#end-date").value,
+    } : {};
+  }
+
+  function validDates() {
+    const { start, end } = dateParams();
+    const custom = AgentMonitor.getRange() === "custom";
+    const error = custom && (!start || !end) ? "请选择起始和终止日期。"
+      : custom && (!AgentMonitor.qs("#start-date").checkValidity() || !AgentMonitor.qs("#end-date").checkValidity()) ? "请选择有效日期。"
+      : custom && start > end ? "起始日期不能晚于终止日期。" : "";
+    const message = AgentMonitor.qs("#date-error");
+    if (message) { message.textContent = error; message.hidden = !error; }
+    if (error) {
+      AgentMonitor.qs("#pivot-panel").hidden = true;
+      AgentMonitor.qs("#ranking-panel").hidden = true;
+      AgentMonitor.qs("#pivot-status").textContent = "未加载 · 日期无效";
+      const summary = AgentMonitor.qs("#query-summary");
+      if (summary) summary.textContent = AgentMonitor.qs("#metric").selectedOptions[0].textContent + " · " + error;
+    }
+    return !error;
+  }
+
+  function setDimensions(values) {
+    dimensions = [...new Set(values)].filter((dim) => Object.hasOwn(dimLabels, dim));
+    const time = dimensions.find((dim) => timeDims.has(dim));
+    dimensions = dimensions.filter((dim) => !timeDims.has(dim));
+    if (time) dimensions.unshift(time);
+    setValue("#time-dim", time || "none");
+    AgentMonitor.qsa("[data-group-dim]").forEach((control) => {
+      control.checked = dimensions.includes(control.dataset.groupDim);
+    });
+    const summary = AgentMonitor.qs("#group-summary");
+    if (summary) summary.textContent = dimensions.length
+      ? `按 ${dimensions.map((dim) => dimLabels[dim]).join(" × ")} 汇总`
+      : "不分组 · 查看筛选范围内的总量";
+  }
+
+  function setValue(selector, value) {
+    const control = AgentMonitor.qs(selector);
+    if (control) {
+      control.value = value;
+    }
+  }
+
+  function isCurrentLoad(generation) {
+    return pageCurrent() && generation === loadGeneration;
+  }
+
+  async function loadFilterOptions(force, allowSync, generation) {
+    const options = await AgentMonitor.api("/api/pivot-filters", {
+      range: AgentMonitor.getRange(),
+      ...dateParams(),
+      force: force ? "1" : undefined,
+      sync: allowSync === false ? "0" : undefined,
+    });
+    if (generation !== undefined && !isCurrentLoad(generation)) {
+      return;
+    }
+    filterNames.forEach((name) => populateFilter(name, options[name] || []));
+    applyFilterQuery();
+  }
+
+  function populateFilter(name, values) {
+    const select = AgentMonitor.qs(`#${name}-filter`);
+    if (!select) {
+      return;
+    }
+    const selected = desiredFilterValue(name);
+    if (name === "project") projectOptions = values.slice();
+    const search = name === "project" ? (AgentMonitor.qs("#project-search")?.value || "").trim().toLowerCase() : "";
+    const allValues = values.filter(value => !search || value.toLowerCase().includes(search));
+    if (selected && !allValues.includes(selected)) {
+      allValues.push(selected);
+    }
+    select.innerHTML = "";
+    const allOption = document.createElement("option");
+    allOption.value = "";
+    allOption.textContent = filterAllLabels[name];
+    select.appendChild(allOption);
+    allValues.forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    });
+    select.value = selected || "";
+    select.disabled = false;
+  }
+
+  function desiredFilterValue(name) {
+    return AgentMonitor.params().get(name) || (AgentMonitor.qs(`#${name}-filter`) && AgentMonitor.qs(`#${name}-filter`).value) || "";
+  }
+
+  function applyFilterQuery() {
+    const query = AgentMonitor.params();
+    filterNames.forEach((name) => {
+      setValue(`#${name}-filter`, query.get(name) || "");
+    });
+  }
+
+  function syncQuery() {
+    AgentMonitor.setParam("x", null);
+    AgentMonitor.setParam("group", null);
+    AgentMonitor.setParam("group_by", dimensions.join(",") || "none");
+    AgentMonitor.setParam("metric", AgentMonitor.qs("#metric").value);
+    AgentMonitor.setParam("range", AgentMonitor.qs("#range").value);
+    const dates = dateParams();
+    AgentMonitor.setParam("start", dates.start || null);
+    AgentMonitor.setParam("end", dates.end || null);
+    syncFilterQuery();
+    renderPresetState();
+  }
+
+  function renderPresetState() {
+    const metric = AgentMonitor.qs("#metric").value;
+    let matched = false;
+    AgentMonitor.qsa(".preset-btn").forEach(button => {
+      const preset = presets[button.dataset.preset];
+      const dims = [preset.x, preset.group].filter(dim => dim !== "none");
+      const active = metric === preset.metric && JSON.stringify(dimensions) === JSON.stringify(dims);
+      button.setAttribute("aria-pressed", String(active));
+      matched ||= active;
+    });
+    const state = AgentMonitor.qs("#preset-state");
+    if (state) state.textContent = matched ? "预设只改变指标与分组，保留当前日期和筛选。" : "自定义指标与分组 · 日期和筛选仍适用";
+  }
+
+  function syncFilterQuery() {
+    const url = new URL(window.location.href);
+    filterNames.forEach((name) => url.searchParams.delete(name));
+    Object.entries(selectedFilters()).forEach(([name, value]) => {
+      url.searchParams.set(name, value);
+    });
+    // Through the shared writer: a raw replaceState here left the navigation
+    // layer's idea of the current route at the pre-filter URL.
+    AgentMonitor.replaceCurrentUrl(url.pathname + url.search);
+  }
+
+  function selectedFilters() {
+    const filters = {};
+    filterNames.forEach((name) => {
+      const control = AgentMonitor.qs(`#${name}-filter`);
+      const value = control ? control.value : "";
+      if (value) {
+        filters[name] = value;
+      }
+    });
+    return filters;
+  }
+
+  async function loadPivot(force, allowSync, generation, filters = selectedFilters()) {
+    renderPresetState();
+    const group_by = dimensions.join(",") || "none";
+    const metric = AgentMonitor.qs("#metric").value;
+    const unknownNote = AgentMonitor.qs("#unknown-cost-note");
+    if (unknownNote) unknownNote.hidden = metric !== "unknown_cost";
+    const range = AgentMonitor.getRange();
+    AgentMonitor.qs("#pivot-status").textContent = "加载中…";
+    const data = await AgentMonitor.api(
+      "/api/pivot",
+      Object.assign({ group_by, metric, range, ...dateParams(), force: force ? "1" : undefined, sync: allowSync === false ? "0" : undefined }, filters)
+    );
+    if (generation !== undefined && !isCurrentLoad(generation)) {
+      return;
+    }
+    const showTrend = data.dimensions.some((dim) => timeDims.has(dim)) || !data.dimensions.length;
+    AgentMonitor.qs("#pivot-panel").hidden = !showTrend;
+    if (showTrend) renderChart(chartData(data, metric), data.dimensions[0] || "none", metric);
+    renderRanking(data, metric);
+    const summary = AgentMonitor.qs("#query-summary");
+    if (summary) {
+      const metricName = AgentMonitor.qs("#metric").selectedOptions[0].textContent;
+      const rangeName = AgentMonitor.qs("#range").selectedOptions[0].textContent;
+      const filters = filterNames.map(name => desiredFilterValue(name)).filter(Boolean);
+      const dates = dateParams();
+      summary.textContent = `${metricName} · ${dates.start ? dates.start + " 至 " + dates.end : rangeName} · ${dimensions.length ? "按 " + dimensions.map(dim => dimLabels[dim]).join(" × ") : "不分组"}${filters.length ? " · 筛选：" + filters.join("、") : " · 全部来源"}`;
+    }
+    AgentMonitor.qs("#pivot-status").textContent = (data.rows.length ? `已加载 ${data.rows.length} 条分组结果` : "当前日期与筛选范围内无记录");
+  }
+
+  function chartData(data, metric) {
+    const dims = data.dimensions;
+    const columns = new Map();
+    const rows = new Map();
+    data.rows.forEach((record) => {
+      const x = record.key[0] ?? "总量";
+      const rest = record.key.slice(1);
+      const column = JSON.stringify(rest);
+      const labels = rest.map((value, i) => displayLabel(value, dims[i + 1]));
+      columns.set(column, {
+        // Only a pure agent series has an agent color identity. Joint groups
+        // retain separate hues so multiple projects/models remain distinguishable.
+        agentId: dims.length === 2 && dims[1] === "agent" ? rest[0] : undefined,
+        text: rest.length ? labels.map((label, i) => `${dimLabels[dims[i + 1]]}：${label.text}`).join(" · ") : "合计",
+        fullLabel: rest.length ? labels.map((label, i) => `${dimLabels[dims[i + 1]]}：${label.fullLabel}`).join(" · ") : "合计",
+      });
+      if (!rows.has(x)) rows.set(x, { x, values: Object.create(null), cost_coverage: Object.create(null) });
+      rows.get(x).values[column] = record.value;
+      rows.get(x).cost_coverage[column] = record.cost_coverage;
+    });
+    const resultRows = [...rows.values()];
+    resultRows.forEach((row) => columns.forEach((_label, column) => {
+      if (!(column in row.values)) row.values[column] = metric === "cost" ? null : 0;
+    }));
+    if (!timeDims.has(dims[0])) resultRows.sort((a, b) =>
+      Object.values(b.values).reduce((sum, v) => sum + (v || 0), 0)
+      - Object.values(a.values).reduce((sum, v) => sum + (v || 0), 0));
+    return { columns: [...columns.keys()], rows: resultRows, labels: Object.fromEntries(columns) };
+  }
+
+  function chartType(x) {
+    return timeDims.has(x) ? "line" : "bar";
+  }
+
+  function hasNoPivotData(data) {
+    return !data.rows.length || !data.columns.length;
+  }
+
+  // A chart that quietly shows fewer series than the data has reads as if it
+  // showed all of them, so say what was left out and where to find it.
+  function renderSeriesLimitNote(plotted, columnCount) {
+    const note = AgentMonitor.qs("#pivot-series-note");
+    if (!note) {
+      return;
+    }
+    if (plotted.dropped > 0) {
+      note.hidden = false;
+      // Not "the N smallest": ranking counts a null as zero, and for cost a
+      // null is either no activity or an unknown price. A series nobody could
+      // price therefore ranks at the bottom whatever it actually cost, so the
+      // note states the basis instead of asserting a size order it cannot know.
+      note.textContent = `趋势图显示按已知成本排名靠前的 ${AgentMonitor.SERIES_LIMIT} 个组合，另 ${plotted.dropped} 个未绘制。下方排名保留全部组合，展开分期明细可看各期数值；未知成本显示 —。`;
+      return;
+    }
+    note.hidden = true;
+    note.textContent = "";
+  }
+
+  // The palette has a fixed number of slots and no ninth hue to hand out, so a
+  // grouping that produces more series than that (group by model, typically)
+  // cannot draw them all. What happens to the remainder depends on the metric.
+  //
+  // For token and message metrics the server writes 0 for a bucket a column had
+  // no activity in, so the tail sums cleanly into one "Other" line.
+  //
+  // Cost is different: `aggregators.pivot` writes null both when a column had no
+  // activity in that bucket AND when it had activity whose price agent-monitor does not
+  // know. Those two are indistinguishable by the time they reach us, so summing
+  // the non-null members would publish a figure that silently omits real spend
+  // and still reads as a complete total. Rather than fabricate that number, the
+  // smallest columns are left out of the chart and the omission is stated; the
+  // ranking below retains every combination and its time buckets.
+  function foldColumnsToSeriesLimit(data, metric) {
+    const seriesOf = (column) => data.rows.map((row) => row.values[column]);
+    const columns = data.columns.map((key) => ({ key, series: seriesOf(key) }));
+    if (columns.length <= AgentMonitor.SERIES_LIMIT) {
+      return { columns, dropped: 0, folded: 0 };
+    }
+    const total = (series) => series.reduce((sum, value) => sum + Math.abs(Number(value) || 0), 0);
+    const ranked = columns.slice().sort((a, b) => total(b.series) - total(a.series));
+
+    if (metric === "cost") {
+      return {
+        columns: ranked.slice(0, AgentMonitor.SERIES_LIMIT),
+        dropped: columns.length - AgentMonitor.SERIES_LIMIT,
+        folded: 0,
+      };
+    }
+
+    const head = ranked.slice(0, AgentMonitor.SERIES_LIMIT - 1);
+    const tail = ranked.slice(AgentMonitor.SERIES_LIMIT - 1);
+    const merged = data.rows.map((row, rowIndex) =>
+      tail.reduce((sum, column) => sum + Number(column.series[rowIndex] || 0), 0)
+    );
+    return {
+      columns: head.concat([{ other: true, label: `其它（${tail.length}）`, series: merged }]),
+      dropped: 0,
+      folded: tail.length,
+    };
+  }
+
+  function renderChart(data, x, metric) {
+    if (hasNoPivotData(data)) {
+      // Clear the note here too, or an empty chart keeps claiming it is
+      // plotting a subset of series that are no longer on screen.
+      renderSeriesLimitNote({ dropped: 0 }, 0);
+      renderEmptyChart();
+      return;
+    }
+    setChartEmptyState(false);
+    const type = chartType(x);
+    const xLabels = data.rows.map((row) => displayLabel(row.x, x));
+    const plotted = foldColumnsToSeriesLimit(data, metric);
+    renderSeriesLimitNote(plotted, data.columns.length);
+    const datasets = plotted.columns.map((column, index) => {
+      if (column.other) {
+        return AgentMonitor.dataset(column.label, column.series, index, {
+          fill: false,
+          spanGaps: true,
+          fullLabel: column.label,
+        });
+      }
+      const label = data.labels[column.key];
+      return AgentMonitor.dataset(label.text, column.series, index, {
+        agentId: label.agentId,
+        fill: false,
+        spanGaps: true,
+        fullLabel: label.fullLabel,
+        costCoverage: data.rows.map(row => row.cost_coverage?.[column.key]),
+      });
+    });
+    AgentMonitor.chart("pivot", "pivot-chart", {
+      type,
+      data: {
+        labels: xLabels.map((label) => label.text),
+        datasets,
+      },
+      options: AgentMonitor.chartOptions({
+        indexAxis: type === "bar" ? "y" : "x",
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: {
+            callbacks: {
+              title(items) {
+                if (!items.length) {
+                  return "";
+                }
+                const label = xLabels[items[0].dataIndex];
+                return label ? label.fullLabel : "";
+              },
+              label(context) {
+                const value = context.raw;
+                const label = context.dataset.fullLabel || context.dataset.label;
+                return metric === "cost" ? `${label}: ${AgentMonitor.costReading(value, context.dataset.costCoverage?.[context.dataIndex])}` : `${label}: ${formatValue(value, metric)} ${["messages", "unknown_cost"].includes(metric) ? "条" : "tokens"}`;
+              },
+            },
+          },
+        },
+      }),
+    });
+  }
+
+  function renderEmptyChart() {
+    if (window.ttWebCharts && window.ttWebCharts.pivot) {
+      window.ttWebCharts.pivot.destroy();
+      delete window.ttWebCharts.pivot;
+    }
+    const canvas = AgentMonitor.qs("#pivot-chart");
+    if (canvas) {
+      const context = canvas.getContext("2d");
+      if (context) {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+    setChartEmptyState(true);
+  }
+
+  function setChartEmptyState(show) {
+    const canvas = AgentMonitor.qs("#pivot-chart");
+    if (!canvas) {
+      return;
+    }
+    const box = canvas.closest(".chart-box");
+    if (!box) {
+      return;
+    }
+    let empty = AgentMonitor.qs("#pivot-chart-empty", box);
+    if (!empty) {
+      empty = document.createElement("div");
+      empty.id = "pivot-chart-empty";
+      empty.className = "empty-state chart-empty-state";
+      empty.textContent = "当前范围内无记录，请检查日期与筛选条件。";
+      box.appendChild(empty);
+    }
+    empty.hidden = !show;
+    canvas.hidden = show;
+  }
+
+  function rankingData(data) {
+    const indices = data.dimensions.map((dim, i) => timeDims.has(dim) ? -1 : i).filter((i) => i >= 0);
+    const timeIndex = data.dimensions.findIndex((dim) => timeDims.has(dim));
+    const groups = new Map();
+    data.rows.forEach((row) => {
+      const key = indices.map((i) => row.key[i]);
+      const id = JSON.stringify(key);
+      if (!groups.has(id)) groups.set(id, { key, value: null, periods: [], cost_coverage: {known: 0, unknown: 0} });
+      const group = groups.get(id);
+      if (row.value !== null) group.value = (group.value ?? 0) + row.value;
+      if (!row.cost_coverage) group.cost_coverage = null;
+      else if (group.cost_coverage) {
+        group.cost_coverage.known += row.cost_coverage.known;
+        group.cost_coverage.unknown += row.cost_coverage.unknown;
+      }
+      if (timeIndex >= 0) group.periods.push({ label: row.key[timeIndex], value: row.value, cost_coverage: row.cost_coverage });
+    });
+    return { dimensions: indices.map((i) => data.dimensions[i]), rows: [...groups.values()].sort((a, b) =>
+      a.value === null ? (b.value === null ? 0 : 1) : b.value === null ? -1 : b.value - a.value) };
+  }
+
+  function renderRanking(data, metric) {
+    const ranked = rankingData(data);
+    const panel = AgentMonitor.qs("#ranking-panel");
+    panel.hidden = !ranked.dimensions.length;
+    if (panel.hidden) return;
+    const metricLabel = AgentMonitor.qs("#metric").selectedOptions[0].textContent;
+    const timeDim = data.dimensions.find((dim) => timeDims.has(dim));
+    const periodLabel = { day: "每日明细", week: "每周明细", month: "每月明细" }[timeDim] || "分期明细";
+    AgentMonitor.qs("#ranking-title").textContent = ranked.dimensions.map((dim) => dimLabels[dim]).join(" × ") + " · " + metricLabel;
+    AgentMonitor.qs("#ranking-count").textContent = AgentMonitor.integer(ranked.rows.length) + " 个组合";
+    AgentMonitor.qs("#ranking-description").textContent = "所选时间范围内合计 · 按" + (metric === "cost" ? "已知成本" : metricLabel) + "降序" +
+      (timeDim ? ` · 展开${periodLabel}` : "");
+    const chartBox = AgentMonitor.qs("#ranking-chart-box");
+    chartBox.style.height = `${Math.max(150, ranked.rows.length * 44 + 50)}px`;
+    chartBox.parentElement.hidden = !ranked.rows.length;
+    const missing = ranked.rows.filter(row => row.value == null).length;
+    const partial = metric === "cost" && ranked.rows.some(row => row.value != null && row.cost_coverage?.unknown > 0);
+    const coverage = AgentMonitor.qs("#ranking-coverage");
+    coverage.hidden = !missing && !partial;
+    coverage.textContent = [
+      missing ? `${missing} 个组合${metric === "cost" ? "无已知金额" : "无读数"}，以 — 标记` : "",
+      partial ? "部分组合含未计价记录，柱形仅表示已知成本" : "",
+    ].filter(Boolean).join("；");
+    AgentMonitor.chart("pivotRanking", "ranking-chart", {
+      type: "bar",
+      data: {
+        labels: ranked.rows.map(row => row.key.join(" · ")),
+        datasets: [AgentMonitor.dataset(metricLabel, ranked.rows.map(row => row.value), 0, { maxBarThickness: 32 })],
+      },
+      options: AgentMonitor.chartOptions({
+        indexAxis: "y",
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: {
+            title: items => ranked.rows[items[0].dataIndex].key.join(" · "),
+            label: context => metric === "cost"
+              ? [AgentMonitor.costReading(context.raw, ranked.rows[context.dataIndex].cost_coverage),
+                 AgentMonitor.costCoverageText(ranked.rows[context.dataIndex].cost_coverage)]
+              : formatValue(context.raw, metric),
+          } },
+        },
+        scales: {
+          x: { beginAtZero: true, ticks: { callback: value => metric === "cost" ? AgentMonitor.chartMoneyTick(value) : AgentMonitor.compactNumber(value) } },
+          y: { ticks: { autoSkip: false } },
+        },
+        layout: { padding: { right: 96 } },
+      }),
+      plugins: [AgentMonitor.barValueLabels(metric === "cost" ? AgentMonitor.money : AgentMonitor.compactNumber, "—")],
+    });
+    const ranking = AgentMonitor.qs("#group-ranking");
+    const rankingScroll = ranking.scrollTop;
+    const expanded = new Map(AgentMonitor.qsa("#group-ranking .ranking-periods[open]").map(element => [element.dataset.key, element.scrollTop]));
+    AgentMonitor.qs("#group-ranking").innerHTML = ranked.rows.length ? ranked.rows.map((row) => {
+      const key = JSON.stringify([ranked.dimensions, row.key, metric]);
+      const label = row.key.map((value, i) => `<span><small>${escapeHtml(dimLabels[ranked.dimensions[i]])}</small>${escapeHtml(value)}</span>`).join("");
+      const periods = row.periods.map((period) => `<div class="ranking-period"><span>${escapeHtml(period.label)}</span><span class="reading-amount">${metric === "cost" ? AgentMonitor.costReading(period.value, period.cost_coverage).split(" · ")[0] : formatValue(period.value, metric)}</span></div>`).join("");
+      const query = new URLSearchParams({ range: AgentMonitor.getRange(), ...dateParams(), sort: metric === "cost" ? "cost" : "tokens" });
+      filterNames.forEach(name => { const value = desiredFilterValue(name); if (value) query.set(name, value); });
+      ranked.dimensions.forEach((dim, index) => query.set(dim, row.key[index]));
+      if (metric === "unknown_cost") query.set("cost_status", "unknown");
+      const follow = metric === "unknown_cost" && row.value === 0 ? '<span class="scope-note">没有未知成本记录</span>' : `<a class="panel-link" href="/sessions?${escapeHtml(query.toString())}">${metric === "unknown_cost" ? "查看含未知成本的会话" : "查看会话"}</a>`;
+      return `<li class="ranking-item"><div class="ranking-heading"><div class="ranking-dimensions">${label}</div><strong>${metric === "cost" ? AgentMonitor.costReading(row.value, row.cost_coverage) : formatValue(row.value, metric)}</strong></div>${metric === "cost" && row.value == null ? '<p class="scope-note">无已知金额</p>' : ""}${metric === "cost" && row.cost_coverage?.unknown > 0 ? `<p class="scope-note">${AgentMonitor.costCoverageText(row.cost_coverage)}</p>` : ""}${follow}${periods ? `<details class="ranking-periods" data-key="${escapeHtml(key)}" ${expanded.has(key) ? "open" : ""}><summary>${periodLabel} · ${row.periods.length} 期</summary>${periods}</details>` : ""}</li>`;
+    }).join("") : '<li class="empty-state">当前范围内无记录，请检查日期与筛选条件。</li>';
+    AgentMonitor.qsa("#group-ranking .ranking-periods[open]").forEach(element => {
+      element.scrollTop = expanded.get(element.dataset.key) || 0;
+    });
+    ranking.scrollTop = rankingScroll;
+  }
+  function displayLabel(value, dim) {
+    const fullLabel = String(value || "");
+    if (dim !== "project") {
+      return { text: fullLabel, fullLabel };
+    }
+    return { text: projectDisplayLabel(value), fullLabel };
+  }
+
+  function projectDisplayLabel(value) {
+    const text = String(value || "");
+    if (!text.startsWith("/") || text === "Other") {
+      return text;
+    }
+    const parts = text.split("/").filter(Boolean);
+    if (parts.length <= 2) {
+      return parts.join("/");
+    }
+    return parts.slice(-2).join("/");
+  }
+
+  function formatValue(value, metric) {
+    if (metric === "cost") {
+      return AgentMonitor.moneyPrecise(value);
+    }
+    if (value === null || value === undefined) {
+      return "—";
+    }
+    return AgentMonitor.integer(value);
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  window.AgentMonitorPivot = { init, chartType, chartData, rankingData };
+})();

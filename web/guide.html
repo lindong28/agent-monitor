@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>agent-monitor 数据来源</title>
+    <link rel="stylesheet" href="/web/styles.css">
+    <script src="/web/vendor/chart.umd.min.js"></script>
+    <script src="/web/app.js"></script>
+    <script src="/web/pivot.js"></script>
+  </head>
+  <body>
+    <dialog id="page-search" class="page-search" aria-labelledby="page-search-title">
+      <div class="search-heading"><h2 id="page-search-title">搜索页面与帮助</h2><button type="button" id="close-page-search" aria-label="关闭搜索">关闭</button></div>
+      <p class="scope-note">查找功能入口和接入说明；账号与会话内容请使用各页面的筛选。</p>
+      <label class="sr-only" for="page-search-input">页面或帮助关键词</label>
+      <div class="search-input-row"><input id="page-search-input" type="search" placeholder="搜索总览、会话、安装…" autocomplete="off"><button type="button" id="clear-page-search">清空</button></div>
+      <p id="page-search-count" class="scope-note" role="status"></p>
+      <div id="page-search-results" class="search-results"></div>
+    </dialog>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <header class="app-header">
+          <a class="brand" data-preserve-range href="/">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-title">agent-monitor</span>
+          </a>
+          <nav class="top-nav" aria-label="区域导航">
+            <a data-area="console" href="/">控制台</a>
+            <a data-area="guide" aria-current="page" data-preserve-range href="/guide/sources">使用与接入</a>
+          </nav>
+          <button class="header-search" id="open-page-search" type="button" aria-haspopup="dialog" aria-controls="page-search"><span aria-hidden="true">⌕</span> 搜索页面与帮助</button>
+        </header>
+        <nav class="nav" aria-label="控制台导航" hidden>
+          <a data-nav href="/">总览</a>
+          <a data-nav href="/explore">透视</a>
+          <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/collection">采集与诊断</a>
+          <a data-nav href="/network">网络</a>
+        </nav>
+        <nav class="nav guide-nav" aria-label="使用与接入导航">
+          <a href="/guide/sources" aria-current="page">数据来源</a>
+          <a href="/guide/collection">采集状态</a>
+          <a href="/guide/setup">首次接入</a>
+          <a href="/guide/questions">查找证据</a>
+        </nav>
+      </aside>
+      <main class="main guide-main">
+        <div class="page-toolbar"><div class="page-location"><span class="workspace-label">使用与接入</span><span class="breadcrumb-separator" aria-hidden="true">/</span><h1 class="page-title">数据来源</h1></div></div>
+        <article class="guide-article">
+        <section class="panel" id="sources">
+          <h2>先确认数据来自哪里</h2>
+          <p class="scope-note">金额来自日志记录或估算，不是服务商账单。</p>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="数据源与查看入口"><table class="guide-source-table"><thead><tr><th>数据源</th><th>提供什么</th><th>查看入口</th></tr></thead><tbody>
+            <tr><th>Claude Code / Codex</th><td data-label="提供什么">本地日志采集出的 token、估算成本和留存会话。采集前已删除的日志无法恢复。</td><td data-label="查看入口"><a href="/explore">透视归因</a> · <a href="/sessions">会话明细</a></td></tr>
+            <tr><th>服务商账号</th><td data-label="提供什么">账号的 5 小时和 7 天配额窗口及查询时间。采集失败保留旧读数，页面日期不改变配额窗口。</td><td data-label="查看入口"><a href="/#quota-explorer">配额与账号</a></td></tr>
+            <tr><th>服务端网络</th><td data-label="提供什么">运行 Web 服务的主机出口与网络诊断，不是浏览器设备的网络。</td><td data-label="查看入口"><a href="/network">检测主机与结果</a></td></tr>
+          </tbody></table></div>
+        </section>
+        </article>
+      </main>
+    </div>
+    <script>AgentMonitor.initClientNavigation(); AgentMonitor.initGuide();</script>
+  </body>
+</html>
