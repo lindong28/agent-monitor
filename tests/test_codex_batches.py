@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class BatchTests(unittest.TestCase):
     def setUp(self):
         for patch in (mock.patch.object(ca, "START_INTERVAL_SECONDS", 0),
+                      mock.patch.object(ca.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"),
                       mock.patch.object(ca.shutil, "which", return_value=sys.executable)):
             patch.start()
             self.addCleanup(patch.stop)
@@ -30,6 +31,7 @@ class BatchTests(unittest.TestCase):
         real_popen = subprocess.Popen
 
         def spawn(command, **kwargs):
+            self.assertEqual(command[:4], [sys.executable, "app-server", "--listen", "stdio://"])
             directory = Path(kwargs["env"]["CODEX_HOME"]).parent
             record = self.manager.read(directory)
             kwargs["env"].update(FAKE_EMAIL=record["email"], FAKE_ACCOUNT=record["account_id"],

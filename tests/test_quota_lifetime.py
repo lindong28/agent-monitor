@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PARENT = r"""
 import os, subprocess, sys
 sys.path.insert(0, sys.argv[1])
+os.environ['AGENT_MONITOR_PROXY_INTERNAL'] = 'http://agent-monitor:synthetic-test-capability@127.0.0.1:9'
 import quota_refresh as qr
 from parsers.accounts import Account
 qr.ROOT = qr.Path(os.environ['LIFETIME_TEST_ROOT'])
