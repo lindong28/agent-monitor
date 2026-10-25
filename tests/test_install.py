@@ -46,6 +46,8 @@ class RollupInstallerTests(unittest.TestCase):
         (self.component / "proxy_runtime/install.py").write_text("print('present')\n")
         shutil.copy2(ROOT / "requirements.txt", self.component / "requirements.txt")
         shutil.copy2(ROOT / "hub.py", self.component / "hub.py")
+        shutil.copy2(ROOT / "service_runtime.py", self.component / "service_runtime.py")
+        (self.component / "connector_service.py").write_text("import pathlib\npathlib.Path.home().joinpath('connector-actions').write_text('converge')\n")
         # Fixtures must not depend on the operator's deployment configuration.
         (self.component / "hub.json").write_text(json.dumps({
             "schema_version": 1, "hub": "node-d", "url": "http://node-d:39001",
@@ -99,6 +101,7 @@ else: sys.exit(9)
         self.assertEqual(data["StartInterval"], 3600)
         self.assertEqual(data["ProgramArguments"], [str(self.component / "agent-monitor"), "refresh"])
         self.assertTrue(data["RunAtLoad"])
+        self.assertEqual((self.home / 'connector-actions').read_text(), 'converge')
         r = self.install()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("\tagent-monitor rollup\tpresent\t", self.ledger)
@@ -112,6 +115,7 @@ else: sys.exit(9)
         self.assertIn("\tagent-monitor rollup\tskipped\tPlatform:", self.ledger)
         self.assertFalse(self.plist.exists())
         self.assertFalse((self.home / "calls").exists())
+
 
 
     def test_portable_fresh_repeat_ledger_and_runtime_are_independent(self):
@@ -134,6 +138,7 @@ else: sys.exit(9)
         self.assertIn("--no-services; existing services unchanged", self.ledger)
         self.assertFalse(self.plist.exists())
         self.assertFalse((self.home / "calls").exists())
+        self.assertFalse((self.home / 'connector-actions').exists())
 
     def test_hub_role_preserves_120_second_local_collector(self):
         result = self.install("hub", "node-c")

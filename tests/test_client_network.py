@@ -21,9 +21,25 @@ import client_network
 import network_policy
 import server
 import codex_accounts
+import service_runtime
 
 
 class NetworkTests(unittest.TestCase):
+    def test_connector_management_http_reports_boot_source_and_settings(self):
+        connector, _, _ = self.connector(b'identity')
+        client = http.client.HTTPConnection('127.0.0.1', connector.pair_server.server_port, timeout=3)
+        self.addCleanup(client.close)
+        client.request('GET', '/health')
+        response = client.getresponse()
+        self.assertEqual(response.status, 200)
+        value = json.loads(response.read())
+        self.assertEqual(value['source_root'], str(Path(client_connector.__file__).resolve().parent))
+        expected = service_runtime.configured_signature(client_connector.BOOT_DEPLOYMENT_SIGNATURE,
+                                                        [connector.server, str(connector.state_file)])
+        self.assertEqual(value['deployment_signature'], expected)
+        self.assertNotEqual(expected, service_runtime.configured_signature(client_connector.BOOT_DEPLOYMENT_SIGNATURE,
+                                                                           ['http://different', str(connector.state_file)]))
+
     def start_http(self, handler):
         http = ThreadingHTTPServer(('127.0.0.1', 0), handler)
         thread = threading.Thread(target=http.serve_forever, daemon=True)

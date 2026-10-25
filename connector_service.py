@@ -12,6 +12,7 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 import urllib.request
+import service_runtime
 
 ROOT = Path(__file__).resolve().parent
 LABEL = "com.agent-monitor.connector"
@@ -88,7 +89,9 @@ def definition(server, state_path):
             "WorkingDirectory": str(ROOT), "RunAtLoad": True, "KeepAlive": True,
             "ThrottleInterval": 30, "LimitLoadToSessionType": "Aqua",
             "StandardOutPath": "/dev/null", "StandardErrorPath": "/dev/null",
-            "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}}
+            "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                "AGENT_MONITOR_DEPLOYMENT_SIGNATURE": service_runtime.configured_signature(
+                    service_runtime.signature(ROOT), [origin(server), str(state_path)])}}
 
 
 def launch(*args):
@@ -100,7 +103,7 @@ def job_target():
 
 
 def owned_definition(path):
-    if not path.exists():
+    if not path.exists() and not path.is_symlink():
         return None
     try:
         value = plistlib.loads(path.read_bytes())
@@ -117,14 +120,25 @@ def owned_definition(path):
 def inspect():
     plist, state_path = paths()
     managed = owned_definition(plist)
-    loaded = launch("print", job_target()).returncode == 0
+    loaded = owned_loaded(managed)
     live = health()
-    saved = read_state(state_path)
+    saved = read_state(managed["ProgramArguments"][5] if managed else state_path)
     configured = managed["ProgramArguments"][3] if managed else None
     connected = bool(live and live.get("connected") and (not configured or live.get("server") == configured))
     return {"installed": bool(managed), "loaded": loaded, "connected": connected,
             "server": configured or (live or {}).get("server"),
             "device": (live or {}).get("label"), "observation": live, "last_status": saved}
+
+
+def owned_loaded(managed):
+    result = launch("print", job_target())
+    if result.returncode == 113:
+        return False
+    if result.returncode:
+        raise ValueError("无法核实连接服务加载状态；现有服务及配置已保留。")
+    if not managed or service_runtime.arguments(result.stdout) != managed["ProgramArguments"]:
+        raise ValueError("已加载连接服务属于其他安装或无法识别；未停止或替换它。")
+    return True
 
 
 def show_status(value, as_json=False):
@@ -134,6 +148,8 @@ def show_status(value, as_json=False):
     if value["connected"]:
         print(f"本机网络通道已连接：{value['device']} → {value['server']}。")
         print("可回到页面点击「开始新一轮」；发送前仍需确认出口。")
+    elif not value["installed"] and not value["loaded"] and value.get("observation") is None:
+        print("可选连接服务未启用；无需修复。需要通过本机发送账号请求时再安装。")
     else:
         print("本机网络通道尚未就绪；当前无法通过本机发送账号请求。")
         print("运行 agent-monitor connect install --server <页面根地址> 启用或恢复连接服务。")
@@ -147,14 +163,15 @@ def show_status(value, as_json=False):
 
 def install(server):
     plist, state_path = paths()
-    wanted = definition(server, state_path)
     if not (ROOT / ".venv/bin/python").is_file():
         raise ValueError("先在此安装目录运行 ./install.sh --no-services，再启用连接服务。")
     old = owned_definition(plist)
-    loaded = launch("print", job_target()).returncode == 0
-    if loaded and not old:
-        raise ValueError("发现同名服务但无法确认归属；未停止或替换它。")
-    if loaded and old == wanted:
+    if old:
+        state_path = Path(old["ProgramArguments"][5])
+    wanted = definition(server, state_path)
+    loaded = owned_loaded(old)
+    expected = wanted["EnvironmentVariables"]["AGENT_MONITOR_DEPLOYMENT_SIGNATURE"]
+    if loaded and old == wanted and service_runtime.matches(health(), ROOT, expected):
         print("连接服务已启用，保留现有连接。若通道不可用，可运行 agent-monitor connect restart。")
         return inspect()
     if not loaded:
@@ -177,6 +194,7 @@ def install(server):
     result = launch("bootstrap", f"gui/{os.getuid()}", str(plist))
     if result.returncode:
         raise ValueError("连接服务配置已保存，但加载失败；请登录macOS桌面后重新运行安装命令。")
+    service_runtime.wait_for_identity(health, ROOT, expected)
     print("本机连接服务已启用，登录后自动启动；关闭终端不会停止。")
     print("正在建立内网连接，可用 agent-monitor connect status 查看；停用使用 agent-monitor connect stop。")
     # Bootstrap is not a readiness proof; status reports pending separately.
@@ -186,9 +204,7 @@ def install(server):
 def stop():
     plist, state_path = paths()
     managed = owned_definition(plist)
-    loaded = launch("print", job_target()).returncode == 0
-    if loaded and not managed:
-        raise ValueError("同名服务归属无法确认；未停止它。")
+    loaded = owned_loaded(managed)
     if loaded and launch("bootout", job_target()).returncode:
         raise ValueError("连接服务卸载失败；未删除配置，请用 connect status 检查。")
     if managed:
@@ -198,7 +214,7 @@ def stop():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="管理浏览器设备的后台网络连接，不执行账号请求。")
-    parser.add_argument("action", choices=("install", "status", "stop", "restart"))
+    parser.add_argument("action", choices=("install", "converge", "status", "stop", "restart"))
     parser.add_argument("--server")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -211,19 +227,32 @@ def main(argv=None):
             if not args.server:
                 parser.error("install requires --server")
             show_status(install(args.server), args.json)
+        elif args.action == "converge":
+            plist, _ = paths()
+            managed = owned_definition(plist)
+            if managed:
+                show_status(install(managed["ProgramArguments"][3]))
+            else:
+                owned_loaded(None)
+                print("连接服务未安装；保留未启用状态。")
         elif args.action == "stop":
             stop()
         elif args.action == "restart":
             plist, _ = paths()
-            if not owned_definition(plist):
+            managed = owned_definition(plist)
+            if not managed:
                 raise ValueError("连接服务尚未安装；先运行 connect install --server <页面根地址>。")
+            if not owned_loaded(managed):
+                show_status(install(managed["ProgramArguments"][3]))
+                return 0
             if launch("kickstart", "-k", job_target()).returncode:
                 raise ValueError("连接服务重启失败；请运行 connect install --server <页面根地址> 恢复。")
             print("已请求重启连接服务；旧批次连接失效，不会重发。用 connect status 检查就绪状态。")
         else:
             result = inspect()
             show_status(result, args.json)
-            return 0 if result["connected"] else 1
+            disabled = not result["installed"] and not result["loaded"] and result["observation"] is None
+            return 0 if result["connected"] or disabled else 1
         return 0
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         # Do not print raw subprocess diagnostics, URLs or request exceptions.

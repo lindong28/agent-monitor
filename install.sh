@@ -337,11 +337,15 @@ if [ "$NO_SERVICES" = 1 ]; then
   echo "agent-monitor installed in staging mode: runtime, assets and CLI links ready; services and network probe skipped (--no-services)."
   emit_install_ledger service "agent-monitor rollup" skipped "--no-services; existing services unchanged"
   emit_install_ledger service "agent-monitor hub" skipped "--no-services; existing services unchanged"
+  emit_install_ledger service "agent-monitor connector" skipped "--no-services; existing services unchanged"
   exit 0
 fi
 install_rollup_daemon
 if [ -f "$ROOT_DIR/state/hub-machine" ]; then
   "$VENV_PY" "$ROOT_DIR/hub.py" install-web
+fi
+if [ "$(uname -s)" = Darwin ]; then
+  "$VENV_PY" "$ROOT_DIR/connector_service.py" converge
 fi
 
 # --- post-install network health hint ---

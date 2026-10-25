@@ -35,6 +35,13 @@ class HubTests(unittest.TestCase):
         config_patch = mock.patch.object(hub, "CONFIG_PATH", self.config_path)
         config_patch.start()
         self.addCleanup(config_patch.stop)
+        for patch in (
+            mock.patch('hub.service_runtime.wait_for_identity'),
+            mock.patch('hub.service_runtime.read_health', side_effect=lambda _url: {
+                'source_root': str(hub.ROOT), 'deployment_signature': hub.service_runtime.signature(hub.ROOT)}),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
         self.machines_path = self.root / "machines.json"
         self.machines_path.write_text(json.dumps({"machines": [
             {"name": name, "ssh_host": name, "self": name == "node-b"}
@@ -113,7 +120,7 @@ class HubTests(unittest.TestCase):
             with self.subTest(code=code, owner=owner):
                 dest.write_bytes(plistlib.dumps(hub.web_plist(hub.ROOT, "/usr/bin/python3")))
                 with mock.patch("hub.Path.home", return_value=self.root), \
-                        mock.patch("hub.subprocess.run", return_value=SimpleNamespace(returncode=code, stdout=owner)) as run:
+                        mock.patch("hub.subprocess.run", return_value=SimpleNamespace(returncode=code, stdout='arguments = {\n/usr/bin/python3\n' + owner + '\nserve\n}\n')) as run:
                     if allowed:
                         hub.stop_web(uninstall=True)
                         self.assertFalse(dest.exists())
@@ -224,7 +231,7 @@ class HubTests(unittest.TestCase):
         previous = hub.web_plist(hub.ROOT, hub.sys.executable, path="/bin:/usr/bin")
         previous["EnvironmentVariables"]["SSH_AUTH_SOCK"] = "/var/run/com.apple.launchd.old/Listeners"
         dest.write_bytes(plistlib.dumps(previous))
-        loaded = SimpleNamespace(returncode=0, stdout=str(hub.ROOT / "hub.py") + "\n")
+        loaded = SimpleNamespace(returncode=0, stdout='arguments = {\n' + hub.sys.executable + '\n' + str(hub.ROOT / "hub.py") + '\nserve\n}\n')
         with mock.patch("hub.Path.home", return_value=self.root), \
                 mock.patch("hub.is_hub", return_value=True), \
                 mock.patch.dict("os.environ", {"PATH": "/bin:/usr/bin", "SSH_AUTH_SOCK": "/var/run/com.apple.launchd.new/Listeners"}), \
@@ -249,7 +256,7 @@ class HubTests(unittest.TestCase):
                 def launchctl(argv, **kwargs):
                     actions.append(argv[1])
                     if argv[1] == "print":
-                        return SimpleNamespace(returncode=0, stdout=str(hub.ROOT / "hub.py") + "\n")
+                        return SimpleNamespace(returncode=0, stdout='arguments = {\n' + hub.sys.executable + '\n' + str(hub.ROOT / "hub.py") + '\nserve\n}\n')
                     if argv[1] == "bootstrap" and actions.count("bootstrap") <= failures:
                         self.assertEqual(kwargs["timeout"], 15)
                         if timeout:
@@ -277,7 +284,7 @@ class HubTests(unittest.TestCase):
         for loaded_owner, allowed in ((str(hub.ROOT / "hub.py"), True),
                                       ("/another/checkout/hub.py", False)):
             with self.subTest(owner=loaded_owner), mock.patch("hub.Path.home", return_value=self.root), \
-                    mock.patch("hub.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=loaded_owner)) as run:
+                    mock.patch("hub.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout='arguments = {\n/usr/bin/python3\n' + loaded_owner + '\nserve\n}\n')) as run:
                 if allowed:
                     hub.stop_web()
                     self.assertEqual(run.call_args.args[0][1], "bootout")

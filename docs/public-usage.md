@@ -86,6 +86,14 @@ git merge --ff-only origin/main
 
 Replace `FULL_SHA` with the published commit you selected. `--check-only` does not install. A successful preflight is not service health: inspect status and the actual dashboard afterward. Deployment does not push, discard changes, migrate state or replace locks. Development worktrees are not persistent production roots. Preserve local edits and coordinate writers if preflight reports a dirty or diverged checkout.
 
+For the configured macOS Hub and an already installed connector, installation compares source and selected configuration identity, reloads changed jobs, and checks the local HTTP endpoint for the target checkout and version. The polling budget is 30 seconds, plus at most two seconds for the final HTTP attempt. The connector retains its configured server and status-file path; without an existing installation it stays disabled. `--no-services` skips both convergence and these checks. Periodic collectors and CLI commands read updated source on their next execution.
+
+Managed updates use stop/start and can interrupt requests or connector routes. Finish account operations before updating; uncertain sends are not automatically replayed. The installer preserves retained state and startup definitions after a failed replacement, reports nonzero, and does not claim that the old process is still available. Use `./status.sh`, `state/hub.log` and `./agent-monitor connect status` to locate the remaining failure before rerunning the same deployment entry. A source rollback is only appropriate when compatible with the retained data/configuration; this update does not migrate their schemas. Manually started dashboards keep the README's explicit stop/update/start procedure.
+
+`./status.sh` includes the optional connector; select `web`, `rollup-daemon` or `connector` to inspect one component. `./uninstall.sh` uses the same selectors and defaults to all three, including disabling connector autostart. It checks service ownership before stopping or removing integration, retains foreign or unrecognized definitions/loaded jobs, and removes only CLI links pointing to this checkout. It never removes state or persistent locks. A foreign component can fail removal while other owned components are still removed; the overall exit code is nonzero.
+
+On Linux, `./agent-monitor open` uses `xdg-open` when a desktop session and that command are available. Otherwise it prints the dashboard URL and leaves the running server available.
+
 For runtime observations and backend investigation, see [service diagnostics](operations/services.md) and [backend checks](public-architecture.md#backend-performance-checks).
 
 ## Troubleshooting

@@ -2,6 +2,8 @@
 
 Installation, update and existing-installation transition are documented in [usage and operations](../public-usage.md). Run lifecycle commands from the owning checkout. `./agent-monitor status` and `/api/health` identify the running instance; source preflight alone does not prove service health. Inspect `state/server.log` for startup failures. Never remove persistent locks or replace an existing state symlink to force startup.
 
+Managed deployment checks the Hub's `/api/health?asset_watch=1` and the connector's loopback `/health`. Their `source_root` and `deployment_signature` identify the checkout and source/selected configuration captured at process startup; changing a plist alone is not proof of activation. The installer checks this identity with a bounded wait after replacement and retains an already matching process. This proves local process response, not browser access, collected-data admission, provider availability or completion of account actions. Hub startup diagnostics remain in `state/hub.log`; connector connection/failure observations remain at its configured status-file path. Deployment failures are synchronous nonzero installer results; no new background alert service is installed.
+
 ## Runtime performance diagnostics
 
 `GET /api/diagnostics` reports the serving process's active operations, recent completions, cumulative counts, coverage and source freshness. Read it at the actual address printed by `./agent-monitor status`; it does not acquire the query-view or sync lock. The observer also writes `state/diagnostics/current.json` and bounded `events.jsonl` files. Inspect these locally when HTTP is unresponsive, and sanitize paths/account data before sharing any logs.

@@ -23,6 +23,9 @@ class ServiceTests(unittest.TestCase):
         for patch in (mock.patch.object(service, 'ROOT', self.root), mock.patch.object(service, 'paths', return_value=(self.plist, self.state)), mock.patch.object(service, 'health', return_value=None)):
             patch.start()
             self.addCleanup(patch.stop)
+        patch = mock.patch.object(service.service_runtime, 'wait_for_identity')
+        patch.start()
+        self.addCleanup(patch.stop)
         patch = contextlib.redirect_stdout(io.StringIO())
         patch.__enter__()
         self.addCleanup(patch.__exit__, None, None, None)
@@ -32,7 +35,8 @@ class ServiceTests(unittest.TestCase):
         self.plist.write_bytes(plistlib.dumps(value or service.definition('http://hub:39001', self.state)))
 
     def result(self, code):
-        return subprocess.CompletedProcess([], code, '', '')
+        args = service.definition('http://hub:39001', self.state)['ProgramArguments']
+        return subprocess.CompletedProcess([], 113 if code == 1 else code, 'arguments = {\n' + '\n'.join(args) + '\n}\n', '')
 
     def test_origin_rejects_credentials_paths_and_invalid_ports(self):
         self.assertEqual(service.origin('http://hub:39001/'), 'http://hub:39001')
@@ -52,7 +56,8 @@ class ServiceTests(unittest.TestCase):
 
     def test_same_configuration_preserves_route(self):
         self.save()
-        with mock.patch.object(service, 'launch', return_value=self.result(0)) as launch:
+        live = {'source_root': str(self.root), 'deployment_signature': service.definition('http://hub:39001', self.state)['EnvironmentVariables']['AGENT_MONITOR_DEPLOYMENT_SIGNATURE']}
+        with mock.patch.object(service, 'launch', return_value=self.result(0)) as launch, mock.patch.object(service, 'health', return_value=live):
             service.install('http://hub:39001')
         self.assertEqual([c.args[0] for c in launch.call_args_list], ['print', 'print'])
 
@@ -110,3 +115,20 @@ class ServiceTests(unittest.TestCase):
         with mock.patch.object(service, 'launch', side_effect=[self.result(1), self.result(1)]), mock.patch.object(service.socket, 'socket'), self.assertRaises(ValueError):
             service.install('http://hub:39001')
         self.assertTrue(self.plist.exists())
+
+    def test_optional_convergence_skips_fresh_and_preserves_installed_server(self):
+        with mock.patch.object(service.platform, 'system', return_value='Darwin'), mock.patch.object(service, 'launch', return_value=self.result(1)), mock.patch.object(service, 'install') as install:
+            self.assertEqual(service.main(['converge']), 0)
+            install.assert_not_called()
+            self.save()
+            install.return_value = {'connected': False, 'installed': True, 'loaded': True, 'last_status': {}}
+            self.assertEqual(service.main(['converge']), 0)
+            install.assert_called_once_with('http://hub:39001')
+
+    def test_new_code_reloads_installed_connector_with_same_server_and_state(self):
+        self.save()
+        (self.root / 'client_connector.py').write_text('new code')
+        with mock.patch.object(service, 'launch', return_value=self.result(0)) as launch:
+            service.install('http://hub:39001')
+        self.assertEqual([c.args[0] for c in launch.call_args_list], ['print', 'bootout', 'bootstrap', 'print'])
+        self.assertEqual(plistlib.loads(self.plist.read_bytes())['ProgramArguments'][3:], ['http://hub:39001', '--state-file', str(self.state)])

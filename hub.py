@@ -13,6 +13,7 @@ import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
+import service_runtime
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "hub.json"
@@ -235,7 +236,8 @@ def collect():
 
 def web_plist(root, python, *, ssh_auth_sock=None, path=None):
     root = Path(root)
-    env = {"PYTHONPATH": str(root), "PATH": path or os.defpath}
+    env = {"PYTHONPATH": str(root), "PATH": path or os.defpath,
+           "AGENT_MONITOR_DEPLOYMENT_SIGNATURE": service_runtime.signature(root)}
     socket = Path(ssh_auth_sock or "")
     # Apple creates this socket for each login session. Pinning it in a plist
     # overrides launchd's fresh environment after a reboot. Custom agents keep
@@ -266,18 +268,23 @@ def install_web():
     dest = plist_dir / (WEB_LABEL + ".plist")
     plist = web_plist(ROOT, sys.executable, ssh_auth_sock=os.environ.get("SSH_AUTH_SOCK"),
                       path=os.environ.get("PATH"))
+    expected = plist["EnvironmentVariables"]["AGENT_MONITOR_DEPLOYMENT_SIGNATURE"]
+    read_health = lambda: service_runtime.read_health(
+        "http://127.0.0.1:%s/api/health?asset_watch=1" % configuration()["port"])
     domain = "gui/%s" % os.getuid()
-    previous = plistlib.loads(dest.read_bytes()) if dest.exists() else None
+    previous = plistlib.loads(dest.read_bytes()) if dest.exists() or dest.is_symlink() else None
     if previous and previous.get("ProgramArguments", [])[1:2] != [str(ROOT / "hub.py")]:
         raise ValueError("hub launchd job belongs to another checkout; incumbent preserved")
     loaded = subprocess.run(["launchctl", "print", domain + "/" + WEB_LABEL],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10)
+    if loaded.returncode not in (0, 113):
+        raise ValueError("cannot inspect loaded hub job; incumbent and startup definition preserved")
     if loaded.returncode == 0:
         # A matching on-disk owner alone does not establish the loaded job's owner.
-        if str(ROOT / "hub.py") not in {line.strip() for line in loaded.stdout.splitlines()}:
+        if service_runtime.arguments(loaded.stdout) != (previous or plist)["ProgramArguments"]:
             raise ValueError("loaded hub job owner differs; incumbent preserved")
-        if previous == plist:
-            print("agent-monitor hub: existing launchd service unchanged; reachability not checked.")
+        if previous == plist and service_runtime.matches(read_health(), ROOT, expected):
+            print("agent-monitor hub: target source/configuration already serving; existing process retained.")
             return
         subprocess.run(["launchctl", "bootout", domain + "/" + WEB_LABEL], check=True, timeout=15)
     plist_dir.mkdir(parents=True, exist_ok=True)
@@ -300,24 +307,24 @@ def install_web():
                 "service availability is unverified. Inspect 'launchctl print %s/%s' "
                 "before retrying 'agent-monitor start'." % (prior, attempt, domain, WEB_LABEL)
             ) from exc
-    print("agent-monitor hub: launchd service loaded; browser reachability and source admission still need verification.")
+    service_runtime.wait_for_identity(read_health, ROOT, expected)
+    print("agent-monitor hub: target source/configuration confirmed through local HTTP; browser and source admission still need verification.")
 
 
 def stop_web(*, uninstall=False):
     dest = Path.home() / "Library" / "LaunchAgents" / (WEB_LABEL + ".plist")
-    previous = plistlib.loads(dest.read_bytes()) if dest.exists() else None
+    previous = plistlib.loads(dest.read_bytes()) if dest.exists() or dest.is_symlink() else None
     if previous and previous.get("ProgramArguments", [])[1:2] != [str(ROOT / "hub.py")]:
         raise ValueError("hub launchd job belongs to another checkout; incumbent preserved")
     target = "gui/%s/%s" % (os.getuid(), WEB_LABEL)
     loaded = subprocess.run(["launchctl", "print", target], stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, text=True, timeout=10)
     if loaded.returncode != 0:
-        if not uninstall:
-            raise ValueError("hub launchd job is not loaded; no service stopped")
         if loaded.returncode != 113:
             raise ValueError("cannot inspect loaded hub job; startup definition preserved")
     else:
-        if str(ROOT / "hub.py") not in {line.strip() for line in loaded.stdout.splitlines()}:
+        expected = previous["ProgramArguments"] if previous else [sys.executable, str(ROOT / "hub.py"), "serve"]
+        if service_runtime.arguments(loaded.stdout) != expected:
             raise ValueError("loaded hub job owner differs; incumbent preserved")
         subprocess.run(["launchctl", "bootout", target], check=True, timeout=15)
     if uninstall:

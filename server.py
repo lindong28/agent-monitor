@@ -158,6 +158,8 @@ def _web_signature():
 # fresh signature each call, so the server self-reports when its on-disk source
 # has changed since boot (the symptom: a long-lived daemon serving old code).
 BOOT_SIGNATURE = _source_signature()
+import service_runtime
+BOOT_DEPLOYMENT_SIGNATURE = service_runtime.signature(ROOT)
 
 
 @contextmanager
@@ -517,6 +519,8 @@ def health(query):
         "ok": True,
         "instance_id": SERVER_INSTANCE_ID,
         "signature": BOOT_SIGNATURE,
+        "source_root": str(ROOT),
+        "deployment_signature": BOOT_DEPLOYMENT_SIGNATURE,
         "web_signature": _web_signature(),
         "stale": _source_signature() != BOOT_SIGNATURE or _first(query, "asset_watch", "") != "1",
     }

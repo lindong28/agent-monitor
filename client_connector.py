@@ -19,6 +19,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import client_network
 import network_policy
+import service_runtime
+
+BOOT_DEPLOYMENT_SIGNATURE = service_runtime.signature(Path(__file__).resolve().parent)
 
 
 def response_header(sock):
@@ -59,6 +62,8 @@ class Connector:
         self.local_route = local_route
         self.label = label
         self.state_file = state_file
+        self.deployment_signature = service_runtime.configured_signature(
+            BOOT_DEPLOYMENT_SIGNATURE, [self.server, str(state_file)])
         self.instance_id = uuid.uuid4().hex
         self.last_contact = 0
         self.stopped = threading.Event()
@@ -116,6 +121,7 @@ class Connector:
                 if self.path == "/health" and self.headers.get("Host") == expected_host:
                     body = json.dumps({"service": "com.agent-monitor.connector",
                         "source_root": str(Path(__file__).resolve().parent), "pid": os.getpid(),
+                        "deployment_signature": connector.deployment_signature,
                         "server": connector.server, "label": connector.label,
                         "instance_id": connector.instance_id,
                         "connected": bool(connector.registration and not connector.stopped.is_set()

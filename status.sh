@@ -9,7 +9,15 @@ ROLLUP_PLIST="$HOME/Library/LaunchAgents/$ROLLUP_LABEL.plist"
 ROLLUP_LOG="$ROOT/state/rollup-daemon.log"
 
 usage() {
-  echo "usage: ./status.sh [web|rollup-daemon]" >&2
+  echo "usage: ./status.sh [web|rollup-daemon|connector]" >&2
+}
+
+status_connector() {
+  if [ "$(uname -s)" = Darwin ]; then
+    "$ROOT/agent-monitor" connect status
+  else
+    echo "connector: no startup definition installed on this platform"
+  fi
 }
 
 status_web() {
@@ -40,14 +48,20 @@ fi
 
 case "$SERVICE" in
   all)
-    status_web
-    status_rollup_daemon
+    result=0
+    status_web || result=1
+    status_rollup_daemon || result=1
+    status_connector || result=1
+    exit "$result"
     ;;
   web)
     status_web
     ;;
   rollup-daemon)
     status_rollup_daemon
+    ;;
+  connector)
+    status_connector
     ;;
   *)
     usage

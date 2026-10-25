@@ -81,6 +81,14 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 
 For a service-managed deployment, use the existing [published-main deployment entry](docs/public-usage.md#services-and-deployment). Reinstallation does not migrate machine identities or erase retained history. `./uninstall.sh` removes owned service/CLI integration while retaining source and state.
 
+## Services
+
+On macOS, the installer manages the periodic collector and the configured Hub. An optional browser-device connector is enabled explicitly with `./agent-monitor connect install --server URL`; later installations update it while preserving its server address and state path. A fresh installation leaves the connector disabled. `--no-services` leaves all services unchanged. Linux retains the CLI and manually started dashboard.
+
+Use `./status.sh` to inspect services, `./agent-monitor start|stop|restart` for the dashboard, and `./agent-monitor connect status|stop|restart` for the connector. `./uninstall.sh` removes this checkout's service integration and CLI links; `web`, `rollup-daemon` and `connector` select one component. Foreign or unrecognized service ownership is preserved and reported. Saved data and locks remain.
+
+Published-main deployment restarts managed processes when their source or selected configuration changes and checks their local HTTP identity. This can interrupt active operations: let account operations finish first, and never replay an uncertain send. An unchanged, confirmed process is retained. A failed replacement returns nonzero with its remaining state; inspect status and logs before retrying. See [deployment and recovery](docs/public-usage.md#services-and-deployment) for the supported entry and verification limits.
+
 ## What the numbers mean
 
 Usage is derived from retained local observations, not provider invoices. Known costs are subtotals for priceable observations; unknown price or incomplete usage is not zero. Codex inherited pagination usage and repeated Claude streaming observations are deduplicated under the existing accounting rules. Aggregate history can outlive detailed session records. Quotas are observations with their own timestamps; an expired reset does not prove fresh quota is available. Date boundaries use Asia/Shanghai.

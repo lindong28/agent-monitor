@@ -197,6 +197,16 @@ request_fresh_generation() {
   fi
 }
 
+open_url() {
+  local url="$1"
+  if [ "$(uname -s)" = Darwin ] && command -v open >/dev/null 2>&1; then
+    open "$url" && return 0
+  elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" && return 0
+  fi
+  echo "Open this dashboard URL in your browser: $url"
+}
+
 open_dashboard() {
   local hub_url
   hub_url="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" url)"
@@ -205,7 +215,7 @@ open_dashboard() {
     if [ -n "${SSH_CONNECTION:-}" ]; then
       echo "$hub_url"
     else
-      open "$hub_url"
+      open_url "$hub_url"
     fi
     return
   fi
@@ -222,13 +232,13 @@ open_dashboard() {
 
   if [ -n "${SSH_CONNECTION:-}" ]; then
     local ts_host
-    ts_host="$(tailscale status --json 2>/dev/null | "$AGENT_MONITOR_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("Self",{}).get("DNSName",""))' 2>/dev/null)"
+    ts_host="$(tailscale status --json 2>/dev/null | "$AGENT_MONITOR_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("Self",{}).get("DNSName",""))' 2>/dev/null || true)"
     ts_host="${ts_host%%.*}"  # extract the short hostname from the device's full DNS name
     : "${ts_host:=$(hostname)}"
     local url="http://$ts_host:$port"
     printf '\e]8;;%s\e\\%s\e]8;;\e\\\n' "$url" "$url"
   else
-    open "http://$CONNECT_HOST:$port"
+    open_url "http://$CONNECT_HOST:$port"
   fi
 }
 
