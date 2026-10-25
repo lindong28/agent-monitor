@@ -78,6 +78,7 @@ const batchStart={},batchNext={},batchRetry={},batchStatus={},batchHelp={replace
 const root={querySelector(){return null;}}, selectedIds=new Set(['p']);
 const element=(tag,text)=>({tag,textContent:text});
 const unavailable=[],submittingBatch=false,timestamp=x=>x;
+const upstreamPause=null,egressPreview=null,deviceConnect=null;
 const before={observed_at:"2026-10-14T00:00:00Z",seven_day_resets_at:Date.now()/1000+3600};
 const op={message_status:"succeeded",before};
 const batch={id:"b",created_at:"2026-10-13T00:00:00Z",items:[{profile_id:"p",operation:op}]};

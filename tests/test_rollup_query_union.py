@@ -88,7 +88,7 @@ class RollupQueryUnionTests(unittest.TestCase):
 
             with mock.patch("rollup.admitted_generations", return_value=generations):
                 combined = rollup.query_pivot("machine", "none", "input")
-                only_macmini = rollup.query_pivot(
+                only_node_c = rollup.query_pivot(
                     "day", "none", "input", machines={"node-c"}
                 )
 
@@ -102,7 +102,7 @@ class RollupQueryUnionTests(unittest.TestCase):
                 {"node-b": expected_first, "node-c": expected_second},
             )
             self.assertEqual(
-                sum(row["values"]["value"] for row in only_macmini["rows"]),
+                sum(row["values"]["value"] for row in only_node_c["rows"]),
                 expected_second,
             )
 

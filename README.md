@@ -45,7 +45,7 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 ./agent-monitor open
 ```
 
-Open the address printed by `start`. In **用量概览**, inspect recorded tokens and estimated cost. Open **会话**, select **全部** for the date range, then select a session to see its usage records. Missing logs produce an empty view; they do not mean zero historical spending. Account login and sending messages are separate optional actions and are not required for this flow.
+Open the address printed by `start`. In **总览**, inspect recorded tokens and estimated cost. Open **会话**, select **全部** for the date range, then select a session to see its usage records. Missing logs produce an empty view; they do not mean zero historical spending. Account login and sending messages are separate optional actions and are not required for this flow.
 
 The source default binds `0.0.0.0`, with port 39001 or the next free port. The local-only command above uses loopback. **The dashboard has no client authentication.** Keep it off the public Internet and untrusted networks; read [SECURITY.md](SECURITY.md) before sharing network access. `AGENT_MONITOR_PORT` selects a different starting port.
 
@@ -60,7 +60,9 @@ HOME="$demo_home" CLAUDE_CONFIG_DIR="$demo_home/.claude" CODEX_HOME="$demo_home/
 ./agent-monitor status
 ```
 
-Open the printed URL, choose **会话 → 全部**, and open `demo-session`. In **用量概览**, select all history to include the sample date. This is the normal parser and dashboard flow with fabricated input. Automatic quota refresh still runs, but the sample has no signed-in account metadata; unavailable quota is expected. Do not click provider login/send or network diagnostics for this sample check. The server can attempt a public pricing refresh and falls back to bundled prices, so this is not an offline mode; no model request is needed. Stop with `./agent-monitor stop` before deleting the disposable sample HOME or starting with another HOME. State belongs to this checkout, so changing HOME alone does not clear earlier collected data.
+Open the printed URL and choose **总览 → 全部** to include the sample date and see 1,800 total tokens. Then choose **会话 → 全部** and open the row labeled `~/example-project`. In the session details, expand **用量记录** to inspect the two observations and **会话标识与记录范围** to confirm the ID `demo-session`; that ID is not the list label.
+
+This is the normal parser and dashboard flow with fabricated input. Automatic quota refresh still runs, but the sample has no signed-in account metadata; unavailable quota is expected. Do not click provider login/send or network diagnostics for this sample check. The server can attempt a public pricing refresh and falls back to bundled prices, so this is not an offline mode; no model request is needed. Stop with `./agent-monitor stop` before deleting the disposable sample HOME or starting with another HOME. State belongs to this checkout, so changing HOME alone does not clear earlier collected data.
 
 ## Configuration and updates
 

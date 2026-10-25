@@ -1177,10 +1177,13 @@ class AdmissionStatusTests(unittest.TestCase):
                 self.assertEqual(excluded["exclusion_reason"], expected_reason)
                 quota = limits["claude"]["accounts"]
                 self.assertEqual(len(quota), 1)
-                self.assertEqual(quota[0]["five_hour_used_pct"], 30)
+                # The fixed reset timestamps are expired; admission still selects
+                # the latest retained observation without inventing current quota.
+                self.assertIsNone(quota[0]["five_hour_used_pct"])
+                self.assertEqual(quota[0]["last_observation"]["five_hour_used_pct"], 30)
                 self.assertEqual(quota[0]["machines"], ["node-a", "node-b"])
                 # The excluded machine contributes neither its value nor its name.
-                self.assertNotEqual(quota[0]["five_hour_used_pct"], 20)
+                self.assertNotEqual(quota[0]["last_observation"]["five_hour_used_pct"], 20)
                 self.assertNotIn("node-c", quota[0]["machines"])
 
     def install_wrong_fingerprint(self, root, machine):
@@ -1365,6 +1368,7 @@ class AdmissionStatusTests(unittest.TestCase):
             "messages": multiplier_sum,
             "output": 2 * multiplier_sum,
             "total": 19 * multiplier_sum,
+            "unknown_cost": 0,  # Every fixture observation has a known price.
         }
 
     @staticmethod
@@ -1679,7 +1683,7 @@ window.AgentMonitor.renderSyncStatus(reachable);
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
-        self.assertIn(">可用<", payload["before"])
+        self.assertIn(">快照可读<", payload["before"])
         self.assertIn(">未检查<", payload["after"])
         self.assertIn("本服务启动后还没检查过这台机器", payload["after"])
         self.assertEqual(payload["reloads"], 0)
@@ -1823,7 +1827,9 @@ const nodes = Object.assign(controls, {
   "#ranking-title": {},
   "#ranking-count": {},
   "#ranking-description": {},
-  "#group-ranking": { set innerHTML(html) { rendered.push(html); } },
+  "#ranking-chart-box": { style: {}, parentElement: {} },
+  "#ranking-coverage": {},
+  "#group-ranking": { set innerHTML(html) { rankings.push(html); } },
   "#pivot-chart": { closest() { return null; } },
 });
 let page = new URL("http://example.test/explore?x=machine&group=none&metric=cost&range=30d");
@@ -1838,7 +1844,7 @@ global.document = {
 };
 let resolveA;
 let resolveB;
-const rendered = [];
+const charts = [], rankings = [];
 global.AgentMonitor = {
   snapshotFingerprint(status) { return JSON.stringify(status.machines || []); },
   qs(selector) { return nodes[selector] || null; },
@@ -1859,10 +1865,12 @@ global.AgentMonitor = {
   watchPageData() {},
   integer(value) { return String(value); },
   moneyPrecise(value) { return String(value); },
+  costReading(value) { return String(value); },
   costCoverageText() { return "定价覆盖未知"; },
   dataset(label, data) { return { label, data }; },
-  chart(_key, _id, config) { rendered.push(config.data.labels[0]); },
+  chart(key, _id, config) { charts.push({key, label: config.data.labels[0]}); },
   chartOptions(value) { return value; },
+  barValueLabels() { return {}; },
   api(path, query) {
     if (path === "/api/sync-status") return Promise.resolve({ syncing: false, completed_at: null, machines: [] });
     if (path === "/api/pivot-filters") return Promise.resolve({ machine: ["A", "B"] });
@@ -1888,7 +1896,7 @@ eval(fs.readFileSync("web/pivot.js", "utf8"));
   await requestB;
   resolveA({ dimensions: ["machine"], rows: [{ key: ["A-data"], value: 1 }] });
   await requestA;
-  process.stdout.write(JSON.stringify({ rendered, selected: controls["#machine-filter"].value, search: page.search }));
+  process.stdout.write(JSON.stringify({ charts, rankings, selected: controls["#machine-filter"].value, search: page.search }));
 })().catch((error) => { console.error(error); process.exit(1); });
 '''
         result = subprocess.run(
@@ -1901,10 +1909,14 @@ eval(fs.readFileSync("web/pivot.js", "utf8"));
         payload = json.loads(result.stdout)
         self.assertEqual(payload["selected"], "B")
         self.assertIn("machine=B", payload["search"])
-        self.assertEqual(len(payload["rendered"]), 2)
-        self.assertIn("initial-data", payload["rendered"][0])
-        self.assertIn("B-data", payload["rendered"][1])
-        self.assertNotIn("A-data", "".join(payload["rendered"]))
+        self.assertEqual(payload["charts"], [
+            {"key": "pivotRanking", "label": "initial-data"},
+            {"key": "pivotRanking", "label": "B-data"},
+        ])
+        self.assertEqual(len(payload["rankings"]), 2)
+        self.assertIn("initial-data", payload["rankings"][0])
+        self.assertIn("B-data", payload["rankings"][1])
+        self.assertNotIn("A-data", "".join(payload["rankings"]))
 
     def test_g4_renderer_preserves_orthogonal_statuses_and_exclusion_consequences(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2001,8 +2013,8 @@ process.stdout.write(JSON.stringify({ combined, excluded, recent, cleanup, unche
         self.assertEqual(result.returncode, 0, result.stderr)
         rendered = json.loads(result.stdout)
 
-        self.assertEqual(rendered["combined"]["coverage"], "已纳入 3/3 台")
-        self.assertEqual(rendered["combined"]["summary"], "后台更新统计与配额 · 新数据陆续显示")
+        self.assertEqual(rendered["combined"]["coverage"], "机器快照可读：3/3 台")
+        self.assertEqual(rendered["combined"]["summary"], "后台更新统计与配额 · 新数据陆续显示 · 1 台需要关注：node-c")
         for text in (
             "刷新中",
             "刷新失败",
@@ -2014,11 +2026,13 @@ process.stdout.write(JSON.stringify({ combined, excluded, recent, cleanup, unche
             "最后联系",
         ):
             self.assertIn(text, rendered["combined"]["html"])
-        self.assertEqual(rendered["excluded"]["coverage"], "已纳入 2/3 台")
+        self.assertEqual(rendered["excluded"]["coverage"], "机器快照可读：2/3 台")
         self.assertIn("未纳入", rendered["excluded"]["html"])
         self.assertIn("尚无数据", rendered["excluded"]["html"])
         self.assertIn("agent-monitor machines accept node-a", rendered["excluded"]["html"])
         self.assertIn("SSH 目标", rendered["excluded"]["html"])
+        self.assertIn("该机数据未计入合计", rendered["excluded"]["html"])
+        self.assertIn(first_use_reason, rendered["excluded"]["html"].split("<details", 1)[1])
         self.assertNotIn("`", rendered["excluded"]["html"])
         for internal_term in (
             "TOFU",
@@ -2032,7 +2046,8 @@ process.stdout.write(JSON.stringify({ combined, excluded, recent, cleanup, unche
         self.assertIn("connection refused", rendered["recent"])
         self.assertIn("用的是上次的数据", rendered["recent"])
         self.assertNotIn("数据过期", rendered["recent"])
-        self.assertIn("数据已更新，但刷新后的清理失败：close failed", rendered["cleanup"])
+        self.assertIn("数据已更新，但刷新后的清理未完成", rendered["cleanup"])
+        self.assertIn("close failed", rendered["cleanup"].split("<details", 1)[1])
         self.assertNotIn("数据过期", rendered["cleanup"])
         for text in (
             "未检查",
@@ -2042,10 +2057,10 @@ process.stdout.write(JSON.stringify({ combined, excluded, recent, cleanup, unche
         ):
             self.assertIn(text, rendered["unchecked"])
         self.assertNotIn("最后尝试", rendered["unchecked"])
-        self.assertEqual(rendered["healthy"]["coverage"], "已纳入 1/1 台")
+        self.assertEqual(rendered["healthy"]["coverage"], "机器快照可读：1/1 台")
         self.assertEqual(rendered["healthy"]["summary"], "使用已采集数据 · 自动更新")
         for text in (
-            "可用",
+            "快照可读",
             "数据更新于",
             "历史自",
         ):
@@ -2140,17 +2155,19 @@ process.stdout.write(JSON.stringify({ reachableFailure, unknownFailure, cleanupF
         self.assertEqual(result.returncode, 0, result.stderr)
         rendered = json.loads(result.stdout)
 
-        self.assertEqual(rendered["reachableFailure"]["summary"], "1 台需要关注")
-        self.assertTrue(rendered["reachableFailure"]["open"])
+        self.assertEqual(rendered["reachableFailure"]["summary"], "1 台需要关注：node-b")
+        # Attention is visible in the summary without automatically expanding UI.
+        self.assertFalse(rendered["reachableFailure"]["open"])
         self.assertIn("刷新失败", rendered["reachableFailure"]["html"])
-        self.assertIn("最近一次刷新失败：worker crashed", rendered["reachableFailure"]["html"])
+        self.assertIn("用的是上次的数据", rendered["reachableFailure"]["html"])
+        self.assertIn("worker crashed", rendered["reachableFailure"]["html"].split("<details", 1)[1])
         self.assertNotIn("最新", rendered["reachableFailure"]["html"])
-        self.assertEqual(rendered["unknownFailure"]["summary"], "1 台需要关注")
+        self.assertEqual(rendered["unknownFailure"]["summary"], "1 台需要关注：node-b")
         self.assertIn("刷新失败", rendered["unknownFailure"]["html"])
         self.assertIn("最后尝试", rendered["unknownFailure"]["html"])
-        self.assertIn("最近一次刷新失败：malformed sync result", rendered["unknownFailure"]["html"])
+        self.assertIn("malformed sync result", rendered["unknownFailure"]["html"].split("<details", 1)[1])
         self.assertNotIn("本服务启动后还没检查过这台机器", rendered["unknownFailure"]["html"])
-        self.assertEqual(rendered["cleanupFailure"]["summary"], "1 台需要关注")
+        self.assertEqual(rendered["cleanupFailure"]["summary"], "1 台需要关注：node-b")
         self.assertIn("清理失败", rendered["cleanupFailure"]["html"])
         self.assertNotIn("最新", rendered["cleanupFailure"]["html"])
 
