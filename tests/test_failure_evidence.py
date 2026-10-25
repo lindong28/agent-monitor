@@ -21,6 +21,14 @@ from parsers import RateLimits
 
 
 class FailureEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        # Exercise failure persistence without booting the real proxy runtime.
+        # Child operations are mocked below; this endpoint is never contacted.
+        route = mock.patch.object(quota_refresh.network_policy, "endpoint",
+                                  return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9")
+        route.start()
+        self.addCleanup(route.stop)
+
     def test_original_quota_failure_survives_rejection_restart_and_resume(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

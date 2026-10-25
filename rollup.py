@@ -1728,7 +1728,7 @@ def _canonicalise_projects(rows, aliases):
     that coincidence alone. Two machines' ~/Downloads become one row without
     anything proving they hold the same work. The user chose that over splitting
     them, since the machine dimension can always take the row back apart; see
-    the project-alias issue in docs/issues/general.md.
+    the project identity contract in docs/references/metrics.md.
     """
     from project_alias import canonical_project
 

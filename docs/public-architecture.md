@@ -29,3 +29,15 @@ Runtime state is under `state/`, which may be an existing deployment-owned symli
 Backend work should inspect the actual affected consumer: aggregate preparation, retained-session reads, snapshot publication, sync and quota operations have different costs. Repeated view preparation and generation invalidation have regression tests in `tests/test_query_view.py`; `scripts/benchmark_backend.py` uses synthetic snapshots. Those observations do not establish production latency for other paths.
 
 See [usage and operations](public-usage.md), [contributing](../CONTRIBUTING.md) and the module tests before changing these boundaries.
+
+## Backend performance checks
+
+| Consumer | Cost and lifetime | Regression entry |
+| --- | --- | --- |
+| Overview, Explore, sync status | Prepared `QueryView` aggregates; signatures grow with machine count and queries with selected daily rows | `tests/test_query_view.py` |
+| View preparation | Startup/new-generation admission, digest and schema validation; old leased view remains readable | `scripts/benchmark_backend.py`, `tests/test_query_view.py` |
+| Publication and GC | Snapshot copy and retained-history validation; long preparation stays outside the shared GC lock | `tests/test_snapshot_contention.py`, `tests/test_generation_gc.py` |
+| Full-history sessions | Retained event admission/materialization and matching history; aggregate benchmarks do not cover this | `tests/test_sessions_cache.py`, `tests/test_conversation_sessions.py` |
+| Sync and quota | Export, transport, publication, quota child lifecycle and browser API fan-out | `tests/test_sync_process.py`, `tests/test_quota_refresh.py` |
+
+Residual costs include cold/new-generation validation, full-history admission/materialization and aggregate cardinality. Recheck the relevant row when its consumer changes; one page's improvement does not close shared-path costs. [Service diagnostics](operations/services.md) gives the runnable isolated benchmark and live observation interpretation. [Accounting contracts](references/metrics.md) and [UI design](design.md) preserve the maintenance boundaries behind parser and frontend code.

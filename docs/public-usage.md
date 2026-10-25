@@ -18,6 +18,45 @@ Retirement is explicit: `./agent-monitor machines retire NAME` updates the selec
 
 Keep backups of state and local configuration outside the checkout before migration. Never replace an existing state symlink, remove persistent locks to force progress, or delete old archives merely because a source is temporarily unavailable. Uninstall keeps source and state.
 
+## Transition an existing installation
+
+This is distinct from updating an installation already based on the public `main`. The release candidate uses a separate publication history, so `git pull --ff-only` from the old history is not a migration command. Publication and replacement of the old main/history require the owner's separate decision. Do not force-push, reset or remove the old checkout as part of these preparation steps.
+
+1. Record the old source revision, checkout path, selected machine/Hub configuration paths and service entrypoints. Preserve the old Git history and private operational documentation outside the public candidate. Keep a recoverable backup of the actual state target as well as the `state` symlink itself; archiving only the link does not back up its data. Coordinate a quiet window for the final state backup.
+2. Before replacing tracked defaults, retain the selected configuration as `machines.local.json` and `hub.local.json`. If the local file already exists, preserve it; otherwise copy the corresponding current tracked file. For example, from the old checkout:
+
+   ```bash
+   for kind in machines hub; do
+     if [ ! -e "$kind.local.json" ] && [ ! -L "$kind.local.json" ]; then
+       cp "$kind.json" "$kind.local.json"
+     fi
+   done
+   ```
+
+   Keep the original names, `self`/Hub role, SSH targets, retired names and intervals. The public examples must never replace them. Preserve `state/hub-machine`, source/account identities, archives, generation metadata and persistent locks. Do not commit local configuration or state.
+3. Rehearse in an isolated copy of the old installation, including a separate HOME and a private copy of its state target. Rewrite copied symlinks and service paths so none points back to live state or services. Use synthetic agent logs/account metadata when real data access is not authorized. Install the exact candidate source into that rehearsal checkout while preserving its local configuration and runtime state, then run `./install.sh --no-services`. Do not invoke service installation or remote collection from the rehearsal. A separate HOME does not isolate the macOS launchd domain: when `state/hub-machine` identifies this machine as the Hub, `./agent-monitor start` can install the real user service. Direct `server.py` startup also enables scheduled synchronization. Do not use either startup path for a preserved Hub/fleet rehearsal.
+4. For a standalone installation with no remote targets, start the isolated instance with a free port and its isolated HOME; compare retained totals and session details with the old instance, then stop it. For a Hub or configured fleet, keep its role marker and configuration unchanged and limit this preparation to installation preservation and the local retained-data reading below. Run it before and after source replacement using the isolated HOME. It imports the reader without starting the server, scheduler, SSH or provider actions. In both cases, compare machine/source identities, state link target, persistent lock identities and retained data; repeat preservation/installation and compare again. Full Hub browser/collection checks remain for the authorized cutover. A successful new installation alone does not prove this transition.
+   ```bash
+   .venv/bin/python - <<'PY'
+   import json
+   import generation, hub, machine_config, rollup
+   config = machine_config.load_machine_config()
+   print(json.dumps({"machine": config.self_machine.name,
+                     "installed_role": hub.local_machine(),
+                     "retired_names": sorted(config.retired_names)}))
+   with generation.generation_admission_snapshot() as admitted:
+       print(json.dumps({"admitted": sorted(item.host for item in admitted.admitted)}))
+       with rollup.use_admitted_generations(admitted.admitted):
+           print(json.dumps(rollup.query_grouped([], "total")))
+   PY
+   ```
+
+   Compare the actual returned totals and admitted names; an empty result does not establish retained-data continuity. This reads a copy of retained state and may create local reader leases/locks; it is not a live health or exporter check. Retain the old-source and candidate outputs privately.
+
+5. After publication/history replacement is explicitly authorized, make the agreed public `main` authoritative at the existing primary checkout path, preserving the backed-up local configuration and state. Coordinate any source-path changes with CLI links and service definitions. Follow [services and deployment](#services-and-deployment) at the verified published revision; an uncommitted overlay or rehearsal checkout is not deployable source. Verify the actual dashboard and collection results before retiring the old recovery copy.
+
+If any identity, retained-data or source check fails, stop before enabling collection. Preserve the failing state and logs; restore the prior source and configuration from the recovery copy under the same service-ownership checks. Do not delete locks, reset identities or accept a new source simply to pass preflight. This guide does not claim a production cutover has occurred.
+
 ## Optional multi-machine collection
 
 Supply your own SSH aliases, with `agent-monitor` installed on each source. The collecting machine needs SSH and rsync access and invokes `~/.local/bin/agent-monitor export` remotely. Exporters require committed source and verify their runtime source identity. Noninteractive SSH environments must resolve the installed CLI and any required SSH agent.
@@ -46,6 +85,8 @@ git merge --ff-only origin/main
 ```
 
 Replace `FULL_SHA` with the published commit you selected. `--check-only` does not install. A successful preflight is not service health: inspect status and the actual dashboard afterward. Deployment does not push, discard changes, migrate state or replace locks. Development worktrees are not persistent production roots. Preserve local edits and coordinate writers if preflight reports a dirty or diverged checkout.
+
+For runtime observations and backend investigation, see [service diagnostics](operations/services.md) and [backend checks](public-architecture.md#backend-performance-checks).
 
 ## Troubleshooting
 
