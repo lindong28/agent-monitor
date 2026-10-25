@@ -6,11 +6,11 @@ agent-monitor reads local agent logs. It can also aggregate snapshots from machi
 
 ## Release status
 
-This is a **release candidate**. The project's own code is MIT-licensed; incorporated third-party source retains its respective license. The intended public source is `https://github.com/lindong28/agent-monitor`; this preparation has not published this candidate to that address. The existing installation and history remain unchanged during preparation. After an explicitly authorized cutover, this public project’s `main` is intended to become the single development and deployment source; the preparation candidate is not a second maintained fork. See [existing-installation transition](docs/public-usage.md#transition-an-existing-installation). See [LICENSE](LICENSE), [third-party notices](THIRD-PARTY-NOTICES.md) and [contributing](CONTRIBUTING.md).
+The project's own code is MIT-licensed; incorporated third-party source retains its respective license. The canonical source is `https://github.com/lindong28/agent-monitor`; use this repository's `main` for development and deployment. The preparation candidate is not a second maintained fork. Installations based on the earlier history must follow the [existing-installation transition](docs/public-usage.md#transition-an-existing-installation) before updating; preserve their configuration and retained data. See [LICENSE](LICENSE), [third-party notices](THIRD-PARTY-NOTICES.md) and [contributing](CONTRIBUTING.md).
 
 ## Install with your coding agent
 
-After publication, paste this prompt into your coding agent. Before publication, replace the URL with the exact local candidate Git source supplied by the maintainer:
+Paste this prompt into your coding agent:
 
 ```text
 Install agent-monitor from https://github.com/lindong28/agent-monitor in a new checkout. Read its README and follow the supported installation and first-use instructions. Help me inspect usage totals and open a session in the dashboard. Ask before accessing my real agent logs or provider account state, including automatic quota queries; otherwise use the documented isolated sample. Preserve any existing configuration and data. Report what worked, the source revision, how to open and stop it, and any missing prerequisites or unverified optional features.
