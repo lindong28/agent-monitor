@@ -13,8 +13,8 @@ import service_runtime
 ROOT = Path(__file__).resolve().parent
 
 
-def run(*args):
-    return deployment_guard._run([sys.executable, *map(str, args)], ROOT, timeout=60)
+def run(*args, timeout=60):
+    return deployment_guard._run([sys.executable, *map(str, args)], ROOT, timeout=timeout)
 
 
 def local_status():
@@ -84,7 +84,9 @@ def restart(component):
                 hub.install_web()
             return 0
         if component == 'connector':
-            return run(ROOT / 'connector_service.py', 'restart')
+            # Covers bounded launchctl inspection/unload/bootstrap and HTTP
+            # readiness, including recovery when the job was not loaded.
+            return run(ROOT / 'connector_service.py', 'restart', timeout=240)
         if sys.platform != 'darwin':
             raise ValueError('The collector schedule is managed only on macOS; exporters run on demand.')
         import rollup_service

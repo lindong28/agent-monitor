@@ -146,7 +146,24 @@ class ServiceTests(unittest.TestCase):
     def test_new_code_reloads_installed_connector_with_same_server_and_state(self):
         self.save()
         (self.root / 'client_connector.py').write_text('new code')
-        with mock.patch.object(service, 'launch', return_value=self.result(0)) as launch:
+        outcomes = [self.result(0), self.result(0), self.result(1), self.result(0), self.result(0)]
+        with mock.patch.object(service, 'launch', side_effect=outcomes) as launch:
             service.install('http://hub:39001')
-        self.assertEqual([c.args[0] for c in launch.call_args_list], ['print', 'bootout', 'bootstrap', 'print'])
+        self.assertEqual([c.args[0] for c in launch.call_args_list], ['print', 'bootout', 'print', 'bootstrap', 'print'])
         self.assertEqual(plistlib.loads(self.plist.read_bytes())['ProgramArguments'][3:], ['http://hub:39001', '--state-file', str(self.state)])
+
+    def test_bootout_waits_for_old_job_before_bootstrap(self):
+        self.save()
+        outcomes = [self.result(0), self.result(0), self.result(0), self.result(1), self.result(0), self.result(0)]
+        with mock.patch.object(service, 'launch', side_effect=outcomes) as launch, mock.patch.object(service.time, 'sleep') as sleep:
+            service.install('http://hub:39001')
+        self.assertEqual([c.args[0] for c in launch.call_args_list], ['print', 'bootout', 'print', 'print', 'bootstrap', 'print'])
+        sleep.assert_called_once()
+
+    def test_old_job_shutdown_timeout_keeps_definition_and_never_bootstraps(self):
+        self.save()
+        before = self.plist.read_bytes()
+        with mock.patch.object(service, 'launch', return_value=self.result(0)) as launch, mock.patch.object(service.time, 'monotonic', side_effect=[0, 31]), self.assertRaisesRegex(ValueError, '卸载尚未完成'):
+            service.install('http://hub:39001')
+        self.assertEqual(self.plist.read_bytes(), before)
+        self.assertNotIn('bootstrap', [c.args[0] for c in launch.call_args_list])

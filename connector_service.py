@@ -184,6 +184,12 @@ def install(server):
                 raise ValueError("本机39002端口已被占用；未停止该进程。请先关闭此前的前台连接命令，或检查端口占用。") from None
     if loaded and launch("bootout", job_target()).returncode:
         raise ValueError("旧连接服务卸载失败；原配置保留，请用 connect status 检查。")
+    if loaded:
+        deadline = time.monotonic() + 30
+        while owned_loaded(old):
+            if time.monotonic() >= deadline:
+                raise ValueError("旧连接服务卸载尚未完成；原配置保留，未加载新服务。请用 agent-monitor service status 检查后再重试。")
+            time.sleep(0.25)
     plist.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=LABEL + ".", dir=plist.parent)
     try:
