@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from unittest import mock
 
@@ -248,6 +248,44 @@ class StatisticsSnapshotTests(unittest.TestCase):
         self.assertNotIn("source_errors", data)
         self.assertEqual(data["observed_at"], NOW.isoformat())
 
+    def test_writer_preserves_canonical_payloads_and_input_metadata(self):
+        entries = LoadedEntries([
+            replace(self.usage()[0], agent_id="claude-code", usage_quality="observed",
+                    timestamp=NOW.astimezone(timezone(timedelta(hours=8))),
+                    cache_creation_tokens=10, cache_creation_1h_tokens=5,
+                    service_context={"speed": "fast", "conflicts": ["speed"]},
+                    cost_usd=0, cost_provenance={"basis": "recorded", "time_basis": "unknown",
+                                               "reason": None, "sources": ["fixture"], "verified_at": None}),
+            replace(self.usage()[0], message_id="second", cost_usd=None),
+        ])
+        entries.unattributed_entries = [replace(entries[1], message_id="unattributed")]
+        all_entries = list(entries) + entries.unattributed_entries
+        expected = []
+        for entry in all_entries:
+            row = asdict(entry)
+            row["timestamp"] = entry.timestamp.astimezone(timezone.utc).isoformat()
+            expected.append(json.dumps(row, allow_nan=False, sort_keys=True))
+        before = [asdict(entry) for entry in all_entries]
+        path = self.root / "canonical.db"
+        result = snapshots.write_snapshot(path, entries, observed_at=NOW)
+        with closing(sqlite3.connect(path)) as conn:
+            actual = [r[0] for r in conn.execute("SELECT payload FROM statistics_usage ORDER BY position")]
+        self.assertEqual(actual, expected)
+        self.assertEqual(result["usage_entries"], all_entries)
+        self.assertEqual([asdict(entry) for entry in all_entries], before)
+        entries[0].service_context["conflicts"].append("inference_geo")
+        self.assertEqual(snapshots.read_snapshot(path)["usage_entries"][0].service_context["conflicts"], ["speed"])
+
+    def test_invalid_late_entry_does_not_modify_existing_snapshot(self):
+        path = self.snapshot("preserved")
+        before = path.read_bytes()
+        for invalid in (replace(self.usage()[0], input_tokens=-1),
+                        replace(self.usage()[0], cost_usd=float("nan")),
+                        replace(self.usage()[0], service_context={"speed": []})):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    snapshots.write_snapshot(path, [self.usage()[0], invalid], observed_at=NOW)
+                self.assertEqual(path.read_bytes(), before)
     def test_v1_usage_is_readable_without_decoding_retired_gateway_payload(self):
         legacy = self.snapshot("v1")
         with closing(sqlite3.connect(legacy)) as conn, conn:

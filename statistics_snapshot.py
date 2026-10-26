@@ -1,7 +1,8 @@
 """Agent usage statistics inside the admitted, digest-bound snapshot.db."""
 
 from contextlib import closing, contextmanager
-from dataclasses import asdict, fields
+from copy import deepcopy
+from dataclasses import fields
 from datetime import date, datetime, timedelta, timezone
 import json
 import math
@@ -91,10 +92,16 @@ def write_snapshot(snapshot_path, loaded_entries, *, observed_at=None):
     meta["usage_quality_counts"] = usage_quality_counts(entries)
     sessions = [validate_session(row) for row in getattr(loaded_entries, "session_metadata", ())]
     for entry in entries:
-        row = asdict(entry)
+        # Scalar fields are immutable; copying each datetime just before
+        # formatting it dominates large exports. Only metadata needs a copy.
+        row = {name: getattr(entry, name) for name in USAGE_FIELDS}
+        for name in ("service_context", "cost_provenance"):
+            row[name] = deepcopy(row[name])
         row["timestamp"] = _timestamp(entry.timestamp)
         _usage_entry(row)
-        usage.append(row)
+        # Validate/encode before touching the destination, but retain only the
+        # encoded form rather than all dictionaries plus a second JSON batch.
+        usage.append(json.dumps(row, allow_nan=False, sort_keys=True))
     _validate_meta(meta)
     with closing(sqlite3.connect(str(snapshot_path))) as conn, conn:
         for name in sorted(LEGACY_TABLES - TABLES):
@@ -104,8 +111,9 @@ def write_snapshot(snapshot_path, loaded_entries, *, observed_at=None):
             conn.execute(f"DELETE FROM {name}")
         for name, rows in (("statistics_meta", [meta]), ("statistics_usage", usage), ("statistics_sessions", sessions)):
             conn.executemany(f"INSERT INTO {name} VALUES (?, ?)",
-                             [(index, json.dumps(row, allow_nan=False, sort_keys=True))
-                              for index, row in enumerate(rows)])
+                             ((index, row if name == "statistics_usage" else
+                               json.dumps(row, allow_nan=False, sort_keys=True))
+                              for index, row in enumerate(rows)))
         _create_usage_indexes(conn)
     return read_snapshot(snapshot_path)
 
