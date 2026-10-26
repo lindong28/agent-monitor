@@ -180,7 +180,8 @@ class RecoveryHttpTests(unittest.TestCase):
             current = SimpleNamespace(host="fixture", meta={"source_host_identity": "host-fixture", "rate_limits": {"claude": None, "codex": block}})
             admitted = mock.MagicMock()
             admitted.__enter__.return_value = SimpleNamespace(admitted=[current])
-            receipt = {"ok": True, "block": {**block, "refresh_error": None}, "source_host_identity": "host-fixture", "exporter_commit": "a" * 40}
+            network = {"policy": "chromium-system", "coverage": "recent_connections_only", "events": []}
+            receipt = {"ok": True, "block": {**block, "refresh_error": None}, "source_host_identity": "host-fixture", "exporter_commit": "a" * 40, "network": network}
             with mock.patch.object(server, "QUOTA_REFRESH", manager), \
                     mock.patch("server.sync.load_machine_config", return_value=SimpleNamespace(by_name={"fixture": machine})), \
                     mock.patch("server.generation.generation_admission_snapshot", return_value=admitted), \
@@ -193,7 +194,9 @@ class RecoveryHttpTests(unittest.TestCase):
                     try:
                         connection.request("POST", "/api/quota-recovery", json.dumps(value), {"Content-Type": "application/json", "X-Agent-Monitor": "action", "Origin": origin or f"http://127.0.0.1:{httpd.server_port}"})
                         response = connection.getresponse()
-                        response.read()
+                        body = json.loads(response.read())
+                        if response.status == 200:
+                            self.assertEqual(body["network"], network)
                         return response.status
                     finally:
                         connection.close()

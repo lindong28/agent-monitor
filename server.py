@@ -922,7 +922,8 @@ class Handler(BaseHTTPRequestHandler):
                         "attempted_at": datetime.now(timezone.utc).isoformat(), "error": None}
                     hub._write_quota_message(QUOTA_REFRESH.path, {"version": 1, "machines": QUOTA_REFRESH.records})
                     QUOTA_REFRESH.revision += 1
-                receipt = {"ok": True, "message": "有效读数已保存，目标机器的 Codex 自动查询已恢复。"}
+                receipt = {"ok": True, "message": "有效读数已保存，目标机器的 Codex 自动查询已恢复。",
+                           "network": receipt.get("network", {"coverage": "unavailable", "events": []})}
             self._send_json(receipt, status=200 if receipt.get("ok") else 409)
         except Exception:
             self._send_json({"error": "恢复回执未能确认或保存，请核对目标机器状态；不要重复探测。"}, status=500)

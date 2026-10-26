@@ -2,12 +2,15 @@
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+import uuid
 
 import diagnostics
+import network_policy
 
 
 def validate_exclusions(value):
@@ -35,14 +38,23 @@ def local_recovery(value):
     validate_request(value)
     # Establish the implementation identity before the irreversible provider read.
     commit = exporter.exporter_version()
+    route = None
     try:
-        block = exporter.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"])
+        # Scope observations without choosing a different endpoint or proxy policy.
+        route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
+        with network_policy.using_route(route):
+            block = exporter.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"])
     except (quota_refresh.RefreshError, OSError, RuntimeError) as exc:
         pause = Controls(exporter.ROOT / "state/upstream_controls").read("codex").get("pause")
-        return {"ok": False, "error": "恢复未完成，暂停保留；请查看诊断后再决定下一步。",
+        receipt = {"ok": False, "error": "恢复未完成，暂停保留；请查看诊断后再决定下一步。",
                 "failure": diagnostics.failure_details(exc), "pause_id": (pause or {}).get("id")}
-    return {"ok": True, "block": block, "source_host_identity": generation.self_certified_host_identity(),
-            "exporter_commit": commit}
+    else:
+        receipt = {"ok": True, "block": block, "source_host_identity": generation.self_certified_host_identity(),
+                   "exporter_commit": commit}
+    # Loopback bridge evidence only; unavailable observations do not replay or
+    # change the provider outcome. Empty events do not establish no request.
+    receipt["network"] = network_policy.observations(route)
+    return receipt
 
 
 def run(machine, value):
