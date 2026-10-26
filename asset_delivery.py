@@ -97,7 +97,7 @@ def encode(data, headers):
         except ValueError:
             quality = 0.0
         if 0 < quality <= 1:
-            compressed = gzip.compress(data, compresslevel=1, mtime=0)
+            compressed = gzip.compress(data, compresslevel=6, mtime=0)
             if len(compressed) < len(data):
                 return compressed, True
         break
