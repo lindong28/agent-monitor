@@ -8,6 +8,8 @@ agent-monitor is an independent Python service with a static JavaScript dashboar
 
 `server.py` exposes usage, session, quota, collection and network routes. `aggregators.py`, `session_cache.py` and `conversation_cache.py` prepare the corresponding views. `web/` renders them. Codex native subagents can be grouped with their main conversation using explicit ancestry; unresolved ancestry is not guessed. Date boundaries use Asia/Shanghai.
 
+`asset_delivery.py` binds static resource URLs to the Web tree's path-and-content signature, including a symlinked vendor directory. HTML remains uncached; matching versioned resources can be reused in the browser without a validation round trip. Unversioned or obsolete URLs retain conditional validation. Dynamic account modules carry the document's version, and the existing health watcher reloads a document when its Web signature changes. Text responses and aggregate JSON negotiate gzip when it reduces bytes; API results remain `no-store`. The bounded in-process byte cache invalidates on file identity, size or timestamp changes; it does not persist usage data. See the [delivery decision](adr/20261026-8d31-dashboard-delivery.md).
+
 ## Multiple machines
 
 `machine_config.py` validates named machines, SSH targets, the local role and retired identities. At startup it selects `machines.local.json` if present, otherwise `machines.json`; explicit caller paths remain explicit. `hub.py` uses the same local-over-default convention for Hub configuration. All importers share the selected machine path, including retirement writes. Adding or removing a local configuration file requires restarting processes.

@@ -1,5 +1,6 @@
 async function previewEgress(...args) {
-  const preview = await import("./account-egress.js");
+  const version = document.querySelector('meta[name="asset-version"]')?.content;
+  const preview = await import("./account-egress.js" + (version ? `?v=${version}` : ""));
   return preview.previewEgress(...args);
 }
 

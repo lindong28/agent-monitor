@@ -2,7 +2,6 @@ import argparse
 import ipaddress
 import socket
 import hashlib
-import gzip
 import json
 import logging
 import math
@@ -42,6 +41,7 @@ import process_identity
 import query_view
 import quota_sync
 import diagnostics
+import asset_delivery
 import quota_applicability
 from aggregators import extract_metric, load_all_entries
 from parsers import claude_status, codex
@@ -131,7 +131,7 @@ def _source_files():
 
 
 def _web_files():
-    return sorted(path for path in WEB_ROOT.rglob("*") if path.is_file())
+    return sorted(asset_delivery.files(WEB_ROOT))
 
 
 def _source_signature():
@@ -145,13 +145,7 @@ def _source_signature():
 
 
 def _web_signature():
-    digest = hashlib.sha256()
-    for path in _web_files():
-        try:
-            digest.update(path.read_bytes())
-        except OSError:
-            continue
-    return digest.hexdigest()[:16]
+    return asset_delivery.signature(WEB_ROOT)
 
 
 # Signature of the code this process actually loaded. health() compares it to a
@@ -1034,8 +1028,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             route = ROUTES.get(parsed.path)
             if route:
-                self._send_json(route(query), send_body=send_body,
-                                compress=parsed.path == "/api/sessions")
+                self._send_json(route(query), send_body=send_body, compress=True)
                 return
             if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/collection", "/ip-check-docs") or parsed.path in GUIDE_PAGES or parsed.path.startswith("/web/"):
                 self._serve_static(parsed.path, send_body=send_body)
@@ -1057,23 +1050,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_json_bytes(self, data, status=200, send_body=True, compress=False):
         encoded = False
-        if compress and len(data) >= 65536:
-            for item in self.headers.get("Accept-Encoding", "").lower().split(","):
-                coding, *parameters = item.strip().split(";")
-                if coding.strip() != "gzip":
-                    continue
-                quality = 1.0
-                try:
-                    for parameter in parameters:
-                        key, _, value = parameter.strip().partition("=")
-                        if key == "q":
-                            quality = float(value)
-                except ValueError:
-                    quality = 0.0
-                if 0 < quality <= 1:
-                    data = gzip.compress(data, compresslevel=1, mtime=0)
-                    encoded = True
-                break
+        if compress:
+            data, encoded = asset_delivery.encode(data, self.headers)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         if compress:
@@ -1125,8 +1103,12 @@ class Handler(BaseHTTPRequestHandler):
             if not resolved.is_file():
                 self.send_error(404)
                 return
-            data = resolved.read_bytes()
-        except OSError:
+            version, assets = asset_delivery.snapshot(WEB_ROOT)
+            if file_path.is_relative_to(WEB_ROOT):
+                data = assets[file_path.relative_to(WEB_ROOT).as_posix()]
+            else:
+                data = asset_delivery.read(resolved)
+        except (OSError, KeyError):
             self.send_error(404)
             return
 
@@ -1136,18 +1118,35 @@ class Handler(BaseHTTPRequestHandler):
         if content_type is None:
             content_type = "application/octet-stream"
         cacheable = path.startswith("/web/") and resolved.suffix != ".html"
+        if resolved.suffix == ".html":
+            data = asset_delivery.html(data, version)
+        request_version = parse_qs(urlparse(getattr(self, "path", "")).query).get("v", [])
+        cache_control = ("private, max-age=31536000, immutable"
+                         if cacheable and request_version == [version]
+                         else "no-cache" if cacheable else "no-store")
+        headers = getattr(self, "headers", {})
+        compressible = resolved.suffix in {".html", ".css", ".js", ".svg", ".md"}
+        encoded = False
+        if compressible:
+            data, encoded = asset_delivery.encode(data, headers)
         etag = '"%s"' % hashlib.sha256(data).hexdigest()
         if cacheable and etag in [part.strip().removeprefix("W/") for part in
                                  getattr(self, "headers", {}).get("If-None-Match", "").split(",")]:
             self.send_response(304)
             self.send_header("ETag", etag)
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Cache-Control", cache_control)
+            if compressible:
+                self.send_header("Vary", "Accept-Encoding")
             self.end_headers()
             return
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-cache" if cacheable else "no-store")
+        self.send_header("Cache-Control", cache_control)
+        if compressible:
+            self.send_header("Vary", "Accept-Encoding")
+        if encoded:
+            self.send_header("Content-Encoding", "gzip")
         if cacheable:
             self.send_header("ETag", etag)
         self.end_headers()

@@ -1,6 +1,7 @@
 (function () {
   const charts = {};
   window.ttWebCharts = charts;
+  const assetVersion = document.querySelector?.('meta[name="asset-version"]')?.content || "";
 
   // Eight categorical slots, assigned in fixed order and never cycled. Validated
   // against this dashboard's white panel surface on the adjacent pairlist that
@@ -2719,7 +2720,7 @@
     pageCleanups.push(() => { codexQuotaReadings = []; renderedQuotaRateLimits = null; });
     if (qs("#codex-account-actions")) {
       const currentAccountsPage = pageScope();
-      import("/web/codex-accounts.js").then((module) => {
+      import("/web/codex-accounts.js" + (assetVersion ? `?v=${assetVersion}` : "")).then((module) => {
         if (currentAccountsPage()) module.init();
       }).catch(() => {
         const notice = qs("#codex-account-notice");
@@ -3522,7 +3523,7 @@
   // unknowingly). The server self-reports staleness via /api/health.stale; this
   // banner makes it visible on every access path, including a long-open tab or a
   // phone on the Tailnet that never went through `agent-monitor open`.
-  let pageWebSignature = null;
+  let pageWebSignature = assetVersion || null;
   let pageServerInstance = null;
   async function pollFreshness() {
     try {
