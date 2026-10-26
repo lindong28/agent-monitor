@@ -47,6 +47,19 @@ function account(id,state='known',presence='in_use',machine='alpha') {
     machines:[machine],reading_from:machine,five_hour_used_pct:91,seven_day_used_pct:37,
     five_hour_resets_at:4102444800,seven_day_resets_at:4102444800,updated_at:'2026-01-01T00:00:00Z'};
 }
+// Fresh passive readings must not be called stale because active queries pause.
+const passive={...account('passive'),updated_at:new Date().toISOString(),
+  quota_observation:{source:'codex_session',observed_at:new Date().toISOString()}};
+ui.renderQuotaAccounts({codex:{accounts:[passive],refresh_errors:[{machine:'alpha',
+  reason:'Codex 配额请求失败，请检查网络',query_state:'paused',account_id:'passive',account_label:'passive@example.test',pause:{id:'a'.repeat(32),at:1}}]}});
+assert(table.textContent.includes('当前读数来自会话日志'));
+assert(table.textContent.includes('主动查询已暂停'));
+assert(!table.textContent.includes('更新延迟'));
+const recoverButton=descendants(table).find(n=>n.tagName==='BUTTON' && n.textContent==='核对并探测一次');
+assert(recoverButton);
+window.confirm=()=>false;
+recoverButton.click();
+assert(!recoverButton.disabled,'cancel must leave the one-shot opportunity unused');
 // Confirmed lack of a subscription must not look like available current quota.
 const unsubscribed = {...account('unsubscribed'), quota_status:'no_subscription',
   quota_status_reason:'无有效 Claude Code 订阅（用户已确认）', plan_verification:'unverified',

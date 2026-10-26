@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import selectors
+import shlex
 import subprocess
 import sys
 import threading
@@ -109,6 +110,7 @@ class Manager:
         self.machines = ()
         self.records = {}
         self.load_error = None
+        self.recovering = False
         try:
             data = json.loads(self.path.read_text())
             if set(data) != {"version", "machines"} or data["version"] != 1 or not isinstance(data["machines"], dict):
@@ -129,6 +131,8 @@ class Manager:
 
     def request(self, machines):
         with self.condition:
+            if self.recovering:
+                raise RuntimeError("一次性恢复正在进行，请等待回执。")
             if self.stopping:
                 raise RuntimeError("配额刷新正在关闭，请稍后重试")
             machines = tuple(machines)
@@ -196,7 +200,7 @@ class Manager:
                             before = previous["rate_limits"][provider]
                             identity = lambda b: quota_identity(provider, b.get("account_id"), b.get("account_label"))
                             if identity(incoming) == identity(before) and _time(before.get("updated_at")) > _time(incoming.get("updated_at")):
-                                for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at"):
+                                for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation"):
                                     incoming[field] = before.get(field)
                     self.records[name] = {"ssh_host": by_name[name].ssh_host,
                                           "payload": payload if payload is not None else old.get("payload"),
@@ -278,8 +282,9 @@ class Manager:
                     base_note = quota_applicability.confirmation(base.get("subscription_confirmation"))
                     if incoming_note and (not base_note or quota_applicability.confirmation_time(incoming_note) > quota_applicability.confirmation_time(base_note)):
                         base["subscription_confirmation"] = incoming_note
-                    if "refresh_failure" in incoming:
-                        base["refresh_failure"] = incoming["refresh_failure"]
+                    for field in ("refresh_failure", "refresh_pause", "query_state"):
+                        if field in incoming:
+                            base[field] = incoming[field]
                     # Login state is the latest query outcome, not the age of
                     # the quota reading returned as its fallback.
                     base["signed_out"] = incoming.get("signed_out", False)
@@ -307,14 +312,16 @@ def _worker():
     machines = [Machine(v["name"], v["ssh_host"], v["self"]) for v in json.loads(sys.stdin.readline())]
     output = sys.stdout
     sync_process.watch_parent()
+    blocked = {}
 
     def query(machine):
         try:
             if machine.is_self:
-                payload = exporter.export_quota()
+                payload = exporter.export_quota(**({"blocked_accounts": blocked} if blocked else {}))
             else:
                 result = subprocess.run([*sync._SSH_PREFIX, machine.ssh_host,
-                    "~/.local/bin/agent-monitor export --quota-only --gui-quota"],
+                    "~/.local/bin/agent-monitor export --quota-only --gui-quota" +
+                    (" --quota-exclusions " + shlex.quote(json.dumps(blocked)) if blocked else "")],
                     capture_output=True, text=True, timeout=MACHINE_TIMEOUT, check=True)
                 payload = json.loads(result.stdout)
             _validate(payload)
@@ -324,24 +331,31 @@ def _worker():
                     diagnostics.failure_summary(diagnostics.failure_details(exc, stage="quota_worker"))}
 
     with redirect_stdout(sys.stderr):
-        # This conservative stop applies to this combined round only. Provider
-        # pauses remain local to each machine; there is no distributed lock.
-        stopped = None
         for machine in machines:
-            if stopped:
-                result = {"machine": machine.name, "payload": None,
-                          "error": "本轮前序机器查询异常；本机尚未尝试。触发原因：" + stopped}
+            if all("*" in blocked.get(p, []) for p in ("claude", "codex")):
+                result = {"machine": machine.name, "payload": None, "error": "本轮前序机器查询异常；本机尚未尝试。前序执行结果未知。"}
             else:
                 result = query(machine)
-                causes = ([result["error"]] if result["error"] else [
-                    provider + "：" + str(block["refresh_error"]) for provider, block in
-                    result["payload"]["rate_limits"].items() if block.get("refresh_error")])
-                if causes:
-                    stopped = machine.name + " / " + "；".join(causes)
+                accumulate_exclusions(blocked, result)
             output.write(json.dumps(result) + "\n")
             output.flush()
         output.write(json.dumps({"done": True}) + "\n")
         output.flush()
+
+
+def accumulate_exclusions(blocked, result):
+    """Only an explicit local prerequisite failure proves no upstream attempt."""
+    if result["error"]:
+        blocked.update(claude=["*"], codex=["*"])
+        return
+    for provider, block in result["payload"]["rate_limits"].items():
+        if not block.get("refresh_error") or block.get("query_state") in {"local_unavailable", "blocked"}:
+            continue
+        failure = diagnostics.safe_failure(block.get("refresh_failure"))
+        identity = failure.get("account_fingerprint") if block.get("query_state") != "unknown" else None
+        values = blocked.setdefault(provider, [])
+        if (identity or "*") not in values:
+            values.append(identity or "*")
 
 
 if __name__ == "__main__":

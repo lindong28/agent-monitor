@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parent
-SOURCES = {"active_query", "claude_statusline"}
+SOURCES = {"active_query", "claude_statusline", "codex_session"}
 
 
 def timestamp(value):

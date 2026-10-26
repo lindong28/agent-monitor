@@ -101,11 +101,12 @@ def exporter_version():
     return commit
 
 
-def export_quota(*, gui_quota=False):
+def export_quota(*, gui_quota=False, blocked_accounts=None):
     """Collect quota without rebuilding or transferring a statistics snapshot."""
     commit = exporter_version()
     import hub
-    limits = _gui_rate_limits() if gui_quota and hub.enabled() else _rate_limits(refresh=True)
+    limits = (_gui_rate_limits(blocked_accounts=blocked_accounts) if gui_quota and hub.enabled()
+              else _rate_limits(refresh=True, blocked_accounts=blocked_accounts))
     return {
         "schema_version": 1,
         "source_host_identity": generation.self_certified_host_identity(),
@@ -307,10 +308,10 @@ def _cleanup_export_staging(output_path):
         generation._fsync_directory(output_path.parent)
 
 
-def _gui_rate_limits():
+def _gui_rate_limits(*, blocked_accounts=None):
     import hub
     try:
-        return hub.request_quota_refresh()
+        return hub.request_quota_refresh(**({"blocked_accounts": blocked_accounts} if blocked_accounts else {}))
     except hub.QuotaRequestError as exc:
         cached = _read_quota_cache(ROOT / "state" / "quota_snapshot.json")
         result = {}
@@ -329,14 +330,37 @@ def _gui_rate_limits():
             # produces exactly that contradiction — which a consumer has to
             # resolve, and one resolution silently drops the error.
             block["signed_out"] = False
+            block["query_state"] = "unknown"
             result[provider] = block
         return result
 
 
-def _rate_limits(refresh=False):
+def _rate_limits(refresh=False, *, blocked_accounts=None):
     import hub
     cache_path = ROOT / "state" / "quota_snapshot.json"
     cached = _read_quota_cache(cache_path) if hub.enabled() else {}
+
+    def query_state(provider, account, block):
+        from upstream_controls import Controls
+        pause = Controls(ROOT / "state/upstream_controls").read(provider).get("pause")
+        if block is None:
+            if not pause:
+                return None
+            block = _rate_limit_block(RateLimits(None, None, None, None), account)
+            block["signed_out"] = account is None
+        if pause:
+            block["refresh_pause"] = {key: pause[key] for key in ("id", "at", "probe_attempt") if key in pause}
+            block["query_state"] = "paused"
+            if not block.get("refresh_error"):
+                import upstream_controls
+                block["refresh_error"] = "本机已暂停该服务的自动请求；" + upstream_controls.pause_summary(pause)
+            import diagnostics
+            failure = diagnostics.safe_failure(pause.get("failure"))
+            if failure.get("account_fingerprint") == quota_refresh.account_fingerprint(provider, account):
+                block["refresh_failure"] = failure
+        else:
+            block["refresh_pause"] = None
+        return block
 
     def read(provider):
         source = claude_status if provider == "claude" else codex
@@ -349,7 +373,7 @@ def _rate_limits(refresh=False):
             if previous and previous.get("account_id") == account.account_id and _quota_time(previous, provider) > _quota_time(block, provider):
                 block = dict(previous)
             block.update(subscription_confirmation=note, refresh_error=None, signed_out=False)
-            return provider, block
+            return provider, query_state(provider, account, block)
         if not refresh:
             block = _rate_limit_block(source.load_rate_limits(), account)
             if block is None and account is None:
@@ -387,11 +411,18 @@ def _rate_limits(refresh=False):
                 # credential looks signed in from here, and saying otherwise
                 # would be a claim this path cannot support.
                 block.setdefault("signed_out", account is None)
+            block = query_state(provider, account, block)
             return provider, block
         error = None
         failure = None
         signed_out = False
+        state = "succeeded"
         try:
+            exclusions = (blocked_accounts or {}).get(provider, [])
+            if "*" in exclusions or quota_refresh.account_fingerprint(provider, account) in exclusions:
+                block = _rate_limit_block(source.load_rate_limits() or RateLimits(None, None, None, None), account)
+                block.update(refresh_error="本轮同服务账号已有失败或结果未知；本机未再次查询。", query_state="blocked", signed_out=False)
+                return provider, query_state(provider, account, block)
             value = quota_refresh.load_rate_limits(provider, account)
         except quota_refresh.NoSubscription:
             # The confirmation may have arrived after this export's precheck.
@@ -410,6 +441,7 @@ def _rate_limits(refresh=False):
             signed_out = True
             value = source.load_rate_limits() or RateLimits(None, None, None, None)
         except (quota_refresh.RefreshError, OSError) as exc:
+            state = "local_unavailable" if isinstance(exc, quota_refresh.LocalUnavailable) else "failed"
             failure = getattr(exc, "failure", None)
             if isinstance(exc, quota_refresh.RefreshError):
                 error = str(exc)
@@ -423,7 +455,8 @@ def _rate_limits(refresh=False):
         block["refresh_error"] = error
         block["refresh_failure"] = failure
         block["signed_out"] = signed_out
-        return provider, block
+        block["query_state"] = state
+        return provider, query_state(provider, account, block)
 
     # There are two independent provider endpoints, each with one bounded child.
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -461,6 +494,8 @@ def _save_quota_cache(cache_path, result):
                     "refresh_error": block["refresh_error"],
                     "signed_out": block.get("signed_out", False),
                     "refresh_failure": block.get("refresh_failure"),
+                    "refresh_pause": block.get("refresh_pause"),
+                    "query_state": block.get("query_state"),
                     "subscription_confirmation": block.get("subscription_confirmation"),
                 }
         staging = cache_path.with_name(cache_path.name + "." + uuid.uuid4().hex)
@@ -475,11 +510,12 @@ def _save_quota_cache(cache_path, result):
             staging.unlink(missing_ok=True)
 
 
-def recover_codex_quota(expected_label, pause_id):
-    """Explicit operator recovery; never called by Web or scheduled collectors."""
+def recover_codex_quota(expected_label, pause_id, *, expected_id=None):
+    """One operator-approved probe; retain the pause until its reading is saved."""
     from upstream_controls import Controls
     account = accounts.codex_account()
-    if not expected_label or account is None or account.label != expected_label:
+    if (not expected_label or account is None or account.label != expected_label
+            or (expected_id is not None and account.account_id != expected_id)):
         raise quota_refresh.RefreshError("当前 Codex 账号与批准目标不一致，未开始探测。")
     value = quota_refresh.load_rate_limits("codex", account, probe_pause_id=pause_id)
     current = accounts.codex_account()
@@ -487,7 +523,9 @@ def recover_codex_quota(expected_label, pause_id):
             "codex", account.account_id, account.label):
         raise quota_refresh.RefreshError("探测期间账号已变化；未保存读数，暂停保留。")
     block = _rate_limit_block(value, account)
-    block.update(refresh_error=None, signed_out=False)
+    if not quota_applicability.current_window(block):
+        raise quota_refresh.RefreshError("探测未返回当前有效额度窗口；暂停保留。")
+    block.update(refresh_error=None, refresh_failure=None, refresh_pause=None, query_state="succeeded", signed_out=False)
     _save_quota_cache(ROOT / "state/quota_snapshot.json", {"codex": block})
     Controls(ROOT / "state/upstream_controls").resume("codex", pause_id)
     return block

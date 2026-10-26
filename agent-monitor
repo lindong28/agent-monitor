@@ -753,13 +753,17 @@ mode.add_argument(
 )
 parser.add_argument("--cached-quota", action="store_true", help="collect statistics without actively querying provider Quota")
 parser.add_argument("--gui-quota", action="store_true", help=argparse.SUPPRESS)
+parser.add_argument("--quota-exclusions", help=argparse.SUPPRESS)
 args = parser.parse_args()
 
 try:
     if args.version:
         print(exporter.exporter_version())
     elif args.quota_only:
-        print(json.dumps(exporter.export_quota(gui_quota=args.gui_quota), sort_keys=True))
+        exclusions = json.loads(args.quota_exclusions) if args.quota_exclusions else None
+        from quota_recovery import validate_exclusions
+        validate_exclusions(exclusions or {})
+        print(json.dumps(exporter.export_quota(gui_quota=args.gui_quota, blocked_accounts=exclusions), sort_keys=True))
     else:
         manifest = exporter.export_bundle(output_path=args.out, quota_refresh=not args.cached_quota, gui_quota=args.gui_quota)
         print(json.dumps(manifest, sort_keys=True))
@@ -813,6 +817,10 @@ if [ -z "$LOCAL_WEB" ]; then
 fi
 
 case "${1:-}" in
+  quota-recover)
+    shift
+    PYTHONPATH="$ROOT_DIR" "$AGENT_MONITOR_PYTHON" -m quota_recovery "$@"
+    ;;
   -h|--help|help)
     usage
     exit 0

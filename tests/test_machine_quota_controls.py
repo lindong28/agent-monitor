@@ -115,6 +115,10 @@ class SerialQuotaRoundTests(unittest.TestCase):
             # A previous result must be emitted before admitting another machine.
             self.assertEqual(len(output.getvalue().splitlines()), len(calls) - 1)
             self.assertEqual(kwargs["timeout"], quota_sync.MACHINE_TIMEOUT)
+            if failure and len(calls) == 3:
+                import shlex
+                argv = shlex.split(command[-1])
+                self.assertEqual(json.loads(argv[argv.index("--quota-exclusions") + 1]), {"codex": ["*"]})
             return SimpleNamespace(stdout=json.dumps(self.payload(failure and len(calls) == 2)))
         with mock.patch.object(quota_sync.sys, "stdin", inputs), \
                 mock.patch.object(quota_sync.sys, "stdout", output), \
@@ -123,15 +127,13 @@ class SerialQuotaRoundTests(unittest.TestCase):
             quota_sync._worker()
         return calls, [json.loads(line) for line in output.getvalue().splitlines()]
 
-    def test_serial_success_and_stop_on_provider_failure(self):
+    def test_serial_success_and_provider_scoped_failure(self):
         calls, results = self.run_round(False)
         self.assertEqual(calls, ["fake-0", "fake-1", "fake-2"])
         self.assertTrue(all(result["payload"] for result in results[:-1]))
         calls, results = self.run_round(True)
-        self.assertEqual(calls, ["fake-0", "fake-1"])
-        self.assertIsNone(results[2]["payload"])
-        self.assertIn("尚未尝试", results[2]["error"])
-        self.assertIn("1 / codex：refused", results[2]["error"])
+        self.assertEqual(calls, ["fake-0", "fake-1", "fake-2"])
+        self.assertIsNotNone(results[2]["payload"])
         self.assertEqual(results[-1], {"done": True})
 
     def test_parent_wait_budget_tracks_number_of_selected_machines(self):

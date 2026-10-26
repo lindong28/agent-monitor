@@ -840,6 +840,7 @@ def _build_rate_limits(rate_limits, timestamp, session_id, models, *, expire=Tru
         updated_at=timestamp,
         # Plan and percentages belong to this same stored observation.
         plan=_plan_type(rate_limits),
+        quota_observation={"source": "codex_session", "observed_at": timestamp},
     )
 
 

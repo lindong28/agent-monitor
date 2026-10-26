@@ -331,7 +331,20 @@ def _rpc_failure(error, request_id):
                 body = None
             if isinstance(body, dict):
                 facts["http_status"] = body.get("status")
+                reason = body.get("error")
+                if isinstance(reason, dict):
+                    facts["upstream_code"] = reason.get("code")
+                    facts["detail"] = reason.get("message")
+            else:
+                # Do not retain an unparsed response body or arbitrary headers.
+                facts["detail"] = message.partition("body=")[0]
     return diagnostics.safe_failure(facts)
+
+
+def account_fingerprint(provider, account):
+    if account is None:
+        return None
+    return hashlib.sha256(quota_identity(provider, account.account_id, account.label).encode()).hexdigest()
 
 
 def _codex(account):

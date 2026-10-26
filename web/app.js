@@ -1077,9 +1077,12 @@
     updateSyncOverviewLink();
   }
 
-  function quotaFailureKind(reason) {
+  function quotaFailureKind(reason, queryState) {
+    if (queryState === "paused") return "paused";
+    if (queryState === "blocked") return "skipped";
     const text = String(reason || "");
     if (text.startsWith("本轮前序机器查询异常；本机尚未尝试")) return "skipped";
+    if (text.startsWith("本轮同服务账号已有失败")) return "skipped";
     if (text.startsWith("本机已暂停该服务的自动请求")) return "paused";
     if (text.startsWith("同一服务已有操作，本次未发出请求。")) return "busy";
     return "error";
@@ -1094,8 +1097,8 @@
     details.className = "note-disclosure";
     const summary = document.createElement("summary");
     const counts = { paused: 0, skipped: 0, busy: 0, error: 0 };
-    failures.forEach(({ reason }) => {
-      counts[quotaFailureKind(reason)] += 1;
+    failures.forEach(({ reason, query_state }) => {
+      counts[quotaFailureKind(reason, query_state)] += 1;
     });
     const labels = [["paused", "暂停"], ["skipped", "本轮未尝试"],
       ["busy", "通道占用未查询"], ["error", "查询异常"]];
@@ -1106,6 +1109,36 @@
       const note = document.createElement("p");
       note.textContent = `${failure.machine}：${failure.reason}`;
       details.appendChild(note);
+      const pause = failure.pause;
+      if (provider.key === "codex" && pause?.id && pause.id !== "unreadable"
+          && failure.account_id && failure.account_label) {
+        const context = document.createElement("p");
+        context.textContent = `账号：${failure.account_label}；暂停时间：${pause.at ? new Date(pause.at * 1000).toLocaleString() : "未记录"}。${failure.failure?.detail || "旧记录可能缺少上游原始原因。"}`;
+        details.appendChild(context);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = pause.probe_attempt ? "本次暂停的探测机会已使用" : "核对并探测一次";
+        button.disabled = !!pause.probe_attempt;
+        button.addEventListener("click", async () => {
+          const confirmed = window.confirm(`仅在 ${failure.machine} 为 ${failure.account_label} 查询一次 Codex 配额。\n暂停标识：${pause.id}\n不生成模型回复、不自动重试。成功保存有效读数后恢复自动查询；失败继续暂停。确认已核对原因并允许这一次查询？`);
+          if (!confirmed) return;
+          button.disabled = true;
+          button.textContent = "正在探测，请等待回执…";
+          try {
+            const response = await fetch("/api/quota-recovery", {method: "POST", headers: {"Content-Type": "application/json", "X-Agent-Monitor": "action"},
+              body: JSON.stringify({machine: failure.machine, account_id: failure.account_id, account_label: failure.account_label, pause_id: pause.id})});
+            const receipt = await response.json();
+            context.textContent = (receipt.message || receipt.error || "未取得有效回执，请核对目标机器状态。")
+              + (receipt.failure?.detail ? ` 原因：${receipt.failure.detail}` : "");
+            button.textContent = receipt.ok ? "恢复成功" : "未恢复，请核对详情";
+            if (receipt.ok) window.location.reload();
+          } catch (_) {
+            context.textContent = "回执未取得，执行结果未知；请核对目标机器的暂停记录，勿重复探测。";
+            button.textContent = "结果未确认";
+          }
+        });
+        details.appendChild(button);
+      }
     });
     cell.appendChild(details);
     row.appendChild(cell);
@@ -1127,11 +1160,12 @@
     if (sourceHealthy && fresh && hasValue) return null;
     const kinds = new Set((block?.refresh_errors || [])
       .filter(({ machine }) => (account.machines || []).includes(machine))
-      .map(({ reason }) => quotaFailureKind(reason)));
+      .map(({ reason, query_state }) => quotaFailureKind(reason, query_state)));
     const state = kinds.has("paused") ? "查询已暂停" : kinds.has("skipped") ? "上次查询未执行"
       : kinds.has("busy") ? "查询通道占用" : null;
     if (state) {
-      return `${hasValue ? "更新延迟，保留上次读数" : "暂不可用"}；${state}，请展开“${provider.label} 采集详情”核对原因`;
+      const reading = hasValue ? (fresh ? (account.quota_observation?.source === "codex_session" ? "当前读数来自会话日志" : "当前读数仍在更新时限内") : "读数已过期，保留上次读数") : "暂无读数";
+      return `${reading}；主动${state}，请展开“${provider.label} 采集详情”核对原因`;
     }
     return hasValue ? "更新延迟，保留上次读数；可点击刷新重试" : "暂不可用，可点击刷新重试";
   }
@@ -1712,6 +1746,8 @@
     const observationTime = account.updated_at || account.last_observation?.observed_at;
     const knownTime = typeof observationTime === "string" && observationTime && Number.isFinite(Date.parse(observationTime));
     exact.textContent = knownTime ? `${historicalOnly ? "历史观测" : "观测时间"}：${formatDate(observationTime)}` : "未取得观测时间";
+    const sourceLabel = {codex_session: "会话日志", active_query: "主动查询", claude_statusline: "状态栏"}[account.quota_observation?.source];
+    exact.textContent += `；读数来源：${sourceLabel || "旧记录未注明"}`;
     details.appendChild(exact);
     if (account.last_observation) {
       const history = account.last_observation;

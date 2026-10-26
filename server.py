@@ -731,7 +731,7 @@ class Handler(BaseHTTPRequestHandler):
         if client_network.handle(self):
             return
         if (parsed.path.startswith("/api/codex-accounts/") or parsed.path in
-                ("/api/account-memory/remove", "/api/restart", "/api/refresh", "/api/network")):
+                ("/api/account-memory/remove", "/api/restart", "/api/refresh", "/api/network", "/api/quota-recovery")):
             header = "codex-accounts" if parsed.path.startswith("/api/codex-accounts/") else "action"
             if not self._check_browser_boundary(header, require_origin=True):
                 return
@@ -740,6 +740,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/account-memory/remove":
             self._handle_account_memory_remove()
+            return
+        if parsed.path == "/api/quota-recovery":
+            self._handle_quota_recovery()
             return
         if parsed.path == "/api/restart":
             self._handle_restart()
@@ -871,6 +874,61 @@ class Handler(BaseHTTPRequestHandler):
             failure_id = diagnostics.monitor.record_failure("account_api", exc)
             self._send_json({"error": "账号操作失败，请检查服务主机的诊断事件；诊断标识：" + failure_id},
                             status=500, send_body=send_body)
+
+    def _handle_quota_recovery(self):
+        import quota_recovery
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+            if not 0 < length <= 4096 or self.headers.get_content_type() != "application/json":
+                raise ValueError()
+            value = quota_recovery.validate_request(json.loads(self.rfile.read(length)))
+            machine = sync.load_machine_config().by_name.get(value["machine"])
+            if machine is None:
+                raise ValueError()
+        except (ValueError, UnicodeDecodeError):
+            self._send_json({"error": "恢复目标或请求格式无效。"}, status=400)
+            return
+        with QUOTA_REFRESH.condition:
+            if QUOTA_REFRESH.running or QUOTA_REFRESH.recovering:
+                self._send_json({"error": "已有配额操作，请等待结束后再核对暂停状态。"}, status=409)
+                return
+            QUOTA_REFRESH.recovering = True
+        try:
+            with generation.generation_admission_snapshot() as admission:
+                current = next((item for item in admission.admitted if item.host == machine.name), None)
+                if current is None:
+                    self._send_json({"error": "目标机器尚未通过来源确认。"}, status=409)
+                    return
+                meta = dict(current.meta)
+                limits = QUOTA_REFRESH.merge(current, machine)
+            before = limits.get("codex") or {}
+            if (before.get("account_id"), before.get("account_label")) != (value["account_id"], value["account_label"]):
+                self._send_json({"error": "页面账号已变化，请重新核对。"}, status=409)
+                return
+            receipt = quota_recovery.run(machine, value)
+            if receipt.get("ok"):
+                block = receipt.get("block") or {}
+                if (receipt.get("source_host_identity") != meta["source_host_identity"]
+                        or (block.get("account_id"), block.get("account_label")) != (value["account_id"], value["account_label"])):
+                    raise ValueError("recovery identity mismatch")
+                # A signed-in independent provider may have no observation yet.
+                recovered_limits = {p: dict(limits.get(p) or {}) for p in ("claude", "codex")}
+                recovered_limits["codex"] = block
+                payload = {"schema_version": 1, "source_host_identity": receipt["source_host_identity"],
+                           "exporter_commit": receipt["exporter_commit"], "rate_limits": recovered_limits}
+                quota_sync._validate(payload)
+                with QUOTA_REFRESH.condition:
+                    QUOTA_REFRESH.records[machine.name] = {"ssh_host": machine.ssh_host, "payload": payload,
+                        "attempted_at": datetime.now(timezone.utc).isoformat(), "error": None}
+                    hub._write_quota_message(QUOTA_REFRESH.path, {"version": 1, "machines": QUOTA_REFRESH.records})
+                    QUOTA_REFRESH.revision += 1
+                receipt = {"ok": True, "message": "有效读数已保存，目标机器的 Codex 自动查询已恢复。"}
+            self._send_json(receipt, status=200 if receipt.get("ok") else 409)
+        except Exception:
+            self._send_json({"error": "恢复回执未能确认或保存，请核对目标机器状态；不要重复探测。"}, status=500)
+        finally:
+            with QUOTA_REFRESH.condition:
+                QUOTA_REFRESH.recovering = False
 
     def _handle_account_memory_remove(self):
         # Browser admission is shared by every mutation in do_POST.
@@ -2056,8 +2114,10 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
                 refresh_error = value if isinstance(value, str) and value.strip() else "配额刷新状态无效，请更新这台机器的 agent-monitor exporter 后重试。"
             if refresh_error is not None:
                 failure_entry = {"machine": current.host, "reason": refresh_error}
-                if provider == "claude" and isinstance(block, dict) and diagnostics.safe_failure(block.get("refresh_failure")):
-                    failure_entry.update(account_id=_account_id(block), failure=diagnostics.safe_failure(block.get("refresh_failure")))
+                if isinstance(block, dict) and (diagnostics.safe_failure(block.get("refresh_failure")) or block.get("refresh_pause")):
+                    failure_entry.update(account_id=_account_id(block), account_label=block.get("account_label"),
+                        failure=diagnostics.safe_failure(block.get("refresh_failure")),
+                        pause=block.get("refresh_pause"), query_state=block.get("query_state"))
                 refresh_errors[provider].append(failure_entry)
             if not isinstance(block, dict):
                 continue

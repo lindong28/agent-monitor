@@ -55,14 +55,26 @@ def _write_quota_message(path, value):
         staging.unlink(missing_ok=True)
 
 
-def _pending_quota_nonce():
+def _pending_quota_request():
     state = ROOT / "state"
-    nonce = _quota_message(state / "quota-refresh-request.json").get("nonce")
+    request = _quota_message(state / "quota-refresh-request-v2.json")
+    version = "-v2" if request else ""
+    if not request:
+        request = _quota_message(state / "quota-refresh-request.json")
+    nonce = request.get("nonce")
     if not isinstance(nonce, str) or not re.fullmatch(r"[0-9a-f]{32}", nonce):
         return None
-    if _quota_message(state / "quota-refresh-receipt.json").get("nonce") == nonce:
+    if _quota_message(state / ("quota-refresh-receipt" + version + ".json")).get("nonce") == nonce:
         return None
-    return nonce
+    from quota_recovery import validate_exclusions
+    exclusions = request.get("blocked_accounts", {}) if version else {}
+    validate_exclusions(exclusions)
+    return {"nonce": nonce, "version": version, "blocked_accounts": exclusions}
+
+
+def _pending_quota_nonce():
+    request = _pending_quota_request()
+    return request["nonce"] if request else None
 
 
 def _kick_quota_collector(deadline):
@@ -95,12 +107,14 @@ def _kick_quota_collector(deadline):
         raise QuotaRequestError("GUI 配额采集器无法启动，请检查这台 Mac 的登录会话后重新刷新。")
 
 
-def request_quota_refresh(*, timeout=QUOTA_REQUEST_TIMEOUT):
+def request_quota_refresh(*, timeout=QUOTA_REQUEST_TIMEOUT, blocked_accounts=None):
     """Serialize SSH requests, leaving the collector and rollup lock independent."""
     deadline = time.monotonic() + timeout
     state = ROOT / "state"
-    request = state / "quota-refresh-request.json"
-    receipt = state / "quota-refresh-receipt.json"
+    # Old collectors must never execute a request whose exclusions they ignore.
+    version = "-v2" if blocked_accounts else ""
+    request = state / ("quota-refresh-request" + version + ".json")
+    receipt = state / ("quota-refresh-receipt" + version + ".json")
     nonce = uuid.uuid4().hex
     try:
         state.mkdir(parents=True, exist_ok=True)
@@ -114,12 +128,13 @@ def request_quota_refresh(*, timeout=QUOTA_REQUEST_TIMEOUT):
                 except BlockingIOError:
                     time.sleep(min(QUOTA_POLL_INTERVAL, max(0, deadline - time.monotonic())))
             try:
-                _write_quota_message(request, {"nonce": nonce})
+                _write_quota_message(request, {"nonce": nonce, **({"blocked_accounts": blocked_accounts} if version else {})})
                 next_kick = 0
                 while time.monotonic() < deadline:
                     acknowledgement = _quota_message(receipt)
                     limits = acknowledgement.get("rate_limits")
                     if (acknowledgement.get("nonce") == nonce and isinstance(limits, dict)
+                            and (not blocked_accounts or acknowledgement.get("blocked_accounts") == blocked_accounts)
                             and set(limits) == {"claude", "codex"}
                             and all(isinstance(block, dict) for block in limits.values())
                             and time.monotonic() < deadline):
@@ -198,25 +213,30 @@ def collect():
     queried = threading.Event()
     failures = []
 
-    def query(nonce):
+    def query(request):
         import exporter
+        # Capture the complete request once: timeout cleanup/replacement cannot
+        # convert an already admitted restricted request into an unrestricted one.
+        nonce = request["nonce"] if request else None
+        version = request["version"] if request else ""
+        exclusions = request["blocked_accounts"] if request else {}
         # Provider refresh has its own deadlines and persists its observed state.
-        limits = exporter._rate_limits(refresh=True)
+        limits = exporter._rate_limits(refresh=True, **({"blocked_accounts": exclusions} if exclusions else {}))
         if nonce is not None:
-            _write_quota_message(ROOT / "state" / "quota-refresh-receipt.json",
-                                 {"nonce": nonce, "rate_limits": limits})
+            _write_quota_message(ROOT / "state" / ("quota-refresh-receipt" + version + ".json"),
+                                 {"nonce": nonce, "rate_limits": limits, **({"blocked_accounts": exclusions} if version else {})})
         stamp.write_text(str(time.time()))
         queried.set()
 
     def serve_quota():
         try:
-            nonce = _pending_quota_nonce()
-            if quota_due or nonce is not None:
-                query(nonce)
+            request = _pending_quota_request()
+            if quota_due or request is not None:
+                query(request)
             while not stopping.wait(QUOTA_POLL_INTERVAL):
-                nonce = _pending_quota_nonce()
-                if nonce is not None:
-                    query(nonce)
+                request = _pending_quota_request()
+                if request is not None:
+                    query(request)
         except Exception as exc:
             failures.append(exc)
 

@@ -48,7 +48,7 @@ class ProviderTests(unittest.TestCase):
         lease.close()
         pause_id = controls.read("codex")["pause"]["id"]
         account = accounts.Account("workspace", "expected@example.test")
-        reading = RateLimits(5, None, 20, None, updated_at="2026-10-22T00:00:00Z")
+        reading = RateLimits(5, 4102444800, 20, 4102444800, updated_at="2026-10-22T00:00:00Z")
         payload = json.dumps({"reading": dataclasses.asdict(reading)})
         child = SimpleNamespace(pid=0, returncode=0, communicate=lambda *a, **k: (payload, ""))
         cache = self.root / "state/quota_snapshot.json"
@@ -79,7 +79,7 @@ class ProviderTests(unittest.TestCase):
         from upstream_controls import Controls
         account = accounts.Account("workspace", "expected@example.test")
         other = accounts.Account("workspace", "other@example.test")
-        reading = RateLimits(5, None, 20, None, updated_at="2026-10-22T00:00:00Z")
+        reading = RateLimits(5, 4102444800, 20, 4102444800, updated_at="2026-10-22T00:00:00Z")
         for mode in ("before", "after", "upstream", "cache"):
             with self.subTest(mode=mode):
                 controls = Controls(self.root / "state/upstream_controls")

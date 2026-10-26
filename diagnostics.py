@@ -9,14 +9,15 @@ import math
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import re
 from pathlib import Path
 import threading
 import time
 import uuid
 
 
-# Only protocol facts and internal vocabulary cross the failure boundary.
-# Exception text, argv, response bodies and filenames are deliberately absent.
+# Only protocol facts and bounded, redacted upstream reasons cross this boundary.
+# Arbitrary exception text, argv and full response bodies remain excluded.
 _STAGES = {"unknown", "account_api", "admission", "child_start", "child_result",
            "credentials", "profile_read", "quota_read", "initialize", "account_check",
            "quota_parse", "cleanup", "remote_prepare", "remote_export", "transfer",
@@ -31,10 +32,28 @@ _SOURCE_FILES = {"server.py", "codex_accounts.py", "upstream_controls.py", "quot
                  "quota_sync.py", "sync.py", "diagnostics.py"}
 
 
+def safe_upstream_detail(value):
+    """Redact credential syntax before retaining a bounded upstream reason."""
+    if not isinstance(value, str):
+        return None
+    # Headers have scheme/value and multi-cookie syntax: discard their complete
+    # value, rather than only the first space- or semicolon-delimited token.
+    value = re.sub(r'''(?im)\b(?:proxy-authorization|authorization|set-cookie|cookie)["']?\s*[:=]\s*[^\r\n]*''', "[credential header redacted]", value)
+    value = re.sub(r"https?://[^\s\"<>]+", "[url redacted]", value)
+    value = re.sub(r"(?i)\bBearer\s+[^\s,;\"}]+", "Bearer [redacted]", value)
+    value = re.sub(r'''(?ix)(["']?(?:password|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|token|secret)["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)''', r"\1[redacted]", value)
+    value = re.sub(r"[A-Za-z0-9_+/=-]{32,}", "[opaque value redacted]", value)
+    return " ".join(value.split())[:512]
+
+
 def safe_failure(value):
     if not isinstance(value, dict):
         return {}
     result = {}
+    for key in ("detail", "upstream_code"):
+        item = safe_upstream_detail(value.get(key))
+        if item:
+            result[key] = item
     for key, allowed in (("stage", _STAGES), ("kind", _KINDS), ("error_type", _ERROR_TYPES)):
         item = value.get(key)
         if isinstance(item, str) and item in allowed:
