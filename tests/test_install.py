@@ -28,6 +28,8 @@ class RollupInstallerTests(unittest.TestCase):
         shutil.copy2(ROOT / "rollup_service.py", self.component / "rollup_service.py")
         shutil.copy2(ROOT / "deployment_guard.py", self.component / "deployment_guard.py")
         shutil.copy2(ROOT / "status.sh", self.component / "status.sh")
+        for name in ('local_web.py', 'process_identity.py'):
+            shutil.copy2(ROOT / name, self.component / name)
         (self.component / "lib").mkdir()
         shutil.copy2(ROOT / "lib/install-output.sh", self.component / "lib/install-output.sh")
         for name in ("agent-monitor", "ip-check"):

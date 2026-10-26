@@ -44,6 +44,7 @@ if [ "${1:-}" = local ]; then
 fi
 
 usage() {
+  echo "Service management: agent-monitor service {status|restart local-web|restart hub|restart collector|restart connector|deploy [--expect SHA]|rebuild-runtime --python /absolute/python}"
   echo "Local dashboard: agent-monitor local {start|stop|restart|status|open}"
   echo "usage: agent-monitor {start|stop|restart|status|open|refresh|connect [install --server URL|status|stop|restart|--server URL]|network [--json] [--force]|session-quota SESSION_ID [--json]|export (--out PATH|--version)|machines (accept NAME [--yes]|retire NAME...)|rollup [--check [--json]|adopt-timezone|blockers|recover|recover-reviewed]}"
 }
@@ -55,6 +56,10 @@ is_running() {
 find_port() {
   local port="$BASE_PORT"
   while nc -z "$CONNECT_HOST" "$port" >/dev/null 2>&1; do
+    if [ "${AGENT_MONITOR_EXACT_PORT:-0}" = 1 ]; then
+      echo "Configured local Web port is occupied; no replacement was started." >&2
+      return 1
+    fi
     port=$((port + 1))
   done
   echo "$port"
@@ -817,6 +822,10 @@ if [ -z "$LOCAL_WEB" ]; then
 fi
 
 case "${1:-}" in
+  service)
+    shift
+    exec "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/service_manager.py" "$@"
+    ;;
   quota-recover)
     shift
     PYTHONPATH="$ROOT_DIR" "$AGENT_MONITOR_PYTHON" -m quota_recovery "$@"

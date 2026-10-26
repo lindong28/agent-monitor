@@ -89,7 +89,9 @@ On macOS, the installer manages the periodic collector and the configured Hub. A
 
 Standalone scheduled collection runs local `rollup`, independently of whether a dashboard is running. Hub machines retain their configured `collect` schedule. Changing a Hub role with `hub MACHINE --no-services` is rejected; stage with `./install.sh --no-services`, then apply the role with `./install.sh hub MACHINE`.
 
-Use `./status.sh` to inspect services, `./agent-monitor start|stop|restart` for the dashboard, and `./agent-monitor connect status|stop|restart` for the connector. `./uninstall.sh` removes this checkout's service integration and CLI links; `web`, `rollup-daemon` and `connector` select one component. Foreign or unrecognized service ownership is preserved and reported. Saved data and locks remain.
+Use `./agent-monitor service status` (also `./status.sh`) for the role, central target, local Web, collector and optional connector. `service restart local-web|hub|collector|connector` selects one component; `service deploy` uses the published-main deployment entry. Deployment also updates an already-running local Web, retaining its bind address, port and environment; a stopped local Web stays stopped. For Python replacement, use `service rebuild-runtime --python /absolute/path/to/python3`; see [rebuild and recovery](docs/public-usage.md#python-runtime-rebuild).
+
+Existing dashboard and connector commands remain compatible. `./uninstall.sh` removes this checkout's service integration and CLI links; `web`, `rollup-daemon` and `connector` select one component. Foreign or unrecognized service ownership is preserved and reported. Saved data and locks remain.
 
 On a Hub client, `open` and `refresh` target the central Hub; default Web management commands direct you to that host. To keep a local dashboard on the client, use `./agent-monitor local start|stop|restart|status|open`. Installation preserves an already running local dashboard. The `local` selector does not manage the Hub, collector or connector.
 

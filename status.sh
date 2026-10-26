@@ -35,11 +35,7 @@ fi
 
 case "$SERVICE" in
   all)
-    result=0
-    status_web || result=1
-    status_rollup_daemon || result=1
-    status_connector || result=1
-    exit "$result"
+    exec "$ROOT/agent-monitor" service status
     ;;
   web)
     status_web

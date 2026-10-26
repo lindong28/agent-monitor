@@ -422,7 +422,9 @@ def main():
             elif args.command == "role":
                 print("hub" if is_hub() else "client" if enabled() else "standalone")
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        print("agent-monitor hub: failed — %s. Check hub.json and rerun the hub installer." % exc, file=sys.stderr)
+        hint = ("Inspect state/rollup-daemon.log and agent-monitor service status; fix the reported collection failure before retrying."
+                if args.command == "collect" else "Check hub.json and the affected service status before rerunning its management command.")
+        print("agent-monitor hub: failed — %s. %s" % (exc, hint), file=sys.stderr)
         return 1
     return 0
 

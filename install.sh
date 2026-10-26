@@ -57,7 +57,7 @@ install_runtime() {
   local runtime_state=present digest marker="$ROOT_DIR/.venv/.agent-monitor-requirements.sha256"
   if [ -x "$VENV_PY" ]; then
     if ! require_python "$VENV_PY"; then
-      echo "Existing .venv was preserved. Stop owned services, rename .venv to a backup, then rerun AGENT_MONITOR_PYTHON=/path/to/python3.10-or-newer ./install.sh with the same arguments. Keep state and local configuration unchanged." >&2
+      echo "Existing .venv was preserved. Use /path/to/python3.10-or-newer runtime_rebuild.py --python /path/to/python3.10-or-newer from the published main checkout; it preserves state and restores the old runtime if rebuilding fails." >&2
       return 1
     fi
   else
@@ -314,6 +314,7 @@ fi
 if [ "$(uname -s)" = Darwin ]; then
   "$VENV_PY" "$ROOT_DIR/connector_service.py" converge
 fi
+"$VENV_PY" "$ROOT_DIR/local_web.py"
 
 # --- post-install network health hint ---
 # Run ip-check once and surface a remediation pointer ONLY when it finds a real
