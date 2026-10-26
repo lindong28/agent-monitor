@@ -139,6 +139,9 @@ def run_case(path, rows, padding_mib, repeat):
 
 
 def main():
+    if sys.argv[1:2] == ["background"]:
+        from benchmark_background import main as background_main
+        return background_main(sys.argv[2:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", nargs="+", type=positive, default=[100, 1000])
     parser.add_argument("--padding-mib", nargs="+", type=nonnegative, default=[0, 4])

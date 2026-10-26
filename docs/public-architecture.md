@@ -43,6 +43,7 @@ See [usage and operations](public-usage.md), [contributing](../CONTRIBUTING.md) 
 | Overview, Explore, sync status | Prepared `QueryView` aggregates; signatures grow with machine count and queries with selected daily rows | `tests/test_query_view.py` |
 | View preparation | Startup/new-generation admission, digest and schema validation; old leased view remains readable | `scripts/benchmark_backend.py`, `tests/test_query_view.py` |
 | Publication and GC | Snapshot copy and retained-history validation; long preparation stays outside the shared GC lock | `tests/test_snapshot_contention.py`, `tests/test_generation_gc.py` |
+| Background collection/export | Archive materialization, rollup and full statistics export; synthetic initial/unchanged/append rounds | `scripts/benchmark_backend.py background`, `tests/test_benchmark_background.py` |
 | Full-history sessions | Retained event admission/materialization and matching history; aggregate benchmarks do not cover this | `tests/test_sessions_cache.py`, `tests/test_conversation_sessions.py` |
 | Sync and quota | Export, transport, publication, quota child lifecycle and browser API fan-out | `tests/test_sync_process.py`, `tests/test_quota_refresh.py` |
 
