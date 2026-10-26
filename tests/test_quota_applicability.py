@@ -223,7 +223,9 @@ class QuotaApplicabilityTests(unittest.TestCase):
                 lease = controls.acquire("claude")
                 lease.pause("quotaRefreshFailed")
                 lease.close()
-            with self.subTest(paused=paused), mock.patch.object(quota_refresh.subprocess, "Popen", side_effect=OSError("fixture child")) as spawn:
+            with self.subTest(paused=paused), \
+                    mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"), \
+                    mock.patch.object(quota_refresh.subprocess, "Popen", side_effect=OSError("fixture child")) as spawn:
                 with self.assertRaises((OSError, quota_refresh.RefreshError)):
                     quota_refresh.load_rate_limits("claude", self.account, recovery_account_id=self.account.account_id)
                 self.assertEqual(spawn.call_count, 0 if paused else 1)

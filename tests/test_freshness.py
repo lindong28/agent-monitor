@@ -81,6 +81,8 @@ class FreshnessWiringTests(unittest.TestCase):
             launcher = launcher_root / "agent-monitor"
             shutil.copy2(ROOT / "agent-monitor", launcher)
             shutil.copy2(ROOT / "hub.py", launcher_root / "hub.py")
+            shutil.copy2(ROOT / "deployment_guard.py", launcher_root / "deployment_guard.py")
+            shutil.copy2(ROOT / "service_runtime.py", launcher_root / "service_runtime.py")
             shutil.copy2(ROOT / "hub.json", launcher_root / "hub.json")
             shutil.copy2(ROOT / "process_identity.py", launcher_root / "process_identity.py")
 

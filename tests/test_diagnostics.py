@@ -50,7 +50,9 @@ class DiagnosticsTests(unittest.TestCase):
                          mock.patch.object(server.codex_accounts.manager, "close", side_effect=RuntimeError("cleanup") if failure == "cleanup" else None), \
                          mock.patch.object(server.QUOTA_REFRESH, "shutdown"), mock.patch.object(server, "QUERY_VIEW", None), \
                          mock.patch.object(server.os, "execv", side_effect=OSError("exec") if failure == "exec" else None) as execute:
-                        server._schedule_reexec()
+                        guard = server.deployment_guard.deployment_lock(Path(tmp), inherit=False)
+                        guard.__enter__()
+                        server._schedule_reexec(guard)
                         if failure:
                             with self.assertRaises((RuntimeError, OSError)):
                                 timer.call_args.args[1]()

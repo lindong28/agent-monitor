@@ -1,5 +1,6 @@
 """Deployment admission against real isolated Git repositories and an inert installer."""
 import os
+import fcntl
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,7 +19,8 @@ class ProductionDeploymentTests(unittest.TestCase):
         home = self.root / "home"
         home.mkdir()
         self.env = {**os.environ, "HOME": str(home), "GIT_CONFIG_GLOBAL": os.devnull,
-                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+                    "CLAUDE_CONFIG_DIR": str(home / '.claude'), "CODEX_HOME": str(home / '.codex'),
+                    "PYTHONDONTWRITEBYTECODE": '1', "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
         for key in list(self.env):
             if key.startswith(("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
                 del self.env[key]
@@ -30,11 +32,12 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.run_git(self.repo, "config", "user.name", "Deployment Test")
         self.run_git(self.repo, "config", "user.email", "test@example.invalid")
         shutil.copy2(SOURCE, self.repo / "deploy.py")
+        shutil.copy2(SOURCE.with_name('deployment_guard.py'), self.repo / 'deployment_guard.py')
         (self.repo / ".gitignore").write_text("installed\n")
-        (self.repo / "install.sh").write_text('#!/bin/sh\nprintf "%s\\n" "$@" > installed\nexit "${TEST_INSTALL_EXIT:-0}"\n')
+        (self.repo / "install.sh").write_text('#!/bin/sh\n# AGENT_MONITOR_INSTALL_BODY\nprintf "%s\\n" "$@" > installed\nexit "${TEST_INSTALL_EXIT:-0}"\n')
         (self.repo / "install.sh").chmod(0o755)
         (self.repo / "source.txt").write_text("published\n")
-        self.run_git(self.repo, "add", "deploy.py", "install.sh", ".gitignore", "source.txt")
+        self.run_git(self.repo, "add", "deploy.py", "deployment_guard.py", "install.sh", ".gitignore", "source.txt")
         self.run_git(self.repo, "commit", "-m", "fixture")
         self.run_git(self.repo, "remote", "add", "origin", str(self.remote))
         self.run_git(self.repo, "push", "origin", "main")
@@ -60,11 +63,26 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertEqual((self.repo / "installed").read_text().splitlines(), ["rollup-daemon", "--no-services"])
         self.assertIn(self.head, result.stdout)
 
+    def test_source_edit_after_successful_preflight_is_not_the_baseline(self):
+        code = '''import deploy, deployment_guard
+def admission():
+    head = deploy.preflight(None)
+    (deploy.ROOT / 'source.txt').write_text('changed after admission')
+    return head
+deployment_guard.run_install(deploy.ROOT, [], preflight=admission)
+'''
+        result = subprocess.run([sys.executable, '-c', code], cwd=self.repo, env=self.env,
+                                capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Source changed', result.stderr)
+        self.assertFalse((self.repo / 'installed').exists())
+
     def test_check_only_does_not_install(self):
         result = self.deploy("--check-only")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.repo / "installed").exists())
         self.assertIn("health were not checked", result.stdout)
+        self.assertFalse((self.repo / 'state').exists())
 
     def test_existing_state_symlink_is_preserved(self):
         state = self.root / "persistent-state"
@@ -80,6 +98,38 @@ class ProductionDeploymentTests(unittest.TestCase):
     def test_installer_failure_is_propagated(self):
         self.env["TEST_INSTALL_EXIT"] = "7"
         self.assertEqual(self.deploy().returncode, 7)
+
+    def publish_installer(self, body):
+        (self.repo / 'install.sh').write_text('#!/bin/sh\n# AGENT_MONITOR_INSTALL_BODY\nset -eu\n' + body)
+        self.run_git(self.repo, 'add', 'install.sh')
+        self.run_git(self.repo, 'commit', '-m', 'inert installer scenario')
+        self.run_git(self.repo, 'push', 'origin', 'main')
+        self.head = self.run_git(self.repo, 'rev-parse', 'HEAD')
+
+    def test_source_edit_during_install_blocks_following_checkpoint(self):
+        self.publish_installer('printf changed > source.txt\n'
+                               '"' + sys.executable + '" deployment_guard.py check "$PWD"\n'
+                               'touch installed\n')
+        result = self.deploy('--expect', self.head)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Source changed', result.stderr)
+        self.assertFalse((self.repo / 'installed').exists())
+
+    def test_head_change_during_install_is_rejected_at_completion(self):
+        self.publish_installer('git commit --allow-empty -m changed >/dev/null\n')
+        result = self.deploy('--expect', self.head)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Source changed', result.stderr)
+
+    def test_lock_is_acquired_before_production_preflight(self):
+        state = self.repo / 'state'
+        state.mkdir()
+        self.run_git(self.repo, 'remote', 'remove', 'origin')
+        with (state / 'deployment.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.deploy()
+        self.blocked(result)
+        self.assertIn('holds state/deployment.lock', result.stderr)
 
     def test_dirty_tracked_states_block(self):
         for mode in ("unstaged", "staged", "deleted"):

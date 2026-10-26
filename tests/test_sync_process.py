@@ -139,7 +139,7 @@ sync_process._worker()
              mock.patch('server.codex_accounts.manager.close', side_effect=lambda: events.append('accounts')), \
              mock.patch('server.sync_process.shutdown', side_effect=lambda: events.append('shutdown')), \
              mock.patch('server.os.execv', side_effect=lambda *args: events.append('exec')):
-            server._schedule_reexec()
+            server._schedule_reexec(mock.MagicMock())
             timer.call_args.args[1]()
         self.assertEqual(events, ['accounts', 'shutdown', 'exec'])
 
@@ -147,7 +147,7 @@ sync_process._worker()
         with mock.patch('server.threading.Timer') as timer, \
              mock.patch('server.codex_accounts.manager.close', side_effect=RuntimeError('not reaped')), \
              mock.patch('server.os.execv') as execute:
-            server._schedule_reexec()
+            server._schedule_reexec(mock.MagicMock())
             with self.assertRaises(RuntimeError):
                 timer.call_args.args[1]()
         execute.assert_not_called()

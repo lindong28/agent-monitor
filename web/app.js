@@ -3525,7 +3525,7 @@
     banner.innerHTML =
       '<span>服务代码已更新，当前页面数据可能来自旧版本。</span>' +
       '<button type="button" id="stale-restart">重启并刷新</button>' +
-      '<span class="stale-hint">或在终端运行 <code>agent-monitor restart</code></span>';
+      '<span class="stale-hint">客户端本机网页：<code>agent-monitor local restart</code>；Hub 或独立模式：<code>agent-monitor restart</code></span>';
     document.body.insertAdjacentElement("afterbegin", banner);
     const button = qs("#stale-restart", banner);
     if (button) {
@@ -3543,7 +3543,8 @@
       const json = await res.json().catch(() => ({}));
       if (json && json.restarting === false) {
         button.disabled = false;
-        button.textContent = "重启失败：新代码有语法错误";
+        button.textContent = res.status === 409 ? "正在部署或重启，请稍后重试" : "重启失败，请检查服务状态";
+        button.title = json.error || "";
         return;
       }
     } catch (e) {

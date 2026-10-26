@@ -159,6 +159,7 @@ def _web_signature():
 # has changed since boot (the symptom: a long-lived daemon serving old code).
 BOOT_SIGNATURE = _source_signature()
 import service_runtime
+import deployment_guard
 BOOT_DEPLOYMENT_SIGNATURE = service_runtime.signature(ROOT)
 
 
@@ -541,19 +542,24 @@ def _compile_check():
     return errors
 
 
-def _schedule_reexec():
+def _schedule_reexec(guard):
     def _reexec():
         # Keep observation alive if cleanup/exec fails; successful exec replaces
         # all threads and the observer's non-inheritable file descriptors.
-        codex_accounts.manager.close()
-        client_network.hub.close()
-        QUOTA_REFRESH.shutdown()
-        if QUERY_VIEW is not None:
-            QUERY_VIEW.close()
-        os.execv(
-            sys.executable,
-            [sys.executable, str(ROOT / "server.py"), "--host", _BIND_HOST, "--port", str(_BIND_PORT)],
-        )
+        try:
+            codex_accounts.manager.close()
+            client_network.hub.close()
+            QUOTA_REFRESH.shutdown()
+            if QUERY_VIEW is not None:
+                QUERY_VIEW.close()
+            os.execv(
+                sys.executable,
+                [sys.executable, str(ROOT / "server.py"), "--host", _BIND_HOST, "--port", str(_BIND_PORT)],
+            )
+        finally:
+            # On successful exec the non-inheritable FD closes atomically;
+            # on cleanup/exec failure release it here so recovery can proceed.
+            guard.__exit__(None, None, None)
 
     threading.Timer(0.4, _reexec).start()
 
@@ -926,17 +932,31 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(receipt, status=status)
 
     def _handle_restart(self):
-        errors = _compile_check()
-        if errors:
-            self._send_json({"restarting": False, "error": errors[0]})
-            return
-        self._send_json({"restarting": True})
+        # HTTP threads must open independent locks rather than sharing the
+        # command-line parent's inherited descriptor through process env.
+        guard = deployment_guard.deployment_lock(ROOT, inherit=False)
         try:
-            self.wfile.flush()
-        except OSError:
-            pass
-        logger.info("restart requested via /api/restart; re-executing")
-        _schedule_reexec()
+            guard.__enter__()
+        except (OSError, ValueError):
+            self._send_json({"restarting": False, "error": "Installation or service change is busy or its lock is unavailable; retry after it finishes."}, status=409)
+            return
+        scheduled = False
+        try:
+            errors = _compile_check()
+            if errors:
+                self._send_json({"restarting": False, "error": errors[0]})
+                return
+            self._send_json({"restarting": True})
+            try:
+                self.wfile.flush()
+            except OSError:
+                pass
+            logger.info("restart requested via /api/restart; re-executing")
+            _schedule_reexec(guard)
+            scheduled = True
+        finally:
+            if not scheduled:
+                guard.__exit__(None, None, None)
 
     def _handle_request(self, send_body=True):
         parsed = urlparse(self.path)

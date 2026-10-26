@@ -16,9 +16,13 @@ agent-monitor is an independent Python service with a static JavaScript dashboar
 
 The optional Hub marker in `state/hub-machine` enables role-specific behavior. macOS LaunchAgents provide periodic local collection and the Hub service. Standalone mode works without a Hub marker and does not contact the maintainer's fleet in the exported public candidate.
 
+Standalone schedules call `rollup`; they do not use the dashboard-dependent `refresh` path. Hub `collect` and requested exports both retain their local rollup work. Reusing a recent export by skipping a collector when observation age is less than interval I would weaken the collection bound: collection at 0, export at ε, skipped collection at I, then a disconnected Hub can leave the next collection until 2I. Safe reuse would need scheduling against the actual observation deadline, completeness and identity checks, and continued collection when transfer stops. The current implementation preserves independent collection; no CPU, I/O or process-count savings have been measured for reuse.
+
 ## Network and account actions
 
 `network_policy.py` and `proxy_runtime/` use a pinned Electron helper for Chromium system-proxy resolution. This helper is installed locally; it is not a hosted gateway. `network_report.py` and `ip_check/` perform explicitly requested diagnostics, separate from log accounting.
+
+Rollup also reaches this resolver through `aggregators._with_calculated_costs` → `pricing_fetcher.get_pricing` when price data needs refreshing. Removing Electron from a collector-only installation would change pricing fallback behavior. The installer therefore keeps one dependency set rather than adding role-specific installation modes and their maintenance burden. Local rollup is not an offline guarantee.
 
 `codex_accounts.py`, `codex_messages.py`, `client_network.py` and `client_connector.py` implement optional account actions and paired browser-device routing. Login and sending require their own actions. Current-account quota refresh can run automatically when opening the dashboard or reading the standalone overview; explicit refresh also requests it, and Hub collection uses its configured schedule. These queries use existing account state and do not generate a model turn. Unknown send outcomes are retained and are not automatically replayed. `upstream_controls.py` retains local provider pauses. Live provider behavior is not established by synthetic sample data or unit tests.
 

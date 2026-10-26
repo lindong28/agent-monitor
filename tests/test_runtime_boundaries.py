@@ -21,6 +21,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class HttpMutationTests(unittest.TestCase):
     def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        root_patch = mock.patch.object(server, 'ROOT', self.root)
+        root_patch.start()
+        self.addCleanup(root_patch.stop)
         self.http = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
@@ -68,11 +74,32 @@ class HttpMutationTests(unittest.TestCase):
                 self.assertEqual(self.request('POST',path),200)
                 action.assert_called_once()
 
+    def test_restart_lock_covers_admission_delay_and_failed_reexec(self):
+        guard = server.deployment_guard
+        scheduled = threading.Event()
+        with mock.patch.object(server, '_compile_check', return_value=[]), mock.patch.object(server.threading, 'Timer') as timer:
+            timer.return_value.start.side_effect = scheduled.set
+            with guard.deployment_lock(self.root, inherit=False):
+                self.assertEqual(self.request('POST', '/api/restart'), 409)
+            timer.assert_not_called()
+            self.assertEqual(self.request('POST', '/api/restart'), 200)
+            self.assertTrue(scheduled.wait(2))
+            self.assertEqual(self.request('POST', '/api/restart'), 409)
+            self.assertEqual(timer.call_count, 1)
+            with self.assertRaises(guard.GuardError), guard.deployment_lock(self.root, inherit=False):
+                pass
+            callback = timer.call_args.args[1]
+            with mock.patch.object(server.codex_accounts.manager, 'close'), mock.patch.object(server.client_network.hub, 'close'), mock.patch.object(server.QUOTA_REFRESH, 'shutdown'), mock.patch.object(server, 'QUERY_VIEW', None), mock.patch.object(server.os, 'execv', side_effect=RuntimeError('fixture exec failure')):
+                with self.assertRaisesRegex(RuntimeError, 'fixture exec failure'):
+                    callback()
+            with guard.deployment_lock(self.root, inherit=False) as fd:
+                self.assertFalse(os.get_inheritable(fd))
+
 class ProcessGroupTests(unittest.TestCase):
     def test_live_identity_survives_missing_or_dead_pid_alias(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('agent-monitor','process_identity.py'):
+            for name in ('agent-monitor','process_identity.py','deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
             (root/'hub.py').write_text('print("standalone")\n')
             state=root/'state';state.mkdir()
@@ -125,8 +152,9 @@ class ProcessGroupTests(unittest.TestCase):
     def test_hub_main_registers_its_own_instance_for_cli_status(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('agent-monitor','process_identity.py'):
+            for name in ('agent-monitor','process_identity.py','deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
+            (root/'hub.py').write_text('print("standalone")\n')
             with mock.patch.object(server,'ROOT',root), \
                  mock.patch.object(server,'_capture_startup_machine_config'), \
                  mock.patch.object(server.hub,'enabled',return_value=False), \
@@ -153,7 +181,7 @@ class ProcessGroupTests(unittest.TestCase):
     def test_real_cli_start_records_the_instance_and_stop_releases_it(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('agent-monitor','process_identity.py'):
+            for name in ('agent-monitor','process_identity.py','deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
             (root/'hub.py').write_text('print("standalone")\n')
             (root/'server.py').write_text('''import argparse,json,threading
@@ -172,12 +200,13 @@ s.serve_forever()
             environment=dict(os.environ,AGENT_MONITOR_PYTHON=sys.executable,
                              AGENT_MONITOR_BIND='127.0.0.1',AGENT_MONITOR_PORT=str(port))
             try:
-                for _ in range(2):
-                    started=subprocess.run([str(root/'agent-monitor'),'start'],env=environment,capture_output=True,text=True,timeout=8)
+                for role, prefix in (('standalone', []), ('client', ['local'])):
+                    (root/'hub.py').write_text('print(' + repr(role) + ')\n')
+                    started=subprocess.run([str(root/'agent-monitor'), *prefix, 'start'],env=environment,capture_output=True,text=True,timeout=8)
                     self.assertEqual(started.returncode,0,started.stderr)
                     owned=process_identity.read_owned(root/'state',root)
                     self.assertIsNotNone(owned)
-                    stopped=subprocess.run([str(root/'agent-monitor'),'stop'],env=environment,capture_output=True,text=True,timeout=13)
+                    stopped=subprocess.run([str(root/'agent-monitor'), *prefix, 'stop'],env=environment,capture_output=True,text=True,timeout=13)
                     self.assertEqual(stopped.returncode,0,stopped.stderr)
                     self.assertIsNone(process_identity.identity(owned[0]))
                     self.assertFalse((root/'state/pid-identity.json').exists())

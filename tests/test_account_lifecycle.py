@@ -55,7 +55,9 @@ if sys.argv[1] == 'exec':
         original_exec(sys.executable, [sys.executable, '-c', "import os; print('EXEC-REAPED',os.getpid(),flush=True)"])
     with mock.patch.object(server.os, 'execv', side_effect=replace), mock.patch.object(server.threading, 'Timer') as timer:
         print('BEFORE', os.getpid(), flush=True)
-        server._schedule_reexec()
+        guard = server.deployment_guard.deployment_lock(root, inherit=False)
+        guard.__enter__()
+        server._schedule_reexec(guard)
         timer.call_args.args[1]()
 else:
     server._capture_startup_machine_config = lambda: None

@@ -1,5 +1,6 @@
 """Deployment regressions; fake launchd and isolated checkout/HOME only."""
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -82,7 +83,7 @@ class DeploymentRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             dest = Path(directory) / 'missing.plist'
             for code, expected in ((113, 0), (0, 1), (1, 1)):
-                with self.subTest(code=code), mock.patch.object(connector, 'paths', return_value=(dest, dest.with_suffix('.json'))), mock.patch('connector_service.platform.system', return_value='Darwin'), mock.patch.object(connector, 'launch', return_value=subprocess.CompletedProcess([], code, 'arguments = {\n/foreign/connector.py\n}\n', '')) as launch, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with self.subTest(code=code), mock.patch.object(connector, 'ROOT', Path(directory)), mock.patch.object(connector, 'paths', return_value=(dest, dest.with_suffix('.json'))), mock.patch('connector_service.platform.system', return_value='Darwin'), mock.patch.object(connector, 'launch', return_value=subprocess.CompletedProcess([], code, 'arguments = {\n/foreign/connector.py\n}\n', '')) as launch, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     self.assertEqual(connector.main(['converge']), expected)
                     self.assertEqual(launch.call_count, 1)
 
@@ -91,7 +92,7 @@ class DeploymentRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             dest = Path(directory) / 'missing.plist'
             for code, live, expected in ((113, None, 0), (0, None, 1), (1, None, 1), (113, {'connected': False}, 1)):
-                with self.subTest(code=code, live=live), mock.patch.object(connector, 'paths', return_value=(dest, dest.with_suffix('.json'))), mock.patch('connector_service.platform.system', return_value='Darwin'), mock.patch.object(connector, 'launch', return_value=subprocess.CompletedProcess([], code, '', '')), mock.patch.object(connector, 'health', return_value=live), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with self.subTest(code=code, live=live), mock.patch.object(connector, 'ROOT', Path(directory)), mock.patch.object(connector, 'paths', return_value=(dest, dest.with_suffix('.json'))), mock.patch('connector_service.platform.system', return_value='Darwin'), mock.patch.object(connector, 'launch', return_value=subprocess.CompletedProcess([], code, '', '')), mock.patch.object(connector, 'health', return_value=live), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     self.assertEqual(connector.main(['status']), expected)
 
 
@@ -99,14 +100,14 @@ class ShellLifecycleTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name)
+        self.home = Path(temporary.name).resolve()
         self.root = self.home / 'checkout'
         self.root.mkdir()
         self.bin = self.home / 'bin'
         self.bin.mkdir()
         self.env = dict(os.environ, HOME=str(self.home), PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         AGENT_MONITOR_PYTHON=sys.executable, SSH_CONNECTION='', DISPLAY='', WAYLAND_DISPLAY='')
-        for name in ('uninstall.sh', 'status.sh', 'agent-monitor'):
+        for name in ('uninstall.sh', 'status.sh', 'agent-monitor', 'rollup_service.py', 'service_runtime.py', 'deployment_guard.py'):
             shutil.copy2(ROOT / name, self.root / name)
 
     def executable(self, name, source):
@@ -122,7 +123,7 @@ class ShellLifecycleTests(unittest.TestCase):
         dest = self.home / 'Library/LaunchAgents/com.agent-monitor.rollup.plist'
         dest.parent.mkdir(parents=True)
         calls = self.home / 'calls'
-        self.executable('launchctl', '#!/bin/sh\nif [ "$1" = print ]; then echo "program = $LOADED_PROGRAM"; exit "${PRINT_CODE:-0}"; fi\necho "$1" >> "$HOME/calls"\n')
+        self.executable('launchctl', '#!/bin/sh\nif [ "$1" = print ]; then\n[ ! -e "$HOME/unloaded" ] || exit 113\necho "program = $LOADED_PROGRAM"\nprintf "arguments = {\\n%s\\nrefresh\\n}\\n" "$LOADED_PROGRAM"\nexit "${PRINT_CODE:-0}"\nfi\necho "$1" >> "$HOME/calls"\ntouch "$HOME/unloaded"\n')
         for disk_owner, loaded_owner, allowed in (('/foreign', '/foreign', False),
                 (str(self.root), '/foreign', False), (str(self.root), str(self.root), True)):
             with self.subTest(disk=disk_owner, loaded=loaded_owner):
@@ -149,6 +150,63 @@ class ShellLifecycleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((link_dir / 'agent-monitor').is_symlink())
         self.assertFalse((link_dir / 'ip-check').is_symlink())
+
+    def test_client_management_requires_explicit_local_target(self):
+        (self.root / 'hub.py').write_text("import sys\nprint('client' if sys.argv[1] == 'role' else 'http://fixture:39001')\n")
+        (self.root / 'process_identity.py').write_text("raise SystemExit(1)\n")
+        for command in ('start', 'stop', 'restart'):
+            result = self.run_script('agent-monitor', command)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn('agent-monitor local ' + command, result.stderr)
+            self.assertFalse((self.root / 'state').exists())
+        result = self.run_script('agent-monitor', 'status')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Role: Hub client', result.stdout)
+        result = self.run_script('agent-monitor', 'local', 'status')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('not running', result.stdout)
+        (self.root / 'hub.py').write_text("print('hub')\n")
+        result = self.run_script('agent-monitor', 'local', 'stop')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertFalse((self.root / 'state').exists())
+
+    def test_web_uninstall_cleans_owned_links_for_each_role(self):
+        (self.root / 'process_identity.py').write_text('raise SystemExit(1)\n')
+        self.executable('launchctl', '#!/bin/sh\nexit 113\n')
+        links = self.home / '.local/bin'
+        links.mkdir(parents=True)
+        for role in ('standalone', 'client', 'hub'):
+            with self.subTest(role=role):
+                (self.root / 'hub.py').write_text("import sys\nif sys.argv[1] == 'role': print(" + repr(role) + ")\n")
+                for name in ('agent-monitor', 'ip-check'):
+                    (links / name).symlink_to(self.root / name)
+                result = self.run_script('uninstall.sh', 'web')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(list(links.iterdir()), [])
+
+    def test_public_service_mutators_share_the_install_lock(self):
+        for name in ('hub.py', 'connector_service.py'):
+            shutil.copy2(ROOT / name, self.root / name)
+        state = self.root / 'state'
+        state.mkdir()
+        self.executable('launchctl', '#!/bin/sh\necho called >> "$HOME/unexpected-service-action"\nexit 113\n')
+        with (state / 'deployment.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            for script, action in (('hub.py', 'install-web'), ('hub.py', 'stop-web'),
+                                   ('hub.py', 'configure'), ('connector_service.py', 'stop'),
+                                   ('connector_service.py', 'converge'), ('rollup_service.py', 'install'),
+                                   ('rollup_service.py', 'uninstall')):
+                result = subprocess.run([sys.executable, str(self.root / script), action], env=self.env,
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0, script + action)
+                self.assertIn('holds state/deployment.lock', result.stderr)
+            (self.root / 'hub.py').write_text("print('standalone')\n")
+            for script, action in (('agent-monitor', 'start'), ('agent-monitor', 'stop'),
+                                   ('agent-monitor', 'restart'), ('uninstall.sh', 'all')):
+                result = self.run_script(script, action)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn('holds state/deployment.lock', result.stderr)
+        self.assertFalse((self.home / 'unexpected-service-action').exists())
 
     def test_linux_open_uses_desktop_or_prints_url(self):
         # Configured Hub path avoids starting any server or accessing account state.

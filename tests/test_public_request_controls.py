@@ -15,6 +15,13 @@ import server
 
 
 class PublicRequestControlsTests(unittest.TestCase):
+    def setUp(self):
+        # Requests and probe children below are mocked; no Electron is needed.
+        route = mock.patch.object(server.network_policy, "endpoint",
+                                  return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9")
+        route.start()
+        self.addCleanup(route.stop)
+
     def test_verified_tls_success_keeps_upstream_pricing(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = b'{"fixture": {"rate": 1}}'

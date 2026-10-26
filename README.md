@@ -37,6 +37,8 @@ cd agent-monitor
 
 The installer creates CLI links in `~/.local/bin`; it does not add that directory to your shell's PATH. Commands below use `./agent-monitor` so they also work before changing PATH. On first installation, `AGENT_MONITOR_PYTHON=/path/to/python3 ./install.sh --no-services` selects a Python interpreter.
 
+Existing environments must also use Python 3.10 or newer. An older `.venv` is preserved and installation stops with recovery instructions; selecting another interpreter does not silently replace it. See [runtime recovery](docs/public-usage.md#troubleshooting).
+
 Using your real HOME lets the monitor read your local agent logs and current provider account state. Opening the dashboard, including `./agent-monitor open`, can automatically query current-account quota using an existing login. Proceed only if you authorize both the local reads and quota queries described in [usage and data](docs/public-usage.md); otherwise use the isolated sample below. Then run:
 
 ```bash
@@ -85,7 +87,11 @@ For a service-managed deployment, use the existing [published-main deployment en
 
 On macOS, the installer manages the periodic collector and the configured Hub. An optional browser-device connector is enabled explicitly with `./agent-monitor connect install --server URL`; later installations update it while preserving its server address and state path. A fresh installation leaves the connector disabled. `--no-services` leaves all services unchanged. Linux retains the CLI and manually started dashboard.
 
+Standalone scheduled collection runs local `rollup`, independently of whether a dashboard is running. Hub machines retain their configured `collect` schedule. Changing a Hub role with `hub MACHINE --no-services` is rejected; stage with `./install.sh --no-services`, then apply the role with `./install.sh hub MACHINE`.
+
 Use `./status.sh` to inspect services, `./agent-monitor start|stop|restart` for the dashboard, and `./agent-monitor connect status|stop|restart` for the connector. `./uninstall.sh` removes this checkout's service integration and CLI links; `web`, `rollup-daemon` and `connector` select one component. Foreign or unrecognized service ownership is preserved and reported. Saved data and locks remain.
+
+On a Hub client, `open` and `refresh` target the central Hub; default Web management commands direct you to that host. To keep a local dashboard on the client, use `./agent-monitor local start|stop|restart|status|open`. Installation preserves an already running local dashboard. The `local` selector does not manage the Hub, collector or connector.
 
 Published-main deployment restarts managed processes when their source or selected configuration changes and checks their local HTTP identity. This can interrupt active operations: let account operations finish first, and never replay an uncertain send. An unchanged, confirmed process is retained. A failed replacement returns nonzero with its remaining state; inspect status and logs before retrying. See [deployment and recovery](docs/public-usage.md#services-and-deployment) for the supported entry and verification limits.
 

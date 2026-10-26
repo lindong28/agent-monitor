@@ -71,7 +71,10 @@ class ScopeTests(unittest.TestCase):
                 self.assertLess(len(data), len(json.dumps(payload).encode()) / 3)
 
     def test_network_identity_survives_success_cache_and_failure(self):
-        with mock.patch.dict(server._NETWORK_CACHE, data=None, ts=0), mock.patch("server.socket.gethostname", return_value="fixture-host"), mock.patch("server.subprocess.run") as run:
+        with mock.patch.dict(server._NETWORK_CACHE, data=None, ts=0), \
+                mock.patch.object(server.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"), \
+                mock.patch("server.socket.gethostname", return_value="fixture-host"), \
+                mock.patch("server.subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout=json.dumps({"verdict":"low"}))
             for query in ({"force":["1"]}, {}):
                 self.assertEqual(server.network(query)["checked_host"], "fixture-host")

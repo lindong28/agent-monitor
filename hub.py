@@ -1,6 +1,8 @@
 """Opt-in hub deployment; collection and API execution remain local to each Mac."""
 
 import argparse
+import contextlib
+import deployment_guard
 import fcntl
 import json
 import os
@@ -262,6 +264,7 @@ def web_plist(root, python, *, ssh_auth_sock=None, path=None):
 
 def install_web():
     if not is_hub():
+        stop_web(uninstall=True)
         print("agent-monitor hub: client configured; local collection stays active.")
         return
     plist_dir = Path.home() / "Library" / "LaunchAgents"
@@ -334,6 +337,29 @@ def stop_web(*, uninstall=False):
         print("agent-monitor hub: stopped. Local collectors and saved data remain available.")
 
 
+def status_web():
+    dest = Path.home() / 'Library/LaunchAgents' / (WEB_LABEL + '.plist')
+    previous = plistlib.loads(dest.read_bytes()) if dest.exists() or dest.is_symlink() else None
+    expected_args = [sys.executable, str(ROOT / 'hub.py'), 'serve']
+    if previous:
+        expected_args = previous.get('ProgramArguments', [])
+        if expected_args[1:] != [str(ROOT / 'hub.py'), 'serve']:
+            raise ValueError('hub startup definition belongs to another checkout or is unrecognized')
+    result = subprocess.run(['launchctl', 'print', 'gui/%s/%s' % (os.getuid(), WEB_LABEL)],
+                            capture_output=True, text=True, timeout=10)
+    if result.returncode == 113:
+        print('agent-monitor hub: not loaded; dashboard availability is unverified. Run agent-monitor start to enable it.')
+        return 1
+    if result.returncode or service_runtime.arguments(result.stdout) != expected_args:
+        raise ValueError('hub loaded ownership/state is unverified; inspect launchctl before changing it')
+    health = service_runtime.read_health('http://127.0.0.1:%s/api/health?asset_watch=1' % configuration()['port'])
+    if not service_runtime.matches(health, ROOT, service_runtime.signature(ROOT)):
+        print('agent-monitor hub: loaded; target HTTP source/configuration is unverified. Inspect state/hub.log and rerun deployment.')
+        return 1
+    print('agent-monitor hub: loaded; local HTTP confirms the target source/configuration. Browser and collection results are not checked.')
+    return 0
+
+
 def serve():
     if not is_hub():
         raise ValueError("only the configured hub may run the central service")
@@ -345,32 +371,36 @@ def serve():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["configure", "install-web", "stop-web", "uninstall-web", "serve", "collect", "url", "interval", "role"])
+    parser.add_argument("command", choices=["configure", "install-web", "stop-web", "uninstall-web", "status-web", "serve", "collect", "url", "interval", "role"])
     parser.add_argument("machine", nargs="?")
     args = parser.parse_args()
     try:
-        if args.command == "configure":
-            if args.machine not in configuration()["machines"]:
-                raise ValueError("configure requires a machine listed in hub.json")
-            MACHINE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            MACHINE_PATH.write_text(args.machine + "\n")
-            print("agent-monitor hub: %s configured; services have not yet been installed." % args.machine)
-        elif args.command == "install-web":
-            install_web()
-        elif args.command == "stop-web":
-            stop_web()
-        elif args.command == "uninstall-web":
-            stop_web(uninstall=True)
-        elif args.command == "serve":
-            serve()
-        elif args.command == "collect":
-            collect()
-        elif args.command == "url":
-            print(origin() or "")
-        elif args.command == "interval":
-            print(interval())
-        elif args.command == "role":
-            print("hub" if is_hub() else "client" if enabled() else "standalone")
+        guard = deployment_guard.mutation_guard(ROOT) if args.command in ('configure', 'install-web', 'stop-web', 'uninstall-web') else contextlib.nullcontext()
+        with guard:
+            if args.command == "configure":
+                if args.machine not in configuration()["machines"]:
+                    raise ValueError("configure requires a machine listed in hub.json")
+                MACHINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                MACHINE_PATH.write_text(args.machine + "\n")
+                print("agent-monitor hub: %s configured; services have not yet been installed." % args.machine)
+            elif args.command == "install-web":
+                install_web()
+            elif args.command == "stop-web":
+                stop_web()
+            elif args.command == "uninstall-web":
+                stop_web(uninstall=True)
+            elif args.command == "status-web":
+                return status_web()
+            elif args.command == "serve":
+                serve()
+            elif args.command == "collect":
+                collect()
+            elif args.command == "url":
+                print(origin() or "")
+            elif args.command == "interval":
+                print(interval())
+            elif args.command == "role":
+                print("hub" if is_hub() else "client" if enabled() else "standalone")
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print("agent-monitor hub: failed — %s. Check hub.json and rerun the hub installer." % exc, file=sys.stderr)
         return 1

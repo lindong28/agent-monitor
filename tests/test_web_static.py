@@ -10,6 +10,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebStaticTests(unittest.TestCase):
+    def test_restart_conflict_is_not_reported_as_syntax_error(self):
+        script = r'''
+const fs=require('fs'), assert=require('assert');
+global.document={readyState:'loading',addEventListener(){}};
+global.window={location:{origin:'http://fixture.invalid',reload(){throw Error('must not reload on rejection');}}};
+eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { restartAndReload,'));
+(async()=>{
+  for(const status of [409,200]) {
+    global.fetch=async()=>({status,json:async()=>({restarting:false,error:'fixture diagnostic'})});
+    const button={}; await window.AgentMonitor.restartAndReload(button);
+    assert.equal(button.disabled,false); assert.equal(button.title,'fixture diagnostic');
+    assert.equal(button.textContent,status===409?'正在部署或重启，请稍后重试':'重启失败，请检查服务状态');
+  }
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_network_provider_readings_preserve_partial_zero_errors_and_raw(self):
         script = r'''
 const fs=require("fs"), assert=require("assert"), node={innerHTML:""};

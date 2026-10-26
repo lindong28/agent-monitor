@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import deployment_guard
 
 ROOT = Path(__file__).resolve().parent
 
@@ -77,16 +78,20 @@ def main():
     if installer_args[:1] == ["--"]:
         installer_args = installer_args[1:]
     try:
+        if not args.check_only:
+            return deployment_guard.run_install(ROOT, installer_args,
+                                                preflight=lambda: preflight(args.expect))
         head = preflight(args.expect)
     except PreflightError as error:
         print(f"{ROOT.name} deployment blocked: {error} Installer was not started.", file=sys.stderr)
         return 1
+    except (deployment_guard.GuardError, OSError, subprocess.TimeoutExpired) as error:
+        detail = str(error) if isinstance(error, deployment_guard.GuardError) else "Local installation failed or timed out; inspect permissions and service status before retrying."
+        print(f"{ROOT.name} deployment failed: {detail}", file=sys.stderr)
+        return 1
     print(f"{ROOT.name} source verified: main = origin/main = {head}", flush=True)
-    if args.check_only:
-        print("Source check only; installation and service health were not checked.")
-        return 0
-    print("Starting install.sh; verify installed runtime and consumer health after installation.", flush=True)
-    os.execv(str(ROOT / "install.sh"), [str(ROOT / "install.sh"), *installer_args])
+    print("Source check only; installation and service health were not checked.")
+    return 0
 
 
 if __name__ == "__main__":

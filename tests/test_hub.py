@@ -243,6 +243,31 @@ class HubTests(unittest.TestCase):
             hub.install_web()
             self.assertEqual([call.args[0][1] for call in run.call_args_list], ["print"])
 
+    def test_hub_status_distinguishes_loaded_from_target_http_identity(self):
+        args = [hub.sys.executable, str(hub.ROOT / 'hub.py'), 'serve']
+        for code, health, expected in ((113, {}, 1), (0, {}, 1), (0, {'source_root': str(hub.ROOT), 'deployment_signature': hub.service_runtime.signature(hub.ROOT)}, 0)):
+            with self.subTest(code=code, health=bool(health)), mock.patch('hub.Path.home', return_value=self.root), mock.patch('hub.subprocess.run', return_value=SimpleNamespace(returncode=code, stdout='arguments = {\n' + '\n'.join(args) + '\n}\n')), mock.patch('hub.service_runtime.read_health', return_value=health):
+                self.assertEqual(hub.status_web(), expected)
+
+    def test_client_transition_removes_only_owned_hub_service(self):
+        dest = self.root / 'Library/LaunchAgents' / (hub.WEB_LABEL + '.plist')
+        dest.parent.mkdir(parents=True)
+        for owner, allowed in ((hub.ROOT, True), (Path('/foreign'), False)):
+            with self.subTest(owner=owner):
+                previous = hub.web_plist(owner, hub.sys.executable)
+                dest.write_bytes(plistlib.dumps(previous))
+                loaded = SimpleNamespace(returncode=0, stdout='arguments = {\n' + '\n'.join(previous['ProgramArguments']) + '\n}\n')
+                with mock.patch('hub.Path.home', return_value=self.root), mock.patch('hub.is_hub', return_value=False), mock.patch('hub.subprocess.run', return_value=loaded) as run:
+                    if allowed:
+                        hub.install_web()
+                        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['print', 'bootout'])
+                        self.assertFalse(dest.exists())
+                    else:
+                        with self.assertRaises(ValueError):
+                            hub.install_web()
+                        self.assertTrue(dest.exists())
+                        run.assert_not_called()
+
     def test_bootstrap_retries_only_explicit_failures(self):
         for failures, timeout, expected_calls in ((1, False, 2), (3, False, 3), (1, True, 1)):
             with self.subTest(failures=failures, timeout=timeout):

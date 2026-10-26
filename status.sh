@@ -4,9 +4,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SERVICE="${1:-all}"
-ROLLUP_LABEL="com.agent-monitor.rollup"
-ROLLUP_PLIST="$HOME/Library/LaunchAgents/$ROLLUP_LABEL.plist"
-ROLLUP_LOG="$ROOT/state/rollup-daemon.log"
 
 usage() {
   echo "usage: ./status.sh [web|rollup-daemon|connector]" >&2
@@ -25,20 +22,10 @@ status_web() {
 }
 
 status_rollup_daemon() {
-  local info pid last_exit interval
-  info="$(launchctl print "gui/$(id -u)/$ROLLUP_LABEL" 2>/dev/null || true)"
-  if [ -z "$info" ]; then
-    if [ -f "$ROLLUP_PLIST" ]; then
-      echo "$ROLLUP_LABEL installed but not loaded: plist=$ROLLUP_PLIST"
-    else
-      echo "$ROLLUP_LABEL not installed"
-    fi
-    return 0
-  fi
-  pid="$(printf '%s\n' "$info" | awk -F'= ' '/pid =/{print $2; exit}')"
-  last_exit="$(printf '%s\n' "$info" | awk -F'= ' '/last exit code =/{print $2; exit}')"
-  interval="$(printf '%s\n' "$info" | awk -F'= ' '/^[[:space:]]*run interval =/{print $2; exit}')"
-  echo "$ROLLUP_LABEL loaded: interval=${interval:-unknown} pid=${pid:-not running} last_exit=${last_exit:-unknown} plist=$ROLLUP_PLIST log=$ROLLUP_LOG"
+  local python
+  python="$ROOT/.venv/bin/python"
+  [ -x "$python" ] || python="$(command -v python3)"
+  "$python" "$ROOT/rollup_service.py" status
 }
 
 if [ "$#" -gt 1 ]; then

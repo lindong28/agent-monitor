@@ -9,6 +9,8 @@ import urllib.request
 def signature(root):
     root = Path(root)
     files = list(root.glob('*.py')) + list((root / 'parsers').glob('**/*.py'))
+    files += list((root / 'proxy_runtime').glob('**/*.py'))
+    files += list((root / 'proxy_runtime').glob('**/*.cjs'))
     files += [root / 'requirements.txt', root / 'state/hub-machine']
     for name in ('machines', 'hub'):
         local = root / (name + '.local.json')

@@ -19,6 +19,11 @@ from parsers.accounts import Account
 
 class QuotaAdmissionTests(unittest.TestCase):
     def setUp(self):
+        # Supply the mocked provider child with a route without starting Electron.
+        route = mock.patch.object(quota_refresh.network_policy, "endpoint",
+                                  return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9")
+        route.start()
+        self.addCleanup(route.stop)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)

@@ -1,5 +1,7 @@
 """User-owned macOS connector lifecycle; never reads provider credentials."""
 import argparse
+import contextlib
+import deployment_guard
 import json
 import os
 from pathlib import Path
@@ -221,39 +223,41 @@ def main(argv=None):
     if args.json and args.action != "status":
         parser.error("--json is supported by status only")
     try:
-        if platform.system() != "Darwin":
-            raise ValueError("自动连接服务当前支持macOS；其他平台可运行 agent-monitor connect --server <页面根地址>。")
-        if args.action == "install":
-            if not args.server:
-                parser.error("install requires --server")
-            show_status(install(args.server), args.json)
-        elif args.action == "converge":
-            plist, _ = paths()
-            managed = owned_definition(plist)
-            if managed:
-                show_status(install(managed["ProgramArguments"][3]))
+        guard = deployment_guard.mutation_guard(ROOT) if args.action in ('install', 'converge', 'stop', 'restart') else contextlib.nullcontext()
+        with guard:
+            if platform.system() != "Darwin":
+                raise ValueError("自动连接服务当前支持macOS；其他平台可运行 agent-monitor connect --server <页面根地址>。")
+            if args.action == "install":
+                if not args.server:
+                    parser.error("install requires --server")
+                show_status(install(args.server), args.json)
+            elif args.action == "converge":
+                plist, _ = paths()
+                managed = owned_definition(plist)
+                if managed:
+                    show_status(install(managed["ProgramArguments"][3]))
+                else:
+                    owned_loaded(None)
+                    print("连接服务未安装；保留未启用状态。")
+            elif args.action == "stop":
+                stop()
+            elif args.action == "restart":
+                plist, _ = paths()
+                managed = owned_definition(plist)
+                if not managed:
+                    raise ValueError("连接服务尚未安装；先运行 connect install --server <页面根地址>。")
+                if not owned_loaded(managed):
+                    show_status(install(managed["ProgramArguments"][3]))
+                    return 0
+                if launch("kickstart", "-k", job_target()).returncode:
+                    raise ValueError("连接服务重启失败；请运行 connect install --server <页面根地址> 恢复。")
+                print("已请求重启连接服务；旧批次连接失效，不会重发。用 connect status 检查就绪状态。")
             else:
-                owned_loaded(None)
-                print("连接服务未安装；保留未启用状态。")
-        elif args.action == "stop":
-            stop()
-        elif args.action == "restart":
-            plist, _ = paths()
-            managed = owned_definition(plist)
-            if not managed:
-                raise ValueError("连接服务尚未安装；先运行 connect install --server <页面根地址>。")
-            if not owned_loaded(managed):
-                show_status(install(managed["ProgramArguments"][3]))
-                return 0
-            if launch("kickstart", "-k", job_target()).returncode:
-                raise ValueError("连接服务重启失败；请运行 connect install --server <页面根地址> 恢复。")
-            print("已请求重启连接服务；旧批次连接失效，不会重发。用 connect status 检查就绪状态。")
-        else:
-            result = inspect()
-            show_status(result, args.json)
-            disabled = not result["installed"] and not result["loaded"] and result["observation"] is None
-            return 0 if result["connected"] or disabled else 1
-        return 0
+                result = inspect()
+                show_status(result, args.json)
+                disabled = not result["installed"] and not result["loaded"] and result["observation"] is None
+                return 0 if result["connected"] or disabled else 1
+            return 0
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         # Do not print raw subprocess diagnostics, URLs or request exceptions.
         print(str(exc) if isinstance(exc, ValueError) else "连接服务管理失败；请检查本机launchd和安装目录。", file=sys.stderr)

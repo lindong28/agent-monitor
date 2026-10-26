@@ -75,6 +75,12 @@ The optional connector supports `./agent-monitor connect --server URL` in the fo
 
 `./install.sh --no-services` installs dependencies/assets and CLI links without changing services or running the post-install public probe. `./install.sh` on macOS additionally configures hourly collection with `com.agent-monitor.rollup`; Linux skips that LaunchAgent. The default installer is therefore a service-changing action. `./status.sh rollup-daemon` reports the scheduler.
 
+The standalone schedule runs `rollup` locally; manual `refresh` retains its existing dashboard/Hub behavior. Scheduler status distinguishes not installed, installed but not loaded, running, previous success/failure and unverified collection. A loaded job alone does not prove a successful collection. A launchctl query failure other than confirmed absence blocks modification and preserves the existing definition; inspect the printed diagnostics before retrying.
+
+`hub MACHINE --no-services` is rejected before changing the live role marker. Stage assets without a role argument, then apply the role through the normal Hub installer. Changing a former Hub to a client removes only the old Hub job owned by this checkout; an unknown or foreign job is preserved and the installer fails. This does not retire a manually started local dashboard.
+
+On a Hub client, `open` and `refresh` target the configured central Hub. Default `start`, `stop` and `restart` refuse to change a different local instance and direct you to the Hub host; `status` reports the role and central target without claiming availability. Use `./agent-monitor local start|stop|restart|status|open` for the client's local dashboard. On the Hub itself, default status inspects its launchd job and local HTTP deployment identity; the `local` selector is rejected to avoid operating on that Hub's process. Existing client dashboards remain running across installation.
+
 Service-managed updates use `./deploy.py` from the primary, clean `main` checkout at the verified live `origin/main` commit. It checks source identity before calling the installer:
 
 ```bash
@@ -86,7 +92,13 @@ git merge --ff-only origin/main
 
 Replace `FULL_SHA` with the published commit you selected. `--check-only` does not install. A successful preflight is not service health: inspect status and the actual dashboard afterward. Deployment does not push, discard changes, migrate state or replace locks. Development worktrees are not persistent production roots. Preserve local edits and coordinate writers if preflight reports a dirty or diverged checkout.
 
+Installation and service-management entrypoints share this checkout's persistent `state/deployment.lock`; a concurrent operation fails promptly. The installer captures its shell body and checks source/version at service boundaries and completion. Source drift stops further steps and reports partial completion; it does not roll back earlier changes. These checks coordinate the supported commands, not arbitrary edits or changes restored between checks. Keep using the same checkout/state and do not remove its lock to bypass a busy result. `--check-only` remains read-only and does not acquire/create this lock.
+
+The installer/managed command has a 30-minute execution limit. On interruption or timeout it terminates its own process group and checks termination; inspect any reported remaining state before retrying. Browser restart requests also use this lock through the delayed restart, and return a conflict while an installation or another restart holds it.
+
 For the configured macOS Hub and an already installed connector, installation compares source and selected configuration identity, reloads changed jobs, and checks the local HTTP endpoint for the target checkout and version. The polling budget is 30 seconds, plus at most two seconds for the final HTTP attempt. The connector retains its configured server and status-file path; without an existing installation it stays disabled. `--no-services` skips both convergence and these checks. Periodic collectors and CLI commands read updated source on their next execution.
+
+A manually started client dashboard is preserved by installation and can still be serving old code. After updating, run `./agent-monitor local restart`, then check its `/api/health?asset_watch=1` source root and deployment signature and open the local page. Default `open` on a client still opens the central Hub; it does not update the local dashboard. To pause the collector for an environment upgrade while preserving its startup definition, use `launchctl bootout gui/$(id -u)/com.agent-monitor.rollup` during an exclusive maintenance window; the next successful deployment reinstalls/loads the configured schedule. Do not use uninstall for this temporary pause.
 
 Managed updates use stop/start and can interrupt requests or connector routes. Finish account operations before updating; uncertain sends are not automatically replayed. The installer preserves retained state and startup definitions after a failed replacement, reports nonzero, and does not claim that the old process is still available. Use `./status.sh`, `state/hub.log` and `./agent-monitor connect status` to locate the remaining failure before rerunning the same deployment entry. A source rollback is only appropriate when compatible with the retained data/configuration; this update does not migrate their schemas. Manually started dashboards keep the README's explicit stop/update/start procedure.
 
@@ -99,6 +111,8 @@ For runtime observations and backend investigation, see [service diagnostics](op
 ## Troubleshooting
 
 - Installer dependency errors: resolve the named Python/runtime/library error and rerun the installer. Missing optional fonts use system fallback and are reported as degraded; this is distinct from a failed proxy-runtime startup.
+- Python older than 3.10: stop this checkout's owned services, rename `.venv` to an unused backup path, and rerun the same installer command with `AGENT_MONITOR_PYTHON=/path/to/a-supported-python`. Do not move or replace `state` or local configuration. If creating the new environment fails, preserve its diagnostics and restore the saved environment before restarting the old installation. Virtual environments contain absolute paths, so recreate the new one at `.venv` rather than building it elsewhere and moving it in.
+- Chart.js download/checksum failure: rerun the installer. It validates the pinned asset on every install, downloads replacements to a temporary file, and publishes them only after verification; a failed download cannot become an installed asset.
 - Empty usage: confirm the source directories, date filter and log presence. Test with the included sample in its own checkout if needed. Do not infer historical zero spend from missing files.
 - Startup: inspect this checkout's `state/server.log` and `./agent-monitor status`. Share only sanitized excerpts; errors and paths can contain private metadata.
 - Collection: use **采集与诊断** to find the affected machine and stage. An old snapshot can remain readable while a new collection attempt fails.

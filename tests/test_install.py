@@ -1,5 +1,6 @@
 """Exercise the real installer with disposable HOME/assets and a launchctl fake."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import plistlib
@@ -15,16 +16,23 @@ class RollupInstallerTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.home = Path(temp.name)
+        self.home = Path(temp.name).resolve()
         self.repo = self.home / "repo"
         self.component = self.repo / "agent-monitor"
         self.component.mkdir(parents=True)
         shutil.copy2(ROOT / "install.sh", self.component / "install.sh")
+        installer = self.component / "install.sh"
+        installer.write_text(installer.read_text().replace(
+            "0e2326c6868072bec1592760c6729043caeea2960a2b46cee6a2192aac6abff0",
+            hashlib.sha256(b"fixture").hexdigest()))
+        shutil.copy2(ROOT / "rollup_service.py", self.component / "rollup_service.py")
+        shutil.copy2(ROOT / "deployment_guard.py", self.component / "deployment_guard.py")
         shutil.copy2(ROOT / "status.sh", self.component / "status.sh")
         (self.component / "lib").mkdir()
         shutil.copy2(ROOT / "lib/install-output.sh", self.component / "lib/install-output.sh")
         for name in ("agent-monitor", "ip-check"):
             (self.component / name).write_text("#!/bin/sh\nexit 0\n")
+            (self.component / name).chmod(0o755)
         vendor = self.component / "web/vendor"
         fonts = vendor / "fonts"
         fonts.mkdir(parents=True)
@@ -62,9 +70,13 @@ import json, os, pathlib, plistlib, sys
 h = pathlib.Path.home(); loaded = h / 'loaded.json'
 op = sys.argv[1]
 if op == 'print':
-    if not loaded.exists(): sys.exit(3)
+    if not sys.argv[2].endswith('/com.agent-monitor.rollup'): sys.exit(113)
+    if not loaded.exists(): sys.exit(113)
     print('program = ' + json.loads(loaded.read_text())['ProgramArguments'][0])
     data = json.loads(loaded.read_text())
+    print('arguments = {')
+    for arg in data['ProgramArguments']: print('    ' + arg)
+    print('}')
     if 'StartInterval' in data:
         print('run interval = ' + str(data['StartInterval']) + ' seconds')
 elif op in ('bootstrap', 'bootout'):
@@ -99,7 +111,7 @@ else: sys.exit(9)
         self.assertIn("\tagent-monitor rollup\tinstalled\t", self.ledger)
         data = plistlib.loads(self.plist.read_bytes())
         self.assertEqual(data["StartInterval"], 3600)
-        self.assertEqual(data["ProgramArguments"], [str(self.component / "agent-monitor"), "refresh"])
+        self.assertEqual(data["ProgramArguments"], [str(self.component / "agent-monitor"), "rollup"])
         self.assertTrue(data["RunAtLoad"])
         self.assertEqual((self.home / 'connector-actions').read_text(), 'converge')
         r = self.install()
@@ -176,6 +188,56 @@ else: sys.exit(9)
         self.assertFalse((self.home / ".local/bin/agent-monitor").exists())
         self.assertFalse((self.home / "calls").exists())
 
+    def test_hub_staging_does_not_change_live_role(self):
+        state = self.component / 'state'
+        state.mkdir()
+        marker = state / 'hub-machine'
+        marker.write_text('node-d\n')
+        result = self.install('hub', 'node-c', '--no-services')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(marker.read_text(), 'node-d\n')
+        self.assertFalse((self.home / 'calls').exists())
+        self.assertFalse((self.home / 'runtime-calls').exists())
+
+    def test_old_existing_python_is_rejected_without_install_side_effects(self):
+        python = self.component / '.venv/bin/python'
+        source = python.read_text()
+        # Execute the installer's actual stdin version check with an old version.
+        import shlex, sys
+        python.write_text('#!/bin/sh\nif [ "$1" = "-" ] && [ "$#" = 1 ]; then\n'
+                          + shlex.quote(sys.executable) + " -c 'import sys; sys.version_info=(3,9,6); exec(sys.stdin.read())'\nexit $?\nfi\n"
+                          + source.removeprefix('#!/bin/sh\n'))
+        result = self.install('--no-services')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('requires Python >=3.10', result.stderr)
+        self.assertIn('Existing .venv was preserved', result.stderr)
+        self.assertTrue(python.exists())
+        self.assertFalse((self.home / 'runtime-calls').exists())
+        self.assertFalse((self.home / '.local/bin/agent-monitor').exists())
+
+    def test_failed_chart_download_does_not_publish_partial_asset(self):
+        chart = self.component / 'web/vendor/chart.umd.min.js'
+        chart.unlink()
+        self.executable('curl', '''#!/usr/bin/env python3
+import pathlib, sys
+pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text('partial')
+raise SystemExit(22)
+''')
+        result = self.install('--no-services')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(chart.exists())
+
+    def test_corrupt_chart_is_replaced_on_reinstall(self):
+        chart = self.component / 'web/vendor/chart.umd.min.js'
+        chart.write_text('partial')
+        self.executable('curl', '''#!/usr/bin/env python3
+import pathlib, sys
+pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text('fixture')
+''')
+        result = self.install('--no-services')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(chart.read_text(), 'fixture')
+
     def test_bootstrap_failure_is_failed_and_retry_recovers(self):
         self.env["FAIL_BOOTSTRAP"] = "1"
         r = self.install("rollup-daemon")
@@ -197,7 +259,7 @@ else: sys.exit(9)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn("\tagent-monitor rollup\tfailed\t", self.ledger)
             if loaded:
-                self.assertIn("loaded job ownership conflict", self.ledger)
+                self.assertIn("schedule convergence failed", self.ledger)
             self.assertEqual(self.plist.read_bytes(), original)
             self.assertFalse((self.home / "calls").exists())
 
@@ -212,8 +274,9 @@ else: sys.exit(9)
         self.assertEqual(plistlib.loads(self.plist.read_bytes())["StartInterval"], 7200)
         r = subprocess.run(["bash", str(self.component / "status.sh"), "rollup-daemon"],
                            env=self.env, text=True, capture_output=True, timeout=20)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("interval=7200 seconds", r.stdout)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("last collection result is unverified", r.stdout)
+        self.assertIn("loaded interval=7200 seconds", r.stdout)
 
 
 if __name__ == "__main__":

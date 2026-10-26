@@ -29,8 +29,22 @@ AGENT_MONITOR_PYTHON="${AGENT_MONITOR_PYTHON:-$(
   command -v python3
 )}"
 : "${AGENT_MONITOR_PYTHON:=python3}"
+LOCAL_WEB=""
+if [ "${1:-}" = local ]; then
+  LOCAL_WEB=local
+  shift
+  case "${1:-}" in
+    start|stop|restart|status|open) ;;
+    *) echo "usage: agent-monitor local {start|stop|restart|status|open}" >&2; exit 2 ;;
+  esac
+  if [ "$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)" = hub ]; then
+    echo "This checkout owns the central Hub; use agent-monitor $1 to manage that service. A separate local Web is not managed in this Hub checkout." >&2
+    exit 2
+  fi
+fi
 
 usage() {
+  echo "Local dashboard: agent-monitor local {start|stop|restart|status|open}"
   echo "usage: agent-monitor {start|stop|restart|status|open|refresh|connect [install --server URL|status|stop|restart|--server URL]|network [--json] [--force]|session-quota SESSION_ID [--json]|export (--out PATH|--version)|machines (accept NAME [--yes]|retire NAME...)|rollup [--check [--json]|adopt-timezone|blockers|recover|recover-reviewed]}"
 }
 
@@ -47,8 +61,13 @@ find_port() {
 }
 
 start() {
+  if ! "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/deployment_guard.py" held "$ROOT_DIR"; then
+    "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/deployment_guard.py" run "$ROOT_DIR" -- "$ROOT_DIR/agent-monitor" ${LOCAL_WEB:+"$LOCAL_WEB"} start
+    return
+  fi
   local hub_role
-  hub_role="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)"
+  hub_role=standalone
+  [ -n "$LOCAL_WEB" ] || hub_role="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)"
   if [ "$hub_role" = hub ]; then
     "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" install-web
     return
@@ -91,6 +110,8 @@ if pid:
     raise SystemExit(0)
 
 os.setsid()
+import deployment_guard
+deployment_guard.detach_guard()
 with open(os.devnull, "rb", buffering=0) as stdin, open(log_file, "ab", buffering=0) as log:
     os.dup2(stdin.fileno(), 0)
     os.dup2(log.fileno(), 1)
@@ -116,7 +137,11 @@ PY
 }
 
 stop() {
-  if [ "$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)" = hub ]; then
+  if ! "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/deployment_guard.py" held "$ROOT_DIR"; then
+    "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/deployment_guard.py" run "$ROOT_DIR" -- "$ROOT_DIR/agent-monitor" ${LOCAL_WEB:+"$LOCAL_WEB"} stop
+    return
+  fi
+  if [ -z "$LOCAL_WEB" ] && [ "$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)" = hub ]; then
     "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" stop-web
     return
   fi
@@ -135,6 +160,19 @@ stop() {
 }
 
 status() {
+  local role hub_url
+  role=standalone
+  [ -n "$LOCAL_WEB" ] || role="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)"
+  if [ "$role" = hub ]; then
+    "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" status-web
+    return
+  fi
+  if [ "$role" = client ]; then
+    hub_url="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" url)"
+    echo "Role: Hub client. Dashboard target: $hub_url (availability not checked)."
+    echo "Use open/refresh for the Hub; use local start/stop/restart/status/open for the optional local Web. Run ./status.sh for collector and connector observations."
+    return 0
+  fi
   if is_running; then
     :
   else
@@ -209,7 +247,8 @@ open_url() {
 
 open_dashboard() {
   local hub_url
-  hub_url="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" url)"
+  hub_url=""
+  [ -n "$LOCAL_WEB" ] || hub_url="$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" url)"
   if [ -n "$hub_url" ]; then
     # The browser always reaches the same central service from every computer.
     if [ -n "${SSH_CONNECTION:-}" ]; then
@@ -762,6 +801,17 @@ raise SystemExit(0 if result["status"] == "observed" else 1)
 PYQUOTA
 }
 
+if [ -z "$LOCAL_WEB" ]; then
+  case "${1:-}" in
+    start|stop|restart)
+      if [ "$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)" = client ]; then
+        echo "This machine is a Hub client. Run this Web management command on the Hub host; no local service was changed. For this machine's local Web, use: agent-monitor local $1" >&2
+        exit 2
+      fi
+      ;;
+  esac
+fi
+
 case "${1:-}" in
   -h|--help|help)
     usage
@@ -774,7 +824,10 @@ case "${1:-}" in
     stop
     ;;
   restart)
-    if [ "$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)" = hub ]; then
+    if ! "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/deployment_guard.py" held "$ROOT_DIR"; then
+      exec "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/deployment_guard.py" run "$ROOT_DIR" -- "$ROOT_DIR/agent-monitor" ${LOCAL_WEB:+"$LOCAL_WEB"} restart
+    fi
+    if [ -z "$LOCAL_WEB" ] && [ "$("$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" role)" = hub ]; then
       "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" stop-web && "$AGENT_MONITOR_PYTHON" "$ROOT_DIR/hub.py" install-web
       exit $?
     fi

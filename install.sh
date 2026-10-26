@@ -2,11 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "${AGENT_MONITOR_PYTHON:-python3}" "$ROOT_DIR/deployment_guard.py" install "$ROOT_DIR" -- "$@"
+# AGENT_MONITOR_INSTALL_BODY
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$ROOT_DIR/lib/install-output.sh"
 BIN_DIR="$HOME/.local/bin"
 VENDOR_DIR="$ROOT_DIR/web/vendor"
 CHART_FILE="$VENDOR_DIR/chart.umd.min.js"
 CHART_URL="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+CHART_SHA256="0e2326c6868072bec1592760c6729043caeea2960a2b46cee6a2192aac6abff0"
 # web/vendor/ is gitignored, so the stylesheet's typefaces are fetched here like
 # Chart.js is. They are not decoration: without them the page falls back to the
 # system stack, which renders fine and therefore hides the regression.
@@ -33,16 +38,30 @@ ROLLUP_LABEL="com.agent-monitor.rollup"
 ROLLUP_PLIST="$HOME/Library/LaunchAgents/$ROLLUP_LABEL.plist"
 ROLLUP_LOG="$ROOT_DIR/state/rollup-daemon.log"
 ROLLUP_INTERVAL_SECONDS="${AGENT_MONITOR_ROLLUP_INTERVAL_SECONDS:-3600}"
-ROLLUP_COMMAND="refresh"
+ROLLUP_COMMAND="rollup"
 VENV_PY="$ROOT_DIR/.venv/bin/python"
 
 usage() {
   echo "usage: ./install.sh [web|rollup-daemon|hub MACHINE] [--no-services]" >&2
 }
 
+require_python() {
+  "$1" - <<'PYTHON'
+import sys
+if sys.version_info < (3, 10):
+    sys.exit("agent-monitor requires Python >=3.10; selected interpreter: " + sys.executable)
+PYTHON
+}
+
 install_runtime() {
   local runtime_state=present digest marker="$ROOT_DIR/.venv/.agent-monitor-requirements.sha256"
-  if [ ! -x "$VENV_PY" ]; then
+  if [ -x "$VENV_PY" ]; then
+    if ! require_python "$VENV_PY"; then
+      echo "Existing .venv was preserved. Stop owned services, rename .venv to a backup, then rerun AGENT_MONITOR_PYTHON=/path/to/python3.10-or-newer ./install.sh with the same arguments. Keep state and local configuration unchanged." >&2
+      return 1
+    fi
+  else
+    require_python "${AGENT_MONITOR_PYTHON:-python3}"
     "${AGENT_MONITOR_PYTHON:-python3}" -m venv "$ROOT_DIR/.venv"
     runtime_state=installed
   fi
@@ -66,91 +85,16 @@ PY
 }
 
 install_rollup_daemon() {
+  "$VENV_PY" "$ROOT_DIR/deployment_guard.py" check "$ROOT_DIR"
   if [ "$(uname -s)" != Darwin ]; then
     echo "→ agent-monitor rollup: skipped on $(uname -s) (requires macOS launchd)"
     emit_install_ledger service "agent-monitor rollup" skipped "Platform: macOS-only launchd schedule"
     return 0
   fi
-  if ! command -v launchctl >/dev/null 2>&1; then
-    echo "✗ agent-monitor rollup: launchctl unavailable; run this installer on a macOS host with launchd" >&2
-    emit_install_ledger service "agent-monitor rollup" failed "launchctl unavailable"
+  local rollup_state
+  if ! rollup_state="$("$VENV_PY" "$ROOT_DIR/rollup_service.py" install --command "$ROLLUP_COMMAND" --interval "$ROLLUP_INTERVAL_SECONDS")"; then
+    emit_install_ledger service "agent-monitor rollup" failed "schedule convergence failed; see diagnostics"
     return 1
-  fi
-  local rollup_state loaded=0 info program candidate
-  info="$(launchctl print "gui/$(id -u)/$ROLLUP_LABEL" 2>/dev/null)" && loaded=1
-  if [ "$loaded" = 1 ]; then
-    program="$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*program = //p' | head -n 1)"
-    if [ "$program" != "$ROOT_DIR/agent-monitor" ]; then
-      echo "✗ agent-monitor rollup: loaded job owner is ${program:-unknown}; inspect launchctl print gui/$(id -u)/$ROLLUP_LABEL and uninstall from that owner first" >&2
-      emit_install_ledger service "agent-monitor rollup" failed "loaded job ownership conflict; incumbent preserved"
-      return 1
-    fi
-  fi
-  mkdir -p "$ROOT_DIR/state" "$HOME/Library/LaunchAgents"
-  chmod +x "$ROOT_DIR/agent-monitor"
-  candidate="$(mktemp "$ROLLUP_PLIST.XXXXXX")"
-  if ! rollup_state="$(ROLLUP_LABEL="$ROLLUP_LABEL" \
-  ROLLUP_PLIST="$ROLLUP_PLIST" \
-  ROLLUP_CANDIDATE="$candidate" \
-  ROLLUP_LOG="$ROLLUP_LOG" \
-  ROLLUP_INTERVAL_SECONDS="$ROLLUP_INTERVAL_SECONDS" \
-  ROLLUP_COMMAND="$ROLLUP_COMMAND" \
-  ROOT_DIR="$ROOT_DIR" \
-  python3 - <<'PY'
-import os
-import plistlib
-import sys
-from pathlib import Path
-
-root = Path(os.environ["ROOT_DIR"])
-interval = int(os.environ["ROLLUP_INTERVAL_SECONDS"])
-if interval < 1:
-    sys.exit("agent-monitor rollup: interval must be a positive number of seconds")
-plist = {
-    "Label": os.environ["ROLLUP_LABEL"],
-    "ProgramArguments": [str(root / "agent-monitor"), os.environ["ROLLUP_COMMAND"]],
-    "RunAtLoad": True,
-    "StartInterval": interval,
-    "WorkingDirectory": str(root),
-    "StandardOutPath": os.environ["ROLLUP_LOG"],
-    "StandardErrorPath": os.environ["ROLLUP_LOG"],
-    "EnvironmentVariables": {"PYTHONPATH": str(root)},
-}
-dest = Path(os.environ["ROLLUP_PLIST"])
-state = "installed"
-if dest.exists() or dest.is_symlink():
-    old = plistlib.loads(dest.read_bytes())
-    if old.get("ProgramArguments", [])[:1] != plist["ProgramArguments"][:1]:
-        sys.exit(f"agent-monitor rollup: {dest} belongs to {old.get('ProgramArguments', [])[:1]}; uninstall from that owner first")
-    state = "present" if old == plist else "updated"
-Path(os.environ["ROLLUP_CANDIDATE"]).write_bytes(plistlib.dumps(plist, sort_keys=False))
-print(state)
-PY
-)"; then
-    rm -f "$candidate"
-    emit_install_ledger service "agent-monitor rollup" failed "could not prepare owned launchd configuration; see diagnostics"
-    return 1
-  fi
-  if [ "$loaded" = 1 ] && [ "$rollup_state" = present ]; then
-    rm -f "$candidate"
-    echo "✓ agent-monitor rollup: existing schedule unchanged (every ${ROLLUP_INTERVAL_SECONDS}s)"
-  else
-    [ "$rollup_state" != present ] || rollup_state=updated
-    if [ "$loaded" = 1 ]; then
-      if ! launchctl bootout "gui/$(id -u)/$ROLLUP_LABEL"; then
-        rm -f "$candidate"
-        echo "✗ agent-monitor rollup: could not unload the existing schedule; its plist was preserved. Check launchctl diagnostics and rerun ./install.sh rollup-daemon" >&2
-        emit_install_ledger service "agent-monitor rollup" failed "could not unload existing schedule; rerun ./install.sh rollup-daemon"
-        return 1
-      fi
-    fi
-    mv -f "$candidate" "$ROLLUP_PLIST"
-    if ! launchctl bootstrap "gui/$(id -u)" "$ROLLUP_PLIST"; then
-      echo "✗ agent-monitor rollup: could not load schedule; log into the macOS desktop and rerun ./install.sh rollup-daemon" >&2
-      emit_install_ledger service "agent-monitor rollup" failed "launchctl bootstrap failed; log into macOS desktop and rerun installer"
-      return 1
-    fi
-    echo "✓ agent-monitor rollup: schedule loaded (every ${ROLLUP_INTERVAL_SECONDS}s)"
   fi
   emit_install_ledger service "agent-monitor rollup" "$rollup_state" "launchd schedule every ${ROLLUP_INTERVAL_SECONDS}s; last run not checked (./status.sh rollup-daemon)"
 }
@@ -167,6 +111,10 @@ case "$SERVICE" in
     ;;
   hub)
     if [ "$#" != 2 ]; then usage; exit 2; fi
+    if [ "$NO_SERVICES" = 1 ]; then
+      echo "hub MACHINE changes the live role and cannot be staged with --no-services. Use ./install.sh --no-services to stage assets without changing the role, then rerun ./install.sh hub MACHINE to apply it." >&2
+      exit 2
+    fi
     if [ "$(uname -s)" != Darwin ]; then
       echo "agent-monitor hub installation requires macOS launchd; standalone agent-monitor remains available." >&2
       exit 1
@@ -189,6 +137,7 @@ fi
 echo "agent-monitor system proxy runtime: $proxy_runtime_state (Chromium system resolver)"
 emit_install_ledger artifact "agent-monitor system proxy runtime" "$proxy_runtime_state" "Electron 45.0.0; system proxy resolver"
 if [ "$SERVICE" = hub ]; then
+  "$VENV_PY" "$ROOT_DIR/deployment_guard.py" check "$ROOT_DIR"
   "$VENV_PY" "$ROOT_DIR/hub.py" configure "$2"
 fi
 if [ -f "$ROOT_DIR/state/hub-machine" ]; then
@@ -223,8 +172,26 @@ fi
 mkdir -p "$ROOT_DIR/state" "$VENDOR_DIR" "$BIN_DIR"
 chmod +x "$ROOT_DIR/agent-monitor"
 
-if [ ! -f "$CHART_FILE" ]; then
-  curl --fail --location --silent --show-error "$CHART_URL" --output "$CHART_FILE"
+chart_valid() {
+  "$VENV_PY" - "$1" "$CHART_SHA256" <<'PYTHON'
+import hashlib, pathlib, sys
+try:
+    valid = hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest() == sys.argv[2]
+except OSError:
+    valid = False
+sys.exit(0 if valid else 1)
+PYTHON
+}
+if ! chart_valid "$CHART_FILE"; then
+  [ ! -e "$CHART_FILE" ] || chart_state=updated
+  chart_candidate="$(mktemp "$CHART_FILE.XXXXXX")"
+  if ! curl --fail --location --silent --show-error --connect-timeout 15 --max-time 120 "$CHART_URL" --output "$chart_candidate" \
+      || ! chart_valid "$chart_candidate"; then
+    rm -f "$chart_candidate"
+    echo "Chart.js download or checksum verification failed; existing asset preserved. Rerun ./install.sh to retry." >&2
+    exit 1
+  fi
+  mv -f "$chart_candidate" "$CHART_FILE"
 fi
 
 mkdir -p "$FONT_DIR"
