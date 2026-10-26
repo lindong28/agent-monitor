@@ -193,9 +193,21 @@ def install(server):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-    result = launch("bootstrap", f"gui/{os.getuid()}", str(plist))
-    if result.returncode:
-        raise ValueError("连接服务配置已保存，但加载失败；请登录macOS桌面后重新运行安装命令。")
+    # Match the existing Hub's bounded local restart budget. A failed command
+    # does not establish absence; only retry after checking the actual job.
+    for attempt in range(1, 4):
+        try:
+            result = launch("bootstrap", f"gui/{os.getuid()}", str(plist))
+        except subprocess.TimeoutExpired:
+            raise ValueError("连接服务加载超时，结果未核实；未重复加载。请运行 agent-monitor service status 检查。") from None
+        if result.returncode == 0:
+            break
+        print(f"连接服务加载尝试 {attempt}/3：launchctl bootstrap exit={result.returncode}；正在核对加载状态。", file=sys.stderr)
+        if owned_loaded(wanted):
+            break
+        if attempt == 3:
+            raise ValueError(f"连接服务配置已保存，加载失败（exit={result.returncode}）；服务未加载。请检查 launchctl print {job_target()}，再运行 agent-monitor service restart connector。")
+        time.sleep(1)
     service_runtime.wait_for_identity(health, ROOT, expected)
     print("本机连接服务已启用，登录后自动启动；关闭终端不会停止。")
     print("正在建立内网连接，可用 agent-monitor connect status 查看；停用使用 agent-monitor connect stop。")

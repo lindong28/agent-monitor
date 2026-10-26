@@ -112,9 +112,27 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(list(self.state.parent.iterdir()), [self.state])
 
     def test_bootstrap_failure_is_reported(self):
-        with mock.patch.object(service, 'launch', side_effect=[self.result(1), self.result(1)]), mock.patch.object(service.socket, 'socket'), self.assertRaises(ValueError):
+        outcomes = [self.result(1)] + [self.result(5), self.result(1)] * 3
+        with mock.patch.object(service, 'launch', side_effect=outcomes), mock.patch.object(service.time, 'sleep'), mock.patch.object(service.socket, 'socket'), self.assertRaisesRegex(ValueError, 'exit=5'):
             service.install('http://hub:39001')
         self.assertTrue(self.plist.exists())
+
+    def test_absent_job_after_failed_bootstrap_can_recover(self):
+        outcomes = [self.result(1), self.result(5), self.result(1), self.result(0), self.result(0)]
+        with mock.patch.object(service, 'launch', side_effect=outcomes) as launch, mock.patch.object(service.time, 'sleep'), mock.patch.object(service.socket, 'socket'):
+            service.install('http://hub:39001')
+        self.assertEqual([c.args[0] for c in launch.call_args_list], ['print', 'bootstrap', 'print', 'bootstrap', 'print'])
+
+    def test_loaded_job_after_failed_bootstrap_is_not_submitted_again(self):
+        outcomes = [self.result(1), self.result(5), self.result(0), self.result(0)]
+        with mock.patch.object(service, 'launch', side_effect=outcomes) as launch, mock.patch.object(service.socket, 'socket'):
+            service.install('http://hub:39001')
+        self.assertEqual(sum(c.args[0] == 'bootstrap' for c in launch.call_args_list), 1)
+
+    def test_bootstrap_timeout_is_not_retried(self):
+        with mock.patch.object(service, 'launch', side_effect=[self.result(1), subprocess.TimeoutExpired('launchctl',15)]) as launch, mock.patch.object(service.socket, 'socket'), self.assertRaisesRegex(ValueError, '超时'):
+            service.install('http://hub:39001')
+        self.assertEqual(launch.call_count, 2)
 
     def test_optional_convergence_skips_fresh_and_preserves_installed_server(self):
         with mock.patch.object(service.platform, 'system', return_value='Darwin'), mock.patch.object(service, 'launch', return_value=self.result(1)), mock.patch.object(service, 'install') as install:
