@@ -25,7 +25,7 @@ class HubTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.marker = self.root / "hub-machine"
-        self.patch = mock.patch.object(hub, "MACHINE_PATH", self.marker)
+        self.patch = mock.patch.object(hub.hub_config, "MACHINE_PATH", self.marker)
         self.patch.start()
         self.addCleanup(self.patch.stop)
         self.config_path = self.root / "hub.json"
@@ -33,7 +33,7 @@ class HubTests(unittest.TestCase):
             "schema_version": 1, "hub": "node-d", "url": "http://node-d:39001",
             "port": 39001, "sync_interval_seconds": 120, "quota_interval_seconds": 3600,
             "machines": ["node-b", "node-c", "node-d"]}))
-        config_patch = mock.patch.object(hub, "CONFIG_PATH", self.config_path)
+        config_patch = mock.patch.object(hub.hub_config, "CONFIG_PATH", self.config_path)
         config_patch.start()
         self.addCleanup(config_patch.stop)
         for patch in (
@@ -101,7 +101,7 @@ class HubTests(unittest.TestCase):
                 machine_config.load_machine_config(path, retirement_root=self.root / "generations")
             # An illegal active declaration outside the hub subset still fails.
             cfg = {**hub.configuration(), "machines": ["node-d"]}
-            with mock.patch("hub.configuration", return_value=cfg):
+            with mock.patch("agent_monitor.hub_config.configuration", return_value=cfg):
                 with self.assertRaisesRegex(machine_config.MachineConfigError, "persistently retired"):
                     machine_config.load_machine_config(path, retirement_root=self.root / "generations")
             path.write_text(original.replace('{"name":"node-d', '// {"name":"node-d'))
@@ -234,7 +234,7 @@ class HubTests(unittest.TestCase):
         dest.write_bytes(plistlib.dumps(previous))
         loaded = SimpleNamespace(returncode=0, stdout='arguments = {\n' + hub.sys.executable + '\n' + str(hub.ROOT / "hub.py") + '\nserve\n}\n')
         with mock.patch("hub.Path.home", return_value=self.root), \
-                mock.patch("hub.is_hub", return_value=True), \
+                mock.patch("agent_monitor.hub_config.is_hub", return_value=True), \
                 mock.patch.dict("os.environ", {"PATH": "/bin:/usr/bin", "SSH_AUTH_SOCK": "/var/run/com.apple.launchd.new/Listeners"}), \
                 mock.patch("hub.subprocess.run", return_value=loaded) as run:
             hub.install_web()
@@ -258,7 +258,7 @@ class HubTests(unittest.TestCase):
                 previous = hub.web_plist(owner, hub.sys.executable)
                 dest.write_bytes(plistlib.dumps(previous))
                 loaded = SimpleNamespace(returncode=0, stdout='arguments = {\n' + '\n'.join(previous['ProgramArguments']) + '\n}\n')
-                with mock.patch('hub.Path.home', return_value=self.root), mock.patch('hub.is_hub', return_value=False), mock.patch('hub.subprocess.run', return_value=loaded) as run:
+                with mock.patch('hub.Path.home', return_value=self.root), mock.patch('agent_monitor.hub_config.is_hub', return_value=False), mock.patch('hub.subprocess.run', return_value=loaded) as run:
                     if allowed:
                         hub.install_web()
                         self.assertEqual([call.args[0][1] for call in run.call_args_list], ['print', 'bootout'])
@@ -291,7 +291,7 @@ class HubTests(unittest.TestCase):
                     return SimpleNamespace(returncode=0)
 
                 with mock.patch("hub.Path.home", return_value=self.root), \
-                        mock.patch("hub.is_hub", return_value=True), \
+                        mock.patch("agent_monitor.hub_config.is_hub", return_value=True), \
                         mock.patch("hub.subprocess.run", side_effect=launchctl), \
                         mock.patch("hub.time.sleep") as sleep:
                     if failures == 3 or timeout:

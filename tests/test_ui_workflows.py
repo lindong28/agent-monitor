@@ -155,7 +155,7 @@ class QueryTests(unittest.TestCase):
             server.create_views().sessions.list({"cost_status": ["bad"]})
 
     def test_session_project_drilldown_uses_source_aliases_without_mutating_entries(self):
-        from project_alias import make_alias_proof
+        from agent_monitor.contracts.project import make_alias_proof
         raw = "/Users/fixture/no-remote-project"
         entry = UsageEntry(datetime(2026, 1, 1, tzinfo=timezone.utc), "s1", "m1", "r1", "A", 10, 2, 0, 0, 1., raw, "codex")
         proof = make_alias_proof(source_path=raw, canonical_project="example/repo", observed_at="2025-01-01T00:00:00Z", repository_identity="repo-v1:" + "a" * 64)

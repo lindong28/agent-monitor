@@ -47,7 +47,7 @@ def parse_trace(body, host):
 def probe(host):
     # No netrc, cookies, account headers, redirects, or HTTP retries. The parent
     # supplies the shared bridge; the entire child also has a wall-clock budget.
-    from ip_check.cli import _require_success
+    from ip_check.http_response import require_success
     import requests
     delay = []
     try:
@@ -55,7 +55,7 @@ def probe(host):
             with client.get("https://" + host + "/cdn-cgi/trace", timeout=(4, 6),
                             allow_redirects=False, stream=True,
                             headers={"Accept-Encoding": "identity"}) as response:
-                _require_success(response, on_retry_after=delay.append)
+                require_success(response, on_retry_after=delay.append)
                 body = response.raw.read(8193, decode_content=False)
                 if len(body) > 8192:
                     raise ValueError("response too large")

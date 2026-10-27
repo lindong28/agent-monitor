@@ -8,7 +8,7 @@ import threading
 import unittest
 from unittest import mock
 
-import asset_delivery
+import agent_monitor.asset_delivery as asset_delivery
 import server
 
 

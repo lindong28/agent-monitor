@@ -6,7 +6,7 @@ import json
 import threading
 import diagnostics
 
-from session_identity import SessionIndex
+from agent_monitor.contracts.session import SessionIndex
 import statistics_snapshot
 
 

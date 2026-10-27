@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from parsers import claude, codex, UsageEntry
-from usage_archive import UsageArchive
+from agent_monitor.ingestion.usage_archive import UsageArchive
 
 
 def usage(n):

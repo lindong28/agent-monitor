@@ -2,7 +2,7 @@ import unittest
 import hashlib
 
 from agent_monitor.ingestion.project_identity import normalize_remote
-from project_alias import (
+from agent_monitor.contracts.project import (
     AliasProofError,
     ProjectAliasCollisionError,
     audit_project_collisions,

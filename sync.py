@@ -270,7 +270,7 @@ def sync_all(
 def sync_quota(machine, current, *, root=generation.DEFAULT_GENERATIONS_ROOT,
                timeout=180, runner=subprocess.run):
     """Publish new quota against the statistics just admitted for this machine."""
-    import hub
+    from agent_monitor import hub_config as hub
     try:
         if machine.is_self:
             payload = exporter.export_quota()
@@ -327,7 +327,7 @@ def _command_failure_reason(exc):
 
 
 def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refresh=True):
-    import hub
+    from agent_monitor import hub_config as hub
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise ValueError("sync timeout must be positive")
     if not isinstance(ssh_host, str) or not _SSH_HOST.fullmatch(ssh_host):

@@ -36,7 +36,7 @@ from project_paths import PROJECT_ROOT
 ROOT = PROJECT_ROOT
 DEFAULT_DB_PATH = ROOT / "state" / "rollup.db"
 DEFAULT_WINDOW_DAYS = 28
-RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "6m": 180, "1y": 365, "2y": 730}
+from agent_monitor.contracts.calendar import RANGE_DAYS, range_window, calendar_date_bounds as _calendar_date_bounds
 TIME_DIMS = {"day", "week", "month"}
 ALL_DIMS = TIME_DIMS | {"project", "model", "agent", "machine"}
 METRICS = {"cost", "input", "output", "cache_read", "cache_creation", "total", "messages", "unknown_cost"}
@@ -165,22 +165,6 @@ def use_admitted_generations(currents):
         del _PINNED_GENERATIONS.value
 
 
-def range_window(value, now=None):
-    if value == "all":
-        return None
-    if isinstance(value, str) and value.endswith("d") and value[:-1].isdigit():
-        days = int(value[:-1])
-    else:
-        days = RANGE_DAYS.get(value, 30)
-    if days < 1:
-        raise ValueError("range days must be positive")
-    current = now() if callable(now) else now
-    if current is None:
-        current = datetime.now().astimezone()
-    if current.tzinfo is None or current.utcoffset() is None:
-        raise ValueError("range now must be timezone-aware")
-    today = current.astimezone(BUCKET_TIMEZONE).date()
-    return today - timedelta(days=days - 1), today
 
 
 def run(
@@ -1588,7 +1572,7 @@ def _canonicalise_projects(rows, aliases):
     them, since the machine dimension can always take the row back apart; see
     the project identity contract in docs/references/metrics.md.
     """
-    from project_alias import canonical_project
+    from agent_monitor.contracts.project import canonical_project
 
     for row in rows:
         row["project"] = canonical_project(row["project"], aliases)
@@ -1751,26 +1735,6 @@ def _usage_rollup_version(conn):
     return version
 
 
-def _calendar_date_bounds(time_range, calendar_days=None):
-    start, end = time_range
-    if isinstance(start, datetime) and isinstance(end, datetime):
-        if any(value.tzinfo is None or value.utcoffset() is None for value in (start, end)):
-            raise ValueError("datetime range endpoints must be timezone-aware")
-        if end < start:
-            raise ValueError("time range end must not precede start")
-        if type(calendar_days) is not int or calendar_days < 1:
-            raise ValueError(
-                "datetime ranges require a positive explicit calendar_days value"
-            )
-        end_date = end.astimezone(BUCKET_TIMEZONE).date()
-        return end_date - timedelta(days=calendar_days - 1), end_date
-    if type(start) is date and type(end) is date:
-        if calendar_days is not None:
-            raise ValueError("calendar_days is only valid with datetime ranges")
-        if end < start:
-            raise ValueError("time range end must not precede start")
-        return start, end
-    raise TypeError("time range endpoints must both be dates or timezone-aware datetimes")
 
 
 def _now(now):

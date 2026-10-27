@@ -54,7 +54,7 @@ def load_machine_config(path=DEFAULT_CONFIG_PATH, *, retirement_root=_DEFAULT_RE
     hub_names = None
     # Installed identity is local state, independent of another Mac's `self` bit.
     if path.resolve() == DEFAULT_CONFIG_PATH.resolve():
-        import hub
+        from agent_monitor import hub_config as hub
         local = hub.local_machine()
         if local is not None:
             hub_names = set(hub.configuration()["machines"])

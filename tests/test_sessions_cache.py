@@ -11,14 +11,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from aggregators import LoadedEntries
+from agent_monitor.contracts.usage import LoadedEntries
 import exporter
 import generation
 from machine_config import Machine
 from parsers import UsageEntry
-from session_cache import SessionCache
-from conversation_cache import ConversationCache
-from session_identity import codex_metadata
+from agent_monitor.views.session_cache import SessionCache
+from agent_monitor.views.conversation_cache import ConversationCache
+from agent_monitor.contracts.session import codex_metadata
 import server
 import sync
 
@@ -80,7 +80,7 @@ class SessionsCacheTests(unittest.TestCase):
     def test_two_http_servers_own_session_and_network_caches(self):
         import http.client
         import threading
-        from agent_monitor.views import NetworkReport
+        from agent_monitor.views.network import NetworkReport
 
         services = [server.create_views(), server.create_views()]
         for label, views in zip(("first", "second"), services):

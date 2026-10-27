@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agent_monitor.contracts.usage import RateLimits, UsageEntry
-from session_identity import codex_metadata, merge_metadata
+from agent_monitor.contracts.session import codex_metadata, merge_metadata
 
 
 # Ported and dependency-stripped from token-tracker src/adapters/codex.py.

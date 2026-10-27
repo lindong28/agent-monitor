@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agent_monitor.contracts.usage import UsageEntry, complete_usage_observation
-from session_identity import merge_metadata
+from agent_monitor.contracts.session import merge_metadata
 
 
 def _encode(entry):

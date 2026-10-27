@@ -1,3 +1,4 @@
+from agent_monitor import hub_config
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_monitor import file_io
 import generation
 import rollup
 import statistics_snapshot
@@ -92,8 +94,7 @@ def exporter_version():
 def export_quota(*, gui_quota=False, blocked_accounts=None):
     """Collect quota without rebuilding or transferring a statistics snapshot."""
     commit = exporter_version()
-    import hub
-    limits = (_gui_rate_limits(blocked_accounts=blocked_accounts) if gui_quota and hub.enabled()
+    limits = (_gui_rate_limits(blocked_accounts=blocked_accounts) if gui_quota and hub_config.enabled()
               else _rate_limits(refresh=True, blocked_accounts=blocked_accounts))
     return {
         "schema_version": 1,
@@ -148,8 +149,7 @@ def export_bundle(
 
         stats = generation.snapshot_stats(snapshot_path)
         if rate_limits is None and gui_quota and refresh and quota_refresh:
-            import hub
-            if hub.enabled():
+            if hub_config.enabled():
                 rate_limits = _gui_rate_limits()
         manifest = {
             "schema_version": stats["schema_version"],
@@ -167,15 +167,15 @@ def export_bundle(
         manifest["manifest_digest"] = manifest_digest(manifest)
         validate_export_manifest(manifest, snapshot_path)
         _write_json(staging / "export.json", manifest)
-        generation._fsync_file(snapshot_path)
-        generation._fsync_directory(staging)
+        file_io.fsync_file(snapshot_path)
+        file_io.fsync_directory(staging)
         os.replace(staging, output_path)
-        generation._fsync_directory(output_path.parent)
+        file_io.fsync_directory(output_path.parent)
         return manifest
     except BaseException:
         if staging.exists():
             shutil.rmtree(staging)
-            generation._fsync_directory(staging.parent)
+            file_io.fsync_directory(staging.parent)
         raise
 
 
@@ -259,7 +259,7 @@ def _vacuum_into_locked(db_path, output_path):
     with closing(sqlite3.connect(uri, uri=True, timeout=30)) as conn:
         storage.require_bucket_timezone(conn, db_path)
         conn.execute("VACUUM INTO ?", (str(output_path),))
-    generation._fsync_file(output_path)
+    file_io.fsync_file(output_path)
 
 
 def _preflight_space(db_path, destination_parent):
@@ -293,7 +293,7 @@ def _cleanup_export_staging(output_path):
             shutil.rmtree(child)
         changed = True
     if changed:
-        generation._fsync_directory(output_path.parent)
+        file_io.fsync_directory(output_path.parent)
 
 
 def _gui_rate_limits(*, blocked_accounts=None):
@@ -305,9 +305,8 @@ def _gui_rate_limits(*, blocked_accounts=None):
 
 
 def _rate_limits(refresh=False, *, blocked_accounts=None):
-    import hub
     return quota_service.rate_limits(
-        refresh, blocked_accounts=blocked_accounts, use_cache=hub.enabled(), root=ROOT,
+        refresh, blocked_accounts=blocked_accounts, use_cache=hub_config.enabled(), root=ROOT,
     )
 
 

@@ -70,7 +70,7 @@ class RecoveryNetworkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)), \
                 mock.patch("exporter.exporter_version", return_value="a" * 40), \
                 mock.patch("network_policy.endpoint", side_effect=network_policy.NetworkPolicyError("runtime_missing")), \
-                mock.patch("exporter.recover_codex_quota") as reader:
+                mock.patch("agent_monitor.quota_service.recover_codex_quota") as reader:
             receipt = quota_recovery.local_recovery(dict(machine="fixture", account_id="fixture",
                 account_label="fixture@example.test", pause_id="a" * 32))
             reader.assert_not_called()

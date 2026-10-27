@@ -35,7 +35,7 @@ class EvidenceTests(unittest.TestCase):
 
     def test_gui_timeout_cleanup_cannot_drop_captured_exclusions(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(hub, "ROOT", Path(tmp)), \
-                mock.patch.object(hub, "configuration", return_value={"quota_interval_seconds": 3600}):
+                mock.patch.object(hub.hub_config, "configuration", return_value={"quota_interval_seconds": 3600}):
             state = Path(tmp) / "state"
             state.mkdir()
             import time
@@ -64,7 +64,7 @@ class EvidenceTests(unittest.TestCase):
     def test_passive_pause_without_reading_still_exposes_recovery_target(self):
         from upstream_controls import Controls
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)), \
-                mock.patch("hub.enabled", return_value=False), \
+                mock.patch("agent_monitor.hub_config.enabled", return_value=False), \
                 mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=accounts.Account("a", "a@example.test")), \
                 mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
                 mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
@@ -160,7 +160,7 @@ class EvidenceTests(unittest.TestCase):
             a = accounts.Account("fixture", "one@example.test")
             b = accounts.Account("other", "two@example.test")
             blocked = {"codex": [quota_refresh.account_fingerprint("codex", a)]}
-            with mock.patch.object(exporter, "ROOT", Path(tmp)), mock.patch("hub.enabled", return_value=False), \
+            with mock.patch.object(exporter, "ROOT", Path(tmp)), mock.patch("agent_monitor.hub_config.enabled", return_value=False), \
                  mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=a), \
                  mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=b), \
                  mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
@@ -190,6 +190,12 @@ class RecoveryHttpTests(unittest.TestCase):
                 request_finished = threading.Event()
 
                 class Handler(server.Handler):
+                    def _send_json(self, value, status=200, **kwargs):
+                        if status in (200, 500):
+                            if not manager.recovering:
+                                raise AssertionError("recovery must remain occupied during response delivery")
+                        return super()._send_json(value, status=status, **kwargs)
+
                     def finish(self):
                         try:
                             super().finish()
@@ -226,6 +232,17 @@ class RecoveryHttpTests(unittest.TestCase):
                     run.assert_called_once()
                     stored = json.loads(manager.path.read_text())
                     self.assertIsNone(stored["machines"]["fixture"]["payload"]["rate_limits"]["codex"]["refresh_error"])
+                    self.assertFalse(manager.recovering)
+                    revision = manager.revision
+                    with mock.patch("quota_sync.write_message", side_effect=OSError("fixture disk failure")):
+                        self.assertEqual(post(), 500)
+                    self.assertFalse(manager.recovering)
+                    self.assertEqual(manager.revision, revision)
+                    self.assertEqual(json.loads(manager.path.read_text()), stored)
+                    with mock.patch("quota_recovery.run", return_value={**receipt, "source_host_identity": "wrong-host"}):
+                        self.assertEqual(post(), 500)
+                    self.assertFalse(manager.recovering)
+                    self.assertEqual(manager.revision, revision)
                 finally:
                     httpd.shutdown()
                     httpd.server_close()

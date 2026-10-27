@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cache import MtimeCache
+from agent_monitor.ingestion.cache import MtimeCache
 
 
 class CacheTests(unittest.TestCase):

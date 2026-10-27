@@ -29,7 +29,7 @@ class SharedContractTests(unittest.TestCase):
 import importlib, sys
 class ForbiddenImplementation:
     def find_spec(self, fullname, *args):
-        if fullname in {"rollup", "aggregators", "server"}:
+        if fullname in {"rollup", "agent_monitor.aggregations", "server"}:
             raise AssertionError("implementation dependency: " + fullname)
 sys.meta_path.insert(0, ForbiddenImplementation())
 import agent_monitor.contracts.usage, agent_monitor.contracts.rollup

@@ -662,13 +662,9 @@ class RollupCheckTests(unittest.TestCase):
             cli_root.mkdir()
             for name in (
                 "agent-monitor",
-                "aggregators.py",
-                "cache.py",
                 "pricing.json",
                 "pricing_fetcher.py",
                 "rollup.py",
-                "usage_archive.py",
-                "session_identity.py",
             ):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")

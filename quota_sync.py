@@ -9,11 +9,11 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 
-import hub
+from agent_monitor.quota_messages import write_message
 import sync_process
 import diagnostics
 import quota_applicability
@@ -129,6 +129,55 @@ class Manager:
         except (OSError, ValueError, TypeError, AttributeError):
             self.load_error = "保存的配额查询结果不可读，请刷新重试"
 
+    @contextmanager
+    def recovery_scope(self):
+        """Keep refresh exclusion through the caller's response delivery."""
+        with self.condition:
+            if self.running or self.recovering:
+                # Preserve the busy response's original condition-lock scope.
+                yield False
+                return
+            self.recovering = True
+        try:
+            yield True
+        finally:
+            with self.condition:
+                self.recovering = False
+
+    def recover(self, machine, value):
+        """Admit and persist one recovery receipt while recovery_scope is held."""
+        import generation
+        import quota_recovery
+        with generation.generation_admission_snapshot() as admission:
+            current = next((item for item in admission.admitted if item.host == machine.name), None)
+            if current is None:
+                return {"error": "目标机器尚未通过来源确认。"}, 409
+            meta = dict(current.meta)
+            limits = self.merge(current, machine)
+        before = limits.get("codex") or {}
+        if (before.get("account_id"), before.get("account_label")) != (value["account_id"], value["account_label"]):
+            return {"error": "页面账号已变化，请重新核对。"}, 409
+        receipt = quota_recovery.run(machine, value)
+        if receipt.get("ok"):
+            block = receipt.get("block") or {}
+            if (receipt.get("source_host_identity") != meta["source_host_identity"]
+                    or (block.get("account_id"), block.get("account_label")) != (value["account_id"], value["account_label"])):
+                raise ValueError("recovery identity mismatch")
+            # A signed-in independent provider may have no observation yet.
+            recovered_limits = {p: dict(limits.get(p) or {}) for p in ("claude", "codex")}
+            recovered_limits["codex"] = block
+            payload = {"schema_version": 1, "source_host_identity": receipt["source_host_identity"],
+                       "exporter_commit": receipt["exporter_commit"], "rate_limits": recovered_limits}
+            _validate(payload)
+            with self.condition:
+                self.records[machine.name] = {"ssh_host": machine.ssh_host, "payload": payload,
+                    "attempted_at": datetime.now(timezone.utc).isoformat(), "error": None}
+                write_message(self.path, {"version": 1, "machines": self.records})
+                self.revision += 1
+            receipt = {"ok": True, "message": "有效读数已保存，目标机器的 Codex 自动查询已恢复。",
+                       "network": receipt.get("network", {"coverage": "unavailable", "events": []})}
+        return receipt, 200 if receipt.get("ok") else 409
+
     def request(self, machines):
         with self.condition:
             if self.recovering:
@@ -213,7 +262,7 @@ class Manager:
                     self.pending = tuple(n for n in self.pending if n != name)
                     self.revision += 1
                     try:
-                        hub._write_quota_message(self.path, {"version": 1, "machines": self.records})
+                        write_message(self.path, {"version": 1, "machines": self.records})
                         self.load_error = None
                     except OSError:
                         self.load_error = "配额已查询，但结果保存失败；重启后可能回到旧读数"

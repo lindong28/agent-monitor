@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import codex_accounts
 import generation
-import hub
+from agent_monitor import hub_config as hub
 import diagnostics
 import quota_applicability
 from .account_memory import (NUMERIC_FIELDS, identity_id, account_key, parse_observed_at, quota_number, text)

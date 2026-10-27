@@ -1,31 +1,31 @@
 """Existing dashboard calendar/window semantics."""
 from datetime import date, datetime, timedelta
-import rollup
+from agent_monitor.contracts import calendar
 
-RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "6m": 180, "1y": 365, "2y": 730}
+from agent_monitor.contracts.calendar import RANGE_DAYS
 
 def session_window(query, now):
     if first(query, "range", "30d") != "custom":
         return range_window(first(query, "range", "30d"), now)
     start, end = pivot_window(query)
-    return (datetime.combine(start, datetime.min.time(), tzinfo=rollup.BUCKET_TIMEZONE),
-            datetime.combine(end, datetime.max.time(), tzinfo=rollup.BUCKET_TIMEZONE))
+    return (datetime.combine(start, datetime.min.time(), tzinfo=calendar.BUCKET_TIMEZONE),
+            datetime.combine(end, datetime.max.time(), tzinfo=calendar.BUCKET_TIMEZONE))
 
 
 def range_window(value, now):
-    calendar_window = rollup.range_window(value, now)
+    calendar_window = calendar.range_window(value, now)
     if calendar_window is None:
         return None
     start_date, _ = calendar_window
     start = datetime.combine(
-        start_date, datetime.min.time(), tzinfo=rollup.BUCKET_TIMEZONE
+        start_date, datetime.min.time(), tzinfo=calendar.BUCKET_TIMEZONE
     )
     return start, now
 
 
 def pivot_window(query):
     if first(query, "range", "30d") != "custom":
-        return rollup.range_window(first(query, "range", "30d"))
+        return calendar.range_window(first(query, "range", "30d"))
     try:
         start = date.fromisoformat(first(query, "start", ""))
         end = date.fromisoformat(first(query, "end", ""))
@@ -53,7 +53,7 @@ def first(query, key, default):
 
 
 def start_of_day(value):
-    return value.astimezone(rollup.BUCKET_TIMEZONE).replace(
+    return value.astimezone(calendar.BUCKET_TIMEZONE).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
 
@@ -64,6 +64,6 @@ def start_of_week(value):
 
 
 def start_of_month(value):
-    return value.astimezone(rollup.BUCKET_TIMEZONE).replace(
+    return value.astimezone(calendar.BUCKET_TIMEZONE).replace(
         day=1, hour=0, minute=0, second=0, microsecond=0
     )

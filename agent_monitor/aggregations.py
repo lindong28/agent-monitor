@@ -1,14 +1,9 @@
 """In-memory aggregation over already loaded usage entries."""
 from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-
-# Compatibility for existing public loader and loaded-history type imports.
-from agent_monitor.contracts.usage import LoadedEntries
-from agent_monitor.ingestion import load_all_entries
+from agent_monitor.contracts.calendar import BUCKET_TIMEZONE as USAGE_TIMEZONE
 
 TIME_DIMS = {"day", "week", "month"}
-USAGE_TIMEZONE = ZoneInfo("Asia/Shanghai")
 ALL_DIMS = TIME_DIMS | {"project", "model", "agent"}
 METRICS = {"cost", "input", "output", "cache_read", "cache_creation", "total", "messages"}
 

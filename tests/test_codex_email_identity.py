@@ -78,7 +78,7 @@ class CodexEmailIdentityTests(unittest.TestCase):
                     email = "first@example.com" if same_email else "second@example.com"
                     reading = RateLimits(20, 100, 21, 200, updated_at="2026-09-24T06:01:00Z")
                     with mock.patch.object(exporter, "ROOT", self.memory_path.parent.parent), \
-                         mock.patch("hub.enabled", return_value=True), \
+                         mock.patch("agent_monitor.hub_config.enabled", return_value=True), \
                          mock.patch.object(quota_service.accounts, "codex_account", return_value=accounts.Account("shared-workspace", email)), \
                          mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
                          mock.patch.object(quota_service.codex, "load_rate_limits", return_value=reading), \

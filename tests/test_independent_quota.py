@@ -110,7 +110,7 @@ class IndependentQuotaTests(unittest.TestCase):
                     self.run_query(manager, self.payload())
                     self.run_query(manager, error=message)
                     manager.records["mini"]["attempted_at"] = "2026-10-11T01:30:00Z"
-                    quota_sync.hub._write_quota_message(self.path, {"version": 1, "machines": manager.records})
+                    quota_sync.write_message(self.path, {"version": 1, "machines": manager.records})
                     current = copy.deepcopy(self.current)
                     current.meta["generated_at"] = "2026-10-11T02:00:00Z"
                     for provider in ("claude", "codex"):

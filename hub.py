@@ -14,21 +14,41 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
 import service_runtime
+from agent_monitor.quota_messages import write_message as _write_quota_message
+from agent_monitor import hub_config
 from project_paths import PROJECT_ROOT
 
 
 ROOT = PROJECT_ROOT
-CONFIG_PATH = ROOT / "hub.json"
-_LOCAL_CONFIG_PATH = ROOT / "hub.local.json"
-if _LOCAL_CONFIG_PATH.exists() or _LOCAL_CONFIG_PATH.is_symlink():
-    CONFIG_PATH = _LOCAL_CONFIG_PATH
-MACHINE_PATH = ROOT / "state" / "hub-machine"
 WEB_LABEL = "com.agent-monitor.hub"
 QUOTA_REQUEST_TIMEOUT = 120
 QUOTA_KICK_INTERVAL = 2
 QUOTA_POLL_INTERVAL = 0.1
+
+
+def configuration(path=None):
+    return hub_config.configuration(path)
+
+
+def local_machine():
+    return hub_config.local_machine()
+
+
+def enabled():
+    return hub_config.enabled()
+
+
+def is_hub():
+    return hub_config.is_hub()
+
+
+def origin():
+    return hub_config.origin()
+
+
+def interval():
+    return hub_config.interval()
 
 
 class QuotaRequestError(RuntimeError):
@@ -43,18 +63,6 @@ def _quota_message(path):
         return {}
 
 
-def _write_quota_message(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    staging = path.with_name(path.name + "." + uuid.uuid4().hex)
-    try:
-        with staging.open("x") as handle:
-            os.chmod(staging, 0o600)
-            json.dump(value, handle, allow_nan=False)
-            handle.flush()
-            os.fsync(handle.fileno())
-        staging.replace(path)
-    finally:
-        staging.unlink(missing_ok=True)
 
 
 def _pending_quota_request():
@@ -153,52 +161,16 @@ def request_quota_refresh(*, timeout=QUOTA_REQUEST_TIMEOUT, blocked_accounts=Non
         raise QuotaRequestError("GUI 配额刷新未能完成，请检查这台 Mac 的采集器后重新刷新。") from exc
 
 
-def configuration(path=None):
-    data = json.loads(Path(path or CONFIG_PATH).read_text())
-    fields = {"schema_version", "hub", "url", "port", "sync_interval_seconds",
-              "quota_interval_seconds", "machines"}
-    if not isinstance(data, dict) or set(data) != fields or data["schema_version"] != 1:
-        raise ValueError("unsupported hub configuration")
-    names = data["machines"]
-    if not isinstance(names, list) or not names or any(
-        not isinstance(n, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", n) for n in names
-    ) or len(set(names)) != len(names) or data["hub"] not in names:
-        raise ValueError("hub machines must be unique machine names containing the hub")
-    for key in ("port", "sync_interval_seconds", "quota_interval_seconds"):
-        if type(data[key]) is not int or data[key] < 1:
-            raise ValueError("%s must be a positive integer" % key)
-    url = urlparse(data["url"])
-    if (data["port"] > 65535 or url.scheme not in {"http", "https"} or not url.hostname
-            or url.username or url.password or url.query or url.fragment or url.path not in {"", "/"}):
-        raise ValueError("hub URL must be an HTTP origin without credentials")
-    if url.scheme != "http" or (url.port or 80) != data["port"]:
-        raise ValueError("hub URL must use HTTP and the configured listening port")
-    return data
 
 
-def local_machine():
-    if not MACHINE_PATH.exists():
-        return None
-    name = MACHINE_PATH.read_text().strip()
-    if name not in configuration()["machines"]:
-        raise ValueError("installed hub machine is absent from hub.json")
-    return name
 
 
-def enabled():
-    return local_machine() is not None
 
 
-def is_hub():
-    return enabled() and local_machine() == configuration()["hub"]
 
 
-def origin():
-    return configuration()["url"].rstrip("/") if enabled() else None
 
 
-def interval():
-    return configuration()["sync_interval_seconds"] if enabled() else 600
 
 
 def collect():
@@ -403,8 +375,8 @@ def main():
             if args.command == "configure":
                 if args.machine not in configuration()["machines"]:
                     raise ValueError("configure requires a machine listed in hub.json")
-                MACHINE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                MACHINE_PATH.write_text(args.machine + "\n")
+                hub_config.MACHINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                hub_config.MACHINE_PATH.write_text(args.machine + "\n")
                 print("agent-monitor hub: %s configured; services have not yet been installed." % args.machine)
             elif args.command == "install-web":
                 install_web()

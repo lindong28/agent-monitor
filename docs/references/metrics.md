@@ -1,6 +1,6 @@
 # Accounting and parser contracts
 
-These are maintenance boundaries for the current implementation, not provider billing guarantees. `parsers/` normalizes observed agent logs, `usage_archive.py` retains observations, `rollup.py` maintains aggregates, and `token_cost.py` derives known-cost subtotals. Tests use synthetic observations; they do not establish live provider behavior.
+These are maintenance boundaries for the current implementation, not provider billing guarantees. `parsers/` normalizes observed agent logs, `agent_monitor/ingestion/usage_archive.py` retains observations, `rollup.py` maintains aggregates, and `token_cost.py` derives known-cost subtotals. Tests use synthetic observations; they do not establish live provider behavior.
 
 ## Usage and cost
 

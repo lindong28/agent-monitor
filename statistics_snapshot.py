@@ -13,7 +13,7 @@ import diagnostics
 from agent_monitor.contracts.usage import (
     LoadedEntries, UsageEntry, USAGE_QUALITIES, usage_quality_counts, validate_usage_metadata,
 )
-from session_identity import SessionIndex, validate as validate_session
+from agent_monitor.contracts.session import SessionIndex, validate as validate_session
 
 
 VERSION = 5

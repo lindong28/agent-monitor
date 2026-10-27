@@ -4,13 +4,13 @@ from datetime import datetime
 from dataclasses import replace
 
 import generation
-import hub
+from agent_monitor import hub_config as hub
 import statistics_snapshot
 import sync
-from session_cache import SessionCache
-from conversation_cache import ConversationCache
-from session_identity import SessionIndex
-from project_alias import canonical_project
+from agent_monitor.views.session_cache import SessionCache
+from agent_monitor.views.conversation_cache import ConversationCache
+from agent_monitor.contracts.session import SessionIndex
+from agent_monitor.contracts.project import canonical_project
 from .time_ranges import first, session_window
 from .projections import (filter_time, filter_values, conversation_stats,
                           group_execution_sessions, session_stats, entry_json, session_sort_key)

@@ -1,4 +1,5 @@
 """Rebuild .venv at its original path, retaining a recoverable runtime backup."""
+from agent_monitor import hub_config
 import argparse
 from contextlib import contextmanager
 import json
@@ -85,8 +86,7 @@ def start_job(job):
     if loaded(job) is None:
         raise ValueError(f'{job["label"]}: startup is unverified.')
     if job['label'] == 'com.agent-monitor.hub':
-        import hub
-        reader = lambda: service_runtime.read_health(f'http://127.0.0.1:{hub.configuration()["port"]}/api/health?asset_watch=1')
+        reader = lambda: service_runtime.read_health(f'http://127.0.0.1:{hub_config.configuration()["port"]}/api/health?asset_watch=1')
     elif job['label'] == 'com.agent-monitor.connector':
         import connector_service
         reader = connector_service.health

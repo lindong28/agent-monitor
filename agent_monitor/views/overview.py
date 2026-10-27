@@ -1,4 +1,5 @@
 """Dashboard overview aggregation over an admitted usage snapshot."""
+from agent_monitor.contracts.calendar import calendar_date_bounds
 from datetime import datetime, timedelta
 
 from .time_ranges import RANGE_DAYS, first, auto_time_dim, start_of_week
@@ -106,7 +107,7 @@ class OverviewView:
             if range_window is None:
                 partial = True
             else:
-                range_start = self.rollups._calendar_date_bounds(range_window)[0].isoformat()
+                range_start = calendar_date_bounds(range_window)[0].isoformat()
                 partial = range_start < earliest
         return {
             "earliest_date": earliest,

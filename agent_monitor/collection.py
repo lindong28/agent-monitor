@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 import diagnostics
 import generation
-import hub
-import query_view
+from agent_monitor import hub_config as hub
+import agent_monitor.views.query_view as query_view
 import sync
 import sync_process
 

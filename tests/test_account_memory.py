@@ -348,7 +348,7 @@ class AccountMemoryTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "server.generation._fsync_file", side_effect=PermissionError("read-only state")
+            "agent_monitor.file_io.fsync_file", side_effect=PermissionError("read-only state")
         ), self.assertLogs("agent-monitor", level="WARNING") as logs:
             limits = server.QUOTA_VIEW.rate_limits(admission=live)
 

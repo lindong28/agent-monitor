@@ -39,7 +39,7 @@ class ExporterTests(unittest.TestCase):
                     self.assertEqual(obtained, [True])
                     return receipt
                 with mock.patch.object(exporter, "exporter_version", return_value="a" * 40), \
-                        mock.patch.object(hub, "enabled", return_value=enabled), \
+                        mock.patch.object(hub.hub_config, "enabled", return_value=enabled), \
                         mock.patch.object(hub, "request_quota_refresh", side_effect=query) as gui_query, \
                         mock.patch.object(exporter, "_rate_limits", return_value={}) as direct:
                     manifest = exporter.export_bundle(source, Path(tmp) / "bundle", gui_quota=gui,

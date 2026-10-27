@@ -151,7 +151,7 @@ def restore(root, recipe):
 
 
 def converge(root=ROOT):
-    import hub
+    from agent_monitor import hub_config as hub
     root = Path(root)
     if hub.is_hub():
         print('Local Web: central Hub owns this checkout; no separate dashboard.')

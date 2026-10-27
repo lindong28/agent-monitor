@@ -130,7 +130,7 @@ class ProviderTests(unittest.TestCase):
 
                 self.sleep.reset_mock()
                 with mock.patch.object(exporter, "ROOT", root), \
-                        mock.patch("hub.enabled", return_value=True), \
+                        mock.patch("agent_monitor.hub_config.enabled", return_value=True), \
                         mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=live), \
                         mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=old), \
                         mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=old), \
@@ -343,7 +343,7 @@ class ProviderTests(unittest.TestCase):
 
         def passive(local_reading):
             import hub
-            with mock.patch.object(hub, "enabled", return_value=True), \
+            with mock.patch.object(hub.hub_config, "enabled", return_value=True), \
                     mock.patch("agent_monitor.quota_service.read_cache",
                                return_value={"claude": cached, "codex": cached}), \
                     mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=local_reading), \
@@ -391,7 +391,7 @@ class ProviderTests(unittest.TestCase):
         # take this query's `signed_out` along with its error, not the old one.
         newer = dict(lapsed, updated_at="2026-09-16T00:00:00+00:00")
         written = {}
-        with mock.patch.object(hub, "enabled", return_value=True), \
+        with mock.patch.object(hub.hub_config, "enabled", return_value=True), \
                 mock.patch("agent_monitor.quota_service.read_cache",
                            return_value={"claude": newer, "codex": newer}), \
                 mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
@@ -525,7 +525,7 @@ class ProviderTests(unittest.TestCase):
             RateLimits(22, None, 18, None, updated_at="2026-09-19T02:40:43Z"),
             accounts.Account("account-old", "old@example.test", "max")),
             "refresh_error": None, "signed_out": False}}
-        with mock.patch("hub.enabled", return_value=True), \
+        with mock.patch("agent_monitor.hub_config.enabled", return_value=True), \
                 mock.patch("agent_monitor.quota_service.read_cache", return_value=stale_cache), \
                 mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=reading), \
                 mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \

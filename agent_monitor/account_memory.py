@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_monitor import file_io
 import generation
 import quota_applicability
 from parsers.accounts import quota_identity
@@ -404,7 +405,7 @@ class AccountMemory:
         parent_created = not parent.exists()
         parent.mkdir(parents=True, exist_ok=True)
         if parent_created:
-            generation._fsync_directory(parent.parent)
+            file_io.fsync_directory(parent.parent)
         temporary = parent / (".%s-%s" % (self.path.name, uuid.uuid4().hex))
         try:
             fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -419,9 +420,9 @@ class AccountMemory:
                 )
                 handle.write("\n")
                 handle.flush()
-            generation._fsync_file(temporary)
+            file_io.fsync_file(temporary)
             os.replace(temporary, self.path)
-            generation._fsync_directory(parent)
+            file_io.fsync_directory(parent)
         finally:
             if temporary.exists():
                 temporary.unlink()

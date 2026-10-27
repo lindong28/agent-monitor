@@ -87,7 +87,7 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
         self.assertEqual(json.loads(path.read_text()), recipe)
 
     def test_converge_stale_process_then_repeat_retains_pid_and_disabled_stays_disabled(self):
-        with mock.patch('hub.is_hub', return_value=False):
+        with mock.patch('agent_monitor.hub_config.is_hub', return_value=False):
             local_web.converge(self.root)
             self.assertIsNone(process_identity.read_owned(self.root / 'state', self.root))
             self.start()
@@ -215,19 +215,19 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
 
     def test_status_reports_local_web_on_client_and_continues_after_failure(self):
         output = io.StringIO()
-        with mock.patch('hub.is_hub', return_value=False), mock.patch('hub.enabled', return_value=True), mock.patch('hub.configuration', return_value={'url': 'http://central:39001'}), mock.patch('service_manager.run', side_effect=[1, 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'), mock.patch('service_manager.local_status', return_value=1) as local, redirect_stdout(output):
+        with mock.patch('agent_monitor.hub_config.is_hub', return_value=False), mock.patch('agent_monitor.hub_config.enabled', return_value=True), mock.patch('agent_monitor.hub_config.configuration', return_value={'url': 'http://central:39001'}), mock.patch('service_manager.run', side_effect=[1, 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'), mock.patch('service_manager.local_status', return_value=1) as local, redirect_stdout(output):
             self.assertEqual(service_manager.status(), 1)
         local.assert_called_once()
         self.assertEqual(run.call_count, 2)
         self.assertIn('http://central:39001 (availability not checked)', output.getvalue())
 
     def test_status_continues_after_collector_timeout(self):
-        with mock.patch('hub.is_hub', return_value=False), mock.patch('hub.enabled', return_value=False), mock.patch('service_manager.run', side_effect=[subprocess.TimeoutExpired('collector', 1), 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'):
+        with mock.patch('agent_monitor.hub_config.is_hub', return_value=False), mock.patch('agent_monitor.hub_config.enabled', return_value=False), mock.patch('service_manager.run', side_effect=[subprocess.TimeoutExpired('collector', 1), 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'):
             self.assertEqual(service_manager.status(), 1)
             self.assertEqual(run.call_count, 2)
 
     def test_status_continues_after_hub_timeout(self):
-        with mock.patch('hub.is_hub', return_value=True), mock.patch('service_manager.run', side_effect=[subprocess.TimeoutExpired('hub', 1), 0, 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'):
+        with mock.patch('agent_monitor.hub_config.is_hub', return_value=True), mock.patch('service_manager.run', side_effect=[subprocess.TimeoutExpired('hub', 1), 0, 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'):
             self.assertEqual(service_manager.status(), 1)
             self.assertEqual(run.call_count, 3)
 

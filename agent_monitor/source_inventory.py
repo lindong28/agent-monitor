@@ -3,6 +3,7 @@
 Register application package roots here when adding one. Runtime state, vendor
 dependencies, tests and task artifacts are not application source roots.
 """
+import hashlib
 from pathlib import Path
 
 from project_paths import PROJECT_ROOT
@@ -17,6 +18,19 @@ def python_sources(root=PROJECT_ROOT):
     for package in PACKAGE_ROOTS:
         files.extend((root / package).rglob("*.py"))
     return sorted(path for path in files if path.is_file())
+
+
+def source_signature(root=PROJECT_ROOT):
+    """Hash the same relative Python paths and bytes used by server drift checks."""
+    root = Path(root)
+    digest = hashlib.sha256()
+    for path in python_sources(root):
+        try:
+            digest.update(str(path.relative_to(root)).encode())
+            digest.update(path.read_bytes())
+        except OSError:
+            continue
+    return digest.hexdigest()[:16]
 
 
 def deployment_sources(root=PROJECT_ROOT):

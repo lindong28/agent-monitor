@@ -10,7 +10,7 @@ from unittest import mock
 import parsers
 from parsers import claude
 import pricing_fetcher as pricing
-from usage_archive import UsageArchive
+from agent_monitor.ingestion.usage_archive import UsageArchive
 
 
 class HistoryContractTests(unittest.TestCase):

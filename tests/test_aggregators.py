@@ -12,10 +12,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-import aggregators
+import agent_monitor.aggregations as aggregators
 
 from agent_monitor.ingestion import IDENTITY_STORE, project_identity
-from aggregators import extract_dim, pivot
+from agent_monitor.aggregations import extract_dim, pivot
 from agent_monitor.ingestion.project_identity import normalize_remote
 identify_project = IDENTITY_STORE.identify_project
 from parsers import UsageEntry
@@ -265,8 +265,8 @@ class AggregatorTests(unittest.TestCase):
             # same chokepoint rather than a second way in.
             ("agent_monitor/storage.py", "_connect_read_only", "rollup_read_chokepoint"),
             ("agent_monitor/storage.py", "_private_read_copy", "locked_source_private_copy_recovery"),
-            ("usage_archive.py", "read", "retained_usage_read_only"),
-            ("usage_archive.py", "collect", "retained_usage_transaction_write"),
+            ("agent_monitor/ingestion/usage_archive.py", "read", "retained_usage_read_only"),
+            ("agent_monitor/ingestion/usage_archive.py", "collect", "retained_usage_transaction_write"),
             ("statistics_snapshot.py", "write_snapshot", "unpublished_statistics_write"),
             ("statistics_snapshot.py", "read_snapshot", "admitted_statistics_read_only"),
             ("statistics_snapshot.py", "read_metadata", "admitted_statistics_metadata_read_only"),
@@ -277,7 +277,7 @@ class AggregatorTests(unittest.TestCase):
             for file_name, function_name, disposition in expected
         }
         actual = []
-        root = Path(aggregators.__file__).resolve().parent
+        root = Path(aggregators.__file__).resolve().parents[1]
         for path in sorted([*root.glob("*.py"), *(root / "agent_monitor").rglob("*.py")]):
             tree = ast.parse(path.read_text())
             parents = {
@@ -353,7 +353,7 @@ class AggregatorTests(unittest.TestCase):
         attach = []
         read_gates = []
         lines_by_kind = {}
-        root = Path(aggregators.__file__).resolve().parent
+        root = Path(aggregators.__file__).resolve().parents[1]
         explicitly_included = {
             "tests/check_rollup_source_coverage.py": (
                 "operational diagnostic that reads the production rollup database"
@@ -672,7 +672,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
+            for name in ("agent-monitor", "rollup.py", "rollup_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
@@ -765,7 +765,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
+            for name in ("agent-monitor", "rollup.py", "rollup_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
@@ -838,7 +838,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
+            for name in ("agent-monitor", "rollup.py", "rollup_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")

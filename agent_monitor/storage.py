@@ -13,13 +13,7 @@ import threading
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
-from zoneinfo import ZoneInfo
-
-
-BUCKET_TIMEZONE_NAME = "Asia/Shanghai"
-
-
-BUCKET_TIMEZONE = ZoneInfo(BUCKET_TIMEZONE_NAME)
+from agent_monitor.contracts.calendar import BUCKET_TIMEZONE, BUCKET_TIMEZONE_NAME
 
 
 _LOCKS_GUARD = threading.Lock()

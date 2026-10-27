@@ -144,7 +144,7 @@ class StatisticsSnapshotTests(unittest.TestCase):
             snapshots.read_admitted_usage(current)
 
     def test_admitted_conversation_keeps_ancestry_outside_window_and_decodes_only_members(self):
-        from session_identity import codex_metadata
+        from agent_monitor.contracts.session import codex_metadata
         metadata = [codex_metadata("root", "cli"), codex_metadata("child",
             {"subagent": {"thread_spawn": {"parent_thread_id": "root"}}}),
             codex_metadata("nested", {"subagent": {"thread_spawn": {"parent_thread_id": "child"}}})]

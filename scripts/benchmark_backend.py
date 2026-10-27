@@ -82,7 +82,7 @@ def make_snapshot(path, rows, padding_mib, tokens, rollup):
 
 def run_case(path, rows, padding_mib, repeat):
     import generation
-    import query_view
+    import agent_monitor.views.query_view as query_view
     import rollup
     from machine_config import Machine, machine_config_fingerprint
 

@@ -9,7 +9,7 @@ from parsers import codex
 from tests.test_codex_forks import event, usage
 from tests.test_source_metric_repairs import meta, turn
 import tests.test_cost as cost_fixtures
-from usage_archive import UsageArchive
+from agent_monitor.ingestion.usage_archive import UsageArchive
 
 
 def checkpoint(owner, model='gpt-5.5'):

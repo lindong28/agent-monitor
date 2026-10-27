@@ -103,7 +103,7 @@ class FailureEvidenceTests(unittest.TestCase):
                 root = Path(directory)
                 with mock.patch.object(quota_refresh, "ROOT", root), \
                         mock.patch.object(exporter, "ROOT", root), \
-                        mock.patch.object(hub, "enabled", return_value=True), \
+                        mock.patch.object(hub.hub_config, "enabled", return_value=True), \
                         mock.patch.object(quota_service.accounts, "codex_account", return_value=Account("synthetic")), \
                         mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
                         mock.patch.object(quota_service.codex, "load_rate_limits", return_value=RateLimits(1, None, 2, None)), \

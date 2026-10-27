@@ -167,7 +167,7 @@ class ReviewedIdentityTests(unittest.TestCase):
         src = Path(__file__).resolve().parents[1]
         cli = self.root / "cli"
         cli.mkdir()
-        for name in ("agent-monitor", "rollup_identity.py", "aggregators.py", "rollup.py", "session_identity.py"):
+        for name in ("agent-monitor", "rollup_identity.py", "rollup.py"):
             shutil.copy2(src / name, cli / name)
         shutil.copytree(src / "parsers", cli / "parsers")
         shutil.copytree(src / "agent_monitor", cli / "agent_monitor")

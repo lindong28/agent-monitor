@@ -32,6 +32,7 @@ def validate_request(value):
 
 def local_recovery(value):
     import exporter
+    from agent_monitor import quota_service
     import generation
     import quota_refresh
     from upstream_controls import Controls
@@ -43,7 +44,7 @@ def local_recovery(value):
         # Scope observations without choosing a different endpoint or proxy policy.
         route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
         with network_policy.using_route(route):
-            block = exporter.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"])
+            block = quota_service.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"], root=exporter.ROOT)
     except (quota_refresh.RefreshError, OSError, RuntimeError) as exc:
         pause = Controls(exporter.ROOT / "state/upstream_controls").read("codex").get("pause")
         receipt = {"ok": False, "error": "恢复未完成，暂停保留；请查看诊断后再决定下一步。",

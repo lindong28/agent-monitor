@@ -1,4 +1,5 @@
 """One public management entry point; lifecycle ownership stays with each component."""
+from agent_monitor import hub_config
 import argparse
 import os
 from pathlib import Path
@@ -37,13 +38,12 @@ def local_status():
 
 def status():
     # Separate checks continue after a component failure; status never installs.
-    import hub
     result = 0
     try:
-        role = 'hub' if hub.is_hub() else ('client' if hub.enabled() else 'standalone')
+        role = 'hub' if hub_config.is_hub() else ('client' if hub_config.enabled() else 'standalone')
         print(f'Role: {role}', flush=True)
         if role == 'client':
-            print(f'Central dashboard: {hub.configuration()["url"]} (availability not checked).', flush=True)
+            print(f'Central dashboard: {hub_config.configuration()["url"]} (availability not checked).', flush=True)
         if role == 'hub':
             result |= run(ROOT / 'hub.py', 'status-web')
         else:
@@ -68,7 +68,7 @@ def restart(component):
     import hub
     with deployment_guard.mutation_guard(ROOT):
         if component == 'local-web':
-            if hub.is_hub():
+            if hub_config.is_hub():
                 raise ValueError('This checkout owns the Hub; use service restart hub.')
             with local_web.account_quiescence(ROOT):
                 recipe = local_web.capture(ROOT)
@@ -79,7 +79,7 @@ def restart(component):
             print('Local Web restarted; target local HTTP identity confirmed.')
             return 0
         if component == 'hub':
-            if not hub.is_hub():
+            if not hub_config.is_hub():
                 raise ValueError('This checkout is not the Hub; manage it on the Hub host.')
             with local_web.account_quiescence(ROOT):
                 hub.stop_web()

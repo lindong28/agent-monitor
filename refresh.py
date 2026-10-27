@@ -71,7 +71,7 @@ def refresh(get, expected_names, *, timeout, clock=time.monotonic, sleep=time.sl
 
 def main():
     try:
-        import hub
+        from agent_monitor import hub_config as hub
         origin = hub.origin()
         if origin is None:
             port = int((ROOT / "state/port").read_text().strip())
@@ -86,10 +86,10 @@ def main():
             with opener.open(request, timeout=30) as response:
                 return json.load(response)
 
-        import server
+        from agent_monitor.source_inventory import source_signature
 
         health = get("/api/health?asset_watch=1")
-        if health.get("stale") or health.get("signature") != server._source_signature():
+        if health.get("stale") or health.get("signature") != source_signature(ROOT):
             raise RefreshError("The dashboard is running different code; run 'agent-monitor restart', then 'agent-monitor refresh'.")
         names = set(machine_config.load_machine_config().by_name)
         print("agent-monitor refresh: refreshing %d machines and their current-account Quota…" % len(names), flush=True)

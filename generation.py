@@ -24,10 +24,11 @@ from machine_config import (
     persisted_retired_names,
     retirement_config_text,
 )
-from project_alias import validate_alias_proofs
+from agent_monitor.contracts.project import validate_alias_proofs
 from agent_monitor.contracts.rollup import USAGE_ROLLUP_AUTHORITY_FLOOR_KEY
 
 
+from agent_monitor.file_io import fsync_directory as _fsync_directory, fsync_file as _fsync_file
 from project_paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
@@ -1251,6 +1252,11 @@ def _remember_validation(directory, signature):
             _READ_VALIDATIONS.popitem(last=False)
 
 
+def unchanged(current):
+    """Whether the admitted generation still has its validated file signature."""
+    return _generation_file_signature(current.generation_dir) == current._signature
+
+
 def _generation_file_signature(directory):
     """Reuse validation only while the published files and WAL stay unchanged."""
     result = []
@@ -1370,20 +1376,8 @@ def _table_exists(conn, table_name):
     ).fetchone() is not None
 
 
-def _fsync_directory(path):
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
-def _fsync_file(path):
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 @contextmanager

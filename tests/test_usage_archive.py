@@ -13,7 +13,7 @@ from unittest import mock
 from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, project_identity, usage_loader
 import rollup
 from parsers import UsageEntry
-from usage_archive import UsageArchive
+from agent_monitor.ingestion.usage_archive import UsageArchive
 
 
 class UsageArchiveTests(unittest.TestCase):

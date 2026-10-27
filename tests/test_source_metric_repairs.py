@@ -9,7 +9,7 @@ from parsers import codex
 import pricing_fetcher
 import tests.test_cost as cost_tests
 from tests.test_codex_forks import event, usage
-from usage_archive import UsageArchive
+from agent_monitor.ingestion.usage_archive import UsageArchive
 from datetime import timezone
 
 

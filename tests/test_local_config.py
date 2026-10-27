@@ -35,13 +35,14 @@ class LocalConfigTests(unittest.TestCase):
 
     def test_default_and_local_overrides_reach_real_consumers(self):
         source = '''
-import inspect, json, machine_config, hub, generation, sync, query_view
+import inspect, json, machine_config, hub, generation, sync
+import agent_monitor.views.query_view as query_view
 path = machine_config.DEFAULT_CONFIG_PATH
 assert generation.DEFAULT_CONFIG_PATH == sync.DEFAULT_CONFIG_PATH == path
 assert inspect.signature(query_view.QueryView).parameters['config_path'].default == path
 assert inspect.signature(generation.retire_machines).parameters['config_path'].default == path
 print(json.dumps([path.name, machine_config.load_machine_config().self_machine.name,
-                  hub.CONFIG_PATH.name, hub.configuration()['hub']]))
+                  hub.hub_config.CONFIG_PATH.name, hub.configuration()['hub']]))
 '''
         result = self.run_source(source)
         self.assertEqual(result.returncode, 0, result.stderr)

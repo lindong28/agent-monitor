@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 import generation
-import query_view
+import agent_monitor.views.query_view as query_view
 import rollup
 import server
 from machine_config import Machine, machine_config_fingerprint

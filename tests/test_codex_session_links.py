@@ -12,7 +12,7 @@ from parsers import codex, codex_profiles
 import server
 import statistics_snapshot
 from tests import test_managed_codex_profiles as fixtures
-from usage_archive import UsageArchive
+from agent_monitor.ingestion.usage_archive import UsageArchive
 
 SID = "11111111-1111-4111-8111-111111111111"
 OTHER = "22222222-2222-4222-8222-222222222222"
@@ -132,7 +132,7 @@ class SessionLinkTests(unittest.TestCase):
         account = quota_service.accounts.Account("workspace", "default@example.test", None)
         cache = {"codex": {"account_id": account.account_id, "account_label": account.label,
                           "five_hour_pct": 82, "updated_at": "2099-01-01T00:00:00Z"}}
-        with mock.patch("hub.enabled", return_value=True), mock.patch.object(exporter, "ROOT", self.root), \
+        with mock.patch("agent_monitor.hub_config.enabled", return_value=True), mock.patch.object(exporter, "ROOT", self.root), \
              mock.patch("agent_monitor.quota_service.read_cache", return_value=cache), \
              mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
              mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \

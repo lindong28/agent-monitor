@@ -243,7 +243,7 @@ class QuotaApplicabilityTests(unittest.TestCase):
         quota_service.save_cache(self.root / "state/quota_snapshot.json", {"claude": cached})
         passive = RateLimits(80, cached["five_hour_resets_at"], 80, cached["seven_day_resets_at"],
                              updated_at=self.now.isoformat(), quota_observation={"source": "claude_statusline", "observed_at": self.now.isoformat()})
-        with mock.patch.object(hub, "enabled", return_value=True), \
+        with mock.patch.object(hub.hub_config, "enabled", return_value=True), \
                 mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account), \
                 mock.patch.object(quota_service.accounts, "codex_account", return_value=None), \
                 mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=passive), \
@@ -251,7 +251,7 @@ class QuotaApplicabilityTests(unittest.TestCase):
             result = quota_service.rate_limits(False, use_cache=True)
         self.assertEqual(result["claude"]["refresh_failure"]["http_status"], 403)
         admission = SimpleNamespace(admitted=[SimpleNamespace(host="fixture", meta={"rate_limits": result})])
-        with mock.patch.object(hub, "enabled", return_value=False):
+        with mock.patch.object(hub.hub_config, "enabled", return_value=False):
             projected = server.QUOTA_VIEW.live_from_admission(admission)
         server.QUOTA_VIEW.apply_applicability(projected)
         entry = projected["claude"]["accounts"][0]
@@ -273,7 +273,7 @@ class QuotaApplicabilityTests(unittest.TestCase):
         quota_service.save_cache(self.root / "state/quota_snapshot.json", {"codex": raw(new)})
         self.assertEqual(quota_service.read_cache(self.root / "state/quota_snapshot.json")["codex"]["seven_day_pct"], 80)
         admission = SimpleNamespace(admitted=[SimpleNamespace(host=host, meta={"rate_limits": {"codex": raw(value)}}) for host, value in (("old", old), ("new", new))])
-        with mock.patch.object(hub, "enabled", return_value=False):
+        with mock.patch.object(hub.hub_config, "enabled", return_value=False):
             result = server.QUOTA_VIEW.live_from_admission(admission)
         self.assertEqual(result["codex"]["accounts"][0]["seven_day_used_pct"], 80)
 

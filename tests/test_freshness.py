@@ -8,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+from agent_monitor import source_inventory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +25,7 @@ class SourceSignatureTests(unittest.TestCase):
     def test_source_files_are_python_modules_only(self):
         import server
 
-        files = server._source_files()
+        files = source_inventory.python_sources(ROOT)
         self.assertIn(ROOT / "server.py", files)
         self.assertTrue(files)
         self.assertTrue(all(path.suffix == ".py" for path in files))
@@ -34,13 +35,24 @@ class SourceSignatureTests(unittest.TestCase):
         import server
 
         full = server._source_signature()
-        original = server._source_files
-        try:
-            server._source_files = lambda: original()[:-1]
+        original = source_inventory.python_sources
+        with mock.patch.object(source_inventory, "python_sources", side_effect=lambda root: original(root)[:-1]):
             reduced = server._source_signature()
-        finally:
-            server._source_files = original
         self.assertNotEqual(full, reduced)
+
+
+class RestartCompileTests(unittest.TestCase):
+    def test_compile_check_accepts_valid_source_and_reports_syntax_error(self):
+        import server
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(server, "ROOT", Path(directory)):
+            source = Path(directory) / "entry.py"
+            source.write_text("answer = 42\n")
+            self.assertEqual(server._compile_check(), [])
+            source.write_text("def broken(:\n")
+            errors = server._compile_check()
+            self.assertEqual(len(errors), 1)
+            self.assertIn(str(source), errors[0])
 
 
 class HealthStaleTests(unittest.TestCase):

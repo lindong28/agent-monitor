@@ -25,7 +25,7 @@ class DeploymentRegressionTests(unittest.TestCase):
             root = Path(directory)
             dest = root / 'Library/LaunchAgents' / (hub.WEB_LABEL + '.plist')
             dest.parent.mkdir(parents=True)
-            with mock.patch.object(hub, 'ROOT', root), mock.patch('hub.Path.home', return_value=root), mock.patch('hub.is_hub', return_value=True):
+            with mock.patch.object(hub, 'ROOT', root), mock.patch('hub.Path.home', return_value=root), mock.patch('agent_monitor.hub_config.is_hub', return_value=True):
                 wanted = hub.web_plist(root, sys.executable, ssh_auth_sock=os.environ.get('SSH_AUTH_SOCK'), path=os.environ.get('PATH'))
                 dest.write_bytes(plistlib.dumps(wanted))
                 loaded = subprocess.CompletedProcess([], 0, 'arguments = {\n' + '\n'.join(wanted['ProgramArguments']) + '\n}\n', '')

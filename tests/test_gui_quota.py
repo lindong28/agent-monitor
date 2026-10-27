@@ -34,7 +34,7 @@ class GuiQuotaTests(unittest.TestCase):
         for patch in (
             mock.patch.object(hub, "ROOT", self.root),
             mock.patch.object(exporter, "ROOT", self.root),
-            mock.patch.object(hub, "enabled", return_value=True),
+            mock.patch.object(hub.hub_config, "enabled", return_value=True),
             mock.patch.object(hub, "QUOTA_POLL_INTERVAL", 0.002),
             mock.patch.object(hub, "QUOTA_KICK_INTERVAL", 0.01),
             mock.patch.object(quota_service.accounts, "claude_account", return_value=accounts.Account("a")),
@@ -250,7 +250,7 @@ class GuiQuotaTests(unittest.TestCase):
                 commands.append(args[-1])
                 output = "/tmp/agent-monitor-export.ABC12345\n" if "mktemp" in args[-1] else "{}"
                 return subprocess.CompletedProcess(args, 0, output, "")
-            with self.subTest(enabled=enabled, refresh=refresh), mock.patch.object(hub, "enabled", return_value=enabled):
+            with self.subTest(enabled=enabled, refresh=refresh), mock.patch.object(hub.hub_config, "enabled", return_value=enabled):
                 sync._pull_remote_export("fixture", self.root / "bundle", timeout=1, runner=runner, quota_refresh=refresh)
             import shlex
             command = next(command for command in commands if shlex.split(command)[2:3] == [sync._REMOTE_EXPORT_SCRIPT])

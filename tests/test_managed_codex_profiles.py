@@ -16,8 +16,8 @@ import exporter
 from parsers import codex, codex_profiles
 import server
 import statistics_snapshot
-from session_identity import SessionIndex, merge_metadata
-from usage_archive import UsageArchive
+from agent_monitor.contracts.session import SessionIndex, merge_metadata
+from agent_monitor.ingestion.usage_archive import UsageArchive
 
 
 class ManagedCodexTests(unittest.TestCase):
@@ -96,7 +96,7 @@ class ManagedCodexTests(unittest.TestCase):
 
     def test_exporter_includes_profiles_without_refreshing_them(self):
         self.session(self.profile("alpha"), "alpha", 10, 21)
-        with mock.patch("hub.enabled", return_value=False), mock.patch.object(exporter, "ROOT", self.root), \
+        with mock.patch("agent_monitor.hub_config.enabled", return_value=False), mock.patch.object(exporter, "ROOT", self.root), \
              mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=None), \
              mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
              mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
@@ -143,7 +143,7 @@ class ManagedCodexTests(unittest.TestCase):
         self.assertNotIn("account", loaded["session_metadata"][0])
 
     def test_ancestry_cannot_link_distinct_accounts(self):
-        from session_identity import codex_metadata
+        from agent_monitor.contracts.session import codex_metadata
         root = codex_metadata("root", "cli")
         child = codex_metadata("child", {"subagent": {"thread_spawn": {"parent_thread_id": "root"}}})
         for row, name in ((root, "alpha"), (child, "beta")):

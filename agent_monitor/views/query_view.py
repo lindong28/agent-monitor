@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 import generation
 import diagnostics
-import hub
+from agent_monitor import hub_config as hub
 import statistics_snapshot
 
 
@@ -97,7 +97,7 @@ class QueryView:
                 if config != view.admission.config:
                     raise ViewUnavailable("机器配置已更新，正在准备统计读取视图。")
                 for current in view.admission.admitted:
-                    if generation._generation_file_signature(current.generation_dir) != current._signature:
+                    if not generation.unchanged(current):
                         raise ViewUnavailable("统计快照已变化，正在重新校验。")
                 view.readers += 1
         except Exception as exc:
