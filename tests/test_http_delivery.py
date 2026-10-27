@@ -83,7 +83,7 @@ class DeliveryTests(unittest.TestCase):
 
     def test_overview_compression_preserves_payload_and_no_store(self):
         payload = {"rows": [{"tokens": i, "model": "fixture"} for i in range(300)]}
-        with mock.patch.dict(server.ROUTES, {"/api/overview": lambda query: payload}):
+        with mock.patch.object(self.httpd.views.overview, "read", return_value=payload):
             for accept, encoded in [("gzip", True), ("gzip;q=0.5", True), ("gzip;q=0", False), ("gzip;q=bad", False), ("identity", False)]:
                 with self.subTest(accept=accept):
                     status, headers, body = self.request("/api/overview", **{"Accept-Encoding": accept})

@@ -1,3 +1,5 @@
+import statistics_snapshot
+from agent_monitor.views import time_ranges
 """Read-only UI contracts, with isolated synthetic records."""
 import dataclasses
 from datetime import date, datetime, timezone
@@ -24,6 +26,7 @@ class ScopeTests(unittest.TestCase):
             for send_body in (True, False):
                 with self.subTest(chapter=chapter, send_body=send_body):
                     handler = object.__new__(server.Handler)
+                    handler.server = SimpleNamespace(views=server.create_views(), routes={})
                     handler.path = f"/guide/{chapter}?range=7d"
                     handler.headers = {}
                     handler.wfile = io.BytesIO()
@@ -53,13 +56,14 @@ class ScopeTests(unittest.TestCase):
         for accepted, compressed in [("gzip, deflate, br", True), ("gzip;q=0.5", True),
                                      ("gzip;q=0", False), ("identity", False), ("", False)]:
             handler = object.__new__(server.Handler)
+            handler.server = SimpleNamespace(views=server.create_views(), routes={})
             handler.path = "/api/sessions?range=30d&with_filters=1"
             handler.headers = {"Accept-Encoding": accepted}
             handler.wfile = io.BytesIO()
             handler.send_response = mock.Mock()
             handler.send_header = mock.Mock()
             handler.end_headers = mock.Mock()
-            with mock.patch.dict(server.ROUTES, {"/api/sessions": lambda query: payload}):
+            with mock.patch.dict(handler.server.routes, {"/api/sessions": lambda query: payload}):
                 handler._handle_request()
             headers = dict(call.args for call in handler.send_header.call_args_list)
             data = handler.wfile.getvalue()
@@ -71,18 +75,18 @@ class ScopeTests(unittest.TestCase):
                 self.assertLess(len(data), len(json.dumps(payload).encode()) / 3)
 
     def test_network_identity_survives_success_cache_and_failure(self):
-        with mock.patch.dict(server._NETWORK_CACHE, data=None, ts=0), \
-                mock.patch.object(server.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"), \
-                mock.patch("server.socket.gethostname", return_value="fixture-host"), \
-                mock.patch("server.subprocess.run") as run:
-            run.return_value = mock.Mock(returncode=0, stdout=json.dumps({"verdict":"low"}))
-            for query in ({"force":["1"]}, {}):
-                self.assertEqual(server.network(query)["checked_host"], "fixture-host")
-            run.side_effect = FileNotFoundError()
-            server._NETWORK_CACHE["data"] = None
-            failed = server.network({"force":["1"]})
-            self.assertEqual(failed["checked_host"], "fixture-host")
-            self.assertFalse(failed["installed"])
+        run = mock.Mock(return_value=mock.Mock(returncode=0, stdout=json.dumps({"verdict": "low"})))
+        clock = [0.0]
+        report = server.NetworkReport(runner=run, child_environment=lambda env: {},
+                                      hostname=lambda: "fixture-host", clock=lambda: clock[0])
+        for _ in range(2):
+            self.assertEqual(report.read()["checked_host"], "fixture-host")
+        run.assert_called_once()
+        run.side_effect = FileNotFoundError()
+        clock[0] = 61.0
+        failed = report.read()
+        self.assertEqual(failed["checked_host"], "fixture-host")
+        self.assertFalse(failed["installed"])
 
     def test_large_session_detail_negotiates_lossless_compression(self):
         import gzip
@@ -90,6 +94,7 @@ class ScopeTests(unittest.TestCase):
         payload = {"meta": None, "entries": [{"model": "fixture-model", "input_tokens": i} for i in range(3000)]}
         for accepted, compressed in [("gzip, deflate, br", True), ("gzip;q=0.5", True), ("gzip;q=0", False), ("identity", False), ("", False)]:
             handler = object.__new__(server.Handler)
+            handler.server = SimpleNamespace(views=server.create_views(), routes={})
             handler.path = "/api/session/fixture"
             handler.headers = {"Accept-Encoding": accepted}
             handler.wfile = io.BytesIO()
@@ -115,39 +120,39 @@ class QueryTests(unittest.TestCase):
         records = [entry, dataclasses.replace(entry, model="B", message_id="m2", request_id="r2", cost_usd=2., input_tokens=20),
                    dataclasses.replace(entry, session_id="other", timestamp=datetime(2026, 1, 2, 16, tzinfo=timezone.utc), model="B")]
         query = {"range":["custom"], "start":["2026-01-02"], "end":["2026-01-02"], "model":["B"], "with_filters":["1"]}
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=records):
-            result = server.sessions_endpoint(query)
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=records):
+            result = server.create_views().sessions.list(query)
             self.assertEqual(result["filters"]["model"], ["A", "B"])
             self.assertEqual([(r["session_id"], r["cost_usd"], r["tokens"]) for r in result["sessions"]], [("s1", 2., 22)])
-            self.assertEqual(len(server.session_detail("s1")["entries"]), 2)
-            self.assertEqual(server.sessions_endpoint({**query, "model":["missing"]})["sessions"], [])
-            self.assertEqual(len(server.sessions_endpoint({"range":["all"]})), 2)
+            self.assertEqual(len(server.create_views().sessions.detail("s1")["entries"]), 2)
+            self.assertEqual(server.create_views().sessions.list({**query, "model":["missing"]})["sessions"], [])
+            self.assertEqual(len(server.create_views().sessions.list({"range":["all"]})), 2)
         admission = SimpleNamespace(admitted=[SimpleNamespace(host="machine-a"), SimpleNamespace(host="machine-b")])
-        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=records):
-            result = server.sessions_endpoint({**query, "machine":["machine-b"]})
+        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("statistics_snapshot.read_admitted_usage", return_value=records):
+            result = server.create_views().sessions.list({**query, "machine":["machine-b"]})
             self.assertEqual([r["machine"] for r in result["sessions"]], ["machine-b"])
             self.assertEqual(result["filters"]["machine"], ["machine-a", "machine-b"])
         for start, end in [("", ""), ("2026-01-03", "2026-01-02")]:
             with self.assertRaises(ValueError):
-                server._session_window({"range":["custom"],"start":[start],"end":[end]}, datetime.now(timezone.utc))
+                time_ranges.session_window({"range":["custom"],"start":[start],"end":[end]}, datetime.now(timezone.utc))
 
     def test_unknown_cost_filter_matches_entries_and_keeps_full_detail(self):
         entry = UsageEntry(datetime(2026, 1, 2, tzinfo=timezone.utc), "mixed", "a", "a", "M", 10, 2, 0, 0, None, "repo", "codex")
         records = [entry, dataclasses.replace(entry, message_id="b", request_id="b", cost_usd=0., input_tokens=20),
                    dataclasses.replace(entry, session_id="priced", message_id="c", request_id="c", cost_usd=3.)]
         query = {"range": ["custom"], "start": ["2026-01-02"], "end": ["2026-01-02"], "cost_status": ["unknown"], "with_filters": ["1"]}
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=records):
-            result = server.sessions_endpoint(query)
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=records):
+            result = server.create_views().sessions.list(query)
             self.assertEqual([(r["session_id"], r["tokens"], r["cost_usd"]) for r in result["sessions"]], [("mixed", 12, None)])
-            self.assertEqual(len(server.session_detail("mixed")["entries"]), 2)
-            self.assertEqual(len(server.sessions_endpoint({**query, "cost_status": [""]})["sessions"]), 2)
-            self.assertEqual(server.sessions_endpoint({**query, "model": ["missing"]})["sessions"], [])
+            self.assertEqual(len(server.create_views().sessions.detail("mixed")["entries"]), 2)
+            self.assertEqual(len(server.create_views().sessions.list({**query, "cost_status": [""]})["sessions"]), 2)
+            self.assertEqual(server.create_views().sessions.list({**query, "model": ["missing"]})["sessions"], [])
         current = SimpleNamespace(host="fixture")
-        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=[current]))), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=records):
-            self.assertEqual(server.sessions_endpoint(query)["sessions"][0]["tokens"], 12)
-            self.assertEqual(len(server.session_detail("mixed", "fixture")["entries"]), 2)
+        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=[current]))), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("statistics_snapshot.read_admitted_usage", return_value=records):
+            self.assertEqual(server.create_views().sessions.list(query)["sessions"][0]["tokens"], 12)
+            self.assertEqual(len(server.create_views().sessions.detail("mixed", "fixture")["entries"]), 2)
         with self.assertRaises(ValueError):
-            server.sessions_endpoint({"cost_status": ["bad"]})
+            server.create_views().sessions.list({"cost_status": ["bad"]})
 
     def test_session_project_drilldown_uses_source_aliases_without_mutating_entries(self):
         from project_alias import make_alias_proof
@@ -157,12 +162,12 @@ class QueryTests(unittest.TestCase):
         for aliases, canonical in [([], "~/no-remote-project"), ([proof], "~/no-remote-project")]:
             current = SimpleNamespace(host="machine-a", meta={"aliases": aliases})
             admission = SimpleNamespace(admitted=[current])
-            with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=[entry]) as read:
+            with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("statistics_snapshot.read_admitted_usage", return_value=[entry]) as read:
                 for selected in [raw, canonical, "missing"]:
-                    result = server.sessions_endpoint({"range":["all"], "project":[selected], "with_filters":["1"]})
+                    result = server.create_views().sessions.list({"range":["all"], "project":[selected], "with_filters":["1"]})
                     self.assertEqual(len(result["sessions"]), 0 if selected == "missing" else 1)
                     self.assertEqual(result["filters"]["project"], [canonical])
-                server.sessions_endpoint({"range":["all"], "project":[canonical]})
+                server.create_views().sessions.list({"range":["all"], "project":[canonical]})
                 self.assertNotIn("project", read.call_args.kwargs["query"])
                 self.assertEqual(entry.project, raw)
 
@@ -170,14 +175,14 @@ class QueryTests(unittest.TestCase):
         summary = {"known_cost_usd": 0., "entries":1, "unknown_cost_entries":0}
         now = datetime(2026, 1, 1, 20, tzinfo=timezone.utc) # Jan 2 in the bucket timezone
         with mock.patch("server.rollup.period_summary", return_value=summary) as read:
-            result = server._period_comparison("7d", now)
+            result = server.create_views().overview.period_comparison("7d", now)
             self.assertEqual([call.args[0] for call in read.call_args_list], [(date(2025,12,26),date(2026,1,1)), (date(2025,12,19),date(2025,12,25))])
             self.assertEqual(result["known_cost_delta_usd"], 0.)
             self.assertIsNone(result["coverage_complete"])
         with mock.patch("server.rollup.period_summary", side_effect=[summary,{**summary,"known_cost_usd":None}]):
-            self.assertIsNone(server._period_comparison("30d", now)["known_cost_delta_usd"])
+            self.assertIsNone(server.create_views().overview.period_comparison("30d", now)["known_cost_delta_usd"])
         with mock.patch("server.rollup.period_summary") as read:
-            self.assertFalse(server._period_comparison("all", now)["available"])
+            self.assertFalse(server.create_views().overview.period_comparison("all", now)["available"])
             read.assert_not_called()
 
     def test_period_cost_distinguishes_empty_unknown_zero_and_mixed(self):

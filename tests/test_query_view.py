@@ -51,7 +51,7 @@ class QueryViewTests(unittest.TestCase):
                         self.assertEqual(server.pivot_filters_endpoint({"range": ["all"]})["machine"], ["node-b"])
                         status = server.sync_status_endpoint({})
                         self.assertEqual(status["machines"][0]["generation_id"], current.meta["generation_id"])
-                        overview = server.overview({"range": ["all"]})
+                        overview = server.create_views().overview.read({"range": ["all"]})
                         self.assertEqual(overview["sync"]["coverage"], {"admitted": 1, "declared": 1})
                         self.assertEqual(overview["range"]["tokens"], index * 10 + 9)
 

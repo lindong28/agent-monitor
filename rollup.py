@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from aggregators import load_all_entries
+from agent_monitor.ingestion import load_all_entries
+from agent_monitor.contracts.rollup import (
+    USAGE_ROLLUP_SCHEMA_VERSION, USAGE_ROLLUP_AUTHORITY_FLOOR_KEY,
+)
 from agent_monitor.storage import (
     BUCKET_TIMEZONE,
     BUCKET_TIMEZONE_NAME,
@@ -33,8 +36,6 @@ from project_paths import PROJECT_ROOT
 ROOT = PROJECT_ROOT
 DEFAULT_DB_PATH = ROOT / "state" / "rollup.db"
 DEFAULT_WINDOW_DAYS = 28
-USAGE_ROLLUP_SCHEMA_VERSION = 2
-USAGE_ROLLUP_AUTHORITY_FLOOR_KEY = "usage_rollup_authoritative_from"
 RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "6m": 180, "1y": 365, "2y": 730}
 TIME_DIMS = {"day", "week", "month"}
 ALL_DIMS = TIME_DIMS | {"project", "model", "agent", "machine"}

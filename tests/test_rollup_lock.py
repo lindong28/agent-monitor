@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-import aggregators
+from agent_monitor.ingestion import IDENTITY_STORE, project_identity
 import rollup
 from agent_monitor import storage
 from parsers import UsageEntry
@@ -229,17 +229,17 @@ def _run_paused_before_database_exit(db_path, paused, release, result):
 
 
 def _write_identity_state_worker(identity_db, ready, result):
-    aggregators.PROJECT_IDENTITY_DB = Path(identity_db)
-    original_resolve = aggregators._resolve_project
-    aggregators._resolve_project = lambda path: (path, "no_remote")
+    IDENTITY_STORE.path = Path(identity_db)
+    original_resolve = IDENTITY_STORE.resolve_project
+    IDENTITY_STORE.resolve_project = lambda path: (path, "no_remote")
     try:
         ready.set()
-        value = aggregators.identify_project("/identity/repo", {})
+        value = IDENTITY_STORE.identify_project("/identity/repo", {})
         result.put({"status": "ok", "value": value})
     except Exception as exc:
         result.put({"status": "error", "error": "%s: %s" % (type(exc).__name__, exc)})
     finally:
-        aggregators._resolve_project = original_resolve
+        IDENTITY_STORE.resolve_project = original_resolve
 
 
 class RollupLockTests(unittest.TestCase):
@@ -918,29 +918,29 @@ class RollupLockTests(unittest.TestCase):
             identity_db = state / "project_identity.db"
             expected_rollup_db = state / "rollup.db"
             wrong_rollup_db = Path(tmp) / "other" / "rollup.db"
-            blocker = aggregators.ProjectIdentityUnavailable(
+            blocker = project_identity.ProjectIdentityUnavailable(
                 "blocked",
                 source_path="/identity/repo",
                 reason="source_unavailable",
             )
 
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db):
                 with self.assertRaises(rollup.RollupLockNotHeld):
-                    aggregators._record_project_identity_blocker_locked(blocker)
+                    IDENTITY_STORE._record_project_identity_blocker_locked(blocker)
                 self.assertFalse(identity_db.exists())
 
                 with self.assertRaises(rollup.RollupLockNotHeld):
-                    aggregators._begin_identity_recovery()
+                    IDENTITY_STORE._begin_identity_recovery()
 
                 with rollup.rollup_lock(expected_rollup_db):
-                    stale_token = aggregators._assert_identity_rollup_lock_held()
+                    stale_token = IDENTITY_STORE.assert_lock_held()
                 with sqlite3.connect(":memory:") as conn:
-                    conn.execute(aggregators.PROJECT_IDENTITY_SCHEMA)
-                    conn.execute(aggregators.PROJECT_IDENTITY_BLOCKER_SCHEMA)
+                    conn.execute(project_identity.PROJECT_IDENTITY_SCHEMA)
+                    conn.execute(project_identity.PROJECT_IDENTITY_BLOCKER_SCHEMA)
                     with self.assertRaises(rollup.RollupLockNotHeld):
-                        aggregators._ensure_project_identity_blocker_schema(conn, stale_token)
+                        IDENTITY_STORE._ensure_project_identity_blocker_schema(conn, stale_token)
                     with self.assertRaises(rollup.RollupLockNotHeld):
-                        aggregators._upsert_project_identity(
+                        IDENTITY_STORE._upsert_project_identity(
                             conn,
                             "/identity/repo",
                             "github.com/example/repo",
@@ -948,7 +948,7 @@ class RollupLockTests(unittest.TestCase):
                             stale_token,
                         )
                     with self.assertRaises(rollup.RollupLockNotHeld):
-                        aggregators._resolve_blocker(
+                        IDENTITY_STORE._resolve_blocker(
                             conn,
                             "/identity/repo",
                             "resolved_pinned",
@@ -957,14 +957,14 @@ class RollupLockTests(unittest.TestCase):
 
                 with rollup.rollup_lock(wrong_rollup_db):
                     with self.assertRaises(rollup.RollupLockNotHeld):
-                        aggregators._record_project_identity_blocker_locked(blocker)
+                        IDENTITY_STORE._record_project_identity_blocker_locked(blocker)
                 self.assertFalse(identity_db.exists())
 
                 observed = queue.Queue()
 
                 def cross_thread_write():
                     try:
-                        aggregators._store_project_identity(
+                        IDENTITY_STORE._store_project_identity(
                             "/identity/repo",
                             "github.com/example/repo",
                             "remote",
@@ -990,8 +990,8 @@ class RollupLockTests(unittest.TestCase):
             identity_b = root / "b" / "project_identity.db"
             identity_b.parent.mkdir(parents=True)
             with sqlite3.connect(identity_b) as conn:
-                conn.execute(aggregators.PROJECT_IDENTITY_SCHEMA)
-                conn.execute(aggregators.PROJECT_IDENTITY_BLOCKER_SCHEMA)
+                conn.execute(project_identity.PROJECT_IDENTITY_SCHEMA)
+                conn.execute(project_identity.PROJECT_IDENTITY_BLOCKER_SCHEMA)
                 conn.execute(
                     """
                     INSERT INTO project_identity_blocker (
@@ -1003,23 +1003,23 @@ class RollupLockTests(unittest.TestCase):
                 )
             self.assertFalse(Path(str(identity_b.with_name("rollup.db")) + ".lock").exists())
 
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_a):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_a):
                 with rollup.rollup_lock(rollup_a):
-                    ownership_token = aggregators._assert_identity_rollup_lock_held()
+                    ownership_token = IDENTITY_STORE.assert_lock_held()
                     with sqlite3.connect(identity_b) as foreign_conn:
                         foreign_writers = {
-                            "ensure_schema": lambda: aggregators._ensure_project_identity_blocker_schema(
+                            "ensure_schema": lambda: IDENTITY_STORE._ensure_project_identity_blocker_schema(
                                 foreign_conn,
                                 ownership_token,
                             ),
-                            "upsert_identity": lambda: aggregators._upsert_project_identity(
+                            "upsert_identity": lambda: IDENTITY_STORE._upsert_project_identity(
                                 foreign_conn,
                                 "/identity/repo",
                                 "github.com/example/repo",
                                 "remote",
                                 ownership_token,
                             ),
-                            "resolve_blocker": lambda: aggregators._resolve_blocker(
+                            "resolve_blocker": lambda: IDENTITY_STORE._resolve_blocker(
                                 foreign_conn,
                                 "/identity/repo",
                                 "resolved_pinned",
@@ -1049,19 +1049,19 @@ class RollupLockTests(unittest.TestCase):
             identity_b = root / "b" / "project_identity.db"
             identity_b.parent.mkdir(parents=True)
             with sqlite3.connect(identity_b) as conn:
-                conn.execute(aggregators.PROJECT_IDENTITY_SCHEMA)
+                conn.execute(project_identity.PROJECT_IDENTITY_SCHEMA)
             self.assertFalse(Path(str(identity_b.with_name("rollup.db")) + ".lock").exists())
 
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_a):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_a):
                 with rollup.rollup_lock(rollup_a):
-                    ownership_token = aggregators._assert_identity_rollup_lock_held()
+                    ownership_token = IDENTITY_STORE.assert_lock_held()
                     with sqlite3.connect(identity_b) as foreign_conn:
                         spoofing_conn = _SpoofingIdentityConnection(
                             foreign_conn,
                             identity_a,
                         )
                         with self.assertRaises(rollup.RollupLockNotHeld):
-                            aggregators._upsert_project_identity(
+                            IDENTITY_STORE._upsert_project_identity(
                                 spoofing_conn,
                                 "/identity/repo",
                                 "github.com/example/repo",

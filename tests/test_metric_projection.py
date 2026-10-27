@@ -20,7 +20,7 @@ class MetricProjectionTests(unittest.TestCase):
                                          ([0], 0, 0), ([2], 2, 0),
                                          ([2, None], 2, 1)]:
             with self.subTest(costs=costs), patch.object(rollup, "_daily_rows", return_value=[row(c) for c in costs]):
-                summary = server._rollup_summary(None)
+                summary = server.create_views().overview.summary(None)
                 self.assertEqual(summary["cost_usd"], expected)
                 self.assertEqual(summary["cost_coverage"], {"known": len(costs)-unknown, "unknown": unknown})
                 self.assertIsNone(summary["by_agent"]["claude-code"])
@@ -35,7 +35,7 @@ class MetricProjectionTests(unittest.TestCase):
             self.assertEqual(grouped["cost_coverage"], {"known": 1, "unknown": 2})
             pivot = rollup.query_pivot("day", "agent", "cost", agents=["codex"])
             self.assertEqual(pivot["rows"][1]["cost_coverage"]["codex"], {"known": 1, "unknown": 1})
-            self.assertIsNone(server._daily_cost_from_pivot(pivot)[0]["codex_cost"])
+            self.assertIsNone(server.create_views().overview.daily_cost(pivot)[0]["codex_cost"])
 
     def test_dimension_reduction_conserves_cost_coverage(self):
         rows = [row(None if n % 2 else n, model="m%02d" % n) for n in range(20)]

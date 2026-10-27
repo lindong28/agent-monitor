@@ -1,3 +1,4 @@
+import statistics_snapshot
 import tempfile
 import unittest
 import json
@@ -45,11 +46,11 @@ class SessionsCacheTests(unittest.TestCase):
                                                         message_id="second", cost_usd=0)])
         self.currents = [self.publish("one", self.entries), self.publish("two", self.entries)]
         Clock.value = NOW
+        self.view = server.create_views().sessions
+        self.view.clock = lambda: Clock.now().astimezone()
         for patcher in (mock.patch.object(server, "datetime", Clock),
                         mock.patch.object(server.hub, "enabled", return_value=True),
                         mock.patch.object(server.COLLECTION, "request"),
-                        mock.patch.object(server, "_SESSION_CACHE", SessionCache()),
-                        mock.patch.object(server, "_CONVERSATION_CACHE", ConversationCache()),
                         mock.patch.object(server.generation, "generation_admission_snapshot")):
             value = patcher.start()
             self.addCleanup(patcher.stop)
@@ -72,30 +73,95 @@ class SessionsCacheTests(unittest.TestCase):
         return current
 
     def assert_uncached_equal(self, query, actual):
-        with mock.patch.object(server, "_SESSION_CACHE", SessionCache(max_entries=0)), \
-             mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None):
-            self.assertEqual(actual, server.sessions_endpoint(query))
+        with mock.patch.object(self.view, "session_cache", SessionCache(max_entries=0)), \
+             mock.patch.object(self.view.conversation_cache, "read", return_value=None):
+            self.assertEqual(actual, self.view.list(query))
+
+    def test_two_http_servers_own_session_and_network_caches(self):
+        import http.client
+        import threading
+        from agent_monitor.views import NetworkReport
+
+        services = [server.create_views(), server.create_views()]
+        for label, views in zip(("first", "second"), services):
+            views.sessions.clock = lambda: Clock.now().astimezone()
+            views.network = NetworkReport(
+                runner=mock.Mock(return_value=SimpleNamespace(
+                    returncode=0, stdout=json.dumps({"verdict": label}))),
+                child_environment=lambda env: {}, hostname=lambda: "fixture-host")
+        servers = [server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler, views=views)
+                   for views in services]
+        threads = [threading.Thread(target=httpd.serve_forever, daemon=True) for httpd in servers]
+
+        def request(index, path, method="GET"):
+            httpd = servers[index]
+            conn = http.client.HTTPConnection(*httpd.server_address, timeout=3)
+            try:
+                host = "%s:%s" % httpd.server_address
+                headers = {"Origin": "http://" + host, "X-Agent-Monitor": "action"}
+                conn.request(method, path, headers=headers)
+                response = conn.getresponse()
+                self.assertEqual(response.status, 200)
+                return json.loads(response.read())
+            finally:
+                conn.close()
+
+        for thread in threads:
+            thread.start()
+        try:
+            with mock.patch.object(statistics_snapshot, "admitted_usage_rows",
+                                   wraps=statistics_snapshot.admitted_usage_rows) as read:
+                path = "/api/sessions?range=30d&with_filters=1&sync=0"
+                first = request(0, path)
+                self.assertEqual(read.call_count, 2)
+                self.assertEqual(request(0, path), first)
+                self.assertEqual(read.call_count, 2)
+                self.assertEqual(request(1, path), first)
+                self.assertEqual(read.call_count, 4)
+                # Disable only the response caches. Each service retains its
+                # own grouped conversations; validation still reads raw rows,
+                # while payload decoding and grouping remain reusable.
+                for views in services:
+                    views.sessions.session_cache = SessionCache(max_entries=0)
+                with mock.patch.object(statistics_snapshot, "decode_usage_payloads",
+                                       wraps=statistics_snapshot.decode_usage_payloads) as decode:
+                    for index in range(2):
+                        self.assertEqual(request(index, path), first)
+                    decode.assert_not_called()
+                self.assertEqual(read.call_count, 8)
+            for index, label in enumerate(("first", "second")):
+                self.assertEqual(request(index, "/api/network")["verdict"], label)
+                self.assertEqual(request(index, "/api/network?force=1", "POST")["verdict"], label)
+                services[index].network.runner.assert_called_once()
+            self.assertIsNot(services[0].sessions.conversation_cache, services[1].sessions.conversation_cache)
+        finally:
+            for httpd in servers:
+                httpd.shutdown()
+                httpd.server_close()
+            for thread in threads:
+                thread.join(2)
+                self.assertFalse(thread.is_alive())
 
     def test_reuse_keeps_responses_independent_and_only_changed_source_rebuilds(self):
-        with mock.patch.object(server.statistics_snapshot, "admitted_usage_rows", wraps=server.statistics_snapshot.admitted_usage_rows) as read:
-            first = server.sessions_endpoint(self.query)
+        with mock.patch.object(statistics_snapshot, "admitted_usage_rows", wraps=statistics_snapshot.admitted_usage_rows) as read:
+            first = self.view.list(self.query)
             first["sessions"][0]["model"] = "mutation"
             first["filters"]["model"].append("mutation")
-            second = server.sessions_endpoint(self.query)
+            second = self.view.list(self.query)
             self.assertNotEqual("mutation", second["sessions"][0]["model"])
             self.assertNotIn("mutation", second["filters"]["model"])
             self.assertEqual(read.call_count, 2)
             Clock.value += timedelta(minutes=1)
-            self.assertEqual(second, server.sessions_endpoint(self.query))
+            self.assertEqual(second, self.view.list(self.query))
             self.assertEqual(read.call_count, 2)
             self.currents[0] = self.publish("one", LoadedEntries([*self.entries,
                 replace(self.base, session_id="new", message_id="new", timestamp=NOW)]))
-            changed = server.sessions_endpoint(self.query)
+            changed = self.view.list(self.query)
             self.assertEqual(read.call_count, 3)
             self.assertEqual(len(changed["sessions"]), len(second["sessions"]) + 1)
         self.assert_uncached_equal(self.query, changed)
         self.currents.pop()
-        self.assertTrue(all(row["machine"] == "one" for row in server.sessions_endpoint(self.query)["sessions"]))
+        self.assertTrue(all(row["machine"] == "one" for row in self.view.list(self.query)["sessions"]))
 
     def test_query_dimensions_and_global_sort_match_uncached_results(self):
         queries = [self.query, {**self.query, "agent": ["codex"]},
@@ -108,18 +174,18 @@ class SessionsCacheTests(unittest.TestCase):
                    {"range": ["custom"], "start": ["2026-10-18"], "end": ["2026-10-19"]}]
         for query in queries:
             with self.subTest(query=query):
-                first = server.sessions_endpoint(query)
-                with mock.patch.object(server.statistics_snapshot, "admitted_usage_rows", side_effect=AssertionError("unexpected repeated decode")):
-                    self.assertEqual(first, server.sessions_endpoint(query))
+                first = self.view.list(query)
+                with mock.patch.object(statistics_snapshot, "admitted_usage_rows", side_effect=AssertionError("unexpected repeated decode")):
+                    self.assertEqual(first, self.view.list(query))
                 self.assert_uncached_equal(query, first)
 
     def test_new_generation_decodes_only_changed_conversation(self):
-        server.sessions_endpoint(self.query)
+        self.view.list(self.query)
         self.currents[0] = self.publish("one", LoadedEntries([*self.entries,
             replace(self.base, session_id="new", message_id="new", timestamp=NOW)]))
-        with mock.patch.object(server.statistics_snapshot, "_usage_entry",
-                               wraps=server.statistics_snapshot._usage_entry) as decode:
-            actual = server.sessions_endpoint(self.query)
+        with mock.patch.object(statistics_snapshot, "_usage_entry",
+                               wraps=statistics_snapshot._usage_entry) as decode:
+            actual = self.view.list(self.query)
             self.assertEqual(decode.call_count, 1)
         self.assert_uncached_equal(self.query, actual)
 
@@ -130,18 +196,18 @@ class SessionsCacheTests(unittest.TestCase):
         entries = LoadedEntries([*self.entries, replace(self.base, session_id="child", message_id="child")],
                                 session_metadata=metadata)
         self.currents = [self.publish("one", entries)]
-        server.sessions_endpoint(self.query)
+        self.view.list(self.query)
         entries[2] = replace(entries[2], cost_usd=3., input_tokens=20)
         self.currents = [self.publish("one", entries)]
-        with mock.patch.object(server.statistics_snapshot, "_usage_entry", wraps=server.statistics_snapshot._usage_entry) as decode:
-            changed = server.sessions_endpoint(self.query)
+        with mock.patch.object(statistics_snapshot, "_usage_entry", wraps=statistics_snapshot._usage_entry) as decode:
+            changed = self.view.list(self.query)
             self.assertEqual(decode.call_count, 2)
         self.assert_uncached_equal(self.query, changed)
         metadata[0] = codex_metadata("session", "cli", title="renamed")
         metadata[1] = codex_metadata("child", {"subagent": {"thread_spawn": {"parent_thread_id": "second"}}})
         entries.session_metadata = metadata
         self.currents = [self.publish("one", entries)]
-        changed = server.sessions_endpoint(self.query)
+        changed = self.view.list(self.query)
         self.assertEqual(next(r for r in changed["sessions"] if r["session_id"] == "session")["title"], "renamed")
         self.assert_uncached_equal(self.query, changed)
 
@@ -151,11 +217,11 @@ class SessionsCacheTests(unittest.TestCase):
         b = replace(a, session_id="b", message_id="b")
         query = {**self.query, "model": ["visible"], "sort": ["cost"]}
         self.currents = [self.publish("ties", LoadedEntries([ignored, b, a]))]
-        first = server.sessions_endpoint(query)
+        first = self.view.list(query)
         self.assertEqual([r["session_id"] for r in first["sessions"]], ["b", "a"])
         self.currents = [self.publish("ties", LoadedEntries([ignored, a, b]))]
-        with mock.patch.object(server.statistics_snapshot, "_usage_entry", wraps=server.statistics_snapshot._usage_entry) as decode:
-            second = server.sessions_endpoint(query)
+        with mock.patch.object(statistics_snapshot, "_usage_entry", wraps=statistics_snapshot._usage_entry) as decode:
+            second = self.view.list(query)
             self.assertEqual(decode.call_count, 0)
         self.assertEqual([r["session_id"] for r in second["sessions"]], ["a", "b"])
         self.assert_uncached_equal(query, second)
@@ -174,10 +240,10 @@ class SessionsCacheTests(unittest.TestCase):
 
     def test_changed_invalid_metadata_is_not_hidden_by_conversation_cache(self):
         self.currents = self.currents[:1]
-        server.sessions_endpoint(self.query)
+        self.view.list(self.query)
         self.change_payload(lambda raw: json.dumps({**json.loads(raw), "service_context": "invalid"}))
-        with self.assertRaises(server.statistics_snapshot.StatisticsSnapshotError):
-            server.sessions_endpoint(self.query)
+        with self.assertRaises(statistics_snapshot.StatisticsSnapshotError):
+            self.view.list(self.query)
 
     def test_duplicate_identity_never_inherits_a_same_root_suitability_proof(self):
         metadata = [codex_metadata(sid, "cli") for sid in ("r", "other")]
@@ -185,8 +251,8 @@ class SessionsCacheTests(unittest.TestCase):
         self.currents = [self.publish("duplicate", LoadedEntries([
             replace(self.base, session_id="b")], session_metadata=metadata))]
         self.change_payload(lambda raw: '{"session_id":"a",' + raw[1:])
-        with mock.patch.object(server.statistics_snapshot, "read_admitted_usage", wraps=server.statistics_snapshot.read_admitted_usage) as fallback:
-            first = server.sessions_endpoint(self.query)
+        with mock.patch.object(statistics_snapshot, "read_admitted_usage", wraps=statistics_snapshot.read_admitted_usage) as fallback:
+            first = self.view.list(self.query)
             self.assertEqual(fallback.call_count, 1)
         self.assertEqual(first["sessions"][0]["session_id"], "r")
         with closing(sqlite3.connect(self.currents[0].db_path)) as conn:
@@ -197,26 +263,26 @@ class SessionsCacheTests(unittest.TestCase):
                     conn.execute("UPDATE statistics_sessions SET payload=? WHERE position=?", (json.dumps(row), position))
             conn.commit()
         self.change_payload(lambda raw: raw)
-        second = server.sessions_endpoint(self.query)
+        second = self.view.list(self.query)
         self.assertEqual(second["sessions"][0]["session_id"], "other")
         self.assert_uncached_equal(self.query, second)
 
     def test_large_integers_and_escaped_surrogate_identity_preserve_python_values(self):
         self.currents = self.currents[:1]
         self.change_payload(lambda raw: json.dumps({**json.loads(raw), "session_id": "surrogate-\ud800", "input_tokens": 2 ** 80}))
-        first = server.sessions_endpoint(self.query)
+        first = self.view.list(self.query)
         row = next(r for r in first["sessions"] if r["session_id"] == "surrogate-\ud800")
         self.assertEqual(row["tokens"], 2 ** 80 + 2)
         self.change_payload(lambda raw: raw)
-        self.assertEqual(first, server.sessions_endpoint(self.query))
+        self.assertEqual(first, self.view.list(self.query))
         self.assert_uncached_equal(self.query, first)
 
     def test_conversation_retention_limits_do_not_truncate_results(self):
         for cache in (ConversationCache(max_entries=1), ConversationCache(max_bytes=1)):
-            with mock.patch.object(server, "_CONVERSATION_CACHE", cache), \
-                 mock.patch.object(server, "_SESSION_CACHE", SessionCache(max_entries=0)):
-                first = server.sessions_endpoint(self.query)
-                self.assertEqual(first, server.sessions_endpoint(self.query))
+            with mock.patch.object(self.view, "conversation_cache", cache), \
+                 mock.patch.object(self.view, "session_cache", SessionCache(max_entries=0)):
+                first = self.view.list(self.query)
+                self.assertEqual(first, self.view.list(self.query))
                 self.assertLessEqual(len(cache._items), cache.max_entries)
                 self.assertLessEqual(cache._bytes, cache.max_bytes)
                 self.assert_uncached_equal(self.query, first)
@@ -242,34 +308,34 @@ class SessionsCacheTests(unittest.TestCase):
                     conn.execute("DROP TABLE statistics_sessions")
                     conn.execute("UPDATE statistics_meta SET payload=?", (json.dumps(meta),))
                     conn.commit()
-                first = server.sessions_endpoint(self.query)
+                first = self.view.list(self.query)
                 self.change_payload(lambda raw: raw)
-                self.assertEqual(first, server.sessions_endpoint(self.query))
+                self.assertEqual(first, self.view.list(self.query))
                 self.assert_uncached_equal(self.query, first)
 
     def test_future_records_clock_rollback_and_midnight_never_return_stale_window(self):
         self.currents = [self.publish("future", LoadedEntries([self.base,
             replace(self.base, message_id="future", timestamp=NOW + timedelta(minutes=1))]))]
-        first = server.sessions_endpoint(self.query)
+        first = self.view.list(self.query)
         Clock.value += timedelta(minutes=2)
-        second = server.sessions_endpoint(self.query)
+        second = self.view.list(self.query)
         self.assertEqual(second["sessions"][0]["tokens"], first["sessions"][0]["tokens"] * 2)
         for instant in (NOW, NOW + timedelta(hours=10), NOW + timedelta(days=1), NOW + timedelta(days=30)):
             Clock.value = instant
-            self.assert_uncached_equal(self.query, server.sessions_endpoint(self.query))
+            self.assert_uncached_equal(self.query, self.view.list(self.query))
 
     def test_admission_error_and_closed_lease_cannot_be_hidden_by_cache(self):
-        server.sessions_endpoint(self.query)
+        self.view.list(self.query)
         with mock.patch.object(server.generation, "generation_admission_snapshot", side_effect=ValueError("invalid admission")):
             with self.assertRaises(ValueError):
-                server.sessions_endpoint(self.query)
+                self.view.list(self.query)
         self.currents[0].close()
-        with self.assertRaises(server.statistics_snapshot.StatisticsSnapshotError):
-            server.sessions_endpoint(self.query)
+        with self.assertRaises(statistics_snapshot.StatisticsSnapshotError):
+            self.view.list(self.query)
 
     def test_parallel_misses_and_hits_produce_independent_equal_results(self):
         with ThreadPoolExecutor(max_workers=3) as pool:
-            results = list(pool.map(lambda _: server.sessions_endpoint(self.query), range(6)))
+            results = list(pool.map(lambda _: self.view.list(self.query), range(6)))
         self.assertTrue(all(result == results[0] for result in results))
         results[0]["sessions"].clear()
         self.assertTrue(results[1]["sessions"])
@@ -285,8 +351,8 @@ class SessionsCacheTests(unittest.TestCase):
         cache.put(current, {}, None, [], {"rows": ["x" * 101]})
         self.assertIsNone(cache.get(current, {}, None))
         self.assertLessEqual(cache._bytes, 100)
-        with mock.patch.object(server, "_SESSION_CACHE", SessionCache(max_bytes=1)):
-            self.assert_uncached_equal(self.query, server.sessions_endpoint(self.query))
+        with mock.patch.object(self.view, "session_cache", SessionCache(max_bytes=1)):
+            self.assert_uncached_equal(self.query, self.view.list(self.query))
 
 
 if __name__ == "__main__":

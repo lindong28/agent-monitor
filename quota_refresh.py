@@ -23,7 +23,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from parsers import RateLimits
+from agent_monitor.contracts.usage import RateLimits
 from parsers.codex import select_codex_rate_limit
 from parsers.accounts import quota_identity
 import network_policy

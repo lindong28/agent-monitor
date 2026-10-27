@@ -9,7 +9,7 @@ from unittest import mock
 import exporter
 import generation
 import rollup
-from aggregators import LoadedEntries
+from agent_monitor.contracts.usage import LoadedEntries
 from parsers import UsageEntry
 from parsers import codex
 

@@ -27,10 +27,14 @@ To exercise the reader's main flow, use the README's isolated sample and inspect
 
 Start with the [responsibility map](docs/public-architecture.md#responsibility-map), then run the existing checks for the behavior you changed. Keep the disposable HOME and source overrides from development setup for each command that loads product code. Use Node 24 to match CI; Python-only commands use this checkout's `.venv/bin/python`.
 
+Follow [where new code belongs](docs/public-architecture.md#where-new-code-belongs) when adding or moving a responsibility. Construct isolated identity/load/view instances for stateful tests; use the normal frontend factory and route interfaces for Node checks. Keep compatibility aliases only where an existing caller needs them, and include the moved owners in source/fingerprint checks.
+
 | Purpose | Command / guide | Scope |
 | --- | --- | --- |
 | Full regression suite | `.venv/bin/python -m unittest discover -s tests` | Python tests and the JavaScript checks invoked by their Python wrappers; mocks do not establish provider availability |
 | One affected Python test module | `.venv/bin/python -m unittest discover -s tests -p 'test_machine_config.py'` | Replace the pattern with the affected module from the map |
+| Shared models and import boundaries | `.venv/bin/python -m unittest discover -s tests -p 'test_shared_contracts.py'` | Model compatibility, metadata isolation and dependency-light generation imports |
+| Frontend factories and navigation | `node tests/web_modules.cjs && node tests/web_routes.cjs` | Node fixtures using normal module/route interfaces; real browser loading remains separate |
 | Acceptance runner's failure/cleanup regression | `node --test scripts/accept_device_connection.test.mjs` | Separate Node test, not included by unittest discovery; uses synthetic browser-tool failures |
 | First-use browser check | [README sample](README.md#try-the-included-sample-without-your-accounts) | Real parser/dashboard with fabricated logs; inspect 1,800 tokens and two records |
 | Connector/device browser acceptance | [Explicit procedure below](#explicit-browser-and-connector-acceptance) | Optional browser tooling; `--launchd` changes an isolated macOS test job |

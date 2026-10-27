@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
-const scripts = ['charts', 'quota', 'network', 'sessions', 'app', 'pivot'];
+const scripts = ['charts', 'quota', 'network', 'sessions', 'collection', 'overview', 'app', 'pivot'];
 function platform() {
   const timers = new Set(), cleared = [];
   const context = {

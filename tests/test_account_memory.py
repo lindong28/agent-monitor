@@ -859,7 +859,7 @@ class AccountMemoryTests(unittest.TestCase):
 
                 def load_overview():
                     try:
-                        server.overview({})
+                        server.create_views().overview.read({})
                     except BaseException as exc:
                         errors.append(exc)
 
@@ -896,7 +896,7 @@ class AccountMemoryTests(unittest.TestCase):
                             side_effect=lambda _admitted: contextlib.nullcontext(),
                         ),
                         mock.patch(
-                            "server._overview_from_admission",
+                            "agent_monitor.views.overview.OverviewView.render",
                             side_effect=delayed_overview,
                         ),
                     )

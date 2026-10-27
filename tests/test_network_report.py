@@ -333,13 +333,13 @@ class ExitCodeTests(unittest.TestCase):
 class CollectTests(unittest.TestCase):
     def test_dead_server_falls_back_to_in_process_check(self):
         with mock.patch.object(network_report, "_live_server_port", return_value=None):
-            with mock.patch.dict("sys.modules", {"server": mock.Mock(network=lambda _query: {"verdict": "low"})}):
+            with mock.patch.object(network_report.LOCAL_REPORT, "read", return_value={"verdict": "low"}):
                 data, note = network_report.collect()
         self.assertEqual(data["verdict"], "low")
         self.assertIn("未运行", note)
 
     def test_server_source_note_claims_a_shared_cache_not_identical_bytes(self):
-        # The server neither locks nor coalesces concurrent cache misses.
+        # Each client receives the current report from the server cache.
         response = mock.MagicMock()
         response.__enter__.return_value = io.BytesIO(b'{"verdict": "low"}')
         with mock.patch.object(network_report, "_live_server_port", return_value=39001):
@@ -351,22 +351,20 @@ class CollectTests(unittest.TestCase):
     def test_unreachable_server_falls_back_and_says_so(self):
         with mock.patch.object(network_report, "_live_server_port", return_value=39001):
             with mock.patch.object(network_report.urllib.request, "build_opener", return_value=mock.Mock(open=mock.Mock(side_effect=OSError("refused")))):
-                with mock.patch.dict("sys.modules", {"server": mock.Mock(network=lambda _query: {"verdict": "low"})}):
+                with mock.patch.object(network_report.LOCAL_REPORT, "read", return_value={"verdict": "low"}):
                     _, note = network_report.collect()
         self.assertIn("取数失败", note)
         self.assertIn("refused", note)
 
-    def test_force_is_passed_through_to_the_in_process_check(self):
-        seen = {}
-
-        def network(query):
-            seen.update(query)
-            return {"verdict": "low"}
-
-        with mock.patch.object(network_report, "_live_server_port", return_value=None):
-            with mock.patch.dict("sys.modules", {"server": mock.Mock(network=network)}):
-                network_report.collect(force=True)
-        self.assertEqual(seen.get("force"), ["1"])
+    def test_force_uses_the_same_local_report_budget(self):
+        report = network_report.NetworkReport(
+            runner=mock.Mock(return_value=mock.Mock(returncode=0, stdout='{"verdict":"low"}')),
+            child_environment=lambda env: {}, hostname=lambda: "fixture")
+        with mock.patch.object(network_report, "_live_server_port", return_value=None), \
+                mock.patch.object(network_report, "LOCAL_REPORT", report):
+            network_report.collect(force=False)
+            network_report.collect(force=True)
+        report.runner.assert_called_once()
 
 
 if __name__ == "__main__":

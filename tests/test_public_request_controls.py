@@ -11,13 +11,15 @@ from unittest import mock
 
 from ip_check import cli
 import pricing_fetcher
+import network_policy
 import server
+from agent_monitor.views.network import NetworkReport
 
 
 class PublicRequestControlsTests(unittest.TestCase):
     def setUp(self):
         # Requests and probe children below are mocked; no Electron is needed.
-        route = mock.patch.object(server.network_policy, "endpoint",
+        route = mock.patch.object(network_policy, "endpoint",
                                   return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9")
         route.start()
         self.addCleanup(route.stop)
@@ -109,34 +111,33 @@ class PublicRequestControlsTests(unittest.TestCase):
             clock = [1000.0]
             response = subprocess.CompletedProcess([], 0, json.dumps({'retry_after_seconds': delay}), '')
             with self.subTest(delay=delay), \
-                    mock.patch.dict(server._NETWORK_CACHE, ts=0.0, data=None, clear=True), \
-                    mock.patch.object(server.time, 'monotonic', side_effect=lambda: clock[0]), \
-                    mock.patch.object(server.subprocess, 'run', return_value=response) as request:
-                server._network_report({})
+                    mock.patch.object(subprocess, 'run', return_value=response) as request:
+                report = NetworkReport(runner=request, clock=lambda: clock[0])
+                report.report()
                 clock[0] += expiry - 1
-                server._network_report({'force': ['1']})
+                report.report()
                 self.assertEqual(request.call_count, 1)
                 clock[0] += 1
-                server._network_report({})
+                report.report()
                 self.assertEqual(request.call_count, 2)
 
     def test_process_failures_are_cached(self):
         for failure in (FileNotFoundError(), OSError(), subprocess.TimeoutExpired('fixture', 30)):
             with self.subTest(failure=type(failure).__name__), \
-                    mock.patch.dict(server._NETWORK_CACHE, ts=0.0, data=None, clear=True), \
-                    mock.patch.object(server.subprocess, 'run', side_effect=failure) as request:
-                self.assertEqual(server._network_report({})['verdict'], 'unknown')
-                server._network_report({'force': ['1']})
+                    mock.patch.object(subprocess, 'run', side_effect=failure) as request:
+                report = NetworkReport(runner=request)
+                self.assertEqual(report.report()['verdict'], 'unknown')
+                report.report()
                 request.assert_called_once()
 
     def test_force_cannot_bypass_success_or_failure_cache(self):
         for response in (subprocess.CompletedProcess([], 0, '{"verdict":"low"}', ''),
                          subprocess.CompletedProcess([], 1, '', 'fixture failure')):
             with self.subTest(returncode=response.returncode), \
-                    mock.patch.dict(server._NETWORK_CACHE, ts=0.0, data=None, clear=True), \
-                    mock.patch.object(server.subprocess, 'run', return_value=response) as request:
-                first = server._network_report({})
-                second = server._network_report({'force': ['1']})
+                    mock.patch.object(subprocess, 'run', return_value=response) as request:
+                report = NetworkReport(runner=request)
+                first = report.report()
+                second = report.report()
                 self.assertEqual(first, second)
                 request.assert_called_once()
 
@@ -149,10 +150,10 @@ class PublicRequestControlsTests(unittest.TestCase):
             self.assertTrue(release.wait(2))
             return subprocess.CompletedProcess([], 0, '{"verdict":"low"}', '')
 
-        with mock.patch.dict(server._NETWORK_CACHE, ts=0.0, data=None, clear=True), \
-                mock.patch.object(server.subprocess, 'run', side_effect=run) as request, \
+        with mock.patch.object(subprocess, 'run', side_effect=run) as request, \
                 concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            futures = [pool.submit(server._network_report, {'force': ['1']}) for _ in range(3)]
+            report = NetworkReport(runner=request)
+            futures = [pool.submit(report.report) for _ in range(3)]
             self.assertTrue(entered.wait(1))
             release.set()
             results = [future.result(3) for future in futures]

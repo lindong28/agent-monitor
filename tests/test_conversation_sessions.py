@@ -12,6 +12,7 @@ from parsers import UsageEntry, codex
 from session_identity import SessionIndex, codex_metadata, merge_metadata
 from usage_archive import UsageArchive
 import server
+from project_alias import canonical_project
 import statistics_snapshot
 
 
@@ -59,35 +60,35 @@ class ConversationTests(unittest.TestCase):
 
     def test_filtered_child_resolves_parent_and_default_detail_matches(self):
         query = {"range": ["custom"], "start": ["2026-01-02"], "end": ["2026-01-02"], "model": ["B"]}
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=self.entries):
-            rows = server.sessions_endpoint(query)
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=self.entries):
+            rows = server.create_views().sessions.list(query)
             self.assertEqual(len(rows), 1)
             row = rows[0]
             self.assertEqual((row["session_id"], row["tokens"], row["cost_usd"], row["title"]), ("root", 12, 2., "A <title>"))
             self.assertEqual(row["created_at"], "2025-12-01T00:00:00+00:00")
-            detail = server.session_detail("root", query=query)
+            detail = server.create_views().sessions.detail("root", query=query)
             self.assertEqual((detail["meta"]["tokens"], detail["meta"]["cost_usd"]), (row["tokens"], row["cost_usd"]))
             self.assertEqual([e["session_id"] for e in detail["entries"]], ["child"])
-            all_detail = server.session_detail("nested", query={**query, "scope": ["all"]})
+            all_detail = server.create_views().sessions.detail("nested", query={**query, "scope": ["all"]})
             self.assertEqual(all_detail["meta"]["session_id"], "root")
             self.assertEqual((len(all_detail["entries"]), all_detail["meta"]["cost_usd"], all_detail["meta"]["unpriced_records"]), (3, 3., 1))
             self.assertEqual(len(all_detail["meta"]["executions"]), 3)
 
     def test_latest_usage_and_unknown_zero_partial_cost(self):
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=self.entries):
-            rows = server.sessions_endpoint({"range": ["all"]})
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=self.entries):
+            rows = server.create_views().sessions.list({"range": ["all"]})
             self.assertEqual([r["session_id"] for r in rows], ["root", "independent"])
             self.assertEqual([r["cost_usd"] for r in rows], [3., 0.])
-            unknown = server.session_detail("root", query={"range": ["all"], "cost_status": ["unknown"]})
+            unknown = server.create_views().sessions.detail("root", query={"range": ["all"], "cost_status": ["unknown"]})
             self.assertIsNone(unknown["meta"]["cost_usd"])
             self.assertEqual(len(unknown["entries"]), 1)
 
     def test_list_normalizes_each_distinct_project_once(self):
         entries = LoadedEntries([replace(self.base, message_id=str(i), project=project)
                                  for i, project in enumerate(["repo", "/Users/user/work"] * 20)])
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=entries), \
-                mock.patch("server.canonical_project", wraps=server.canonical_project) as canonical:
-            result = server.sessions_endpoint({"range": ["all"], "with_filters": ["1"]})
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=entries), \
+                mock.patch("agent_monitor.views.sessions.canonical_project", wraps=canonical_project) as canonical:
+            result = server.create_views().sessions.list({"range": ["all"], "with_filters": ["1"]})
         self.assertEqual(canonical.call_count, 2)
         self.assertEqual(result["filters"]["project"], ["repo", "~/work"])
         self.assertEqual(result["sessions"][0]["tokens"], 40 * 12)

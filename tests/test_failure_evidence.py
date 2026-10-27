@@ -140,8 +140,8 @@ class FailureEvidenceTests(unittest.TestCase):
     def test_network_start_failure_preserves_errno_without_sensitive_text(self):
         results = []
         for number in (13, 8):
-            with mock.patch.object(server.subprocess, "run", side_effect=OSError(number, "fixture-secret-token")):
-                result = server._run_network_report()
+            with mock.patch.object(subprocess, "run", side_effect=OSError(number, "fixture-secret-token")):
+                result = server.NetworkReport().probe()
             results.append(result["error"])
             self.assertIn("errno=" + str(number), result["error"])
             self.assertNotIn("fixture-secret-token", json.dumps(result))

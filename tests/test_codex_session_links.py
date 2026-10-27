@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-import aggregators
+from agent_monitor.contracts.usage import LoadedEntries
 import exporter
 from agent_monitor import quota_service
 import quota_applicability
@@ -38,16 +38,17 @@ class SessionLinkTests(unittest.TestCase):
         self.assertFalse(errors)
         self.assertEqual(before.session_metadata[0]["account"]["name"], "alpha")
         self.link()
-        with mock.patch("aggregators._parse_usage_file", side_effect=AssertionError("usage cache should remain valid")):
+        with mock.patch.object(self.loader, "parse_usage_file", side_effect=AssertionError("usage cache should remain valid")):
             after, errors = self.collect()
         self.assertFalse(errors)
         self.assertEqual(list(before), list(after))
         self.assertIsNone(after.session_metadata[0]["account"])
         snapshot = statistics_snapshot.write_snapshot(self.root / "snapshot.sqlite3", after)
-        loaded = aggregators.LoadedEntries(snapshot["usage_entries"], session_metadata=snapshot["session_metadata"])
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=loaded):
-            self.assertIsNone(server.sessions_endpoint({"range": ["all"]})[0]["account"])
-            self.assertIsNone(server.session_detail(SID, query={"range": ["all"]})["meta"]["account"])
+        loaded = LoadedEntries(snapshot["usage_entries"], session_metadata=snapshot["session_metadata"])
+        views = server.create_views(usage_source=self.loader)
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch.object(self.loader, "load_all_entries", return_value=loaded):
+            self.assertIsNone(server.sessions_endpoint({"range": ["all"]}, views=views)[0]["account"])
+            self.assertIsNone(server.session_detail(SID, query={"range": ["all"]}, views=views)["meta"]["account"])
 
     def test_retained_and_readonly_metadata_are_invalidated_after_rollout_removal(self):
         home = self.profile("alpha")
@@ -58,7 +59,7 @@ class SessionLinkTests(unittest.TestCase):
         self.link()
         for read_only in (True, False):
             archive = UsageArchive(self.root / "archive.sqlite3")
-            entries, _ = aggregators._load_archived_entries(archive, [], False, read_only)
+            entries, _ = self.loader.load_archived_entries(archive, [], False, read_only)
             self.assertEqual(list(before), list(entries))
             self.assertIsNone(archive.session_metadata[0]["account"])
         persisted = UsageArchive(self.root / "archive.sqlite3")

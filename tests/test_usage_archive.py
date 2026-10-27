@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-import aggregators
+from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, project_identity, usage_loader
 import rollup
 from parsers import UsageEntry
 from usage_archive import UsageArchive
@@ -30,12 +30,12 @@ class UsageArchiveTests(unittest.TestCase):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
         for patch in (
-            mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", self.root / "project_identity.db"),
-            mock.patch.object(aggregators, "_GLOBAL_USAGE_CACHE", None),
-            mock.patch.object(aggregators, "_PROJECT_CACHE", {}),
-            mock.patch.object(aggregators, "_usage_paths", side_effect=lambda **kwargs: list(self.sessions.glob("*.jsonl"))),
-            mock.patch.object(aggregators.codex, "SESSIONS_DIR", str(self.sessions)),
-            mock.patch.object(aggregators.codex, "STATE_DB", str(self.metadata)),
+            mock.patch.object(IDENTITY_STORE, "path", self.root / "project_identity.db"),
+            mock.patch.object(USAGE_LOADER, "cache", None),
+            mock.patch.object(IDENTITY_STORE, "project_cache", {}),
+            mock.patch.object(USAGE_LOADER, "usage_paths", side_effect=lambda **kwargs: list(self.sessions.glob("*.jsonl"))),
+            mock.patch.object(usage_loader.codex, "SESSIONS_DIR", str(self.sessions)),
+            mock.patch.object(usage_loader.codex, "STATE_DB", str(self.metadata)),
             mock.patch("pricing_fetcher.get_pricing", return_value={}),
             mock.patch("pricing_fetcher.calculate_cost", return_value=1.0),
         ):
@@ -43,7 +43,7 @@ class UsageArchiveTests(unittest.TestCase):
 
     def seed(self):
         UsageArchive(self.archive_path).collect(
-            [], None, None, [], aggregators.USAGE_TIMEZONE,
+            [], None, None, [], usage_loader.USAGE_TIMEZONE,
             now=datetime(2026, 1, 1, 18, tzinfo=timezone.utc),
         )
 
@@ -58,7 +58,7 @@ class UsageArchiveTests(unittest.TestCase):
         return path
 
     def load(self, **kwargs):
-        return aggregators.load_all_entries(**kwargs)
+        return USAGE_LOADER.load_all_entries(**kwargs)
 
     def run_rollup(self):
         return rollup.run(db_path=self.db, entries_loader=self.load, now=lambda: self.now)
@@ -84,13 +84,13 @@ class UsageArchiveTests(unittest.TestCase):
 import json, sys
 from pathlib import Path
 from unittest import mock
-import aggregators
+from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, project_identity, usage_loader
 root = Path(sys.argv[1])
-aggregators.PROJECT_IDENTITY_DB = root / 'project_identity.db'
-aggregators.codex.SESSIONS_DIR = str(root / 'sessions')
-aggregators.codex.STATE_DB = str(root / 'missing.sqlite3')
-with mock.patch.object(aggregators, '_usage_paths', side_effect=lambda **kwargs: list((root / 'sessions').glob('*.jsonl'))), mock.patch('pricing_fetcher.get_pricing', return_value={}), mock.patch('pricing_fetcher.calculate_cost', return_value=1.0):
-    entries = aggregators.load_all_entries()
+IDENTITY_STORE.path = root / 'project_identity.db'
+usage_loader.codex.SESSIONS_DIR = str(root / 'sessions')
+usage_loader.codex.STATE_DB = str(root / 'missing.sqlite3')
+with mock.patch.object(USAGE_LOADER, 'usage_paths', side_effect=lambda **kwargs: list((root / 'sessions').glob('*.jsonl'))), mock.patch('pricing_fetcher.get_pricing', return_value={}), mock.patch('pricing_fetcher.calculate_cost', return_value=1.0):
+    entries = USAGE_LOADER.load_all_entries()
 print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), entries.history_authoritative_from]))
 """
         def child():
@@ -124,7 +124,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                           cache_read_tokens=900, output_tokens=110)
             UsageArchive(self.archive_path).collect(
                 [path], lambda _: [old, replace(old, request_id="token-count:2"), retained], lambda _: "old-parser", [],
-                aggregators.USAGE_TIMEZONE)
+                usage_loader.USAGE_TIMEZONE)
         before = {e.dedup_key for e in UsageArchive(self.archive_path).read()[0]}
         self.run_rollup()
         repaired = UsageArchive(self.archive_path).read()[0]
@@ -135,7 +135,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.assertEqual(by_session["positive"].input_tokens, 100)
         self.assertEqual(by_session["zero"].message_count, 0)
         self.assertEqual(sum(row[2] for row in self.rows()), 171)
-        aggregators._GLOBAL_USAGE_CACHE = None
+        USAGE_LOADER.cache = None
         self.run_rollup()
         self.assertEqual(sum(row[2] for row in self.rows()), 171)
 
@@ -150,7 +150,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.assertEqual(sum(e.input_tokens for e in UsageArchive(self.archive_path).read()[0]), 170)
         for path in self.sessions.glob("*.jsonl"):
             path.unlink()
-        aggregators._GLOBAL_USAGE_CACHE = None
+        USAGE_LOADER.cache = None
         self.now = datetime(2026, 8, 15, tzinfo=timezone.utc)
         self.run_rollup()
         self.assertEqual(self.rows(), [("2026-02-10", "gpt-5", 170)])
@@ -166,10 +166,10 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                 conn = self.models_db(wal=wal)
                 try:
                     self.run_rollup()
-                    before = aggregators.codex._metadata_signature(self.metadata)
+                    before = usage_loader.codex._metadata_signature(self.metadata)
                     conn.execute("UPDATE threads SET model='model-b'")
                     conn.commit()
-                    after = aggregators.codex._metadata_signature(self.metadata)
+                    after = usage_loader.codex._metadata_signature(self.metadata)
                     self.assertNotEqual(before, after)
                     self.run_rollup()
                     self.assertEqual(self.rows(), [("2026-02-10", "gpt-5", 100)])
@@ -181,11 +181,11 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.session()
         self.models_db().close()
         self.load()
-        aggregators._GLOBAL_USAGE_CACHE = None
-        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+        USAGE_LOADER.cache = None
+        with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             self.load()
             self.assertEqual(parse.call_count, 0)
-            with mock.patch.object(aggregators, "_parser_fingerprint", return_value="new-parser"):
+            with mock.patch.object(USAGE_LOADER, "parser_fingerprint", return_value="new-parser"):
                 self.load()
             self.assertEqual(parse.call_count, 1)
 
@@ -201,13 +201,13 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                     conn.execute("INSERT INTO activity VALUES (1)")
                     conn.commit()
                     original = self.load()
-                    before = aggregators.codex._metadata_signature(self.metadata)
+                    before = usage_loader.codex._metadata_signature(self.metadata)
                     conn.execute("UPDATE activity SET counter=2")
                     conn.commit()
-                    after = aggregators.codex._metadata_signature(self.metadata)
+                    after = usage_loader.codex._metadata_signature(self.metadata)
                     self.assertNotEqual(before, after)
-                    aggregators._GLOBAL_USAGE_CACHE = None
-                    with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+                    USAGE_LOADER.cache = None
+                    with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
                         self.assertEqual(self.load(), original)
                         self.assertEqual(parse.call_count, 0)
                 finally:
@@ -218,7 +218,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.session("two", tokens=170)
         conn = self.models_db("mapped-one")
         self.addCleanup(conn.close)
-        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+        with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             self.assertEqual({entry.model for entry in self.load()}, {"gpt-5"})
             conn.execute("INSERT INTO threads VALUES ('two', 'mapped-two')")
             conn.commit()
@@ -237,7 +237,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         conn.execute("DELETE FROM threads")
         conn.commit()
         conn.close()
-        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+        with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             self.assertEqual(self.load()[0].model, "gpt-5")
             self.load()
             self.assertEqual(parse.call_count, 1)
@@ -254,7 +254,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.models_db().close()
         self.load()
         self.session(tokens=200)
-        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+        with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             self.assertEqual(self.load()[0].input_tokens, 200)
             self.assertEqual(parse.call_count, 1)
 
@@ -266,7 +266,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         original = self.load()
         conn.execute("INSERT INTO threads VALUES ('unrelated-session', 'another-model')")
         conn.commit()
-        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+        with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             self.assertEqual(self.load(), original)
             self.assertEqual(parse.call_count, 2)
 
@@ -281,7 +281,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                     conn.execute("CREATE TABLE activity (counter INTEGER)")
                     conn.execute("INSERT INTO activity VALUES (1)")
                     conn.commit()
-                    original_parse = aggregators._parse_usage_file
+                    original_parse = USAGE_LOADER.parse_usage_file
 
                     def parse_then_update(path, **kwargs):
                         entries = original_parse(path, **kwargs)
@@ -292,11 +292,11 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                         conn.commit()
                         return entries
 
-                    with mock.patch.object(aggregators, "_parse_usage_file", side_effect=parse_then_update):
+                    with mock.patch.object(USAGE_LOADER, "parse_usage_file", side_effect=parse_then_update):
                         self.assertEqual(self.load(force_reload=True)[0].model, "gpt-5")
                     with sqlite3.connect(self.archive_path) as archive:
                         self.assertEqual(archive.execute("SELECT count(*) FROM parsed_files WHERE signature IS NULL").fetchone()[0], 0)
-                    with mock.patch.object(aggregators, "_parse_usage_file", wraps=original_parse) as parse:
+                    with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=original_parse) as parse:
                         self.assertEqual(self.load()[0].model, "gpt-5")
                         self.assertEqual(parse.call_count, 1 if change_model else 0)
                 finally:
@@ -306,7 +306,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.session()
         self.models_db().close()
         self.load()
-        real_signature = aggregators.codex._metadata_signature
+        real_signature = usage_loader.codex._metadata_signature
         calls = []
 
         def unstable_signature(path):
@@ -314,8 +314,8 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
             database, wal = real_signature(path)
             return (database[:3] + (database[3] + len(calls),), wal)
 
-        with mock.patch.object(aggregators.codex, "_metadata_signature", side_effect=unstable_signature), mock.patch.object(
-            aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file
+        with mock.patch.object(usage_loader.codex, "_metadata_signature", side_effect=unstable_signature), mock.patch.object(
+            USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file
         ) as parse:
             self.assertFalse(self.load().scan_complete)
             self.load()
@@ -327,7 +327,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         conn.close()
         before = {p.name: p.read_bytes() for p in self.root.glob("metadata.sqlite3*")}
         errors = []
-        models = aggregators.codex._load_thread_models(
+        models = usage_loader.codex._load_thread_models(
             self.metadata, immutable=True, source_errors=errors)
         self.assertEqual(errors, [])
         self.assertEqual(set(models.values()), {"model-a"})
@@ -352,7 +352,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
 
     def test_missing_and_broken_metadata_retry_existing_source(self):
         self.session()
-        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+        with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             self.load()
             self.load()
             self.assertEqual(parse.call_count, 2)
@@ -400,7 +400,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.assertEqual(len(self.load(archive_path=custom)), 1)
         cache = mock.Mock()
         cache.load.return_value = []
-        with mock.patch.object(aggregators, "_GLOBAL_USAGE_CACHE", cache):
+        with mock.patch.object(USAGE_LOADER, "cache", cache):
             self.assertEqual(self.load(force_reload=True), [])
         cache.clear.assert_called_once_with()
         cache.load.assert_called_once_with()
@@ -429,7 +429,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         with conn:
             conn.execute("UPDATE threads SET title='after'")
         conn.close()
-        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+        with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             refreshed = self.load()
             self.assertEqual(parse.call_count, 0)
         self.assertEqual(original, refreshed)
@@ -441,7 +441,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.models_db().close()
         with path.open("a") as handle:
             handle.write("invalid-json\n")
-        with mock.patch.object(aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file) as parse:
+        with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             self.assertFalse(self.load().scan_complete)
             self.load()
             self.assertEqual(parse.call_count, 2)
@@ -461,19 +461,19 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.session()
         self.run_rollup()
         entry = replace(self.load()[0], model="new-model")
-        blocked = aggregators.LoadedEntries([], blocked_sources=[{"source_path": "project"}], unattributed_entries=[entry], history_authoritative_from="2026-01-03")
+        blocked = usage_loader.LoadedEntries([], blocked_sources=[{"source_path": "project"}], unattributed_entries=[entry], history_authoritative_from="2026-01-03")
         rollup.run(db_path=self.db, entries_loader=lambda: blocked, now=lambda: self.now)
         self.assertEqual(self.rows("daily_rollup"), [("2026-02-10", "gpt-5", 100)])
         self.assertEqual(self.rows(), [("2026-02-10", "new-model", 100)])
-        recovered = aggregators.LoadedEntries([entry], history_authoritative_from="2026-01-03")
+        recovered = usage_loader.LoadedEntries([entry], history_authoritative_from="2026-01-03")
         rollup.run(db_path=self.db, entries_loader=lambda: recovered, now=lambda: self.now)
         self.assertEqual(self.rows("daily_rollup"), [("2026-02-10", "new-model", 100)])
 
     def test_unrelated_blocker_allows_healthy_old_day_replay_and_model_migration(self):
         self.seed()
         source = str(self.root / "healthy")
-        with contextlib.closing(sqlite3.connect(aggregators.PROJECT_IDENTITY_DB)) as conn, conn:
-            conn.execute(aggregators.PROJECT_IDENTITY_SCHEMA)
+        with contextlib.closing(sqlite3.connect(IDENTITY_STORE.path)) as conn, conn:
+            conn.execute(project_identity.PROJECT_IDENTITY_SCHEMA)
             conn.execute("INSERT INTO project_identity VALUES (?, 'healthy', 'remote')", (source,))
         def session(name, tokens, model):
             path = self.session(name, tokens, model=model)
@@ -483,7 +483,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         session("one", 100, "old-model")
         self.run_rollup()
         blocker = {"source_path": str(self.root / "unrelated"), "reason": "source_unavailable"}
-        with mock.patch.object(aggregators, "list_project_identity_blockers", return_value=[blocker]):
+        with mock.patch.object(IDENTITY_STORE, "list_blockers", return_value=[blocker]):
             session("two", 70, "old-model")
             self.run_rollup()
             self.assertEqual(self.rows(), [("2026-02-10", "old-model", 170)])
@@ -499,24 +499,24 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
     def test_authority_excludes_union_of_persisted_and_current_blocker_candidates(self):
         source = str(self.root / "blocked")
         known = {source, "stored", "old-resolved", "old-alias", "old-pin", "new-resolved", "new-pin", "healthy"}
-        with contextlib.closing(sqlite3.connect(aggregators.PROJECT_IDENTITY_DB)) as conn, conn:
-            conn.execute(aggregators.PROJECT_IDENTITY_SCHEMA)
+        with contextlib.closing(sqlite3.connect(IDENTITY_STORE.path)) as conn, conn:
+            conn.execute(project_identity.PROJECT_IDENTITY_SCHEMA)
             conn.executemany("INSERT INTO project_identity VALUES (?, ?, 'remote')",
                              [(source if project == "stored" else str(self.root / str(i)), project)
                               for i, project in enumerate(sorted(known))])
         persisted = {"source_path": source, "resolved_candidate": "old-resolved",
                      "resolved_project": "old-alias", "pin_candidate": "old-pin"}
-        current = aggregators.ProjectIdentityConflict(
+        current = project_identity.ProjectIdentityConflict(
             "conflict", source, "conflicting_history",
             resolved_project="new-resolved", pin_candidate="new-pin")
         entry = UsageEntry(datetime(2026, 2, 10, tzinfo=timezone.utc), "s", "m", "r", "model", 100, 0, 0, 0, None, source, "codex")
         for diagnostic in (False, True):
             with self.subTest(diagnostic=diagnostic), \
-                 mock.patch.object(aggregators, "list_project_identity_blockers", return_value=[persisted]), \
-                 mock.patch.object(aggregators, "_identify_project", side_effect=current), \
-                 mock.patch.object(aggregators, "_record_project_identity_blocker", return_value=aggregators._unpersisted_blocker_dict(current)), \
-                 mock.patch.object(aggregators, "_stored_projects", wraps=aggregators._stored_projects) as stored:
-                loaded = aggregators._with_calculated_costs([entry], read_only=diagnostic, diagnostic=diagnostic)
+                 mock.patch.object(IDENTITY_STORE, "list_blockers", return_value=[persisted]), \
+                 mock.patch.object(IDENTITY_STORE, "resolve", side_effect=current), \
+                 mock.patch.object(IDENTITY_STORE, "record_blocker", return_value=USAGE_LOADER.unpersisted_blocker_dict(current)), \
+                 mock.patch.object(IDENTITY_STORE, "stored_projects", wraps=IDENTITY_STORE.stored_projects) as stored:
+                loaded = USAGE_LOADER.enrich_entries([entry], read_only=diagnostic, diagnostic=diagnostic)
                 self.assertEqual(loaded.history_authoritative_projects, {"healthy"})
                 stored.assert_called_once_with(immutable=diagnostic)
 
@@ -525,17 +525,17 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.session()
         entry = self.load()[0]
         initial = [replace(entry, session_id=project, project=project) for project in ("healthy", "shared", "unknown")]
-        rollup.run(db_path=self.db, entries_loader=lambda: aggregators.LoadedEntries(initial, history_authoritative_from="2026-01-03"), now=lambda: self.now)
+        rollup.run(db_path=self.db, entries_loader=lambda: usage_loader.LoadedEntries(initial, history_authoritative_from="2026-01-03"), now=lambda: self.now)
         healthy_path, good_alias, blocked_alias = [str(self.root / name) for name in ("healthy", "good-alias", "blocked-alias")]
-        with contextlib.closing(sqlite3.connect(aggregators.PROJECT_IDENTITY_DB)) as conn, conn:
-            conn.execute(aggregators.PROJECT_IDENTITY_SCHEMA)
+        with contextlib.closing(sqlite3.connect(IDENTITY_STORE.path)) as conn, conn:
+            conn.execute(project_identity.PROJECT_IDENTITY_SCHEMA)
             conn.executemany("INSERT INTO project_identity VALUES (?, ?, 'remote')",
                              [(healthy_path, "healthy"), (good_alias, "shared"), (blocked_alias, "shared")])
         raw = [replace(entry, session_id=path, project=path, input_tokens=170, model="new-model")
                for path in (healthy_path, good_alias, "unknown")]
         blocker = {"source_path": blocked_alias, "reason": "source_unavailable"}
-        with mock.patch.object(aggregators, "list_project_identity_blockers", return_value=[blocker]):
-            loaded = aggregators._with_calculated_costs(raw)
+        with mock.patch.object(IDENTITY_STORE, "list_blockers", return_value=[blocker]):
+            loaded = USAGE_LOADER.enrich_entries(raw)
         loaded.history_authoritative_from = "2026-01-03"
         self.assertEqual(loaded.history_authoritative_projects, {"healthy"})
         checked = rollup._check_rollup(self.db, lambda: loaded, now=lambda: self.now)
@@ -570,7 +570,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         def parse(path):
             return [entry if path == one else replace(entry, model="second")]
         def collect():
-            return archive.collect([two, one], parse, lambda p: str(p.stat().st_mtime_ns), [], aggregators.USAGE_TIMEZONE)[0]
+            return archive.collect([two, one], parse, lambda p: str(p.stat().st_mtime_ns), [], usage_loader.USAGE_TIMEZONE)[0]
         self.assertEqual([e.model for e in collect()], ["first"])
         two.write_text("changed")
         self.assertEqual([e.model for e in collect()], ["first"])

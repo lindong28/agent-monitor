@@ -11,7 +11,9 @@ import statistics_snapshot
 
 
 class ConversationCache:
-    def __init__(self, *, max_entries=8192, max_bytes=16 * 1024 * 1024):
+    def __init__(self, *, max_entries=8192, max_bytes=16 * 1024 * 1024,
+                 snapshots=statistics_snapshot):
+        self.snapshots = snapshots
         self.max_entries = max_entries
         self.max_bytes = max_bytes
         self._items = OrderedDict()
@@ -57,7 +59,7 @@ class ConversationCache:
         dimensions = {k: v for k, v in query.items() if k not in {"sync", "force", "sort", "order"}}
         reader_query = None if (query.get("with_filters") or [""])[0] == "1" else {
             k: v for k, v in query.items() if k != "project"}
-        with statistics_snapshot.admitted_usage_rows(current, time_range=window,
+        with self.snapshots.admitted_usage_rows(current, time_range=window,
                 query=reader_query, identities=True) as (meta, sessions, rows):
             if meta is None:
                 return ([], {key: [] for key in ("machine", "agent", "project", "model")}), True
@@ -87,7 +89,7 @@ class ConversationCache:
                 key = hashlib.sha256(json.dumps(context, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
                 result = self._get(key, window)
                 if result is None:
-                    entries = statistics_snapshot.decode_usage_payloads((r[1] for r in records), meta["version"])
+                    entries = self.snapshots.decode_usage_payloads((r[1] for r in records), meta["version"])
                     # Exact identities are necessary: two duplicate-key identities
                     # can share a root today, then diverge in a later generation.
                     if any((entry.agent_id, entry.session_id) != record[2]

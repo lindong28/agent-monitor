@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from unittest import mock
 
-from aggregators import LoadedEntries
+from agent_monitor.contracts.usage import LoadedEntries
 import exporter
 from parsers import UsageEntry
 import statistics_snapshot as snapshots
@@ -161,18 +161,19 @@ class StatisticsSnapshotTests(unittest.TestCase):
             self.assertEqual(result.session_metadata, metadata)
         import server
         from types import SimpleNamespace
+        views = server.create_views()
         with mock.patch("server.hub.enabled", return_value=True), mock.patch(
                 "server.generation.generation_admission_snapshot") as admission:
             admission.return_value.__enter__.return_value = SimpleNamespace(admitted=[current])
             query = {"range": ["custom"], "start": ["2026-09-02"], "end": ["2026-09-02"], "session_agent": ["codex"]}
-            detail = server.session_detail("nested", "node-b", query)
+            detail = server.session_detail("nested", "node-b", query, views=views)
             self.assertEqual(detail["meta"]["session_id"], "root")
             self.assertEqual([e["session_id"] for e in detail["entries"]], ["nested"])
-            all_detail = server.session_detail("root", "node-b", {**query, "scope": ["all"]})
+            all_detail = server.session_detail("root", "node-b", {**query, "scope": ["all"]}, views=views)
             self.assertEqual([e["session_id"] for e in all_detail["entries"]], ["root", "child", "nested"])
 
     def test_admitted_usage_matches_full_reader_at_boundaries_and_filters(self):
-        import server
+        from agent_monitor.views.projections import filter_time, filter_values
         start = NOW.replace(hour=0, minute=0, second=0, microsecond=1)
         end = start + timedelta(days=1)
         entries = LoadedEntries([replace(self.usage()[0], timestamp=stamp,
@@ -188,8 +189,8 @@ class StatisticsSnapshotTests(unittest.TestCase):
             for query in ({}, {"agent": ["codex"]}, {"project": ["quote' OR 1=1 --"]},
                           {"model": ["other", "model"]}, {"agent": ["claude"], "model": ["other"]}):
                 with self.subTest(time_range=time_range, query=query):
-                    expected = server._filter_values(server._filter_time(full, time_range), query)
-                    actual = server._filter_time(snapshots.read_admitted_usage(
+                    expected = filter_values(filter_time(full, time_range), query)
+                    actual = filter_time(snapshots.read_admitted_usage(
                         current, time_range=time_range, query=query), time_range)
                     self.assertEqual(actual, expected)
         for session_id in ("session-0", "session-1", "missing"):

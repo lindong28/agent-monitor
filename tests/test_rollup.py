@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-import aggregators
+from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, usage_loader
 import rollup
 from parsers import UsageEntry
 
@@ -234,7 +234,7 @@ class RollupTests(unittest.TestCase):
             identity_db = Path(tmp) / "project-identity.db"
             now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
             source_path = "/old/path"
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db, create=True):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db, create=True):
                 first_project = self.identify_project(source_path, returncode=1, stdout="")
                 rollup.run(
                     db_path=db_path,
@@ -272,7 +272,7 @@ class RollupTests(unittest.TestCase):
             now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
             source_path = "/old/path"
             remote = "github.com/org/repo"
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db, create=True):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db, create=True):
                 first_project = self.identify_project(
                     source_path,
                     returncode=0,
@@ -306,7 +306,7 @@ class RollupTests(unittest.TestCase):
             now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
             source_path = "/old/path"
             remote = "github.com/org/repo"
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db, create=True):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db, create=True):
                 project = self.identify_project(
                     source_path,
                     returncode=0,
@@ -338,7 +338,7 @@ class RollupTests(unittest.TestCase):
             second_path = "/work/second"
             first_remote = "github.com/org/first"
             second_remote = "github.com/org/second"
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db, create=True):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db, create=True):
                 first_project = self.identify_project(
                     first_path,
                     returncode=0,
@@ -408,17 +408,17 @@ class RollupTests(unittest.TestCase):
             now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
 
             with self.production_loader(sessions, state / "project_identity.db"):
-                with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", state / "legacy-identity.db"):
+                with mock.patch.object(IDENTITY_STORE, "path", state / "legacy-identity.db"):
                     first = rollup.run(
                         db_path=state / "rollup.db",
-                        entries_loader=aggregators.load_all_entries,
+                        entries_loader=USAGE_LOADER.load_all_entries,
                         now=lambda: now,
                     )
                 self.set_git_remote(source, "git@github.com:org/repo.git")
                 self.reset_loader_process_state()
                 second = rollup.run(
                     db_path=state / "rollup.db",
-                    entries_loader=aggregators.load_all_entries,
+                    entries_loader=USAGE_LOADER.load_all_entries,
                     now=lambda: now,
                 )
 
@@ -445,10 +445,10 @@ class RollupTests(unittest.TestCase):
             now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
 
             with self.production_loader(sessions, state / "project_identity.db"):
-                with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", state / "legacy-identity.db"):
+                with mock.patch.object(IDENTITY_STORE, "path", state / "legacy-identity.db"):
                     rollup.run(
                         db_path=state / "rollup.db",
-                        entries_loader=aggregators.load_all_entries,
+                        entries_loader=USAGE_LOADER.load_all_entries,
                         now=lambda: now,
                     )
                 self.remove_tree(missing_source)
@@ -456,7 +456,7 @@ class RollupTests(unittest.TestCase):
                 self.reset_loader_process_state()
                 result = rollup.run(
                     db_path=state / "rollup.db",
-                    entries_loader=aggregators.load_all_entries,
+                    entries_loader=USAGE_LOADER.load_all_entries,
                     now=lambda: now,
                 )
 
@@ -491,10 +491,10 @@ class RollupTests(unittest.TestCase):
             now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
 
             with self.production_loader(sessions, state / "project_identity.db"):
-                with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", state / "legacy-identity.db"):
+                with mock.patch.object(IDENTITY_STORE, "path", state / "legacy-identity.db"):
                     rollup.run(
                         db_path=state / "rollup.db",
-                        entries_loader=aggregators.load_all_entries,
+                        entries_loader=USAGE_LOADER.load_all_entries,
                         now=lambda: now,
                     )
                 self.set_git_remote(changed_source, "git@github.com:org/new-name.git")
@@ -502,13 +502,13 @@ class RollupTests(unittest.TestCase):
                 self.reset_loader_process_state()
                 result = rollup.run(
                     db_path=state / "rollup.db",
-                    entries_loader=aggregators.load_all_entries,
+                    entries_loader=USAGE_LOADER.load_all_entries,
                     now=lambda: now,
                 )
                 self.reset_loader_process_state()
                 repeated = rollup.run(
                     db_path=state / "rollup.db",
-                    entries_loader=aggregators.load_all_entries,
+                    entries_loader=USAGE_LOADER.load_all_entries,
                     now=lambda: now,
                 )
 
@@ -561,10 +561,10 @@ class RollupTests(unittest.TestCase):
             now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
 
             with self.production_loader(sessions, state / "project_identity.db"):
-                with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", state / "legacy-identity.db"):
+                with mock.patch.object(IDENTITY_STORE, "path", state / "legacy-identity.db"):
                     rollup.run(
                         db_path=state / "rollup.db",
-                        entries_loader=aggregators.load_all_entries,
+                        entries_loader=USAGE_LOADER.load_all_entries,
                         now=lambda: now,
                     )
                 self.set_git_remote(changed_source, "git@github.com:org/new-name.git")
@@ -572,7 +572,7 @@ class RollupTests(unittest.TestCase):
                 self.reset_loader_process_state()
                 blocked = rollup.run(
                     db_path=state / "rollup.db",
-                    entries_loader=aggregators.load_all_entries,
+                    entries_loader=USAGE_LOADER.load_all_entries,
                     now=lambda: now,
                 )
 
@@ -581,7 +581,7 @@ class RollupTests(unittest.TestCase):
                 self.reset_loader_process_state()
                 after_restart = rollup.run(
                     db_path=state / "rollup.db",
-                    entries_loader=aggregators.load_all_entries,
+                    entries_loader=USAGE_LOADER.load_all_entries,
                     now=lambda: now,
                 )
                 process_probe = subprocess.run(
@@ -589,9 +589,9 @@ class RollupTests(unittest.TestCase):
                         sys.executable,
                         "-c",
                         (
-                            "import json, sys; from pathlib import Path; import aggregators; "
-                            "aggregators.PROJECT_IDENTITY_DB = Path(sys.argv[1]); "
-                            "print(json.dumps(aggregators.list_project_identity_blockers()))"
+                            "import json, sys; from pathlib import Path; from agent_monitor.ingestion import IDENTITY_STORE; "
+                            "IDENTITY_STORE.path = Path(sys.argv[1]); "
+                            "print(json.dumps(IDENTITY_STORE.list_blockers()))"
                         ),
                         str(state / "project_identity.db"),
                     ],
@@ -642,7 +642,7 @@ class RollupTests(unittest.TestCase):
             with self.production_loader(sessions, state / "project_identity.db"):
                 rollup.run(
                     db_path=state / "rollup.db",
-                    entries_loader=aggregators.load_all_entries,
+                    entries_loader=USAGE_LOADER.load_all_entries,
                     now=lambda: now,
                 )
                 self.write_codex_session(sessions / "00-stable.jsonl", stable_source, "stable-session", 20)
@@ -650,7 +650,7 @@ class RollupTests(unittest.TestCase):
                 self.reset_loader_process_state()
                 result = rollup.run(
                     db_path=state / "rollup.db",
-                    entries_loader=aggregators.load_all_entries,
+                    entries_loader=USAGE_LOADER.load_all_entries,
                     now=lambda: now,
                 )
 
@@ -1050,23 +1050,23 @@ class RollupTests(unittest.TestCase):
     @staticmethod
     def identify_project(path, returncode, stdout):
         completed = mock.Mock(returncode=returncode, stdout=stdout, stderr="git resolution failed")
-        with mock.patch("aggregators.subprocess.run", return_value=completed):
-            return aggregators.identify_project(path, {})
+        with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=completed):
+            return IDENTITY_STORE.identify_project(path, {})
 
     @staticmethod
     @contextlib.contextmanager
     def production_loader(sessions_dir, identity_db):
-        prior_usage_cache = aggregators._GLOBAL_USAGE_CACHE
-        prior_project_cache = aggregators._PROJECT_CACHE
+        prior_usage_cache = USAGE_LOADER.cache
+        prior_project_cache = IDENTITY_STORE.project_cache
         try:
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch.object(
-                aggregators.codex, "SESSIONS_DIR", str(sessions_dir)
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch.object(
+                usage_loader.codex, "SESSIONS_DIR", str(sessions_dir)
             ), mock.patch.object(
-                aggregators.codex, "STATE_DB", str(Path(sessions_dir).parent / "missing-state.sqlite")
+                usage_loader.codex, "STATE_DB", str(Path(sessions_dir).parent / "missing-state.sqlite")
             ), mock.patch.object(
-                aggregators.claude, "_get_claude_dirs", return_value=[]
+                usage_loader.claude, "_get_claude_dirs", return_value=[]
             ), mock.patch.dict(
-                aggregators.os.environ, {"AGENT_MONITOR_EXTRA_JSONL": ""}, clear=False
+                usage_loader.os.environ, {"AGENT_MONITOR_EXTRA_JSONL": ""}, clear=False
             ), mock.patch(
                 "pricing_fetcher.get_pricing", return_value={}
             ), mock.patch(
@@ -1075,13 +1075,13 @@ class RollupTests(unittest.TestCase):
                 RollupTests.reset_loader_process_state()
                 yield
         finally:
-            aggregators._GLOBAL_USAGE_CACHE = prior_usage_cache
-            aggregators._PROJECT_CACHE = prior_project_cache
+            USAGE_LOADER.cache = prior_usage_cache
+            IDENTITY_STORE.project_cache = prior_project_cache
 
     @staticmethod
     def reset_loader_process_state():
-        aggregators._GLOBAL_USAGE_CACHE = None
-        aggregators._PROJECT_CACHE = {}
+        USAGE_LOADER.cache = None
+        IDENTITY_STORE.project_cache = {}
 
     @staticmethod
     def init_git_repo(path, remote=None):

@@ -5,7 +5,7 @@ import quota_applicability
 from pathlib import Path
 from typing import Optional
 
-from . import RateLimits
+from agent_monitor.contracts.usage import RateLimits
 
 
 STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")

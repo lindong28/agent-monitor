@@ -64,16 +64,16 @@ class ParserTests(unittest.TestCase):
     def test_per_file_parsing_then_dedupe_matches_load_entries(self):
         # The dashboard parses each file on its own and merges, so the dedupe
         # that load_entries does internally has to be reapplied after the merge.
-        from aggregators import _deduped
+        from agent_monitor.ingestion import USAGE_LOADER
 
         merged = []
         for path in sorted((FIXTURES / "claude_resumed").rglob("*.jsonl")):
             merged.extend(claude.parse_file(path, fallback_project="fallback"))
         self.assertEqual(len(merged), 4)
-        self.assertEqual(sum(e.input_tokens for e in _deduped(merged)), 300)
+        self.assertEqual(sum(e.input_tokens for e in USAGE_LOADER.deduped(merged)), 300)
 
     def test_dedupe_keeps_codex_rollouts_that_resume_one_thread(self):
-        from aggregators import _deduped
+        from agent_monitor.ingestion import USAGE_LOADER
 
         def rollout(rollout_id):
             return UsageEntry(
@@ -92,8 +92,8 @@ class ParserTests(unittest.TestCase):
             )
 
         entries = [rollout("rollout-a"), rollout("rollout-b")]
-        self.assertEqual(len(_deduped(entries)), 2)
-        self.assertEqual(len(_deduped(entries + [rollout("rollout-a")])), 2)
+        self.assertEqual(len(USAGE_LOADER.deduped(entries)), 2)
+        self.assertEqual(len(USAGE_LOADER.deduped(entries + [rollout("rollout-a")])), 2)
 
     def test_dedup_key_ignores_session_but_separates_requests(self):
         def entry(session_id, message_id, request_id):

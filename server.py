@@ -4,25 +4,18 @@ import socket
 import hashlib
 import json
 import logging
-import math
 import mimetypes
 import os
 import posixpath
 import signal
-import subprocess
 import sys
 import threading
 import time
 import uuid
-from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
-from dataclasses import replace
-from project_alias import canonical_project
+from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as _ThreadingHTTPServer
 from socketserver import TCPServer
-from pathlib import Path
 import codex_accounts
-import network_policy
 import account_egress
 import client_network
 from urllib.parse import parse_qs, unquote, urlparse
@@ -30,10 +23,6 @@ from zoneinfo import ZoneInfo
 
 import rollup
 import generation
-import statistics_snapshot
-from session_identity import SessionIndex
-from session_cache import SessionCache
-from conversation_cache import ConversationCache
 import hub
 import sync
 import process_identity
@@ -41,14 +30,14 @@ import query_view
 import quota_sync
 import diagnostics
 import asset_delivery
-import quota_applicability
 from project_paths import PROJECT_ROOT
 from agent_monitor import source_inventory
 from agent_monitor.account_memory import AccountMemory, UNSPECIFIED_ACCOUNT_LABEL, parse_observed_at
 from agent_monitor.collection import CollectionCoordinator
 from agent_monitor.quota_view import QuotaView
-from aggregators import extract_metric, load_all_entries
-from pricing_fetcher import is_estimated_pricing_model
+from agent_monitor import ingestion
+from agent_monitor.views import ViewServices, OverviewView, SessionsView, NetworkReport
+from functools import partial
 
 
 ROOT = PROJECT_ROOT
@@ -60,12 +49,6 @@ GUIDE_PAGES = {
     "/guide/questions": "guide-questions.html",
 }
 logger = logging.getLogger("agent-monitor")
-_NETWORK_CACHE = {"ts": 0.0, "data": None}
-_NETWORK_TTL = 60.0
-_NETWORK_LOCK = threading.Lock()
-_SESSION_CACHE = SessionCache()
-_CONVERSATION_CACHE = ConversationCache()
-RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "6m": 180, "1y": 365, "2y": 730}
 SERVER_INSTANCE_ID = uuid.uuid4().hex
 ACCOUNT_MEMORY = AccountMemory(ROOT / "state" / "account_memory.json")
 QUOTA_REFRESH = quota_sync.Manager(ROOT / "state" / "machine_quota.json")
@@ -118,78 +101,8 @@ def diagnostics_endpoint(_query):
     return diagnostics.monitor.snapshot()
 
 
-def overview(query):
-    completed_before = COLLECTION.snapshot()["completed_at"]
-    sync_started = COLLECTION.request(query)
-    with COLLECTION.admission() as admission:
-        with rollup.use_admitted_generations(admission.admitted):
-            return _overview_from_admission(
-                query,
-                admission,
-                completed_before=completed_before,
-                sync_started=sync_started,
-            )
-
-
-def _overview_from_admission(
-    query,
-    admission,
-    *,
-    completed_before,
-    sync_started,
-):
-    now = datetime.now().astimezone()
-    range_value = _first(query, "range", "30d")
-    rollup_range_window = rollup.range_window(range_value, now)
-    cost_granularity = _auto_time_dim(range_value)
-    cost_over_time = rollup.query_pivot(
-        cost_granularity, "agent", "cost", time_range=rollup_range_window
-    )
-    today = now.astimezone(rollup.BUCKET_TIMEZONE).date()
-    today_window = (today, today)
-    week_window = (today - timedelta(days=today.weekday()), today)
-    month_window = (today.replace(day=1), today)
-    week_summary = _rollup_summary(week_window)
-    week_summary["window"] = {
-        "start": _start_of_week(now).isoformat(),
-        "end": now.isoformat(),
-    }
-
-    sync_status = dict(COLLECTION.status(now=now, admission=admission))
-    sync_status["refresh_pending"] = bool(
-        sync_started
-        or sync_status["syncing"]
-        or sync_status.get("completed_at") != completed_before
-    )
-    result = {
-        "rate_limits": QUOTA_VIEW.rate_limits(
-            admission=admission,
-            sync_status=sync_status,
-        ),
-        "sync": sync_status,
-        "today": _rollup_summary(today_window),
-        "week": week_summary,
-        "range": _rollup_summary(rollup_range_window),
-        "daily_cost_30d": _daily_cost_from_pivot(
-            rollup.query_pivot(
-                "day", "agent", "cost", time_range=rollup.range_window("30d", now)
-            )
-        ),
-        "cost_over_time": cost_over_time,
-        "cost_over_time_granularity": cost_granularity,
-        "rollup_coverage": _rollup_coverage(rollup_range_window),
-        "top_projects_week": _top_projects_from_rollup(week_window, limit=5),
-        "model_mix_month": _model_mix_from_rollup(month_window),
-        "attribution_windows": {
-            "week": {"start": week_window[0].isoformat(), "end": today.isoformat()},
-            "month": {"start": month_window[0].isoformat(), "end": today.isoformat()},
-        },
-        "history_gap": None,
-        "codex_cost_estimated": True,
-    }
-    if _first(query, "compare", "") == "1":
-        result["comparison"] = _period_comparison(range_value, now)
-    return result
+def overview(query, *, views):
+    return views.overview.read(query)
 
 
 def _pivot_window(query):
@@ -262,40 +175,8 @@ def collection_endpoint(_query):
         return {"sync": status, "rate_limits": limits}
 
 
-def cost_diagnostics_endpoint(query):
-    """Group unpriced observations without starting remote collection."""
-    time_range = _session_window(query, datetime.now().astimezone())
-    counts = defaultdict(int)
-
-    def collect(entries, machine, aliases=None):
-        projects = [canonical_project(value, aliases) for value in query.get("project", [])]
-        for entry in _filter_time(entries, time_range):
-            if entry.cost_usd is not None:
-                continue
-            if projects and canonical_project(entry.project, aliases) not in projects:
-                continue
-            if query.get("agent") and entry.agent_id not in query["agent"]:
-                continue
-            if query.get("model") and entry.model not in query["model"]:
-                continue
-            reason = (entry.cost_provenance or {}).get("reason") or "unrecorded"
-            counts[(machine, entry.agent_id, entry.model, reason)] += 1
-
-    if hub.enabled():
-        with generation.generation_admission_snapshot() as admission:
-            for current in admission.admitted:
-                if query.get("machine") and current.host not in query["machine"]:
-                    continue
-                selection = {key: query[key] for key in ("agent", "model") if key in query}
-                selection["cost_status"] = ["unknown"]
-                entries = statistics_snapshot.read_admitted_usage(current, time_range=time_range, query=selection)
-                collect(entries, current.host, (current.meta or {}).get("aliases"))
-    else:
-        machine = sync.load_machine_config().self_machine.name
-        if not query.get("machine") or machine in query["machine"]:
-            collect(load_all_entries(read_only=True, diagnostic=True), machine)
-    return {"groups": [dict(zip(("machine", "agent", "model", "reason"), key), entries=count)
-                       for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]}
+def cost_diagnostics_endpoint(query, *, views):
+    return views.sessions.cost_diagnostics(query)
 
 
 def refresh_endpoint(query):
@@ -310,153 +191,12 @@ def refresh_endpoint(query):
     return dict(COLLECTION.status(), **receipt)
 
 
-def sessions_endpoint(query):
-    cost_status = _first(query, "cost_status", "")
-    if cost_status not in ("", "unknown"):
-        raise ValueError("Unsupported cost_status: %s" % cost_status)
-    now = datetime.now().astimezone()
-    time_range = _session_window(query, now)
-    sessions = []
-    options = {key: set() for key in ("machine", "agent", "project", "model")}
-    with_filters = _first(query, "with_filters", "") == "1"
-
-    def collect(entries, machine=None, aliases=None, *, index=None, projects=None, with_offset=False):
-        source_sessions = []
-        source_options = {key: set() for key in options}
-        index = index if index is not None else SessionIndex(getattr(entries, "session_metadata", ()))
-        # Match Explore display identities without rewriting stored usage.
-        projects = projects if projects is not None else {}
-        in_window = []
-        offsets = {}
-        for offset, entry in enumerate(entries):
-            if time_range is not None and not time_range[0] <= entry.timestamp.astimezone() <= time_range[1]:
-                continue
-            if entry.project not in projects:
-                projects[entry.project] = canonical_project(entry.project, aliases)
-            project = projects[entry.project]
-            entry = entry if project == entry.project else replace(entry, project=project)
-            in_window.append(entry)
-            if with_offset:
-                offsets[id(entry)] = offset
-        display_query = dict(query)
-        if query.get("project"):
-            display_query["project"] = [canonical_project(value, aliases)
-                                        for value in query["project"]]
-        if with_filters:
-            if machine and in_window:
-                source_options["machine"].add(machine)
-            for entry in in_window:
-                source_options["agent"].add(entry.agent_id)
-                source_options["project"].add(entry.project)
-                source_options["model"].add(entry.model)
-        source_options = {key: sorted(values) for key, values in source_options.items()}
-        if _first(query, "machine", "") not in ("", machine):
-            return source_sessions, source_options, None
-        visible = _filter_values(in_window, display_query)
-        if cost_status == "unknown":
-            visible = [entry for entry in visible if entry.cost_usd is None]
-        for key, items in index.group(visible).items():
-            row = _conversation_stats(items, key, index, aliases)
-            if machine:
-                row["machine"] = machine
-            source_sessions.append(row)
-        return source_sessions, source_options, offsets[id(visible[0])] if with_offset and visible else None
-
-    def merge(result):
-        rows, filters = result[:2]
-        sessions.extend(rows)
-        for key, values in filters.items():
-            options[key].update(values)
-
-    if hub.enabled():
-        COLLECTION.request(query)
-        with generation.generation_admission_snapshot() as admission:
-            for current in admission.admitted:
-                if not with_filters and _first(query, "machine", "") not in ("", current.host):
-                    continue
-                result = _SESSION_CACHE.get(current, query, time_range)
-                if result is None:
-                    aliases = (getattr(current, "meta", None) or {}).get("aliases")
-                    grouped = _CONVERSATION_CACHE.read(current, query, time_range,
-                        lambda entries, index, projects: collect(entries, current.host, aliases,
-                            index=index, projects=projects, with_offset=True))
-                    if grouped is None:
-                        entries = statistics_snapshot.read_admitted_usage(
-                            current, time_range=time_range, query=None if with_filters else
-                            {key: value for key, value in query.items() if key != "project"})
-                        result = collect(entries, current.host, aliases)
-                        _SESSION_CACHE.put(current, query, time_range, entries, result)
-                    else:
-                        result, reusable = grouped
-                        if reusable:
-                            # Every bucket checked all candidate timestamps;
-                            # no retained event objects are needed for this guard.
-                            _SESSION_CACHE.put(current, query, time_range, (), result)
-                merge(result)
-    else:
-        merge(collect(load_all_entries(), sync.load_machine_config().self_machine.name))
-    sort = _first(query, "sort", "time")
-    sessions.sort(key=lambda row: _session_sort_key(row, sort),
-                  reverse=_first(query, "order", "desc") != "asc")
-    if with_filters:
-        return {"sessions": sessions, "filters": {key: sorted(v for v in values if v)
-                                                 for key, values in options.items()}}
-    return sessions
+def sessions_endpoint(query, *, views):
+    return views.sessions.list(query)
 
 
-def session_detail(session_id, machine=None, query=None):
-    # Direct Python callers retain the old all-records default; the HTTP/UI
-    # passes its actual list context, including the ordinary 30-day default.
-    query = {"scope": ["all"]} if query is None else query
-    scope = _first(query, "scope", "filtered")
-    if scope not in ("all", "filtered"):
-        raise ValueError("Unsupported session scope")
-    if _first(query, "cost_status", "") not in ("", "unknown"):
-        raise ValueError("Unsupported cost_status")
-    agent = _first(query, "session_agent", "")
-    window = None if scope == "all" else _session_window(query, datetime.now().astimezone())
-    aliases = None
-    if hub.enabled():
-        with generation.generation_admission_snapshot() as admission:
-            selected = [current for current in admission.admitted if current.host == machine]
-            if not selected:
-                return {"meta": None, "entries": [], "scope": scope}
-            current = selected[0]
-            entries = statistics_snapshot.read_admitted_usage(current, session_id=session_id, session_agent=agent,
-                time_range=window, query=None if scope == "all" else
-                {key: value for key, value in query.items() if key != "project"})
-            aliases = (getattr(current, "meta", None) or {}).get("aliases")
-    else:
-        entries = load_all_entries()
-    index = SessionIndex(getattr(entries, "session_metadata", ()))
-    keys = {(entry.agent_id, entry.session_id) for entry in entries if entry.session_id == session_id and (not agent or entry.agent_id == agent)}
-    keys.update(key for key in index.metadata if key[1] == session_id and (not agent or key[0] == agent))
-    roots = {index.root(key) for key in keys}
-    if len(roots) > 1:
-        raise ValueError("Session ID is ambiguous; specify session_agent")
-    if not roots:
-        return {"meta": None, "entries": [], "scope": scope}
-    root = next(iter(roots))
-    entries = [replace(entry, project=canonical_project(entry.project, aliases)) for entry in entries
-               if index.root((entry.agent_id, entry.session_id)) == root]
-    if scope != "all":
-        display_query = dict(query)
-        if query.get("project"):
-            display_query["project"] = [canonical_project(value, aliases) for value in query["project"]]
-        entries = _filter_values(_filter_time(entries, window), display_query)
-        if _first(query, "cost_status", "") == "unknown":
-            entries = [entry for entry in entries if entry.cost_usd is None]
-    entries.sort(key=lambda entry: entry.timestamp)
-    if not entries:
-        return {"meta": None, "entries": [], "scope": scope}
-    meta = _conversation_stats(entries, root, index, aliases)
-    meta["machine"] = machine
-    meta["executions"] = []
-    for key, items in _group_execution_sessions(entries).items():
-        identity = index.metadata.get(key, {})
-        meta["executions"].append({**_session_stats(items), "title": identity.get("title"),
-                                   "parent_session_id": identity.get("parent_session_id"), "is_main": key == root})
-    return {"meta": meta, "entries": [_entry_json(entry) for entry in entries], "scope": scope}
+def session_detail(session_id, machine=None, query=None, *, views):
+    return views.sessions.detail(session_id, machine, query)
 
 
 def health(query):
@@ -536,66 +276,8 @@ def timezone_endpoint(_query):
     return {"timezone": local_timezone()}
 
 
-def network(query):
-    return {**_network_report(query), "checked_host": socket.gethostname()}
-
-
-def _network_report(query):
-    # A refresh click shares the same request budget as polling. Hold the lock
-    # through the bounded child call so concurrent clients share failures too.
-    with _NETWORK_LOCK:
-        now = time.monotonic()
-        if (_NETWORK_CACHE["data"] is not None
-                and now - _NETWORK_CACHE["ts"] < _NETWORK_CACHE.get("ttl", _NETWORK_TTL)):
-            return _NETWORK_CACHE["data"]
-        data = _run_network_report()
-        delay = data.get("retry_after_seconds")
-        ttl = _NETWORK_TTL
-        if (not isinstance(delay, bool) and isinstance(delay, (int, float))
-                and math.isfinite(delay) and delay >= 0):
-            ttl = max(ttl, delay)
-        _NETWORK_CACHE.update(ts=time.monotonic(), data=data, ttl=ttl)
-        return data
-
-
-def _run_network_report():
-    try:
-        result = subprocess.run(["ip-check", "--json"], capture_output=True, text=True, timeout=30,
-                                env=network_policy.child_environment(os.environ))
-        if result.returncode != 0:
-            return {
-                "error": result.stderr or "ip-check exited non-zero",
-                "installed": True,
-                "verdict": "unknown",
-            }
-        data = json.loads(result.stdout)
-        if not isinstance(data, dict):
-            return {"error": "ip-check returned an invalid report", "installed": True, "verdict": "unknown"}
-        return data
-    except network_policy.NetworkPolicyError as exc:
-        return {"error": str(exc), "installed": True, "verdict": "unknown"}
-    except FileNotFoundError:
-        return {
-            "error": "PATH 里找不到 ip-check 命令",
-            "installed": False,
-            "verdict": "unknown",
-            "hint": "运行 ./install.sh 安装",
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "error": "ip-check 超时（>30s），外部 API 可能较慢",
-            "installed": True,
-            "verdict": "unknown",
-        }
-    except json.JSONDecodeError as exc:
-        return {
-            "error": f"ip-check returned invalid JSON: {exc}",
-            "installed": True,
-            "verdict": "unknown",
-        }
-    except OSError as exc:
-        return {"error": "无法启动 ip-check：" + diagnostics.failure_summary(
-            diagnostics.failure_details(exc, stage="network_start")), "installed": True, "verdict": "unknown"}
+def network(query, *, views):
+    return views.network.read()
 
 
 ROUTES = {
@@ -613,7 +295,26 @@ ROUTES = {
 }
 
 
+def create_views(*, usage_source=None):
+    """Build fresh view/cache owners without replacing process-wide services."""
+    return ViewServices(OverviewView(COLLECTION, QUOTA_VIEW, rollup),
+                        SessionsView(COLLECTION, ingestion if usage_source is None else usage_source),
+                        NetworkReport())
+
+
+def create_routes(views):
+    routes = dict(ROUTES)
+    for path in ("/api/overview", "/api/sessions", "/api/cost-diagnostics", "/api/network"):
+        routes[path] = partial(routes[path], views=views)
+    return routes
+
+
 class ThreadingHTTPServer(_ThreadingHTTPServer):
+    def __init__(self, *args, views=None, **kwargs):
+        self.views = views if views is not None else create_views()
+        self.routes = create_routes(self.views)
+        super().__init__(*args, **kwargs)
+
     def server_bind(self):
         # No CGI consumer needs a reverse-resolved server_name. Bind/listen
         # must still work when the host's reverse DNS service is unavailable.
@@ -700,7 +401,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/api/refresh", "/api/network"):
             try:
                 query = parse_qs(parsed.query)
-                action = refresh_endpoint if parsed.path == "/api/refresh" else network
+                action = refresh_endpoint if parsed.path == "/api/refresh" else self.server.routes["/api/network"]
                 self._send_json(action(query))
             except Exception:
                 logger.exception("refresh action failed")
@@ -983,9 +684,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path.startswith("/api/session/"):
                 session_id = unquote(parsed.path[len("/api/session/") :])
-                self._send_json(session_detail(session_id, _first(query, "machine", ""), query), send_body=send_body, compress=True)
+                self._send_json(session_detail(session_id, _first(query, "machine", ""), query, views=self.server.views), send_body=send_body, compress=True)
                 return
-            route = ROUTES.get(parsed.path)
+            route = self.server.routes.get(parsed.path)
             if route:
                 self._send_json(route(query), send_body=send_body, compress=True)
                 return
@@ -1113,310 +814,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
 
 
-def _session_window(query, now):
-    if _first(query, "range", "30d") != "custom":
-        return _range_window(_first(query, "range", "30d"), now)
-    start, end = _pivot_window(query)
-    return (datetime.combine(start, datetime.min.time(), tzinfo=rollup.BUCKET_TIMEZONE),
-            datetime.combine(end, datetime.max.time(), tzinfo=rollup.BUCKET_TIMEZONE))
-
-
-def _period_comparison(range_value, now):
-    if range_value == "all":
-        return {"available": False, "reason": "全部历史没有等长的前一期"}
-    days = RANGE_DAYS.get(range_value, 30)
-    end = now.astimezone(rollup.BUCKET_TIMEZONE).date() - timedelta(days=1)
-    start = end - timedelta(days=days - 1)
-    previous = (start - timedelta(days=days), start - timedelta(days=1))
-    def period(window):
-        return {"start": window[0].isoformat(), "end": window[1].isoformat(),
-                **rollup.period_summary(window)}
-    current, prior = period((start, end)), period(previous)
-    known = current["known_cost_usd"] is not None and prior["known_cost_usd"] is not None
-    return {"available": True, "timezone": str(rollup.BUCKET_TIMEZONE), "days": days,
-            "current": current, "previous": prior,
-            "known_cost_delta_usd": current["known_cost_usd"] - prior["known_cost_usd"] if known else None,
-            "coverage_complete": None}
-
-
-def _range_window(value, now):
-    calendar_window = rollup.range_window(value, now)
-    if calendar_window is None:
-        return None
-    start_date, _ = calendar_window
-    start = datetime.combine(
-        start_date, datetime.min.time(), tzinfo=rollup.BUCKET_TIMEZONE
-    )
-    return start, now
-
-
-def _auto_time_dim(range_value):
-    if range_value == "all":
-        return "month"
-    days = RANGE_DAYS.get(range_value, 30)
-    if days <= 90:
-        return "day"
-    if days <= 365:
-        return "week"
-    return "month"
-
-
-def _rollup_coverage(range_window):
-    earliest = rollup.earliest_rollup_date()
-    range_start = None
-    partial = False
-    if earliest:
-        if range_window is None:
-            partial = True
-        else:
-            range_start = rollup._calendar_date_bounds(range_window)[0].isoformat()
-            partial = range_start < earliest
-    return {
-        "earliest_date": earliest,
-        "range_start": range_start,
-        "partial_before_range": partial,
-    }
-
-
-def _filter_time(entries, time_range):
-    if time_range is None:
-        return list(entries)
-    start, end = time_range
-    return [entry for entry in entries if start <= entry.timestamp.astimezone() <= end]
-
-
-def _filter_values(entries, query):
-    agents = set(query.get("agent", []))
-    projects = set(query.get("project", []))
-    models = set(query.get("model", []))
-    result = []
-    for entry in entries:
-        if agents and entry.agent_id not in agents:
-            continue
-        if projects and entry.project not in projects:
-            continue
-        if models and entry.model not in models:
-            continue
-        result.append(entry)
-    return result
-
-
-def _summary(entries):
-    by_agent = defaultdict(float)
-    total_cost = 0.0
-    for entry in entries:
-        if entry.cost_usd is not None:
-            total_cost += entry.cost_usd
-            by_agent[entry.agent_id] += entry.cost_usd
-    return {
-        "cost_usd": total_cost,
-        "tokens": sum(extract_metric(entry, "total") for entry in entries),
-        "by_agent": {"claude-code": by_agent["claude-code"], "codex": by_agent["codex"]},
-    }
-
-
-def _rollup_summary(time_range):
-    cost_pivot = rollup.query_pivot(
-        "agent", "none", "cost", time_range=time_range
-    )
-    cost_rows = cost_pivot["rows"]
-    token_rows = rollup.query_pivot(
-        "agent", "none", "total", time_range=time_range
-    )["rows"]
-    by_agent = {"claude-code": None, "codex": None}
-    for row in cost_rows:
-        value = row["values"].get("value")
-        if value is not None:
-            by_agent[row["x"]] = value
-    return {
-        "cost_usd": (sum(value for value in by_agent.values() if value is not None)
-                     if any(value is not None for value in by_agent.values()) else None),
-        "tokens": sum(
-            row["values"].get("value") or 0
-            for row in token_rows
-        ),
-        "by_agent": by_agent,
-        "cost_coverage": cost_pivot.get("cost_coverage"),
-    }
-
-
-def _daily_cost_from_pivot(pivot):
-    return [
-        {
-            "date": row["x"],
-            "claude_cost": row["values"].get("claude-code"),
-            "codex_cost": row["values"].get("codex"),
-        }
-        for row in pivot["rows"]
-    ]
-
-
-def _top_projects_from_rollup(time_range, limit):
-    pivot = rollup.query_pivot(
-        "project", "none", "cost", time_range=time_range
-    )
-    return [
-        {"project": row["x"], "cost_usd": row["values"].get("value"),
-         "cost_coverage": row.get("cost_coverage", {}).get("value")}
-        for row in pivot["rows"]
-        if row["values"].get("value") is not None
-    ][:limit]
-
-
-def _model_mix_from_rollup(time_range):
-    pivot = rollup.query_pivot(
-        "model", "none", "total", time_range=time_range
-    )
-    rows = [
-        {"model": row["x"], "tokens": row["values"].get("value") or 0}
-        for row in pivot["rows"]
-    ]
-    grand_total = sum(row["tokens"] for row in rows) or 1
-    for row in rows:
-        row["pct"] = row["tokens"] / grand_total
-    return rows
-
-
-def _daily_cost(entries, now):
-    days = []
-    by_day = defaultdict(lambda: {"claude_cost": 0.0, "codex_cost": 0.0})
-    for entry in entries:
-        day = entry.timestamp.astimezone(rollup.BUCKET_TIMEZONE).date().isoformat()
-        if entry.cost_usd is None:
-            continue
-        key = "codex_cost" if entry.agent_id == "codex" else "claude_cost"
-        by_day[day][key] += entry.cost_usd
-    start = now.astimezone(rollup.BUCKET_TIMEZONE).date() - timedelta(days=29)
-    for offset in range(30):
-        day = (start + timedelta(days=offset)).isoformat()
-        row = {"date": day}
-        row.update(by_day[day])
-        days.append(row)
-    return days
-
-
-def _top_projects(entries, limit):
-    totals = defaultdict(float)
-    for entry in entries:
-        if entry.cost_usd is not None:
-            totals[entry.project] += entry.cost_usd
-    return [
-        {"project": project, "cost_usd": cost}
-        for project, cost in sorted(totals.items(), key=lambda item: item[1], reverse=True)[:limit]
-    ]
-
-
-def _model_mix(entries):
-    totals = defaultdict(int)
-    for entry in entries:
-        totals[entry.model] += extract_metric(entry, "total")
-    grand_total = sum(totals.values()) or 1
-    return [
-        {"model": model, "tokens": tokens, "pct": tokens / grand_total}
-        for model, tokens in sorted(totals.items(), key=lambda item: item[1], reverse=True)
-    ]
-
-
-def _group_sessions(entries):
-    sessions = defaultdict(list)
-    for entry in entries:
-        sessions[entry.session_id].append(entry)
-    return sessions
-
-
-def _group_execution_sessions(entries):
-    sessions = defaultdict(list)
-    for entry in entries:
-        sessions[(entry.agent_id, entry.session_id)].append(entry)
-    return sessions
-
-
-def _conversation_stats(entries, key, index, aliases=None):
-    result = _session_stats(entries)
-    identity = index.metadata.get(key, {})
-    own = next((entry for entry in entries if (entry.agent_id, entry.session_id) == key), None)
-    result.update(session_id=key[1], agent_id=key[0], title=identity.get("title"),
-                  created_at=identity.get("created_at"), account=identity.get("account"),
-                  relationship_status=index.status(key),
-                  subagent_count=len({(e.agent_id, e.session_id) for e in entries} - {key}),
-                  project=own.project if own else canonical_project(identity.get("project") or result["project"], aliases))
-    return result
-
-
-def _session_stats(entries):
-    entries = sorted(entries, key=lambda entry: entry.timestamp)
-    known_costs = [entry.cost_usd for entry in entries if entry.cost_usd is not None]
-    cost = sum(known_costs) if known_costs else None
-    start = entries[0].timestamp
-    end = entries[-1].timestamp
-    usage_events = sum(entry.message_count for entry in entries)
-    return {
-        "session_id": entries[0].session_id,
-        "agent_id": entries[0].agent_id,
-        "project": entries[0].project,
-        "model": entries[0].model,
-        "started_at": start.isoformat(),
-        "ended_at": end.isoformat(),
-        "duration_seconds": max(int((end - start).total_seconds()), 0),
-        "cost_usd": cost,
-        "unpriced_records": len(entries) - len(known_costs),
-        "tokens": sum(extract_metric(entry, "total") for entry in entries),
-        "usage_events": usage_events,
-        "estimated": any(e.agent_id == "codex" or is_estimated_pricing_model(e.model) for e in entries),
-    }
-
-
-def _entry_json(entry):
-    return {
-        "timestamp": entry.timestamp.isoformat(),
-        "session_id": entry.session_id,
-        "message_id": entry.message_id,
-        "request_id": entry.request_id,
-        "model": entry.model,
-        "input_tokens": entry.input_tokens,
-        "output_tokens": entry.output_tokens,
-        "cache_creation_tokens": entry.cache_creation_tokens,
-        "cache_read_tokens": entry.cache_read_tokens,
-        "cost_usd": entry.cost_usd,
-        "project": entry.project,
-        "agent_id": entry.agent_id,
-        "usage_event_count": entry.message_count,
-        "usage_quality": entry.usage_quality,
-        "service_context": entry.service_context,
-        "cost_provenance": entry.cost_provenance,
-    }
-
-
-def _session_sort_key(row, sort):
-    if sort == "cost":
-        return row["cost_usd"] if row["cost_usd"] is not None else -1
-    if sort == "tokens":
-        return row["tokens"]
-    if sort == "duration":
-        return row["duration_seconds"]
-    return row["ended_at"]
-
-
 def _first(query, key, default):
     values = query.get(key)
     return values[0] if values else default
-
-
-def _start_of_day(value):
-    return value.astimezone(rollup.BUCKET_TIMEZONE).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-
-
-def _start_of_week(value):
-    start = _start_of_day(value)
-    return start - timedelta(days=start.weekday())
-
-
-def _start_of_month(value):
-    return value.astimezone(rollup.BUCKET_TIMEZONE).replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0
-    )
 
 
 def _json_default(value):

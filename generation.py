@@ -25,7 +25,7 @@ from machine_config import (
     retirement_config_text,
 )
 from project_alias import validate_alias_proofs
-from rollup import USAGE_ROLLUP_AUTHORITY_FLOOR_KEY
+from agent_monitor.contracts.rollup import USAGE_ROLLUP_AUTHORITY_FLOOR_KEY
 
 
 from project_paths import PROJECT_ROOT

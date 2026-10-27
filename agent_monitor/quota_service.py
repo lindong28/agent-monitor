@@ -15,7 +15,7 @@ from pathlib import Path
 
 import quota_applicability
 import quota_refresh
-from parsers import RateLimits
+from agent_monitor.contracts.usage import RateLimits
 from parsers import accounts, claude_status, codex
 from project_paths import PROJECT_ROOT
 

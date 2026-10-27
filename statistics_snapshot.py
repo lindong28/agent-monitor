@@ -10,7 +10,9 @@ from pathlib import Path
 import sqlite3
 import diagnostics
 
-from parsers import UsageEntry, USAGE_QUALITIES, usage_quality_counts, validate_usage_metadata
+from agent_monitor.contracts.usage import (
+    LoadedEntries, UsageEntry, USAGE_QUALITIES, usage_quality_counts, validate_usage_metadata,
+)
 from session_identity import SessionIndex, validate as validate_session
 
 
@@ -321,7 +323,6 @@ def decode_usage_payloads(payloads, version):
 @diagnostics.measured("statistics.read_usage")
 def read_admitted_usage(current, *, time_range=None, query=None, session_id=None, session_agent=None):
     """Decode only usage needed by Sessions; callers retain exact time filtering."""
-    from aggregators import LoadedEntries
     with admitted_usage_rows(current, time_range=time_range, query=query,
                              session_id=session_id, session_agent=session_agent) as (meta, sessions, rows):
         if meta is None:

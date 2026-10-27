@@ -93,7 +93,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
         }
         with (
             mock.patch(
-                "server.load_all_entries",
+                "server.ingestion.load_all_entries",
                 side_effect=AssertionError("Overview must not read live entries"),
             ),
             mock.patch("server.COLLECTION.request", return_value=False),
@@ -118,7 +118,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
             mock.patch("server.rollup.query_pivot", side_effect=pivot),
             mock.patch("server.rollup.earliest_rollup_date", return_value="2026-04-21"),
         ):
-            payload = server.overview({"range": ["30d"]})
+            payload = server.create_views().overview.read({"range": ["30d"]})
 
         for key in ("today", "week", "range"):
             self.assertEqual(payload[key]["cost_usd"], 5.0)
@@ -951,7 +951,7 @@ class BackgroundSyncTests(unittest.TestCase):
             return_value={"columns": [], "rows": []},
         ), mock.patch("server.rollup.earliest_rollup_date", return_value=None):
             started = time.monotonic()
-            payload = server.overview({"force": ["1"]})
+            payload = server.create_views().overview.read({"force": ["1"]})
             elapsed = time.monotonic() - started
             self.release.set()
             self.wait_for_terminal()
@@ -1002,7 +1002,7 @@ class AdmissionStatusTests(unittest.TestCase):
                 "rollup.admitted_generations",
                 side_effect=AssertionError("overview queries must reuse the pinned admission set"),
             ):
-                payload = server.overview({"range": ["30d"], "sync": ["0"]})
+                payload = server.create_views().overview.read({"range": ["30d"], "sync": ["0"]})
 
             load_admission.assert_called_once()
             self.assertEqual(payload["sync"]["coverage"], {"admitted": 3, "declared": 3})
@@ -2245,9 +2245,9 @@ class WriteSetTests(unittest.TestCase):
                 "generation.self_certified_host_identity", return_value=source_identity
             ):
                 reset_collection()
-                server.overview({})
+                server.create_views().overview.read({})
                 after_load = self.tree_manifest(sandbox)
-                server.overview({"force": ["1"]})
+                server.create_views().overview.read({"force": ["1"]})
                 deadline = time.monotonic() + 2
                 while server.COLLECTION.snapshot()["syncing"] and time.monotonic() < deadline:
                     time.sleep(0.01)

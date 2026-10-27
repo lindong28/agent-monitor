@@ -4,7 +4,8 @@ import json
 import shlex
 import sys
 
-import aggregators
+from agent_monitor import ingestion
+from agent_monitor.ingestion.project_identity import ProjectIdentityRecoveryError
 
 
 def main(argv=None):
@@ -44,7 +45,7 @@ def main(argv=None):
             return _print_blockers()
         if args.command == "recover-reviewed":
             return _recover_reviewed(args)
-        recovered = aggregators.pin_project_identity(args.path, args.pin_existing)
+        recovered = ingestion.IDENTITY_STORE.pin(args.path, args.pin_existing)
         print(
             "RECOVERED: pinned {source_path} to directly matched identity {project}; status={status}".format(
                 source_path=recovered["source_path"],
@@ -53,7 +54,7 @@ def main(argv=None):
             )
         )
         return 0
-    except aggregators.ProjectIdentityRecoveryError as exc:
+    except ProjectIdentityRecoveryError as exc:
         print("RECOVERY REFUSED: %s" % exc, file=sys.stderr)
         return 2
 
@@ -63,10 +64,10 @@ def _recover_reviewed(args):
         with open(args.manifest, encoding="utf-8") as handle:
             manifest = json.load(handle)
     except (OSError, ValueError) as exc:
-        raise aggregators.ProjectIdentityRecoveryError(
+        raise ProjectIdentityRecoveryError(
             "Cannot read reviewed manifest; check --manifest JSON: %s" % exc
         ) from exc
-    assignments = aggregators.recover_reviewed_project_identities(manifest, apply=args.apply)
+    assignments = ingestion.IDENTITY_STORE.recover_reviewed(manifest, apply=args.apply)
     if args.apply:
         print("RECOVERED: committed %d reviewed project identities." % len(assignments))
     else:
@@ -81,7 +82,7 @@ def _recover_reviewed(args):
 
 
 def _print_blockers():
-    blockers = aggregators.list_project_identity_blockers(status="active")
+    blockers = ingestion.IDENTITY_STORE.list_blockers(status="active")
     if not blockers:
         print("OK: no active project identity blockers.")
         return 0

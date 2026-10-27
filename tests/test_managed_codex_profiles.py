@@ -10,7 +10,8 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-import aggregators
+from agent_monitor.contracts.usage import LoadedEntries
+from agent_monitor.ingestion import ProjectIdentityStore, UsageLoader
 import exporter
 from parsers import codex, codex_profiles
 import server
@@ -24,6 +25,7 @@ class ManagedCodexTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.loader = UsageLoader(ProjectIdentityStore(self.root / "project_identity.db"))
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
         self.stack.enter_context(mock.patch.dict(os.environ, {"HOME": str(self.root), "AGENT_MONITOR_EXTRA_JSONL": ""}))
@@ -56,8 +58,8 @@ class ManagedCodexTests(unittest.TestCase):
     def collect(self):
         archive = UsageArchive(self.root / "archive.sqlite3")
         errors = []
-        entries, _ = aggregators._load_archived_entries(archive, errors, False, False)
-        return aggregators.LoadedEntries(entries, session_metadata=archive.session_metadata), errors
+        entries, _ = self.loader.load_archived_entries(archive, errors, False, False)
+        return LoadedEntries(entries, session_metadata=archive.session_metadata), errors
 
     def test_two_profiles_default_archive_models_snapshot_and_session_api(self):
         self.session(self.default, "default", 3, 5, "default-model")
@@ -69,14 +71,15 @@ class ManagedCodexTests(unittest.TestCase):
         self.assertEqual({e.session_id: e.model for e in entries}, {n: n + "-model" for n in ("default", "alpha", "beta")})
         snapshot = statistics_snapshot.write_snapshot(self.root / "snapshot.db", entries)
         self.assertEqual(snapshot["version"], 5)
-        loaded = aggregators.LoadedEntries(snapshot["usage_entries"], session_metadata=snapshot["session_metadata"])
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.load_all_entries", return_value=loaded):
-            rows = {r["session_id"]: r for r in server.sessions_endpoint({"range": ["all"]})}
+        loaded = LoadedEntries(snapshot["usage_entries"], session_metadata=snapshot["session_metadata"])
+        views = server.create_views(usage_source=self.loader)
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch.object(self.loader, "load_all_entries", return_value=loaded):
+            rows = {r["session_id"]: r for r in server.sessions_endpoint({"range": ["all"]}, views=views)}
             self.assertIsNone(rows["default"]["account"])
             self.assertEqual({sid: r["title"] for sid, r in rows.items()}, {n: "Task " + n + "-model" for n in ("default", "alpha", "beta")})
             for name in ("alpha", "beta"):
                 self.assertEqual(rows[name]["account"]["email"], name + "@example.test")
-                detail = server.session_detail(name, query={"range": ["all"]})
+                detail = server.session_detail(name, query={"range": ["all"]}, views=views)
                 self.assertEqual(detail["meta"]["account"], rows[name]["account"])
 
     def test_passive_quota_reaches_existing_accounts_consumer(self):

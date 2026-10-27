@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from aggregators import load_all_entries  # noqa: E402
+from agent_monitor.ingestion import load_all_entries  # noqa: E402
 from rollup import (  # noqa: E402
     BUCKET_FIELDS,
     DEFAULT_DB_PATH,

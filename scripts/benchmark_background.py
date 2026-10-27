@@ -36,6 +36,7 @@ def positive(value):
 def source_identity():
     # Include dirty candidates; a Git HEAD alone does not identify executed code.
     paths = sorted(set(ROOT.glob("*.py")) | set((ROOT / "parsers").rglob("*.py")) |
+                   set((ROOT / "agent_monitor").rglob("*.py")) |
                    set((ROOT / "scripts").glob("benchmark*.py")))
     paths += [ROOT / "requirements.txt", ROOT / "pricing.json"]
     files = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -65,7 +66,8 @@ def cpu_time():
 
 def run_case(path, rows, repeat):
     # Called only after isolated HOME is installed, before any project import.
-    import aggregators
+    from agent_monitor.ingestion import ProjectIdentityStore, UsageLoader
+    from parsers import codex
     import exporter
     import statistics_snapshot
 
@@ -92,14 +94,12 @@ def run_case(path, rows, repeat):
             raise AssertionError("unexpected child process: %r" % command)
         return popen(command, *args, **kwargs)
 
+    loader = UsageLoader(ProjectIdentityStore(path / "identity.db"))
     with ExitStack() as stack:
         for patch in (
-            mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", path / "identity.db"),
-            mock.patch.object(aggregators, "_GLOBAL_USAGE_CACHE", None),
-            mock.patch.object(aggregators, "_PROJECT_CACHE", {}),
-            mock.patch.object(aggregators, "_usage_paths", side_effect=lambda **kw: sorted(sessions.glob("*.jsonl"))),
-            mock.patch.object(aggregators.codex, "SESSIONS_DIR", str(sessions)),
-            mock.patch.object(aggregators.codex, "STATE_DB", str(metadata)),
+            mock.patch.object(loader, "usage_paths", side_effect=lambda **kw: sorted(sessions.glob("*.jsonl"))),
+            mock.patch.object(codex, "SESSIONS_DIR", str(sessions)),
+            mock.patch.object(codex, "STATE_DB", str(metadata)),
             mock.patch("pricing_fetcher.get_pricing", return_value=PRICES),
             # Synthetic manifest identity; report actual source hashes separately.
             mock.patch.object(exporter, "exporter_version", return_value="a" * 40),
@@ -110,7 +110,7 @@ def run_case(path, rows, repeat):
         ):
             stack.enter_context(patch)
         parsed = stack.enter_context(mock.patch.object(
-            aggregators, "_parse_usage_file", wraps=aggregators._parse_usage_file))
+            loader, "parse_usage_file", wraps=loader.parse_usage_file))
         samples = []
         expected = rows
         for state in ["initial"] + [s for _ in range(repeat) for s in ("unchanged", "append")]:
@@ -123,7 +123,7 @@ def run_case(path, rows, repeat):
             parsed.reset_mock()
             output = path / "export"
             start_wall, start_cpu = time.perf_counter(), cpu_time()
-            loaded, collect = measured(aggregators.load_all_entries)
+            loaded, collect = measured(loader.load_all_entries)
             _, export = measured(lambda: exporter.export_bundle(
                 db_path=path / "rollup.db", output_path=output,
                 entries_loader=lambda: loaded, generated_at=NOW.isoformat(),

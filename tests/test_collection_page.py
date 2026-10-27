@@ -1,3 +1,5 @@
+import statistics_snapshot
+from types import SimpleNamespace
 """Collection navigation and read-only projection use synthetic observations."""
 import io
 import json
@@ -44,17 +46,17 @@ class CollectionPageTests(unittest.TestCase):
         hosts = [SimpleNamespace(host="m1", meta={}), SimpleNamespace(host="m2", meta={})]
         with mock.patch.object(server.hub, "enabled", return_value=True), \
              mock.patch.object(server.generation, "generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=hosts))), \
-             mock.patch.object(server.statistics_snapshot, "read_admitted_usage", return_value=entries) as read, \
+             mock.patch.object(statistics_snapshot, "read_admitted_usage", return_value=entries) as read, \
              mock.patch.object(server.COLLECTION, "request", side_effect=AssertionError("refresh")):
-            self.assertEqual(server.cost_diagnostics_endpoint(query), expected)
+            self.assertEqual(server.create_views().sessions.cost_diagnostics(query), expected)
             self.assertEqual(read.call_count, 1)
             self.assertEqual(read.call_args.kwargs["query"]["cost_status"], ["unknown"])
         with mock.patch.object(server.hub, "enabled", return_value=False), \
              mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(self_machine=SimpleNamespace(name="m1"))), \
-             mock.patch.object(server, "load_all_entries", return_value=entries) as read:
-            self.assertEqual(server.cost_diagnostics_endpoint(query), expected)
+             mock.patch.object(server.ingestion, "load_all_entries", return_value=entries) as read:
+            self.assertEqual(server.create_views().sessions.cost_diagnostics(query), expected)
             read.assert_called_once_with(read_only=True, diagnostic=True)
-            self.assertEqual(server.cost_diagnostics_endpoint({**query, "model": ["absent"]}), {"groups": []})
+            self.assertEqual(server.create_views().sessions.cost_diagnostics({**query, "model": ["absent"]}), {"groups": []})
 
     def test_cost_diagnostic_links_preserve_filters_and_escape_source_values(self):
         script = r'''
@@ -124,6 +126,7 @@ for(const modified of [true,false]) {
 
     def test_collection_static_route_and_initializer(self):
         handler = object.__new__(server.Handler)
+        handler.server = SimpleNamespace(views=server.create_views(), routes={})
         handler.path = "/collection?return=%2Fsessions%3Fsession%3Dfixture"
         handler.headers = {}
         handler.wfile = io.BytesIO()

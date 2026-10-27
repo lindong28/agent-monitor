@@ -6,7 +6,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from parsers import UsageEntry, complete_usage_observation
+from agent_monitor.contracts.usage import UsageEntry, complete_usage_observation
 from session_identity import merge_metadata
 
 

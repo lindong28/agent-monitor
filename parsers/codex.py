@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import RateLimits, UsageEntry
+from agent_monitor.contracts.usage import RateLimits, UsageEntry
 from session_identity import codex_metadata, merge_metadata
 
 

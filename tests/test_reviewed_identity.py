@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import aggregators
+from agent_monitor.ingestion import IDENTITY_STORE, project_identity
 import rollup
 from agent_monitor import storage
 
@@ -21,10 +21,10 @@ class ReviewedIdentityTests(unittest.TestCase):
         self.identity = self.root / "project_identity.db"
         self.rollup = self.root / "rollup.db"
         self.archive = self.root / "usage_archive.sqlite3"
-        self.patch = mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", self.identity)
+        self.patch = mock.patch.object(IDENTITY_STORE, "path", self.identity)
         self.patch.start()
         self.addCleanup(self.patch.stop)
-        self.cache = mock.patch.object(aggregators, "_PROJECT_CACHE", {})
+        self.cache = mock.patch.object(IDENTITY_STORE, "project_cache", {})
         self.cache.start()
         self.addCleanup(self.cache.stop)
         with sqlite3.connect(self.rollup) as conn:
@@ -38,8 +38,8 @@ class ReviewedIdentityTests(unittest.TestCase):
             conn.execute("INSERT INTO retained_events VALUES ('unchanged-event', 100)")
         self.manifest = {"version": 1, "assignments": []}
         with sqlite3.connect(self.identity) as conn:
-            conn.execute(aggregators.PROJECT_IDENTITY_SCHEMA)
-            conn.execute(aggregators.PROJECT_IDENTITY_BLOCKER_SCHEMA)
+            conn.execute(project_identity.PROJECT_IDENTITY_SCHEMA)
+            conn.execute(project_identity.PROJECT_IDENTITY_BLOCKER_SCHEMA)
             # 41 distinct paths / five projects mirror the operational batch shape.
             for i in range(41):
                 source = "/deleted/worktree-%d" % i
@@ -60,13 +60,13 @@ class ReviewedIdentityTests(unittest.TestCase):
 
     def test_preview_is_read_only_then_apply_preserves_history_and_archive(self):
         before = self.state_bytes()
-        result = aggregators.recover_reviewed_project_identities(self.manifest)
+        result = IDENTITY_STORE.recover_reviewed(self.manifest)
         self.assertEqual(len(result), 41)
         self.assertEqual(self.state_bytes(), before)
-        self.assertEqual(aggregators._PROJECT_CACHE, {})
-        aggregators.recover_reviewed_project_identities(self.manifest, apply=True)
+        self.assertEqual(IDENTITY_STORE.project_cache, {})
+        IDENTITY_STORE.recover_reviewed(self.manifest, apply=True)
         self.assertEqual(len(self.identity_rows()), 41)
-        self.assertEqual(len(aggregators._PROJECT_CACHE), 41)
+        self.assertEqual(len(IDENTITY_STORE.project_cache), 41)
         for path in (self.rollup, self.archive):
             self.assertEqual(path.read_bytes(), before[path.name])
         with sqlite3.connect(self.identity) as conn:
@@ -74,17 +74,17 @@ class ReviewedIdentityTests(unittest.TestCase):
             for row in conn.execute("SELECT source_path,reason,resolved_candidate,first_seen FROM project_identity_blocker"):
                 expected = next(x["expected_blocker"] for x in self.manifest["assignments"] if x["source_path"] == row[0])
                 self.assertEqual(row[1:], (expected["reason"], expected["resolved_candidate"], expected["first_seen"]))
-        with self.assertRaisesRegex(aggregators.ProjectIdentityRecoveryError, "no active"):
-            aggregators.recover_reviewed_project_identities(self.manifest, apply=True)
+        with self.assertRaisesRegex(project_identity.ProjectIdentityRecoveryError, "no active"):
+            IDENTITY_STORE.recover_reviewed(self.manifest, apply=True)
 
     def test_all_preconditions_are_checked_before_any_write(self):
         for field, value in [("reason", "changed"), ("resolved_candidate", "other"), ("pin_candidate", "other"), ("first_seen", "later")]:
             manifest = copy.deepcopy(self.manifest)
             manifest["assignments"][-1]["expected_blocker"][field] = value
             for apply in (False, True):
-                with self.subTest(field=field, apply=apply), mock.patch.object(aggregators, "_upsert_project_identity", side_effect=AssertionError("write started")):
-                    with self.assertRaisesRegex(aggregators.ProjectIdentityRecoveryError, field + " changed"):
-                        aggregators.recover_reviewed_project_identities(manifest, apply=apply)
+                with self.subTest(field=field, apply=apply), mock.patch.object(IDENTITY_STORE, "_upsert_project_identity", side_effect=AssertionError("write started")):
+                    with self.assertRaisesRegex(project_identity.ProjectIdentityRecoveryError, field + " changed"):
+                        IDENTITY_STORE.recover_reviewed(manifest, apply=apply)
                 self.assertEqual(self.identity_rows(), [])
 
     def test_existing_identity_and_inactive_or_missing_blocker_refuse_batch(self):
@@ -101,18 +101,18 @@ class ReviewedIdentityTests(unittest.TestCase):
                         conn.execute("DELETE FROM project_identity_blocker WHERE source_path=?", (source,))
                 before = self.state_bytes()
                 for apply in (False, True):
-                    with self.assertRaises(aggregators.ProjectIdentityRecoveryError):
-                        aggregators.recover_reviewed_project_identities(self.manifest, apply=apply)
+                    with self.assertRaises(project_identity.ProjectIdentityRecoveryError):
+                        IDENTITY_STORE.recover_reviewed(self.manifest, apply=apply)
                 self.assertEqual(self.state_bytes(), before)
 
     def test_mid_batch_database_failure_rolls_back_and_keeps_cache(self):
         with sqlite3.connect(self.identity) as conn:
             conn.execute("CREATE TRIGGER reject_second BEFORE INSERT ON project_identity WHEN NEW.source_path='/deleted/worktree-1' BEGIN SELECT RAISE(ABORT, 'injected second row failure'); END")
         before = self.state_bytes()
-        with self.assertRaisesRegex(aggregators.ProjectIdentityRecoveryError, "injected second row failure"):
-            aggregators.recover_reviewed_project_identities(self.manifest, apply=True)
+        with self.assertRaisesRegex(project_identity.ProjectIdentityRecoveryError, "injected second row failure"):
+            IDENTITY_STORE.recover_reviewed(self.manifest, apply=True)
         self.assertEqual(self.state_bytes(), before)
-        self.assertEqual(aggregators._PROJECT_CACHE, {})
+        self.assertEqual(IDENTITY_STORE.project_cache, {})
 
     def test_malformed_manifests_refuse_before_lock_or_connection(self):
         bad = [None, {}, {"version": True, "assignments": []}, {"version": 2, "assignments": []}, {"version": 1, "assignments": []}]
@@ -136,31 +136,31 @@ class ReviewedIdentityTests(unittest.TestCase):
             bad.append(manifest)
         with mock.patch.object(storage, "rollup_lock", side_effect=AssertionError("lock opened")):
             for manifest in bad:
-                with self.subTest(manifest=manifest), self.assertRaises(aggregators.ProjectIdentityRecoveryError):
-                    aggregators.recover_reviewed_project_identities(manifest, apply=True)
+                with self.subTest(manifest=manifest), self.assertRaises(project_identity.ProjectIdentityRecoveryError):
+                    IDENTITY_STORE.recover_reviewed(manifest, apply=True)
 
     def test_preview_does_not_create_missing_lock_or_identity_database(self):
         self.identity.unlink()
         self.rollup.with_suffix(".db.lock").unlink()
         before = self.state_bytes()
-        with self.assertRaises(aggregators.ProjectIdentityRecoveryError):
-            aggregators.recover_reviewed_project_identities(self.manifest)
+        with self.assertRaises(project_identity.ProjectIdentityRecoveryError):
+            IDENTITY_STORE.recover_reviewed(self.manifest)
         self.assertEqual(self.state_bytes(), before)
 
     def test_legacy_schema_preview_does_not_upgrade_but_apply_does(self):
         with sqlite3.connect(self.identity) as conn:
             conn.execute("ALTER TABLE project_identity_blocker DROP COLUMN pin_candidate")
         before = self.state_bytes()
-        aggregators.recover_reviewed_project_identities(self.manifest)
+        IDENTITY_STORE.recover_reviewed(self.manifest)
         self.assertEqual(self.state_bytes(), before)
-        aggregators.recover_reviewed_project_identities(self.manifest, apply=True)
+        IDENTITY_STORE.recover_reviewed(self.manifest, apply=True)
         self.assertEqual(len(self.identity_rows()), 41)
 
     def test_original_strict_pin_still_refuses_null_candidate(self):
         item = self.manifest["assignments"][0]
-        with mock.patch.object(aggregators, "_resolve_project", return_value=(item["project"], "remote")):
-            with self.assertRaisesRegex(aggregators.ProjectIdentityRecoveryError, "no unique historical identity"):
-                aggregators.pin_project_identity(item["source_path"], item["project"])
+        with mock.patch.object(IDENTITY_STORE, "resolve_project", return_value=(item["project"], "remote")):
+            with self.assertRaisesRegex(project_identity.ProjectIdentityRecoveryError, "no unique historical identity"):
+                IDENTITY_STORE.pin(item["source_path"], item["project"])
         self.assertEqual(self.identity_rows(), [])
 
     def test_cli_launcher_preview_apply_and_refusal(self):

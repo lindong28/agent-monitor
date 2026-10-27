@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import SERVICE_CONTEXT_KEYS, UsageEntry, complete_usage_observation
+from agent_monitor.contracts.usage import SERVICE_CONTEXT_KEYS, UsageEntry, complete_usage_observation
 
 
 # Ported and dependency-stripped from token-tracker src/adapters/claude.py.

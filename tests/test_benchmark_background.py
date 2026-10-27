@@ -61,11 +61,11 @@ import benchmark_background as benchmark
 with tempfile.TemporaryDirectory() as temp:
     root = Path(temp)
     os.environ["HOME"] = temp
-    import aggregators
-    parse = aggregators._parse_usage_file
+    from agent_monitor.ingestion import UsageLoader
+    parse = UsageLoader.parse_usage_file
     def corrupted(*args, **kwargs):
         return [replace(e, output_tokens=0) for e in parse(*args, **kwargs)]
-    with mock.patch.object(aggregators, "_parse_usage_file", side_effect=corrupted):
+    with mock.patch.object(UsageLoader, "parse_usage_file", autospec=True, side_effect=corrupted):
         try:
             benchmark.run_case(root, 10, 1)
         except AssertionError as exc:
@@ -105,6 +105,13 @@ with tempfile.TemporaryDirectory() as temp:
             self.assertEqual(before, benchmark.source_identity())
             p.write_text("x = 2\n")
             self.assertNotEqual(before["sha256"], benchmark.source_identity()["sha256"])
+            package = Path(temp) / "agent_monitor" / "ingestion" / "usage_loader.py"
+            package.parent.mkdir(parents=True)
+            package.write_text("x = 1\n")
+            packaged = benchmark.source_identity()
+            self.assertIn("agent_monitor/ingestion/usage_loader.py", packaged["files"])
+            package.write_text("x = 2\n")
+            self.assertNotEqual(packaged["sha256"], benchmark.source_identity()["sha256"])
 
 
 if __name__ == "__main__":

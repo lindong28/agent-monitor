@@ -31,6 +31,7 @@ class HttpMutationTests(unittest.TestCase):
         root_patch.start()
         self.addCleanup(root_patch.stop)
         self.http = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+        self.http.views.network.runner = mock.Mock(side_effect=AssertionError('unexpected network probe'))
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
         self.thread.start()
         self.addCleanup(self.close)
@@ -64,11 +65,14 @@ class HttpMutationTests(unittest.TestCase):
 
     def test_network_cli_forced_post_and_cached_get_use_actual_http_boundary(self):
         with mock.patch.object(network_report,'_live_server_port',return_value=self.http.server_port), \
-             mock.patch.object(server,'network',return_value={'fixture':'fresh'}) as refresh, \
-             mock.patch.dict(server.ROUTES,{'/api/network':lambda query:{'fixture':'cached'}}):
+             mock.patch.dict(self.http.routes, {'/api/network': mock.Mock(
+                 side_effect=lambda query: {'fixture': 'fresh' if query.get('force') == ['1'] else 'cached'})}):
+            route = self.http.routes['/api/network']
             self.assertEqual(network_report.collect(force=True)[0],{'fixture':'fresh'})
-            refresh.assert_called_once_with({'force':['1']})
+            route.assert_called_once_with({'force':['1']})
             self.assertEqual(network_report.collect(force=False)[0],{'fixture':'cached'})
+            self.assertEqual(route.call_args_list, [mock.call({'force':['1']}), mock.call({})])
+            self.http.views.network.runner.assert_not_called()
 
     def test_restart_and_remove_same_origin_reach_handlers(self):
         def response(handler): handler._send_json({'ok':True})

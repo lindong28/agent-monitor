@@ -162,7 +162,7 @@ class DiagnosticsTests(unittest.TestCase):
                 return response.status, json.loads(response.read())
             finally:
                 conn.close()
-        with mock.patch.object(diagnostics, "monitor", monitor), mock.patch.dict(server.ROUTES, {"/api/fixture": blocked}):
+        with mock.patch.object(diagnostics, "monitor", monitor), mock.patch.dict(httpd.routes, {"/api/fixture": blocked}):
             worker = threading.Thread(target=lambda: request("/api/fixture?credential=never-record"))
             try:
                 worker.start()

@@ -1,7 +1,7 @@
 import unittest
 import hashlib
 
-from aggregators import normalize_remote
+from agent_monitor.ingestion.project_identity import normalize_remote
 from project_alias import (
     AliasProofError,
     ProjectAliasCollisionError,

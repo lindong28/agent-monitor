@@ -7,6 +7,17 @@
   const { window, document } = platform;
   const charts = {};
   window.ttWebCharts = charts;
+  // Shared presentation label used by Overview and Collection diagnostics.
+  function agentLabel(column) {
+    if (column === "claude-code") {
+      return "Claude Code";
+    }
+    if (column === "codex") {
+      return "Codex";
+    }
+    return column || "value";
+  }
+
   // Grouped thousands: a five-digit total without them ($46736.41) has to be
   // counted digit by digit before it can be read as "about 47k".
   function money(value) {
@@ -304,5 +315,5 @@
     Object.values(charts).forEach(chart => chart.destroy());
     Object.keys(charts).forEach(key => delete charts[key]);
   }
-  return { money, moneyPrecise, costCoverageText, costReading, integer, pct, compactNumber, barValueLabels, shortText, chart, seriesColor, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costTableReading, renderChartTable, SERIES_LIMIT, destroyCharts };
+  return { agentLabel, money, moneyPrecise, costCoverageText, costReading, integer, pct, compactNumber, barValueLabels, shortText, chart, seriesColor, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costTableReading, renderChartTable, SERIES_LIMIT, destroyCharts };
 });

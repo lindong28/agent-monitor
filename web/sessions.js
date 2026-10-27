@@ -3,8 +3,17 @@
   if (typeof module === "object" && module.exports) module.exports = factory;
   else (root.AgentMonitorModules ||= {}).sessions = factory;
 })(typeof window === "undefined" ? globalThis : window, function createSessions(dependencies) {
-  const { platform, qs, qsa, params, getRange, setParam, copyText, api, bindShell, moneyPrecise, integer, projectLabel, codexSessionAccountLabel, collectionUrl, renderSyncStatus, waitForSyncTerminal, refreshStatistics, formatDate, dayKey, timeOfDay, escapeHtml, pageScope, watchPageData, replaceCurrentUrl } = dependencies;
+  const { platform, qs, qsa, params, getRange, setParam, copyText, api, bindShell, moneyPrecise, integer, codexSessionAccountLabel, collectionUrl, renderSyncStatus, waitForSyncTerminal, refreshStatistics, formatDate, dayKey, timeOfDay, escapeHtml, pageScope, watchPageData, replaceCurrentUrl } = dependencies;
   const { window, document } = platform;
+  // Project identifiers share a long host-and-owner prefix, so truncating from
+  // the left kept "hub.com/" and dropped the part that tells them apart. Keep
+  // the trailing segments; the full path stays available in the tooltip.
+  function projectLabel(value) {
+    const parts = String(value || "").split("/").filter(Boolean);
+    const tail = parts.slice(-2).join("/");
+    return tail.length > 34 ? tail.slice(0, 33) + "…" : tail;
+  }
+
   // Every session ever recorded arrived as one unbroken table — 2,512 rows and
   // 162,000 pixels on this machine — with no way to narrow it and a header that
   // scrolled out of sight within a screen. Narrowing comes first because the

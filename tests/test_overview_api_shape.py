@@ -1,3 +1,5 @@
+from agent_monitor.views import time_ranges
+from agent_monitor.views import projections
 from component_fixtures import reset_collection
 import contextlib
 import dataclasses
@@ -266,7 +268,7 @@ class OverviewApiShapeTests(unittest.TestCase):
     def test_pivot_endpoint_uses_rollup_not_live_entries(self):
         expected = {"columns": ["value"], "rows": [{"x": "2026-06", "values": {"value": 1.0}}]}
         with (
-            mock.patch("server.load_all_entries", side_effect=AssertionError("pivot should not use live entries")),
+            mock.patch("server.ingestion.load_all_entries", side_effect=AssertionError("pivot should not use live entries")),
             mock.patch("server.rollup.query_pivot", return_value=expected) as query_pivot,
         ):
             payload = server.pivot_endpoint({"range": ["2y"], "x": ["month"], "group": ["project"], "metric": ["cost"]})
@@ -292,10 +294,10 @@ class OverviewApiShapeTests(unittest.TestCase):
         )
 
         with (
-            mock.patch("server.load_all_entries", return_value=[entry]) as load_all_entries,
+            mock.patch("server.ingestion.load_all_entries", return_value=[entry]) as load_all_entries,
             mock.patch("server.rollup.query_pivot", side_effect=AssertionError("sessions must stay live")),
         ):
-            payload = server.sessions_endpoint({"range": ["all"]})
+            payload = server.create_views().sessions.list({"range": ["all"]})
 
         load_all_entries.assert_called_once()
         self.assertEqual(payload[0]["session_id"], "s1")
@@ -319,7 +321,7 @@ class OverviewApiShapeTests(unittest.TestCase):
             agent_id="codex",
         )
 
-        payload = server._entry_json(entry)
+        payload = projections.entry_json(entry)
 
         self.assertEqual(payload["usage_event_count"], 1)
         self.assertNotIn("message_count", payload)
@@ -340,17 +342,17 @@ class OverviewApiShapeTests(unittest.TestCase):
             agent_id="claude-code",
         )
 
-        self.assertTrue(server._session_stats([entry])["estimated"])
+        self.assertTrue(projections.session_stats([entry])["estimated"])
 
     def test_overview_today_and_week_kpis_use_rollup_not_live_entries(self):
         with (
             mock.patch(
-                "server.load_all_entries",
+                "server.ingestion.load_all_entries",
                 side_effect=AssertionError("overview must not use live entries"),
             ),
             mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}) as query_pivot,
         ):
-            payload = server.overview({})
+            payload = server.create_views().overview.read({})
 
         self.assertGreaterEqual(query_pivot.call_count, 8)
         self.assertIsNone(payload["today"]["cost_usd"])
@@ -363,18 +365,18 @@ class OverviewApiShapeTests(unittest.TestCase):
         with (
             mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
         ):
-            payload = server.overview({})
+            payload = server.create_views().overview.read({})
         after = datetime.now().astimezone()
 
         start = datetime.fromisoformat(payload["week"]["window"]["start"])
         end = datetime.fromisoformat(payload["week"]["window"]["end"])
-        self.assertEqual(start, server._start_of_week(before))
+        self.assertEqual(start, time_ranges.start_of_week(before))
         self.assertGreaterEqual(end, before)
         self.assertLessEqual(end, after)
 
     def test_overview_force_query_routes_to_background_sync(self):
         with mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}):
-            server.overview({"force": ["1"]})
+            server.create_views().overview.read({"force": ["1"]})
 
         self.sync_trigger.assert_called_once_with({"force": ["1"]})
 
@@ -421,7 +423,7 @@ class OverviewApiShapeTests(unittest.TestCase):
             mock.patch("server.rollup.history_gap", side_effect=AssertionError("must not read local history gap")),
             mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
         ):
-            payload = server.overview({})
+            payload = server.create_views().overview.read({})
 
         self.assertIsNone(payload["history_gap"])
 
@@ -429,25 +431,25 @@ class OverviewApiShapeTests(unittest.TestCase):
         now = datetime(2026, 6, 13, 17, 30, tzinfo=timezone(timedelta(hours=-7)))
 
         for value, expected_days in (("6m", 180), ("1y", 365), ("2y", 730)):
-            start, end = server._range_window(value, now)
+            start, end = time_ranges.range_window(value, now)
             self.assertEqual(end, now)
             self.assertEqual(start.tzinfo, server.rollup.BUCKET_TIMEZONE)
             self.assertEqual(
                 (now.astimezone(server.rollup.BUCKET_TIMEZONE).date() - start.date()).days + 1,
                 expected_days,
             )
-        self.assertIsNone(server._range_window("all", now))
+        self.assertIsNone(time_ranges.range_window("all", now))
 
     def test_raw_range_today_week_and_month_use_shanghai_calendar_boundaries(self):
         now = datetime(2026, 6, 13, 17, 30, tzinfo=timezone(timedelta(hours=-7)))
 
-        range_start, range_end = server._range_window("7d", now)
+        range_start, range_end = time_ranges.range_window("7d", now)
 
         self.assertEqual(range_start.isoformat(), "2026-06-08T00:00:00+08:00")
         self.assertEqual(range_end, now)
-        self.assertEqual(server._start_of_day(now).isoformat(), "2026-06-14T00:00:00+08:00")
-        self.assertEqual(server._start_of_week(now).isoformat(), "2026-06-08T00:00:00+08:00")
-        self.assertEqual(server._start_of_month(now).isoformat(), "2026-06-01T00:00:00+08:00")
+        self.assertEqual(time_ranges.start_of_day(now).isoformat(), "2026-06-14T00:00:00+08:00")
+        self.assertEqual(time_ranges.start_of_week(now).isoformat(), "2026-06-08T00:00:00+08:00")
+        self.assertEqual(time_ranges.start_of_month(now).isoformat(), "2026-06-01T00:00:00+08:00")
 
     def test_daily_cost_uses_shanghai_buckets_and_exact_30_day_fill(self):
         now = datetime(2026, 6, 13, 17, 30, tzinfo=timezone(timedelta(hours=-7)))
@@ -467,7 +469,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         )
 
         with self.system_timezone("America/Los_Angeles"):
-            rows = server._daily_cost([entry], now)
+            rows = projections.daily_cost([entry], now)
 
         self.assertEqual(len(rows), 30)
         self.assertEqual(rows[0]["date"], "2026-05-16")
@@ -478,18 +480,18 @@ class OverviewApiShapeTests(unittest.TestCase):
         query_window = server.rollup.range_window("7d", now)
 
         with mock.patch("server.rollup.earliest_rollup_date", return_value="2026-06-08"):
-            coverage = server._rollup_coverage(query_window)
+            coverage = server.create_views().overview.coverage(query_window)
 
         self.assertEqual(coverage["range_start"], "2026-06-08")
         self.assertFalse(coverage["partial_before_range"])
 
     def test_auto_time_dim_uses_day_week_month_thresholds(self):
-        self.assertEqual(server._auto_time_dim("7d"), "day")
-        self.assertEqual(server._auto_time_dim("90d"), "day")
-        self.assertEqual(server._auto_time_dim("6m"), "week")
-        self.assertEqual(server._auto_time_dim("1y"), "week")
-        self.assertEqual(server._auto_time_dim("2y"), "month")
-        self.assertEqual(server._auto_time_dim("all"), "month")
+        self.assertEqual(time_ranges.auto_time_dim("7d"), "day")
+        self.assertEqual(time_ranges.auto_time_dim("90d"), "day")
+        self.assertEqual(time_ranges.auto_time_dim("6m"), "week")
+        self.assertEqual(time_ranges.auto_time_dim("1y"), "week")
+        self.assertEqual(time_ranges.auto_time_dim("2y"), "month")
+        self.assertEqual(time_ranges.auto_time_dim("all"), "month")
 
     def test_overview_cost_over_time_reads_rollup_with_auto_granularity(self):
         expected = {
@@ -499,7 +501,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         with (
             mock.patch("server.rollup.query_pivot", return_value=expected) as query_pivot,
         ):
-            payload = server.overview({"range": ["1y"]})
+            payload = server.create_views().overview.read({"range": ["1y"]})
 
         self.assertIs(payload["cost_over_time"], expected)
         self.assertEqual(payload["cost_over_time_granularity"], "week")
@@ -513,8 +515,8 @@ class OverviewApiShapeTests(unittest.TestCase):
             mock.patch("server.rollup.earliest_rollup_date", return_value="2026-04-21"),
             mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
         ):
-            long_payload = server.overview({"range": ["2y"]})
-            short_payload = server.overview({"range": ["7d"]})
+            long_payload = server.create_views().overview.read({"range": ["2y"]})
+            short_payload = server.create_views().overview.read({"range": ["7d"]})
 
         self.assertEqual(long_payload["rollup_coverage"]["earliest_date"], "2026-04-21")
         self.assertTrue(long_payload["rollup_coverage"]["partial_before_range"])

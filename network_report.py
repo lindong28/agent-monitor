@@ -4,10 +4,8 @@
 Data comes from agent-monitor itself rather than from a second `ip-check` call: when the
 server is up the snapshot is pulled from /api/network, so the terminal normally
 serves the cache the page is already serving instead of probing again; when it is
-down the same `server.network()` function runs in-process, so both paths share one
-error taxonomy instead of growing two. The server neither locks nor coalesces
-concurrent cache misses, so this is a shared cache, not a guarantee that the two
-readers see identical bytes.
+down an instance of the same NetworkReport component runs in-process. Both paths
+share the error taxonomy, cache budget and serialized probe behavior.
 
 Scope is deliberately this machine only, matching the page. Nothing here reaches
 the machines in machines.json -- that file governs usage sync, not diagnostics.
@@ -25,9 +23,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from project_paths import PROJECT_ROOT
+from agent_monitor.views.network import NetworkReport
 
 ROOT = PROJECT_ROOT
 STATE_DIR = ROOT / "state"
+LOCAL_REPORT = NetworkReport()
 
 # The server gives ip-check 30s before it times out; we must outlive that so a
 # slow external API surfaces as ip-check's own timeout message rather than as a
@@ -106,10 +106,7 @@ def collect(force=False):
         except (urllib.error.URLError, OSError, ValueError) as exc:
             detour = "agent-monitor 服务在 :%d 但取数失败（%s），已改为本进程直接检测" % (port, exc)
 
-    sys.path.insert(0, str(ROOT))
-    import server
-
-    snapshot = server.network({"force": ["1"]} if force else {})
+    snapshot = LOCAL_REPORT.read()
     return snapshot, detour or "本进程直接运行 ip-check（agent-monitor 服务未运行）"
 
 

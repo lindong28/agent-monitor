@@ -13,27 +13,31 @@ from pathlib import Path
 from unittest import mock
 
 import aggregators
-from aggregators import extract_dim, identify_project, normalize_remote, pivot
+
+from agent_monitor.ingestion import IDENTITY_STORE, project_identity
+from aggregators import extract_dim, pivot
+from agent_monitor.ingestion.project_identity import normalize_remote
+identify_project = IDENTITY_STORE.identify_project
 from parsers import UsageEntry
 
 
 def _project_identity_race_worker(identity_db, project, resolution, ready, start, result):
-    aggregators.PROJECT_IDENTITY_DB = Path(identity_db)
-    original_resolve = aggregators._resolve_project
+    IDENTITY_STORE.path = Path(identity_db)
+    original_resolve = IDENTITY_STORE.resolve_project
 
     def proposed_resolution(_path):
         return project, resolution
 
-    aggregators._resolve_project = proposed_resolution
+    IDENTITY_STORE.resolve_project = proposed_resolution
     try:
         ready.put(project)
         if not start.wait(10):
             raise TimeoutError("parent did not release project identity race")
-        result.put(("ok", aggregators.identify_project("/race/repo", {})))
+        result.put(("ok", IDENTITY_STORE.identify_project("/race/repo", {})))
     except Exception as exc:
         result.put(("error", "%s: %s" % (type(exc).__name__, exc)))
     finally:
-        aggregators._resolve_project = original_resolve
+        IDENTITY_STORE.resolve_project = original_resolve
 
 
 class AggregatorTests(unittest.TestCase):
@@ -109,7 +113,7 @@ class AggregatorTests(unittest.TestCase):
             cache = {}
             identity_db = Path(tmp) / "project-identity.db"
             completed = mock.Mock(returncode=0, stdout="git@github.com:owner/repo.git\n")
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch(
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch(
                 "subprocess.run", return_value=completed
             ):
                 self.assertEqual(identify_project("/tmp/repo", cache), "github.com/owner/repo")
@@ -125,9 +129,9 @@ class AggregatorTests(unittest.TestCase):
         for name, failure in failures.items():
             with self.subTest(failure=name), tempfile.TemporaryDirectory() as tmp:
                 identity_db = Path(tmp) / "project-identity.db"
-                with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db, create=True):
+                with mock.patch.object(IDENTITY_STORE, "path", identity_db, create=True):
                     success = mock.Mock(returncode=0, stdout="git@github.com:owner/repo.git\n", stderr="")
-                    with mock.patch("aggregators.subprocess.run", return_value=success):
+                    with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=success):
                         self.assertEqual(identify_project("/tmp/repo", {}), "github.com/owner/repo")
 
                     patch_args = (
@@ -135,21 +139,21 @@ class AggregatorTests(unittest.TestCase):
                         if isinstance(failure, Exception)
                         else {"return_value": failure}
                     )
-                    with mock.patch("aggregators.subprocess.run", **patch_args):
+                    with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", **patch_args):
                         self.assertEqual(identify_project("/tmp/repo", {}), "github.com/owner/repo")
 
     def test_identify_project_persists_and_warns_on_first_resolution_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             identity_db = Path(tmp) / "project-identity.db"
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db, create=True):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db, create=True):
                 with mock.patch(
-                    "aggregators.subprocess.run",
+                    "agent_monitor.ingestion.project_identity.subprocess.run",
                     side_effect=subprocess.TimeoutExpired(cmd=["git"], timeout=2),
-                ), self.assertLogs("aggregators", level="WARNING"):
+                ), self.assertLogs("agent_monitor.ingestion.project_identity", level="WARNING"):
                     self.assertEqual(identify_project("/tmp/repo", {}), "/tmp/repo")
 
                 success = mock.Mock(returncode=0, stdout="git@github.com:owner/repo.git\n", stderr="")
-                with mock.patch("aggregators.subprocess.run", return_value=success):
+                with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=success):
                     self.assertEqual(identify_project("/tmp/repo", {}), "/tmp/repo")
                 conn = sqlite3.connect(identity_db)
                 try:
@@ -167,11 +171,11 @@ class AggregatorTests(unittest.TestCase):
             source.mkdir()
             identity_db = root / "project-identity.db"
             self.seed_rollup_project(root / "rollup.db", "github.com/owner/repo")
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch(
-                "aggregators.subprocess.run",
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch(
+                "agent_monitor.ingestion.project_identity.subprocess.run",
                 side_effect=subprocess.TimeoutExpired(cmd=["git"], timeout=2),
             ):
-                with self.assertRaises(aggregators.ProjectIdentityUnavailable):
+                with self.assertRaises(project_identity.ProjectIdentityUnavailable):
                     identify_project(str(source), {})
 
     def test_identify_project_allows_existing_new_path_without_remote_amid_unrelated_history(self):
@@ -181,7 +185,7 @@ class AggregatorTests(unittest.TestCase):
             source.mkdir()
             identity_db = root / "project-identity.db"
             self.seed_rollup_project(root / "rollup.db", "github.com/owner/existing")
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db):
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db):
                 self.assertEqual(identify_project(str(source), {}), str(source))
 
     def test_identify_project_blocks_unreconciled_remote_change(self):
@@ -196,10 +200,10 @@ class AggregatorTests(unittest.TestCase):
                 stdout="git@github.com:owner/new-name.git\n",
                 stderr="",
             )
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch(
-                "aggregators.subprocess.run", return_value=changed
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch(
+                "agent_monitor.ingestion.project_identity.subprocess.run", return_value=changed
             ):
-                with self.assertRaises(aggregators.ProjectIdentityUnavailable):
+                with self.assertRaises(project_identity.ProjectIdentityUnavailable):
                     identify_project(str(source), {})
 
     def test_identify_project_bootstraps_existing_raw_path_before_remote(self):
@@ -208,8 +212,8 @@ class AggregatorTests(unittest.TestCase):
             identity_db = root / "project-identity.db"
             self.seed_rollup_project(root / "rollup.db", "/tmp/repo")
             success = mock.Mock(returncode=0, stdout="git@github.com:owner/repo.git\n", stderr="")
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch(
-                "aggregators.subprocess.run", return_value=success
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch(
+                "agent_monitor.ingestion.project_identity.subprocess.run", return_value=success
             ):
                 self.assertEqual(identify_project("/tmp/repo", {}), "/tmp/repo")
 
@@ -229,8 +233,8 @@ class AggregatorTests(unittest.TestCase):
             )
 
             with mock.patch.object(
-                aggregators, "PROJECT_IDENTITY_DB", identity_db
-            ), mock.patch("aggregators.subprocess.run", return_value=success):
+                IDENTITY_STORE, "path", identity_db
+            ), mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=success):
                 self.assertEqual(
                     identify_project("/tmp/repo", {}),
                     "github.com/owner/repo",
@@ -245,13 +249,13 @@ class AggregatorTests(unittest.TestCase):
 
     def test_production_sqlite_connect_sites_match_explicit_census(self):
         expected = [
-            ("aggregators.py", "_stored_project_identity", "project_identity_read"),
-            ("aggregators.py", "_stored_projects", "project_identity_read"),
-            ("aggregators.py", "_list_project_identity_blockers", "project_identity_read"),
-            ("aggregators.py", "_record_project_identity_blocker_locked", "project_identity_write"),
-            ("aggregators.py", "_begin_identity_recovery", "project_identity_write"),
-            ("aggregators.py", "recover_reviewed_project_identities", "reviewed_identity_preview_read_only"),
-            ("aggregators.py", "_store_project_identity", "project_identity_write"),
+            ("agent_monitor/ingestion/project_identity.py", "stored_identity", "project_identity_read"),
+            ("agent_monitor/ingestion/project_identity.py", "stored_projects", "project_identity_read"),
+            ("agent_monitor/ingestion/project_identity.py", "_list_project_identity_blockers", "project_identity_read"),
+            ("agent_monitor/ingestion/project_identity.py", "_record_project_identity_blocker_locked", "project_identity_write"),
+            ("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "project_identity_write"),
+            ("agent_monitor/ingestion/project_identity.py", "recover_reviewed", "reviewed_identity_preview_read_only"),
+            ("agent_monitor/ingestion/project_identity.py", "_store_project_identity", "project_identity_write"),
             ("exporter.py", "_vacuum_into_locked", "locked_read_only_vacuum_snapshot"),
             ("generation.py", "snapshot_stats", "immutable_generation_validation"),
             ("rollup.py", "adopt_bucket_timezone", "explicit_legacy_adoption_write"),
@@ -307,13 +311,13 @@ class AggregatorTests(unittest.TestCase):
         expected_daily_rollup = [
             ("scripts/benchmark_backend.py", "make_snapshot", "isolated_benchmark_fixture"),
             ("scripts/benchmark_backend.py", "make_snapshot", "isolated_benchmark_fixture"),
-            ("aggregators.py", "recover_reviewed_project_identities", "reviewed_identity_preview_read_only"),
-            ("aggregators.py", "recover_reviewed_project_identities", "reviewed_identity_preview_read_only"),
-            ("aggregators.py", "_legacy_project_identity", "rollup_read_chokepoint"),
-            ("aggregators.py", "_legacy_project_identity", "rollup_read_chokepoint"),
-            ("aggregators.py", "_begin_identity_recovery", "recovery_prechecked_attach"),
-            ("aggregators.py", "_begin_identity_recovery", "recovery_prechecked_attach"),
-            ("aggregators.py", "_derive_pin_candidate", "recovery_prechecked_attach"),
+            ("agent_monitor/ingestion/project_identity.py", "recover_reviewed", "reviewed_identity_preview_read_only"),
+            ("agent_monitor/ingestion/project_identity.py", "recover_reviewed", "reviewed_identity_preview_read_only"),
+            ("agent_monitor/ingestion/project_identity.py", "_legacy_project_identity", "rollup_read_chokepoint"),
+            ("agent_monitor/ingestion/project_identity.py", "_legacy_project_identity", "rollup_read_chokepoint"),
+            ("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "recovery_prechecked_attach"),
+            ("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "recovery_prechecked_attach"),
+            ("agent_monitor/ingestion/project_identity.py", "_derive_pin_candidate", "recovery_prechecked_attach"),
             ("generation.py", "snapshot_stats", "immutable_generation_validation"),
             ("generation.py", "snapshot_stats", "immutable_generation_validation"),
             ("generation.py", "snapshot_stats", "immutable_generation_validation"),
@@ -331,12 +335,12 @@ class AggregatorTests(unittest.TestCase):
             ),
         ]
         expected_attach = [
-            ("aggregators.py", "_begin_identity_recovery", "recovery_prechecked_attach")
+            ("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "recovery_prechecked_attach")
         ]
         expected_read_gates = [
-            ("aggregators.py", "recover_reviewed_project_identities"),
-            ("aggregators.py", "_legacy_project_identity"),
-            ("aggregators.py", "_begin_identity_recovery"),
+            ("agent_monitor/ingestion/project_identity.py", "recover_reviewed"),
+            ("agent_monitor/ingestion/project_identity.py", "_legacy_project_identity"),
+            ("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery"),
             ("tests/check_rollup_source_coverage.py", "_read_rows"),
         ]
         dispositions = {
@@ -426,12 +430,12 @@ class AggregatorTests(unittest.TestCase):
         self.assertCountEqual(attach, expected_attach)
         self.assertCountEqual(read_gates, expected_read_gates)
         self.assertLess(
-            max(lines_by_kind[("aggregators.py", "_begin_identity_recovery", "read_gate")]),
-            min(lines_by_kind[("aggregators.py", "_begin_identity_recovery", "attach")]),
+            max(lines_by_kind[("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "read_gate")]),
+            min(lines_by_kind[("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "attach")]),
         )
         self.assertLess(
-            max(lines_by_kind[("aggregators.py", "_legacy_project_identity", "read_gate")]),
-            min(lines_by_kind[("aggregators.py", "_legacy_project_identity", "daily_rollup")]),
+            max(lines_by_kind[("agent_monitor/ingestion/project_identity.py", "_legacy_project_identity", "read_gate")]),
+            min(lines_by_kind[("agent_monitor/ingestion/project_identity.py", "_legacy_project_identity", "daily_rollup")]),
         )
         self.assertLess(
             max(
@@ -506,10 +510,10 @@ class AggregatorTests(unittest.TestCase):
             self.seed_rollup_project(root / "rollup.db", "/tmp/repo")
             self.seed_rollup_project(root / "rollup.db", "github.com/owner/repo")
             success = mock.Mock(returncode=0, stdout="git@github.com:owner/repo.git\n", stderr="")
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch(
-                "aggregators.subprocess.run", return_value=success
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch(
+                "agent_monitor.ingestion.project_identity.subprocess.run", return_value=success
             ):
-                with self.assertRaises(aggregators.ProjectIdentityConflict):
+                with self.assertRaises(project_identity.ProjectIdentityConflict):
                     identify_project("/tmp/repo", {})
 
     def test_pin_project_identity_resolves_only_to_existing_rollup_key(self):
@@ -521,9 +525,9 @@ class AggregatorTests(unittest.TestCase):
             new_project = "github.com/owner/new-name"
             self.seed_recovery_rollup(root / "rollup.db", old_project, 100)
 
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db):
-                aggregators._record_project_identity_blocker(
-                    aggregators.ProjectIdentityUnavailable(
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db):
+                IDENTITY_STORE.record_blocker(
+                    project_identity.ProjectIdentityUnavailable(
                         "remote changed",
                         source_path=source,
                         reason="unreconciled_remote",
@@ -536,28 +540,28 @@ class AggregatorTests(unittest.TestCase):
                     stdout="git@github.com:owner/new-name.git\n",
                     stderr="",
                 )
-                with mock.patch("aggregators.subprocess.run", return_value=current_remote):
-                    with self.assertRaises(aggregators.ProjectIdentityRecoveryError):
-                        aggregators.pin_project_identity(source, "github.com/owner/missing")
+                with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=current_remote):
+                    with self.assertRaises(project_identity.ProjectIdentityRecoveryError):
+                        IDENTITY_STORE.pin(source, "github.com/owner/missing")
 
                 restored_remote = mock.Mock(
                     returncode=0,
                     stdout="git@github.com:owner/old-name.git\n",
                     stderr="",
                 )
-                with mock.patch("aggregators.subprocess.run", return_value=restored_remote):
-                    recovered = aggregators.pin_project_identity(source, old_project)
+                with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=restored_remote):
+                    recovered = IDENTITY_STORE.pin(source, old_project)
                 changed = mock.Mock(
                     returncode=0,
                     stdout="git@github.com:owner/new-name.git\n",
                     stderr="",
                 )
-                with mock.patch("aggregators.subprocess.run", return_value=changed):
+                with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=changed):
                     self.assertEqual(identify_project(source, {}), old_project)
 
                 self.assertEqual(recovered["status"], "resolved_pinned")
-                self.assertEqual(aggregators.list_project_identity_blockers(), [])
-                all_blockers = aggregators.list_project_identity_blockers(status=None)
+                self.assertEqual(IDENTITY_STORE.list_blockers(), [])
+                all_blockers = IDENTITY_STORE.list_blockers(status=None)
                 self.assertEqual(all_blockers[0]["status"], "resolved_pinned")
 
     def test_pin_project_identity_refuses_unrelated_existing_project_and_keeps_blocker_active(self):
@@ -576,11 +580,11 @@ class AggregatorTests(unittest.TestCase):
                 stderr="",
             )
 
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch(
-                "aggregators.subprocess.run", return_value=restored
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch(
+                "agent_monitor.ingestion.project_identity.subprocess.run", return_value=restored
             ):
-                aggregators._record_project_identity_blocker(
-                    aggregators.ProjectIdentityUnavailable(
+                IDENTITY_STORE.record_blocker(
+                    project_identity.ProjectIdentityUnavailable(
                         "remote changed",
                         source_path=source,
                         reason="unreconciled_remote",
@@ -588,11 +592,11 @@ class AggregatorTests(unittest.TestCase):
                         pin_candidate=old_project,
                     )
                 )
-                with self.assertRaises(aggregators.ProjectIdentityRecoveryError):
-                    aggregators.pin_project_identity(source, unrelated_project)
+                with self.assertRaises(project_identity.ProjectIdentityRecoveryError):
+                    IDENTITY_STORE.pin(source, unrelated_project)
 
-                self.assertIsNone(aggregators._stored_project_identity(source))
-                active = aggregators.list_project_identity_blockers()
+                self.assertIsNone(IDENTITY_STORE.stored_identity(source))
+                active = IDENTITY_STORE.list_blockers()
                 self.assertEqual(len(active), 1)
                 self.assertEqual(active[0]["source_path"], source)
                 self.assertEqual(active[0]["status"], "active")
@@ -603,16 +607,16 @@ class AggregatorTests(unittest.TestCase):
                     stdout="git@github.com:owner/new-name.git\n",
                     stderr="",
                 )
-                with mock.patch("aggregators.subprocess.run", return_value=unresolved):
-                    with self.assertRaises(aggregators.ProjectIdentityRecoveryError):
-                        aggregators.pin_project_identity(source, new_project)
-                self.assertIsNone(aggregators._stored_project_identity(source))
+                with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=unresolved):
+                    with self.assertRaises(project_identity.ProjectIdentityRecoveryError):
+                        IDENTITY_STORE.pin(source, new_project)
+                self.assertIsNone(IDENTITY_STORE.stored_identity(source))
                 self.assertEqual(
-                    aggregators.list_project_identity_blockers()[0]["status"],
+                    IDENTITY_STORE.list_blockers()[0]["status"],
                     "active",
                 )
-                with mock.patch("aggregators.subprocess.run", return_value=restored):
-                    recovered = aggregators.pin_project_identity(source, old_project)
+                with mock.patch("agent_monitor.ingestion.project_identity.subprocess.run", return_value=restored):
+                    recovered = IDENTITY_STORE.pin(source, old_project)
                 self.assertEqual(recovered["status"], "resolved_pinned")
 
     def test_legacy_persisted_blocker_without_pin_candidate_stays_active_and_refuses_pin(self):
@@ -650,16 +654,16 @@ class AggregatorTests(unittest.TestCase):
                 stdout="git@github.com:owner/old-name.git\n",
                 stderr="",
             )
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch(
-                "aggregators.subprocess.run", return_value=restored
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch(
+                "agent_monitor.ingestion.project_identity.subprocess.run", return_value=restored
             ):
-                active = aggregators.list_project_identity_blockers()
+                active = IDENTITY_STORE.list_blockers()
                 self.assertIsNone(active[0]["pin_candidate"])
-                with self.assertRaises(aggregators.ProjectIdentityRecoveryError):
-                    aggregators.pin_project_identity(source, old_project)
-                self.assertIsNone(aggregators._stored_project_identity(source))
+                with self.assertRaises(project_identity.ProjectIdentityRecoveryError):
+                    IDENTITY_STORE.pin(source, old_project)
+                self.assertIsNone(IDENTITY_STORE.stored_identity(source))
                 self.assertEqual(
-                    aggregators.list_project_identity_blockers()[0]["status"],
+                    IDENTITY_STORE.list_blockers()[0]["status"],
                     "active",
                 )
 
@@ -694,12 +698,12 @@ class AggregatorTests(unittest.TestCase):
                 check=True,
             )
             with mock.patch.object(
-                aggregators,
-                "PROJECT_IDENTITY_DB",
+                IDENTITY_STORE,
+                "path",
                 cli_root / "state" / "project_identity.db",
             ):
-                aggregators._record_project_identity_blocker(
-                    aggregators.ProjectIdentityUnavailable(
+                IDENTITY_STORE.record_blocker(
+                    project_identity.ProjectIdentityUnavailable(
                         "remote changed",
                         source_path=source,
                         reason="unreconciled_remote",
@@ -792,9 +796,9 @@ class AggregatorTests(unittest.TestCase):
                 ],
                 check=True,
             )
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db):
-                aggregators._record_project_identity_blocker(
-                    aggregators.ProjectIdentityUnavailable(
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db):
+                IDENTITY_STORE.record_blocker(
+                    project_identity.ProjectIdentityUnavailable(
                         "remote changed",
                         source_path=source,
                         reason="unreconciled_remote",
@@ -823,9 +827,9 @@ class AggregatorTests(unittest.TestCase):
             self.assertIn("bucket_timezone", recovered.stderr)
             self.assertIn("explicit rollup adoption", recovered.stderr)
             self.assertIn("identity and blocker state were not changed", recovered.stderr)
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db):
-                self.assertIsNone(aggregators._stored_project_identity(source))
-                blockers = aggregators.list_project_identity_blockers()
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db):
+                self.assertIsNone(IDENTITY_STORE.stored_identity(source))
+                blockers = IDENTITY_STORE.list_blockers()
             self.assertEqual(len(blockers), 1)
             self.assertEqual(blockers[0]["status"], "active")
 

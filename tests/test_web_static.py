@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 def app_source():
-    return "\n".join((ROOT / "web" / name).read_text() for name in ("app.js", "charts.js", "quota.js", "network.js", "sessions.js"))
+    return "\n".join((ROOT / "web" / name).read_text() for name in ("app.js", "charts.js", "quota.js", "network.js", "sessions.js", "collection.js", "overview.js"))
 
 
 class WebStaticTests(unittest.TestCase):
@@ -224,7 +224,16 @@ global.window = {location: {origin: "http://example.test", pathname: "/", search
 global.document = {readyState: "loading", addEventListener() {}};
 const ui = require("./web/app.js")();
 ui.callback = ui.chartMoneyTick;
-assert(fs.readFileSync("web/app.js", "utf8").includes("callback: (value) => chartMoneyTick(value)"), "daily cost chart uses the currency formatter");
+const configs = {};
+const createOverview = require("./web/overview.js");
+createOverview({platform: {window, document}, qs: () => ({}), money: ui.money,
+  integer: ui.integer, chart: (key, id, config) => { configs[key] = config; },
+  chartOptions: ui.chartOptions, dataset: ui.dataset, chartMoneyTick: ui.chartMoneyTick,
+  barValueLabels: ui.barValueLabels, compactNumber: ui.compactNumber,
+  renderQuotaAccounts() {}, renderChartTable() {}, agentLabel: ui.agentLabel,
+}).renderOverview({today: {}, week: {}, range: {}, top_projects_week: [], model_mix_month: [],
+  cost_over_time: {columns: [], rows: []}}, "7d");
+ui.callback = configs.dailyCost.options.scales.y.ticks.callback;
 for (const values of [[0, .001, .002, .003, .004], [0, .000001, .000002, .000003], [0, 10, 20, 30]]) {
   const labels = values.map(ui.callback);
   assert.strictEqual(new Set(labels).size, values.length, `distinct ticks collapsed: ${labels}`);
@@ -1968,11 +1977,24 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn('tbody.setAttribute("aria-busy", state === "loading" ? "true" : "false")', js)
 
     def test_sessions_endpoint_keeps_live_raw_entries_as_its_source(self):
-        server = (ROOT / "server.py").read_text()
-        endpoint = server[server.index("def sessions_endpoint") : server.index("def session_detail")]
-
-        self.assertIn("load_all_entries()", endpoint)
-        self.assertNotIn("rollup.", endpoint)
+        from types import SimpleNamespace
+        from unittest import mock
+        from agent_monitor.contracts.usage import UsageEntry
+        from agent_monitor.views.sessions import SessionsView
+        now = datetime.now(timezone.utc)
+        entry = UsageEntry(now, "raw-session", "message", "request", "fixture-model",
+                           12, 3, 0, 0, 0.01, "fixture-project", "codex")
+        source = SimpleNamespace(load_all_entries=mock.Mock(return_value=[entry]))
+        machines = SimpleNamespace(load_machine_config=lambda: SimpleNamespace(
+            self_machine=SimpleNamespace(name="fixture-machine")))
+        view = SessionsView(mock.Mock(), source, machines=machines,
+                            mode=SimpleNamespace(enabled=lambda: False), clock=lambda: now)
+        with mock.patch("rollup.query_pivot", side_effect=AssertionError("rollup is not the raw session source")):
+            rows = view.list({"range": ["all"]})
+        source.load_all_entries.assert_called_once_with()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["session_id"], "raw-session")
+        self.assertEqual(rows[0]["tokens"], 15)
 
     def test_g2_explore_has_four_single_select_filter_controls(self):
         html = (ROOT / "web" / "explore.html").read_text()
@@ -2106,7 +2128,7 @@ class ClientNavigationPrerequisitesTests(unittest.TestCase):
     """
 
     PAGES = ("index.html", "explore.html", "sessions.html", "network.html")
-    REQUIRED = ("/web/charts.js", "/web/quota.js", "/web/network.js", "/web/sessions.js", "/web/app.js", "/web/pivot.js", "/web/vendor/chart.umd.min.js")
+    REQUIRED = ("/web/charts.js", "/web/quota.js", "/web/network.js", "/web/sessions.js", "/web/collection.js", "/web/overview.js", "/web/app.js", "/web/pivot.js", "/web/vendor/chart.umd.min.js")
 
     def test_every_page_loads_every_route_handler_it_might_have_to_run(self):
         for name in self.PAGES:
@@ -2115,34 +2137,13 @@ class ClientNavigationPrerequisitesTests(unittest.TestCase):
                 with self.subTest(page=name, script=script):
                     self.assertIn(f'<script src="{script}"></script>', html)
 
-    def test_the_route_table_names_only_handlers_those_scripts_define(self):
-        """The other half: a route whose handler nothing defines.
-
-        Pinning the script set is only half the contract — a route added to the
-        table without a matching global fails the same quiet way.
-        """
-        app = app_source()
-        table = app.split("const CLIENT_ROUTES", 1)[1].split("]);", 1)[0]
-        defined = {
-            "initOverview": app,
-            "initSessions": app,
-            "initNetwork": app,
-            "window.AgentMonitorPivot": (ROOT / "web" / "pivot.js").read_text(encoding="utf-8"),
-        }
-        for handler, source in defined.items():
-            if handler in table:
-                with self.subTest(handler=handler):
-                    bare = handler.rsplit(".", 1)[-1]
-                    self.assertTrue(
-                        f"root.{bare} =" in source or f"window.{bare} =" in source
-                        or f"function {bare}(" in source
-                        or f"{bare}," in source,
-                        f"{handler} is routed but not defined by its script",
-                    )
-        # And the table covers exactly the four served paths, so a page that
-        # exists cannot silently fall back to a full reload.
-        for path in ('["/"', '["/explore"', '["/sessions"', '["/network"'):
-            self.assertIn(path, table)
+    def test_route_handlers_execute_through_the_application(self):
+        """Run served routes through normal module imports and navigation."""
+        result = subprocess.run(
+            ["node", "tests/web_routes.cjs"], cwd=ROOT,
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 class SignedOutMachinesReadAsStateNotFailureTests(unittest.TestCase):

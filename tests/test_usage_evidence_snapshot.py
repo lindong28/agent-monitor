@@ -1,3 +1,4 @@
+from agent_monitor.views import projections
 """Transport observed evidence without changing the legacy statistics contract."""
 
 from dataclasses import asdict, replace
@@ -106,7 +107,7 @@ class UsageEvidenceSnapshotTests(unittest.TestCase):
             for quality in ("observed", "incomplete", "unknown"):
                 entry = replace(self.entry, usage_quality=quality, cost_usd=value,
                                 service_context={"speed": "fast"}, cost_provenance=provenance)
-                result = server._entry_json(entry)
+                result = projections.entry_json(entry)
                 self.assertEqual(result["cost_usd"], value)
                 self.assertEqual(result["usage_quality"], quality)
                 self.assertEqual(result["service_context"], {"speed": "fast"})

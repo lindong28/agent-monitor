@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-import aggregators
+from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, project_identity, usage_loader
 import pricing_fetcher
 import rollup
 from parsers import UsageEntry
@@ -30,7 +30,7 @@ class RollupCheckTests(unittest.TestCase):
             initial = [self.entry(now - timedelta(days=age), str((age, project)), project, 100, 1.0)
                        for age in (1, 60) for project in ("healthy", "blocked", "unknown")]
             def loaded(entries, blocked=False):
-                return aggregators.LoadedEntries(
+                return usage_loader.LoadedEntries(
                     entries, history_authoritative_from="2026-01-01",
                     blocked_sources=[{"source_path": "/blocked"}] if blocked else [],
                     history_authoritative_projects={"healthy"} if blocked else None)
@@ -307,8 +307,8 @@ class RollupCheckTests(unittest.TestCase):
 
             with self.production_loader(sessions, identity_db) as get_pricing:
                 rollup.run(db_path=db_path, entries_loader=lambda: historical, now=lambda: now)
-                aggregators._record_project_identity_blocker(
-                    aggregators.ProjectIdentityUnavailable(
+                IDENTITY_STORE.record_blocker(
+                    project_identity.ProjectIdentityUnavailable(
                         "persisted source is unavailable",
                         source_path=str(persisted_source),
                         reason="source_unavailable",
@@ -319,18 +319,18 @@ class RollupCheckTests(unittest.TestCase):
 
                 result = rollup._check_rollup(
                     db_path,
-                    lambda: aggregators.load_all_entries(read_only=True, diagnostic=True),
+                    lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
                 )
 
                 get_pricing.assert_called_with(persist=False)
                 self.assertEqual(self.db_snapshot(identity_db), identity_before)
-                persisted_after = aggregators.list_project_identity_blockers()
+                persisted_after = IDENTITY_STORE.list_blockers()
                 self.assertEqual(
                     [row["source_path"] for row in persisted_after],
                     [str(persisted_source)],
                 )
-                self.assertIsNone(aggregators._stored_project_identity(str(fresh_source)))
+                self.assertIsNone(IDENTITY_STORE.stored_identity(str(fresh_source)))
 
             self.assertEqual(result["sources_blocked"], 2)
             blockers = {item["source_path"]: item for item in result["blocked_sources"]}
@@ -370,8 +370,8 @@ class RollupCheckTests(unittest.TestCase):
 
             with self.production_loader(sessions, identity_db):
                 rollup.run(db_path=db_path, entries_loader=lambda: historical, now=lambda: now)
-                aggregators._record_project_identity_blocker(
-                    aggregators.ProjectIdentityUnavailable(
+                IDENTITY_STORE.record_blocker(
+                    project_identity.ProjectIdentityUnavailable(
                         "source was unavailable",
                         source_path=str(source),
                         reason="source_unavailable",
@@ -382,7 +382,7 @@ class RollupCheckTests(unittest.TestCase):
 
                 result = rollup._check_rollup(
                     db_path,
-                    lambda: aggregators.load_all_entries(read_only=True, diagnostic=True),
+                    lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
                 )
 
@@ -420,7 +420,7 @@ class RollupCheckTests(unittest.TestCase):
 
                 result = rollup._check_rollup(
                     db_path,
-                    lambda: aggregators.load_all_entries(read_only=True, diagnostic=True),
+                    lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
                 )
 
@@ -459,7 +459,7 @@ class RollupCheckTests(unittest.TestCase):
                 )
 
             with self.production_loader(sessions, identity_db), mock.patch.object(
-                aggregators.os,
+                usage_loader.os,
                 "walk",
                 side_effect=walk_with_nested_permission_error,
             ):
@@ -468,7 +468,7 @@ class RollupCheckTests(unittest.TestCase):
 
                 result = rollup._check_rollup(
                     db_path,
-                    lambda: aggregators.load_all_entries(read_only=True, diagnostic=True),
+                    lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
                 )
 
@@ -504,16 +504,16 @@ class RollupCheckTests(unittest.TestCase):
             identity_db = state / "project_identity.db"
 
             with self.production_loader(sessions, identity_db), mock.patch.object(
-                aggregators.codex,
+                usage_loader.codex,
                 "_load_thread_models",
-                wraps=aggregators.codex._load_thread_models,
+                wraps=usage_loader.codex._load_thread_models,
             ) as load_thread_models:
                 rollup.run(db_path=db_path, entries_loader=list, now=lambda: now)
                 before = self.tree_snapshot(root)
 
                 result = rollup._check_rollup(
                     db_path,
-                    lambda: aggregators.load_all_entries(read_only=True, diagnostic=True),
+                    lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
                 )
 
@@ -568,13 +568,13 @@ class RollupCheckTests(unittest.TestCase):
 
                 identity_db = state / "project_identity.db"
                 with self.production_loader(sessions, identity_db), mock.patch.object(
-                    aggregators.codex,
+                    usage_loader.codex,
                     "STATE_DB",
                     str(codex_state),
                 ):
-                    normal = aggregators.load_all_entries(force_reload=True)
+                    normal = USAGE_LOADER.load_all_entries(force_reload=True)
                     before = self.tree_snapshot(root)
-                    diagnostic = aggregators.load_all_entries(
+                    diagnostic = USAGE_LOADER.load_all_entries(
                         read_only=True,
                         diagnostic=True,
                     )
@@ -604,7 +604,7 @@ class RollupCheckTests(unittest.TestCase):
                 with conn:
                     conn.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, model TEXT)")
 
-            real_optional_signature = aggregators.codex._optional_file_signature
+            real_optional_signature = usage_loader.codex._optional_file_signature
             writer_connections = []
 
             def create_wal_after_absence_probe(path):
@@ -623,11 +623,11 @@ class RollupCheckTests(unittest.TestCase):
             source_errors = []
             try:
                 with mock.patch.object(
-                    aggregators.codex,
+                    usage_loader.codex,
                     "_optional_file_signature",
                     side_effect=create_wal_after_absence_probe,
                 ):
-                    models = aggregators.codex._load_thread_models(
+                    models = usage_loader.codex._load_thread_models(
                         codex_state,
                         immutable=True,
                         source_errors=source_errors,
@@ -944,28 +944,28 @@ class RollupCheckTests(unittest.TestCase):
     @staticmethod
     @contextlib.contextmanager
     def production_loader(sessions_dir, identity_db):
-        prior_usage_cache = aggregators._GLOBAL_USAGE_CACHE
-        prior_project_cache = aggregators._PROJECT_CACHE
+        prior_usage_cache = USAGE_LOADER.cache
+        prior_project_cache = IDENTITY_STORE.project_cache
         try:
-            with mock.patch.object(aggregators, "PROJECT_IDENTITY_DB", identity_db), mock.patch.object(
-                aggregators.codex, "SESSIONS_DIR", str(sessions_dir)
+            with mock.patch.object(IDENTITY_STORE, "path", identity_db), mock.patch.object(
+                usage_loader.codex, "SESSIONS_DIR", str(sessions_dir)
             ), mock.patch.object(
-                aggregators.codex, "STATE_DB", str(Path(sessions_dir).parent / "missing-state.sqlite")
+                usage_loader.codex, "STATE_DB", str(Path(sessions_dir).parent / "missing-state.sqlite")
             ), mock.patch.object(
-                aggregators.claude, "_get_claude_dirs", return_value=[]
+                usage_loader.claude, "_get_claude_dirs", return_value=[]
             ), mock.patch.dict(
-                aggregators.os.environ, {"AGENT_MONITOR_EXTRA_JSONL": ""}, clear=False
+                usage_loader.os.environ, {"AGENT_MONITOR_EXTRA_JSONL": ""}, clear=False
             ), mock.patch(
                 "pricing_fetcher.get_pricing", return_value={}
             ) as get_pricing, mock.patch(
                 "pricing_fetcher.calculate_cost", return_value=1.0
             ):
-                aggregators._GLOBAL_USAGE_CACHE = None
-                aggregators._PROJECT_CACHE = {}
+                USAGE_LOADER.cache = None
+                IDENTITY_STORE.project_cache = {}
                 yield get_pricing
         finally:
-            aggregators._GLOBAL_USAGE_CACHE = prior_usage_cache
-            aggregators._PROJECT_CACHE = prior_project_cache
+            USAGE_LOADER.cache = prior_usage_cache
+            IDENTITY_STORE.project_cache = prior_project_cache
 
     @staticmethod
     def init_git_repo(path, remote=None):
