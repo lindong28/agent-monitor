@@ -110,6 +110,21 @@ On Linux, `./agent-monitor open` uses `xdg-open` when a desktop session and that
 
 For runtime observations and backend investigation, see [service diagnostics](operations/services.md) and [backend checks](public-architecture.md#backend-performance-checks).
 
+## Linux sandbox setup
+
+The Electron system-proxy helper requires a working Chromium sandbox even though it opens no browser window. On Linux systems that restrict unprivileged user namespaces, the downloaded helper may abort because its bundled `chrome-sandbox` is not a root-owned setuid executable. The installer reports this as `runtime_protocol_failed`; do not treat it as a provider login failure.
+
+If Google Chrome is already installed by your system administrator, Chromium supports using its existing sandbox helper. Confirm that `/opt/google/chrome/chrome-sandbox` is root-owned, executable and setuid before selecting it:
+
+```bash
+stat -c '%U %a %n' /opt/google/chrome/chrome-sandbox
+export CHROME_DEVEL_SANDBOX=/opt/google/chrome/chrome-sandbox
+./install.sh --no-services
+AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
+```
+
+The expected owner and mode are `root 4755`. Keep this environment variable in the environment that starts agent-monitor. If the helper is absent or has different ownership or permissions, ask the machine administrator to configure a supported sandbox using [Chromium's Linux guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md). The installer does not elevate privileges or configure host security policy. Do not disable sandboxing to make installation pass. GitHub's Linux CI selects the preinstalled Chrome helper and checks its ownership and setuid bit before installation.
+
 ## Python runtime rebuild
 
 From the primary clean checkout at live `origin/main`, run `./agent-monitor service rebuild-runtime --python /absolute/path/to/python3`. The selected interpreter must be outside this checkout's `.venv` and at least Python 3.10. If the old interpreter cannot run the CLI, invoke `/absolute/path/to/python3 runtime_rebuild.py --python /absolute/path/to/python3` directly. `--expect FULL_SHA` pins the published release.

@@ -32,6 +32,15 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+      - name: Use the runner-provided Linux sandbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sandbox=/opt/google/chrome/chrome-sandbox
+          test -x "$sandbox"
+          test -u "$sandbox"
+          test "$(stat -c '%u' "$sandbox")" = 0
+          echo "CHROME_DEVEL_SANDBOX=$sandbox" >> "$GITHUB_ENV"
       - name: Install in an isolated HOME
         shell: bash
         run: |
@@ -55,7 +64,7 @@ jobs:
           from pathlib import Path
           from proxy_runtime.install import executable
           with tempfile.TemporaryDirectory() as profile, tempfile.TemporaryFile() as errors:
-              env = {key: os.environ[key] for key in ('PATH', 'HOME', 'LD_LIBRARY_PATH') if key in os.environ}
+              env = {key: os.environ[key] for key in ('PATH', 'HOME', 'LD_LIBRARY_PATH', 'CHROME_DEVEL_SANDBOX') if key in os.environ}
               env['AGENT_MONITOR_PROXY_DATA'] = profile
               child = subprocess.Popen([str(executable()), '--ozone-platform=headless', '--disable-gpu',
                   str(Path('proxy_runtime/main.cjs').resolve())], stdin=subprocess.PIPE,

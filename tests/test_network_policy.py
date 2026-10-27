@@ -76,9 +76,11 @@ class RuntimeConsumerTests(unittest.TestCase):
         self.addCleanup(source.shutdown)
         network_policy.close()
         self.addCleanup(network_policy.close)
+        sandbox_env = {key: os.environ[key] for key in ("CHROME_DEVEL_SANDBOX",) if key in os.environ}
         with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {
             "HOME": home, "PATH": "/usr/bin:/bin", "NO_PROXY": "*",
             "HTTPS_PROXY": "http://127.0.0.1:1",
+            **sandbox_env,
         }, clear=True):
             for host in ("127.0.0.1", "localhost"):
                 url = f"http://{host}:{source.server_port}/fixture"

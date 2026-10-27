@@ -38,7 +38,7 @@ The prompt can be used before cloning. The repository's instructions contain the
 ## Requirements
 
 - Python 3.10 or newer with `venv` and `pip`, Git, curl and `nc` (netcat).
-- macOS or Linux on x86-64 or ARM64. macOS supports the optional LaunchAgents. Linux needs the shared libraries required by Electron; the installer reports missing libraries. Windows is not supported by the current lifecycle scripts.
+- macOS or Linux on x86-64 or ARM64. macOS supports the optional LaunchAgents. Linux needs Electron's shared libraries and a usable Chromium sandbox; see [Linux sandbox setup](docs/public-usage.md#linux-sandbox-setup). The installer reports missing libraries. Windows is not supported by the current lifecycle scripts.
 - Internet access during installation for Python packages, Chart.js, IBM Plex fonts and the pinned Electron system-proxy runtime. Downloads go to this checkout's `.venv`, `web/vendor` and `.runtime`.
 - Your own Claude Code/Codex logs for real usage. Provider CLIs, logins and subscription access are optional for account/quota actions. SSH and rsync are optional for remote machines.
 
