@@ -190,6 +190,10 @@ def _run(command, root, *, timeout=INSTALL_TIMEOUT):
             os.killpg(child.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            # Darwin can report EPERM for a group containing only zombies.
+            # Do not infer termination: require ESRCH in the bounded wait below.
+            pass
         child.wait(timeout=5)
         deadline = time.monotonic() + 5
         while True:
@@ -197,6 +201,8 @@ def _run(command, root, *, timeout=INSTALL_TIMEOUT):
                 os.killpg(child.pid, 0)
             except ProcessLookupError:
                 break
+            except PermissionError:
+                pass  # Still unverified; a live inaccessible group must fail.
             if time.monotonic() >= deadline:
                 raise GuardError('Installation termination is unverified: its process group remains. '
                                  'Inspect the operation before retrying; do not remove deployment.lock.') from None

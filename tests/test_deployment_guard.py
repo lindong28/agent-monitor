@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import deployment_guard as guard
 
@@ -178,6 +179,32 @@ class DeploymentGuardTests(unittest.TestCase):
         result = self.run_guard('run', '--', sys.executable, '-c', code)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.run_guard('run', '--', sys.executable, '-c', 'pass').returncode, 0)
+
+    def test_group_permission_error_waits_for_confirmed_disappearance(self):
+        child = mock.Mock(pid=12345)
+        timeout = subprocess.TimeoutExpired('fixture', .3)
+        child.wait.side_effect = [timeout, 0, 0]
+        with mock.patch.object(guard.subprocess, 'Popen', return_value=child), \
+                mock.patch.object(guard.os, 'killpg', side_effect=[
+                    None, PermissionError(), PermissionError(), ProcessLookupError(),
+                ]) as killpg, mock.patch.object(guard.time, 'sleep'):
+            with self.assertRaises(subprocess.TimeoutExpired) as caught:
+                guard._run(['fixture'], self.root, timeout=.3)
+        self.assertIs(caught.exception, timeout)
+        self.assertEqual(killpg.call_args_list, [
+            mock.call(12345, signal.SIGTERM), mock.call(12345, signal.SIGKILL),
+            mock.call(12345, 0), mock.call(12345, 0),
+        ])
+
+    def test_persistent_group_permission_error_does_not_confirm_termination(self):
+        child = mock.Mock(pid=12345)
+        child.wait.side_effect = [subprocess.TimeoutExpired('fixture', .3), 0, 0]
+        with mock.patch.object(guard.subprocess, 'Popen', return_value=child), \
+                mock.patch.object(guard.os, 'killpg', side_effect=[
+                    None, PermissionError(), PermissionError(),
+                ]), mock.patch.object(guard.time, 'monotonic', side_effect=[0, 6]):
+            with self.assertRaisesRegex(guard.GuardError, 'termination is unverified'):
+                guard._run(['fixture'], self.root, timeout=.3)
 
     def test_timeout_reaps_group_even_when_leader_exits_first(self):
         for resistant in (False, True):
