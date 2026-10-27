@@ -59,7 +59,7 @@ class UsageEvidenceSnapshotTests(unittest.TestCase):
         entries.append(replace(self.entry, agent_id="codex", message_id="codex"))
         path = self.root / "current.db"
         result = snapshots.write_snapshot(path, entries)
-        self.assertEqual(result["version"], 4)
+        self.assertEqual(result["version"], 5)
         self.assertEqual(result["usage_quality_counts"], {"incomplete": 1, "observed": 1, "unknown": 1})
         self.assertEqual(result["usage_entries"], entries)
         self.assertTrue(result["scan_complete"])
