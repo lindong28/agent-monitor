@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class HttpMutationTests(unittest.TestCase):
     def setUp(self):
+        dns = mock.patch.object(server.socket, 'getfqdn', return_value='fixture.example')
+        dns.start()
+        self.addCleanup(dns.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)

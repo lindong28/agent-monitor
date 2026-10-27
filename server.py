@@ -19,7 +19,8 @@ from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from dataclasses import replace
 from project_alias import canonical_project
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as _ThreadingHTTPServer
+from socketserver import TCPServer
 from pathlib import Path
 import codex_accounts
 import network_policy
@@ -665,6 +666,14 @@ ROUTES = {
 }
 
 
+class ThreadingHTTPServer(_ThreadingHTTPServer):
+    def server_bind(self):
+        # No CGI consumer needs a reverse-resolved server_name. Bind/listen
+        # must still work when the host's reverse DNS service is unavailable.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 30
@@ -764,13 +773,16 @@ class Handler(BaseHTTPRequestHandler):
             hostname = urlparse("//" + host).hostname
         except ValueError:
             hostname = None
-        allowed = {"localhost", socket.gethostname().lower(), socket.getfqdn().lower()}
-        allowed.update(name.split(".")[0] for name in tuple(allowed))
         try:
             ipaddress.ip_address(hostname or "")
             valid_host = True
         except ValueError:
+            allowed = {"localhost", socket.gethostname().lower()}
+            allowed.update(name.split(".")[0] for name in tuple(allowed))
             valid_host = (hostname or "").lower() in allowed
+            if not valid_host:
+                fqdn = socket.getfqdn().lower()
+                valid_host = (hostname or "").lower() in {fqdn, fqdn.split(".")[0]}
         origin = self.headers.get("Origin")
         if (not valid_host or self.headers.get("X-Agent-Monitor") != header
                 or self.headers.get("Sec-Fetch-Site") == "cross-site"

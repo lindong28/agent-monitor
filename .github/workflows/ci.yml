@@ -65,7 +65,7 @@ jobs:
             AGENT_MONITOR_PYTHON="$(command -v python)" ./install.sh --no-services
           .venv/bin/python -m pip install -r requirements-dev.txt
       - name: Run Python and JavaScript regression tests
-        run: .venv/bin/python -m unittest discover -f -s tests
+        run: .venv/bin/python -m unittest discover -s tests
       - name: Diagnose Linux resolver startup after failure
         if: failure() && runner.os == 'Linux'
         timeout-minutes: 1

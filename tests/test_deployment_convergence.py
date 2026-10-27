@@ -198,6 +198,10 @@ class ShellLifecycleTests(unittest.TestCase):
                                    ('rollup_service.py', 'uninstall')):
                 result = subprocess.run([sys.executable, str(self.root / script), action], env=self.env,
                                         capture_output=True, text=True, timeout=10)
+                if script == 'rollup_service.py' and sys.platform != 'darwin':
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('no service changed', result.stdout + result.stderr)
+                    continue
                 self.assertNotEqual(result.returncode, 0, script + action)
                 self.assertIn('holds state/deployment.lock', result.stderr)
             (self.root / 'hub.py').write_text("print('standalone')\n")

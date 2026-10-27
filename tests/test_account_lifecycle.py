@@ -64,9 +64,6 @@ if sys.argv[1] == 'exec':
 else:
     server._capture_startup_machine_config = lambda: None
     server.hub.is_hub = lambda: False
-    # This fixture tests process shutdown, not the host's reverse DNS service.
-    import socket
-    socket.getfqdn = lambda host: host
     original_server = server.ThreadingHTTPServer
     class ReadyServer(original_server):
         def serve_forever(self, *args, **kwargs):

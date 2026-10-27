@@ -8,6 +8,8 @@ agent-monitor is an independent Python service with a static JavaScript dashboar
 
 `server.py` exposes usage, session, quota, collection and network routes. `aggregators.py`, `session_cache.py` and `conversation_cache.py` prepare the corresponding views. `web/` renders them. Codex native subagents can be grouped with their main conversation using explicit ancestry; unresolved ancestry is not guessed. Date boundaries use Asia/Shanghai.
 
+HTTP binding does not perform reverse DNS. Browser action admission accepts the existing IP and local-hostname cases without reverse DNS; other hostname aliases still use the host's FQDN lookup. Origin, action-header and cross-site checks remain required. A slow resolver can still delay requests using those other aliases.
+
 `asset_delivery.py` binds static resource URLs to the Web tree's path-and-content signature, including a symlinked vendor directory. HTML remains uncached; matching versioned resources can be reused in the browser without a validation round trip. Unversioned or obsolete URLs retain conditional validation. Dynamic account modules carry the document's version, and the existing health watcher reloads a document when its Web signature changes. Text responses and aggregate JSON negotiate gzip when it reduces bytes; API results remain `no-store`. The bounded in-process byte cache invalidates on file identity, size or timestamp changes; it does not persist usage data. See the [delivery decision](adr/20261026-8d31-dashboard-delivery.md).
 
 ## Multiple machines
