@@ -32,14 +32,23 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
-      - name: Use the runner-provided Linux sandbox
+      - name: Prepare the pinned Linux sandbox on this disposable runner
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sandbox=/opt/google/chrome/chrome-sandbox
+          test ! -e .runtime
+          runtime="$(python -c 'from proxy_runtime.install import install, runtime_directory; install(); print(runtime_directory())')"
+          sudo install -d -o root -g root -m 0755 /agent-monitor-ci
+          sandbox=/agent-monitor-ci/chrome-sandbox
+          sudo install -o root -g root -m 4755 "$runtime/chrome-sandbox" "$sandbox"
           test -x "$sandbox"
           test -u "$sandbox"
-          test "$(stat -c '%u' "$sandbox")" = 0
+          test "$(stat -c '%u:%a' / /agent-monitor-ci | sort -u)" = 0:755
+          test "$(stat -c '%u:%a' "$sandbox")" = 0:4755
+          mount_options="$(findmnt -n -o OPTIONS -T "$sandbox")"
+          case ",$mount_options," in
+            *,nosuid,*|*,noexec,*) echo 'CI sandbox needs an executable, suid-enabled mount.' >&2; exit 1 ;;
+          esac
           echo "CHROME_DEVEL_SANDBOX=$sandbox" >> "$GITHUB_ENV"
       - name: Install in an isolated HOME
         shell: bash
@@ -53,7 +62,7 @@ jobs:
             AGENT_MONITOR_PYTHON="$(command -v python)" ./install.sh --no-services
           .venv/bin/python -m pip install -r requirements-dev.txt
       - name: Run Python and JavaScript regression tests
-        run: .venv/bin/python -m unittest discover -s tests
+        run: .venv/bin/python -m unittest discover -f -s tests
       - name: Diagnose Linux resolver startup after failure
         if: failure() && runner.os == 'Linux'
         timeout-minutes: 1
@@ -63,6 +72,9 @@ jobs:
           import json, os, signal, subprocess, tempfile
           from pathlib import Path
           from proxy_runtime.install import executable
+          if not executable().is_file():
+              print('Resolver was not installed; inspect the preceding preparation step.')
+              raise SystemExit(0)
           with tempfile.TemporaryDirectory() as profile, tempfile.TemporaryFile() as errors:
               env = {key: os.environ[key] for key in ('PATH', 'HOME', 'LD_LIBRARY_PATH', 'CHROME_DEVEL_SANDBOX') if key in os.environ}
               env['AGENT_MONITOR_PROXY_DATA'] = profile

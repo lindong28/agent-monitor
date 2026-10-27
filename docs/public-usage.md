@@ -123,7 +123,7 @@ export CHROME_DEVEL_SANDBOX=/opt/google/chrome/chrome-sandbox
 AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 ```
 
-The expected owner and mode are `root 4755`. Keep this environment variable in the environment that starts agent-monitor. If the helper is absent or has different ownership or permissions, ask the machine administrator to configure a supported sandbox using [Chromium's Linux guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md). The installer does not elevate privileges or configure host security policy. Do not disable sandboxing to make installation pass. GitHub's Linux CI selects the preinstalled Chrome helper and checks its ownership and setuid bit before installation.
+The expected owner and mode are `root 4755`; its parent directories must also be protected from unprivileged writes and its mount must permit execution and setuid. Keep this environment variable in the environment that starts agent-monitor. If the helper is absent or has different ownership or permissions, ask the machine administrator to configure a supported sandbox using [Chromium's Linux guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md). The installer does not elevate privileges or configure host security policy. Do not disable sandboxing to make installation pass. On disposable GitHub Linux runners, CI separately prepares a protected copy of the pinned Electron sandbox before running the normal installer; see the [CI sandbox decision](adr/20261027-b648-ci-linux-sandbox.md) and its [mount correction](adr/20261027-c291-ci-sandbox-mount.md).
 
 ## Python runtime rebuild
 
