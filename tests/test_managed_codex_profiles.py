@@ -102,6 +102,25 @@ class ManagedCodexTests(unittest.TestCase):
         self.assertEqual(limits["codex"]["managed_accounts"][0]["five_hour_pct"], 21)
         self.assertTrue(limits["codex"]["signed_out"])
 
+    def test_default_and_managed_readings_share_one_machine_membership(self):
+        older = {"account_id": "shared", "account_label": "member@example.test",
+                 "updated_at": "2026-10-01T00:00:00Z", "five_hour_pct": 21}
+        newer = {**older, "account_profile": "work", "five_hour_pct": 35,
+                 "updated_at": "2026-10-02T00:00:00Z"}
+        for hosts in (("first",), ("first", "second")):
+            with self.subTest(hosts=hosts):
+                admission = SimpleNamespace(admitted=[SimpleNamespace(host=host, meta={"rate_limits": {
+                    "codex": {**older, "managed_accounts": [newer]}}}) for host in hosts])
+                before = json.dumps([current.meta for current in admission.admitted])
+                with mock.patch("server.hub.enabled", return_value=False), \
+                     mock.patch("server._self_machine_name", return_value="first"):
+                    rows = server._live_rate_limits_from_admission(admission)["codex"]["accounts"]
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["machines"], list(hosts))
+                self.assertEqual(rows[0]["five_hour_used_pct"], 35)
+                self.assertEqual(rows[0]["reading_from"], "first")
+                self.assertEqual(json.dumps([current.meta for current in admission.admitted]), before)
+
     def test_version_four_snapshot_remains_readable(self):
         self.session(self.default, "default", 3, 5)
         entries, _ = self.collect()
@@ -152,7 +171,10 @@ eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','win
 const ui=window.AgentMonitor;
 assert.equal(ui.codexSessionAccountLabel({name:'alpha',email:'alpha@example.test'}),'账号：alpha · alpha@example.test');
 assert.equal(ui.codexSessionAccountLabel(null),'账号归属未记录或冲突');
-assert.equal(ui.quotaAccountName({account_label:'beta@example.test',account_profile:'beta'}),'beta · beta@example.test（日志观测）');
+for (const profile of [undefined, 'work-profile']) {
+  assert.equal(ui.quotaAccountName({account_label:'beta@example.test',account_profile:profile}),'beta@example.test');
+}
+assert.equal(ui.quotaAccountName({account_id:'abcdefghijk',account_profile:'work-profile'}),'账号 abcdefgh');
 '''
         result = subprocess.run(["node", "-e", script], cwd=Path(__file__).parents[1], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -2166,7 +2166,8 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
                     "failures": [],
                 }
             else:
-                bucket["machines"].append(current.host)
+                if current.host not in bucket["machines"]:
+                    bucket["machines"].append(current.host)
                 old_observation = quota_applicability.observation(bucket["latest"][1].get("quota_observation"))
                 new_observation = quota_applicability.observation(block.get("quota_observation"))
                 old_trusted = bool(provider == "claude" and old_observation and old_observation["observed_at"])

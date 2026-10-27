@@ -942,7 +942,7 @@
   function quotaMatches(provider, account) {
     if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return false;
     const terms = quotaFilter.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const text = [account.account_label, account.account_id, quotaAccountName(account),
+    const text = [account.account_label, account.account_id, account.account_profile, quotaAccountName(account),
       account.account_plan, quotaPlanLabel(account.account_plan),
       account.reading_plan, account.credential_plan, ...(account.machines || [])]
       .filter(Boolean).join(" ").toLowerCase();
@@ -1699,7 +1699,7 @@
 
   function quotaMachinesCell(account, display = account) {
     const cell = document.createElement("td");
-    const names = account.machines || [];
+    const names = [...new Set(account.machines || [])];
     const source = display.quota_source === "account_action" ? null : display.reading_from;
     const remembered = quotaPresence(account) === "remembered";
     if (!names.length) cell.textContent = "—";
@@ -1751,9 +1751,16 @@
     const observationTime = account.updated_at || account.last_observation?.observed_at;
     const knownTime = typeof observationTime === "string" && observationTime && Number.isFinite(Date.parse(observationTime));
     exact.textContent = knownTime ? `${historicalOnly ? "历史观测" : "观测时间"}：${formatDate(observationTime)}` : "未取得观测时间";
-    const sourceLabel = {codex_session: "会话日志", active_query: "主动查询", claude_statusline: "状态栏"}[account.quota_observation?.source];
+    const sourceLabel = account.quota_source === "account_action" ? "账号操作中的配额查询"
+      : {codex_session: "会话日志", active_query: "主动查询", claude_statusline: "状态栏"}[account.quota_observation?.source];
     exact.textContent += `；读数来源：${sourceLabel || "旧记录未注明"}`;
     details.appendChild(exact);
+    if (account.account_profile) {
+      const profile = document.createElement("span");
+      profile.className = "quota-history-note";
+      profile.textContent = `配置名：${account.account_profile}`;
+      details.appendChild(profile);
+    }
     if (account.last_observation) {
       const history = account.last_observation;
       const retained = document.createElement("span");
@@ -1842,7 +1849,7 @@
 
   function quotaAccountName(account) {
     if (typeof account.account_label === "string" && account.account_label) {
-      return account.account_profile ? `${account.account_profile} · ${account.account_label}（日志观测）` : account.account_label;
+      return account.account_label;
     }
     if (typeof account.account_id === "string" && account.account_id) {
       return `账号 ${account.account_id.slice(0, 8)}`;

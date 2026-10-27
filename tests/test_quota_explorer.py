@@ -143,6 +143,8 @@ Date.now=()=>fixedNow;
 for (const [machines, source, expected] of [
   [['alpha'], 'alpha', 'alpha'],
   [['alpha','beta'], 'beta', 'alpha · beta（配额来源）'],
+  [['alpha','alpha','beta'], 'beta', 'alpha · beta（配额来源）'],
+  [['alpha','alpha'], 'alpha', 'alpha'],
   [['alpha'], 'beta', 'alpha · 配额来源：beta'],
   [[], 'beta', '— · 配额来源：beta'],
   [['alpha'], null, 'alpha'],
@@ -195,10 +197,26 @@ const original=JSON.stringify(data);
 const rows=()=>table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId);
 const count=()=>nodes['#quota-match-count'].textContent;
 const search=(s)=>{nodes['#quota-search'].value=s;nodes['#quota-search'].listeners.input();};
+// Identity stays concise while profile search and reading provenance remain available.
+for (const [source, label] of [['codex_session','会话日志'], ['active_query','主动查询'], [null,'旧记录未注明']]) {
+  const sample={...account('member'),account_profile:'work-profile',quota_observation:{source}};
+  const before=JSON.stringify(sample);
+  ui.renderQuotaAccounts({codex:{accounts:[sample]}});
+  assert.equal(rows()[0].cells[0].textContent,'member@example.test');
+  assert(rows()[0].cells[6].textContent.includes('读数来源：'+label));
+  assert(rows()[0].cells[6].textContent.includes('配置名：work-profile'));
+  search('work-profile');
+  assert.equal(rows().length,1,'profile remains searchable independently of account label');
+  search('absent-profile');
+  assert.equal(rows().length,0);
+  search('');
+  assert.equal(JSON.stringify(sample),before);
+}
 // A completed Web action must replace an older reading for this member only.
 const past=account('shared','known','remembered');
 past.machines=[]; past.reading_from=null;
 past.account_label='one@example.test'; past.seven_day_used_pct=91; past.seven_day_resets_at=1;
+past.quota_observation={source:'codex_session'};
 const other={...past,account_label:'two@example.test'};
 const otherWorkspace={...past,account_id:'other-workspace'};
 const projection={codex:{accounts:[past,other,otherWorkspace],refresh_errors:[{machine:'alpha',reason:'fixture collection failure'}]}};
@@ -218,6 +236,8 @@ assert(!rows()[0].cells[0].textContent.includes('最后观测值，不代表当�
 assert(!rows()[0].cells[2].textContent.includes('机器记录'));
 const observationDetails=descendants(rows()[0].cells[6]).find(n=>n.tagName==='DETAILS');
 assert(observationDetails.textContent.includes('来自账号操作中的配额查询'));
+assert(observationDetails.textContent.includes('读数来源：账号操作中的配额查询'));
+assert(!observationDetails.textContent.includes('读数来源：会话日志'));
 assert(observationDetails.textContent.includes('套餐'));
 assert.equal(rows()[0].cells[5].textContent,'—');
 assert(observationDetails.textContent.includes('当前未在已纳入的机器上使用'));
