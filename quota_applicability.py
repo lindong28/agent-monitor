@@ -33,7 +33,10 @@ def observation(value):
     if not isinstance(value, dict) or value.get("source") not in SOURCES:
         return None
     observed = value.get("observed_at")
-    return {"source": value["source"], "observed_at": observed if timestamp(observed) is not None else None}
+    result = {"source": value["source"], "observed_at": observed if timestamp(observed) is not None else None}
+    if value["source"] == "codex_session" and isinstance(value.get("session_id"), str) and value["session_id"]:
+        result["session_id"] = value["session_id"]
+    return result
 
 
 def confirmation(value):

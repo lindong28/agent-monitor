@@ -51,7 +51,7 @@ class UsageArchive:
         return entries, row[0] if row else None
 
     def collect(self, paths, parser, signature_for, source_errors, bucket_timezone,
-                force_reload=False, now=None, session_metadata=()):
+                force_reload=False, now=None, session_metadata=(), session_metadata_transform=None):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(self.path, timeout=30)) as conn:
             with conn:
@@ -106,6 +106,8 @@ class UsageArchive:
                             (entry.dedup_key, json.dumps(_encode(entry))),
                         )
                 self.session_metadata = merge_metadata(self._read_sessions(conn), session_metadata)
+                if session_metadata_transform is not None:
+                    self.session_metadata = session_metadata_transform(self.session_metadata)
                 conn.executemany("INSERT INTO usage_sessions VALUES (?, ?, ?) ON CONFLICT(agent_id, session_id) DO UPDATE SET metadata=excluded.metadata WHERE metadata != excluded.metadata",
                                  [(row["agent_id"], row["session_id"], json.dumps(row, sort_keys=True)) for row in self.session_metadata])
                 result = ([retained_by_key[key] for key in sorted(retained_by_key)], authority)

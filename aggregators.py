@@ -842,6 +842,7 @@ def _parser_fingerprint():
 
 
 def _load_archived_entries(archive, source_errors, force_reload, read_only):
+    links = codex_profiles.session_links(source_errors=source_errors)
     paths = _usage_paths(source_errors=source_errors)
     fingerprint = _parser_fingerprint()
     contexts = {}
@@ -859,7 +860,7 @@ def _load_archived_entries(archive, source_errors, force_reload, read_only):
             contexts[path] = (models, history, signature, digest)
         metadata = codex.session_metadata(history, models)
         for row in metadata:
-            row["account"] = account
+            row["account"] = None if links.excludes(row["session_id"]) else account
         sessions.extend(metadata)
 
     def signature_for(path):
@@ -889,11 +890,12 @@ def _load_archived_entries(archive, source_errors, force_reload, read_only):
 
         retained, authority = archive.read()
         from session_identity import merge_metadata
-        archive.session_metadata = merge_metadata(archive.session_metadata, sessions)
+        archive.session_metadata = links.apply(merge_metadata(archive.session_metadata, sessions))
         entries = MtimeCache(lambda: paths, parse).load(source_errors=source_errors)
         return _deduped(list(entries) + retained, source_errors), authority
     return archive.collect(paths, parse, signature_for, source_errors, USAGE_TIMEZONE,
-                           force_reload=force_reload, session_metadata=sessions)
+                           force_reload=force_reload, session_metadata=sessions,
+                           session_metadata_transform=links.apply)
 
 
 def _codex_source_context(paths, state_db, source_errors):

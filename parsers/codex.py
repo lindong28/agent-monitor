@@ -526,19 +526,23 @@ def _record_source_error(source_errors, path, line_number, exc):
     source_errors.append({"path": str(path), "stage": "parse", "error": detail})
 
 
-def load_rate_limits(sessions_dir=None, state_db=None):
+def load_rate_limits(sessions_dir=None, state_db=None, *, session_links=None, source_errors=None):
+    from . import codex_profiles
+    links = session_links if session_links is not None else codex_profiles.session_links(source_errors=source_errors)
+    if links.unavailable:
+        return None
     sessions_path = Path(sessions_dir or SESSIONS_DIR)
     if not sessions_path.is_dir():
         return None
 
     state_path = state_db or STATE_DB
     jsonl_files = sorted(sessions_path.rglob("*.jsonl"))
-    signature = _files_signature(jsonl_files, state_path)
+    signature = (_files_signature(jsonl_files, state_path), links.signature)
     if signature == _RATE_LIMITS_CACHE["signature"]:
         return _RATE_LIMITS_CACHE["value"]
 
     models = _load_thread_models(state_path)
-    candidates = filter(None, (_extract_latest_rate_limits(path, models) for path in jsonl_files))
+    candidates = filter(None, (_extract_latest_rate_limits(path, models, session_links=links) for path in jsonl_files))
     latest = max(candidates, key=lambda limits: _timestamp_key(limits.updated_at), default=None)
     _RATE_LIMITS_CACHE.update(signature=signature, value=latest)
     return latest
@@ -551,6 +555,10 @@ def load_session_rate_limits(session_id, sessions_dir=None):
             raise ValueError
     except (ValueError, AttributeError, TypeError):
         raise ValueError("use the full canonical session UUID; session not queried") from None
+    from . import codex_profiles
+    links = codex_profiles.session_links()
+    if links.excludes(session_id):
+        raise ValueError("session account is mixed or unverified; stored quota excluded")
     sessions_path = Path(SESSIONS_DIR if sessions_dir is None else sessions_dir)
     if not sessions_path.is_dir():
         raise ValueError("session directory unavailable; session not queried")
@@ -565,7 +573,7 @@ def load_session_rate_limits(session_id, sessions_dir=None):
     path = paths[0]
     if _read_session_id(path) != session_id:
         raise ValueError("rollout identity unreadable or mismatched; quota unverified")
-    limits = _extract_latest_rate_limits(path, {}, expire=False)
+    limits = _extract_latest_rate_limits(path, {}, expire=False, session_links=links)
     if limits is None or limits.seven_day_pct is None:
         result["status"] = "no_weekly_reading"
         return result
@@ -745,8 +753,10 @@ def _extract_rate_limits(path, models):
     return _build_rate_limits(rate_limits, timestamp, session_id, models)
 
 
-def _extract_latest_rate_limits(path, models, *, expire=True):
+def _extract_latest_rate_limits(path, models, *, expire=True, session_links=None):
     session_id = _read_session_id(path)
+    if session_links is not None and session_links.excludes(session_id):
+        return None
     try:
         for line in _reverse_lines(path):
             if '"rate_limits"' not in line:
@@ -840,7 +850,7 @@ def _build_rate_limits(rate_limits, timestamp, session_id, models, *, expire=Tru
         updated_at=timestamp,
         # Plan and percentages belong to this same stored observation.
         plan=_plan_type(rate_limits),
-        quota_observation={"source": "codex_session", "observed_at": timestamp},
+        quota_observation={"source": "codex_session", "observed_at": timestamp, "session_id": session_id},
     )
 
 

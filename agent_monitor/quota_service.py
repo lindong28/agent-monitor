@@ -24,14 +24,26 @@ ROOT = PROJECT_ROOT
 
 def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=None):
     root = Path(root) if root is not None else ROOT
+    from parsers import codex_profiles
+    links = codex_profiles.session_links()
     try:
         result = requester(**({"blocked_accounts": blocked_accounts} if blocked_accounts else {}))
-        managed = managed_codex_rate_limits()
+        if not links.accepts_cached_quota(result.get("codex")):
+            previous = result["codex"]
+            result["codex"] = {**rate_limit_block(RateLimits(None, None, None, None)),
+                               **{key: previous[key] for key in ("account_id", "account_label", "credential_plan", "signed_out") if key in previous},
+                               "account_plan": previous.get("credential_plan"),
+                               "query_state": "unknown", "refresh_error": "跨账号恢复后，旧日志额度归属无法核实。"}
+        if links.errors and ((result.get("codex") or {}).get("quota_observation") or {}).get("source") != "active_query":
+            result["codex"] = dict(result.get("codex") or {}, query_state="unknown", refresh_error=links.errors[0]["error"])
+        managed = managed_codex_rate_limits(links)
         if managed:
             result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
         return result
     except request_error as exc:
         cached = read_cache(root / "state" / "quota_snapshot.json")
+        if not links.accepts_cached_quota(cached.get("codex")):
+            cached.pop("codex", None)
         result = {}
         for provider, account in (("claude", accounts.claude_account()), ("codex", accounts.codex_account())):
             previous = cached.get(provider)
@@ -50,7 +62,7 @@ def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=Non
             block["signed_out"] = False
             block["query_state"] = "unknown"
             result[provider] = block
-        managed = managed_codex_rate_limits()
+        managed = managed_codex_rate_limits(links)
         if managed:
             result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
         return result
@@ -58,11 +70,23 @@ def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=Non
 
 def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=None):
     root = Path(root) if root is not None else ROOT
+    from parsers import codex_profiles
+    links = codex_profiles.session_links()
     cache_path = root / "state" / "quota_snapshot.json"
     cached = read_cache(cache_path) if use_cache else {}
+    rejected_codex_cache = not links.accepts_cached_quota(cached.get("codex"))
+    if rejected_codex_cache:
+        cached.pop("codex", None)
 
     def query_state(provider, account, block):
         from upstream_controls import Controls
+        if provider == "codex" and rejected_codex_cache and block is None:
+            block = rate_limit_block(RateLimits(None, None, None, None), account)
+            block.update(query_state="unknown", refresh_error="跨账号恢复后，旧日志额度归属无法核实。", signed_out=account is None)
+        if provider == "codex" and links.errors and (not block or (block.get("quota_observation") or {}).get("source") != "active_query"):
+            block = block or rate_limit_block(RateLimits(None, None, None, None), account)
+            block["refresh_error"] = links.errors[0]["error"]
+            block["query_state"] = "unknown"
         pause = Controls(root / "state/upstream_controls").read(provider).get("pause")
         if block is None:
             if not pause:
@@ -85,10 +109,12 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
 
     def read(provider):
         source = claude_status if provider == "claude" else codex
+        def passive():
+            return source.load_rate_limits(session_links=links) if provider == "codex" else source.load_rate_limits()
         account = accounts.claude_account() if provider == "claude" else accounts.codex_account()
         note = quota_applicability.Store(root / "state").get(provider, account.account_id) if account else None
         if quota_applicability.unavailable(note):
-            value = source.load_rate_limits() or RateLimits(None, None, None, None)
+            value = passive() or RateLimits(None, None, None, None)
             block = rate_limit_block(value, account)
             previous = cached.get(provider)
             if previous and previous.get("account_id") == account.account_id and quota_time(previous, provider) > quota_time(block, provider):
@@ -96,7 +122,7 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
             block.update(subscription_confirmation=note, refresh_error=None, signed_out=False)
             return provider, query_state(provider, account, block)
         if not refresh:
-            block = rate_limit_block(source.load_rate_limits(), account)
+            block = rate_limit_block(passive(), account)
             if block is None and account is None:
                 # The one case that has to stop returning None. A machine with no
                 # credential file and no reading used to publish nothing at all
@@ -141,13 +167,13 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
         try:
             exclusions = (blocked_accounts or {}).get(provider, [])
             if "*" in exclusions or quota_refresh.account_fingerprint(provider, account) in exclusions:
-                block = rate_limit_block(source.load_rate_limits() or RateLimits(None, None, None, None), account)
+                block = rate_limit_block(passive() or RateLimits(None, None, None, None), account)
                 block.update(refresh_error="本轮同服务账号已有失败或结果未知；本机未再次查询。", query_state="blocked", signed_out=False)
                 return provider, query_state(provider, account, block)
             value = quota_refresh.load_rate_limits(provider, account)
         except quota_refresh.NoSubscription:
             # The confirmation may have arrived after this export's precheck.
-            value = source.load_rate_limits() or RateLimits(None, None, None, None)
+            value = passive() or RateLimits(None, None, None, None)
         except quota_refresh.NotSignedIn:
             # A state, not a failure: this machine does not use this provider, or
             # its sign-in has lapsed. It is published as a state so the server can
@@ -160,7 +186,7 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
             # — two facts the reader may well want told apart later, even though
             # neither is a failure today.
             signed_out = True
-            value = source.load_rate_limits() or RateLimits(None, None, None, None)
+            value = passive() or RateLimits(None, None, None, None)
         except (quota_refresh.RefreshError, OSError) as exc:
             state = "local_unavailable" if isinstance(exc, quota_refresh.LocalUnavailable) else "failed"
             failure = getattr(exc, "failure", None)
@@ -171,7 +197,7 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
                 error = "配额采集失败：" + diagnostics.failure_summary(diagnostics.failure_details(exc))
                 if getattr(exc, "diagnostic_save_error", None):
                     error += "；暂停诊断保存失败：" + exc.diagnostic_save_error
-            value = source.load_rate_limits() or RateLimits(None, None, None, None)
+            value = passive() or RateLimits(None, None, None, None)
         block = rate_limit_block(value, account)
         block["refresh_error"] = error
         block["refresh_failure"] = failure
@@ -187,36 +213,43 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
         note = quota_applicability.Store(root / "state").get("claude", claude["account_id"])
         if note:
             claude["subscription_confirmation"] = note
-    managed = managed_codex_rate_limits()
+    managed = managed_codex_rate_limits(links)
     if managed:
         result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
     if refresh and use_cache:
-        save_cache(cache_path, result)
+        save_cache(cache_path, result, session_links=links)
     return result
 
 
-def managed_codex_rate_limits():
+def managed_codex_rate_limits(session_links=None):
     """Passive observations from account-bound homes; no login/refresh calls."""
     from parsers import codex_profiles
+    links = session_links if session_links is not None else codex_profiles.session_links()
     result = []
     for profile in codex_profiles.discover():
         if profile.account is None:
             continue
         account = accounts.Account(profile.account["account_id"], profile.account["email"], None)
-        values = [codex.load_rate_limits(profile.home / child, profile.home / "state_5.sqlite")
+        values = [codex.load_rate_limits(profile.home / child, profile.home / "state_5.sqlite", session_links=links)
                   for child in ("sessions", "archived_sessions")]
         value = max((v for v in values if v is not None), key=lambda v: v.updated_at, default=None)
         block = rate_limit_block(value or RateLimits(None, None, None, None), account)
         block.update(account_profile=profile.account["name"], signed_out=False, query_state="passive")
+        if links.errors:
+            block.update(refresh_error=links.errors[0]["error"], query_state="unknown")
         result.append(block)
     return result
 
 
-def save_cache(cache_path, result):
+def save_cache(cache_path, result, *, session_links=None):
+    from parsers import codex_profiles
+    links = session_links if session_links is not None else codex_profiles.session_links()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     with cache_path.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         previous = read_cache(cache_path)
+        if not links.accepts_cached_quota(previous.get("codex")):
+            previous.pop("codex", None)
         for provider, block in result.items():
             old = previous.get(provider)
             if block is not None and (old is None or accounts.quota_identity(
