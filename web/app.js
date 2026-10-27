@@ -998,6 +998,10 @@
     return account.presence === undefined ? "in_use" : account.presence;
   }
 
+  function codexSessionAccountLabel(account) {
+    return account ? `账号：${account.name} · ${account.email}` : "账号归属未记录或冲突";
+  }
+
   function renderQuotaAccounts(rateLimits, options = {}) {
     const table = qs("#quota-accounts");
     const reset = qs("#quota-clear");
@@ -1838,7 +1842,7 @@
 
   function quotaAccountName(account) {
     if (typeof account.account_label === "string" && account.account_label) {
-      return account.account_label;
+      return account.account_profile ? `${account.account_profile} · ${account.account_label}（日志观测）` : account.account_label;
     }
     if (typeof account.account_id === "string" && account.account_id) {
       return `账号 ${account.account_id.slice(0, 8)}`;
@@ -3189,7 +3193,7 @@
       detailParams.set("session_agent", row.agent_id);
       tr.innerHTML = `
         <td><span class="pill agent-${escapeHtml(row.agent_id)}">${escapeHtml(row.agent_id)}</span><br><small>${escapeHtml(row.machine || "本机")}</small></td>
-        <td class="project-cell"><a class="session-title" href="/sessions?${escapeHtml(detailParams.toString())}" title="${escapeHtml(row.title || row.project)}">${escapeHtml(row.title || projectLabel(row.project))}</a>${row.title ? `<small>${escapeHtml(projectLabel(row.project))}</small>` : ""}${row.subagent_count ? `<small>含 ${integer(row.subagent_count)} 个子代理</small>` : ""}</td>
+        <td class="project-cell"><a class="session-title" href="/sessions?${escapeHtml(detailParams.toString())}" title="${escapeHtml(row.title || row.project)}">${escapeHtml(row.title || projectLabel(row.project))}</a>${row.title ? `<small>${escapeHtml(projectLabel(row.project))}</small>` : ""}${row.subagent_count ? `<small>含 ${integer(row.subagent_count)} 个子代理</small>` : ""}${row.agent_id === "codex" ? `<small>${escapeHtml(codexSessionAccountLabel(row.account))}</small>` : ""}</td>
         <td class="nowrap">${grouped ? escapeHtml(timeOfDay(row.ended_at)) : formatDate(row.ended_at)}</td>
         <td class="numeric">${sessionEntryCost(row.cost_usd)}${row.unpriced_records && row.cost_usd != null ? '<br><small>部分未计价</small>' : ""}</td>
         <td class="numeric">${integer(row.tokens)}</td>
@@ -3343,7 +3347,7 @@
     const panel = document.createElement("section");
     panel.className = "session-detail";
     panel.innerHTML = `<a class="session-back" href="/sessions?${escapeHtml(back.toString())}">返回会话列表</a>
-      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p>${escapeHtml(machine || "本机")} · <span id="session-scope"></span></p><button id="session-scope-toggle" type="button"></button><details class="note-disclosure"><summary>会话标识与记录范围</summary><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div><p class="scope-note">仅含已采集的用量和会话标题，不含对话正文。<a data-collection-link href="${escapeHtml(collectionUrl())}">采集与诊断</a></p></details></div></div>
+      <div class="panel session-identity"><div><h2 id="session-project">会话</h2><p id="session-times"></p><p id="session-account"></p><p>${escapeHtml(machine || "本机")} · <span id="session-scope"></span></p><button id="session-scope-toggle" type="button"></button><details class="note-disclosure"><summary>会话标识与记录范围</summary><div class="session-id-line"><span>ID</span><code id="session-identity"></code><button id="session-copy" type="button">复制 ID</button></div><p class="scope-note">仅含已采集的用量和会话标题，不含对话正文。<a data-collection-link href="${escapeHtml(collectionUrl())}">采集与诊断</a></p></details></div></div>
       <div id="session-detail-content" aria-live="polite"></div>`;
     qs("main").appendChild(panel);
     qs("#session-identity").textContent = id;
@@ -3424,6 +3428,7 @@
       conflicting_service_context: "服务模式记录冲突", mode_unreported: "部分服务模式未记录，按标准模式估值",
       invalid_recorded_cost: "源记录金额无效"}[reason] || "计价原因未识别");
     qs("#session-project").textContent = meta.title || projectLabel(meta.project || distinct("project").join("、")) || "会话目录未记录";
+    qs("#session-account").textContent = meta.agent_id === "codex" ? codexSessionAccountLabel(meta.account) : "";
     qs("#session-times").textContent = `最近用量：${last === null ? "时间未知" : formatDate(last)}`;
     content.innerHTML = `<div class="session-metrics">
       <article><h3>记录费用</h3><strong>${sessionEntryCost(cost)}</strong><p>${cost === null ? "当前记录均无法计价" : unknown ? "部分未计价 · 仅合计可计价记录 · 非账单" : "仅合计可计价记录 · 非账单"}</p></article>

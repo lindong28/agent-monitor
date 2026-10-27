@@ -49,7 +49,7 @@ def codex_metadata(session_id, source=None, *, title=None, created_at=None, proj
 
 
 def validate(row):
-    if not isinstance(row, dict) or set(row) != FIELDS:
+    if not isinstance(row, dict) or not FIELDS <= set(row) or not set(row) <= FIELDS | {"account"}:
         raise ValueError("invalid session metadata fields")
     if any(not isinstance(row[key], str) or not row[key] for key in ("agent_id", "session_id")):
         raise ValueError("invalid session metadata identity")
@@ -62,6 +62,10 @@ def validate(row):
         raise ValueError("invalid session parent")
     if row["created_at"] is not None and timestamp(row["created_at"]) is None:
         raise ValueError("invalid session creation time")
+    account = row.get("account")
+    if account is not None and (not isinstance(account, dict) or set(account) != {"name", "account_id", "email"}
+                                or any(not isinstance(v, str) or not v for v in account.values())):
+        raise ValueError("invalid session account")
     return dict(row)
 
 
@@ -81,6 +85,12 @@ def merge_metadata(previous=(), observed=()):
             elif old["relation"] != "unknown" and (relation, parent) != (old["relation"], old["parent_session_id"]):
                 relation, parent = "conflict", None
             row.update(relation=relation, parent_session_id=parent)
+            if "account" in old:
+                if "account" in row and row["account"] != old["account"]:
+                    # Copied session IDs do not establish which account owns usage.
+                    row["account"] = None
+                else:
+                    row["account"] = old["account"]
             for field in ("title", "project"):
                 if row[field] is None:
                     row[field] = old[field]
@@ -120,7 +130,12 @@ class SessionIndex:
             if row["relation"] != "child":
                 status = row["relation"]
                 break
-            node = (node[0], row["parent_session_id"])
+            parent_key = (node[0], row["parent_session_id"])
+            parent_row = self.metadata.get(parent_key)
+            if parent_row and row.get("account") != parent_row.get("account"):
+                status = "conflict"
+                break
+            node = parent_key
         else:
             status = "cycle"
         for member in path:

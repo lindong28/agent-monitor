@@ -14,7 +14,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from parsers import UsageEntry
-from parsers import claude, codex
+from parsers import claude, codex, codex_profiles
 
 
 TIME_DIMS = {"day", "week", "month"}
@@ -837,7 +837,7 @@ def load_all_entries(force_reload=False, read_only=False, diagnostic=False, arch
 
 def _parser_fingerprint():
     digest = hashlib.sha256()
-    for path in (Path(__file__), ROOT / "parsers" / "__init__.py", Path(claude.__file__), Path(codex.__file__)):
+    for path in (Path(__file__), ROOT / "parsers" / "__init__.py", Path(claude.__file__), Path(codex.__file__), Path(codex_profiles.__file__)):
         digest.update(path.read_bytes())
     return digest.hexdigest()
 
@@ -845,46 +845,29 @@ def _parser_fingerprint():
 def _load_archived_entries(archive, source_errors, force_reload, read_only):
     paths = _usage_paths(source_errors=source_errors)
     fingerprint = _parser_fingerprint()
-    metadata_signature = None
-    model_mapping_digest = None
-    codex_models = {}
-    if any(_is_codex_usage_path(path) for path in paths):
-        before_errors = len(source_errors)
-        try:
-            metadata_signature = codex._metadata_signature(Path(codex.STATE_DB))
-        except FileNotFoundError:
-            # The existing parser permits metadata absence and falls back to
-            # session/default model; absence never qualifies for cache reuse.
-            pass
-        except OSError as exc:
-            _append_source_error(source_errors, codex.STATE_DB, "metadata", exc)
-        codex_models = codex._load_thread_models(
-            codex.STATE_DB, immutable=True, source_errors=source_errors,
-        )
-        if len(source_errors) != before_errors:
-            # Failed metadata is not evidence that every recorded model became
-            # the default. Retain archived Codex events until the next good read.
-            paths = [path for path in paths if not _is_codex_usage_path(path)]
-        try:
-            after = codex._metadata_signature(Path(codex.STATE_DB))
-        except OSError:
-            after = None
-        if len(source_errors) != before_errors or after != metadata_signature:
-            metadata_signature = None
-        if metadata_signature is not None:
-            # The same successfully read mapping feeds both the digest and
-            # parser. Unrelated DB/WAL writes do not change parsing inputs.
-            model_mapping_digest = hashlib.sha256(
-                json.dumps(codex_models, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
-
-    history = codex.HistoryResolver(path for path in paths if _is_codex_usage_path(path))
-    sessions = codex.session_metadata(history, codex_models)
+    contexts = {}
+    sessions = []
+    roots = codex_profiles.sources(source_errors)
+    # Sessions and archived_sessions in one home share their ancestry/model DB.
+    homes = {}
+    for root, state_db, account in roots:
+        homes.setdefault(state_db, ([], account))[0].extend(path for path in paths if path.is_relative_to(root))
+    for state_db, (source_paths, account) in homes.items():
+        accepted, models, history, signature, digest = _codex_source_context(source_paths, state_db, source_errors)
+        rejected = set(source_paths) - set(accepted)
+        paths = [path for path in paths if path not in rejected]
+        for path in accepted:
+            contexts[path] = (models, history, signature, digest)
+        metadata = codex.session_metadata(history, models)
+        for row in metadata:
+            row["account"] = account
+        sessions.extend(metadata)
 
     def signature_for(path):
         file_stat = path.stat()
         metadata = None
-        if _is_codex_usage_path(path):
+        if path in contexts:
+            codex_models, history, metadata_signature, model_mapping_digest = contexts[path]
             if metadata_signature is None:
                 return None
             # This signature names the mapping snapshot consumed by this
@@ -897,7 +880,10 @@ def _load_archived_entries(archive, source_errors, force_reload, read_only):
         return json.dumps((file_stat.st_mtime_ns, file_stat.st_size, fingerprint, metadata))
 
     def parse(path):
-        return _parse_usage_file(path, source_errors=source_errors, codex_models=codex_models, codex_history=history)
+        context = contexts.get(path)
+        return _parse_usage_file(path, source_errors=source_errors,
+                                 codex_models=context[0] if context else None,
+                                 codex_history=context[1] if context else None)
 
     if read_only:
         from cache import MtimeCache
@@ -909,6 +895,44 @@ def _load_archived_entries(archive, source_errors, force_reload, read_only):
         return _deduped(list(entries) + retained, source_errors), authority
     return archive.collect(paths, parse, signature_for, source_errors, USAGE_TIMEZONE,
                            force_reload=force_reload, session_metadata=sessions)
+
+
+def _codex_source_context(paths, state_db, source_errors):
+    metadata_signature = None
+    model_mapping_digest = None
+    codex_models = {}
+    if paths:
+        before_errors = len(source_errors)
+        try:
+            metadata_signature = codex._metadata_signature(Path(state_db))
+        except FileNotFoundError:
+            # The existing parser permits metadata absence and falls back to
+            # session/default model; absence never qualifies for cache reuse.
+            pass
+        except OSError as exc:
+            _append_source_error(source_errors, state_db, "metadata", exc)
+        codex_models = codex._load_thread_models(
+            state_db, immutable=True, source_errors=source_errors,
+        )
+        if len(source_errors) != before_errors:
+            # Failed metadata is not evidence that every recorded model became
+            # the default. Retain archived Codex events until the next good read.
+            paths = []
+        try:
+            after = codex._metadata_signature(Path(state_db))
+        except OSError:
+            after = None
+        if len(source_errors) != before_errors or after != metadata_signature:
+            metadata_signature = None
+        if metadata_signature is not None:
+            # The same successfully read mapping feeds both the digest and
+            # parser. Unrelated DB/WAL writes do not change parsing inputs.
+            model_mapping_digest = hashlib.sha256(
+                json.dumps(codex_models, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+
+    history = codex.HistoryResolver(paths)
+    return paths, codex_models, history, metadata_signature, model_mapping_digest
 
 
 def _identity_rollup_lock():
@@ -1097,11 +1121,11 @@ def _usage_paths(source_errors=None):
             paths.extend(_walk_jsonl_paths(base, source_errors))
         elif base.is_dir():
             paths.extend(base.rglob("*.jsonl"))
-    codex_sessions = Path(codex.SESSIONS_DIR)
-    if source_errors is not None:
-        paths.extend(_walk_jsonl_paths(codex_sessions, source_errors))
-    elif codex_sessions.is_dir():
-        paths.extend(codex_sessions.rglob("*.jsonl"))
+    for codex_sessions, _state_db, _account in codex_profiles.sources(source_errors):
+        if source_errors is not None:
+            paths.extend(_walk_jsonl_paths(codex_sessions, source_errors))
+        elif codex_sessions.is_dir():
+            paths.extend(codex_sessions.rglob("*.jsonl"))
     extra = os.environ.get("AGENT_MONITOR_EXTRA_JSONL", "")
     for raw_path in extra.split(","):
         if raw_path.strip():
@@ -1155,10 +1179,10 @@ def _walk_jsonl_paths(base, source_errors):
 
 def _parse_usage_file(path, source_errors=None, codex_models=None, codex_history=None):
     path = Path(path)
-    if _is_codex_usage_path(path):
+    if codex_models is not None or _is_codex_usage_path(path):
         if codex_models is None:
             codex_models = codex._load_thread_models(
-                codex.STATE_DB,
+                next(db for root, db, _account in codex_profiles.sources() if path.is_relative_to(root)),
                 immutable=source_errors is not None,
                 source_errors=source_errors,
             )
@@ -1186,11 +1210,7 @@ def _parse_usage_file(path, source_errors=None, codex_models=None, codex_history
 
 
 def _is_codex_usage_path(path):
-    try:
-        Path(path).relative_to(Path(codex.SESSIONS_DIR))
-    except ValueError:
-        return False
-    return True
+    return any(Path(path).is_relative_to(root) for root, _db, _account in codex_profiles.sources())
 
 
 def _append_source_error(source_errors, path, stage, exc):

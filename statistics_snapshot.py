@@ -14,7 +14,7 @@ from parsers import UsageEntry, USAGE_QUALITIES, usage_quality_counts, validate_
 from session_identity import SessionIndex, validate as validate_session
 
 
-VERSION = 4
+VERSION = 5
 V3_TABLES = {"statistics_meta", "statistics_usage"}
 TABLES = V3_TABLES | {"statistics_sessions"}
 LEGACY_TABLES = V3_TABLES | {"statistics_requests", "statistics_attempts"}
@@ -128,7 +128,7 @@ def _create_usage_indexes(conn):
 
 
 def _validate_meta(meta):
-    if not isinstance(meta, dict) or type(meta.get("version")) is not int or meta["version"] not in (1, 2, 3, VERSION):
+    if not isinstance(meta, dict) or type(meta.get("version")) is not int or meta["version"] not in (1, 2, 3, 4, VERSION):
         raise ValueError("unsupported statistics extension")
     expected = META_FIELDS | ({"gateway"} if meta["version"] == 1 else set())
     if meta["version"] >= 3:

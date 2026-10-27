@@ -311,7 +311,11 @@ def _cleanup_export_staging(output_path):
 def _gui_rate_limits(*, blocked_accounts=None):
     import hub
     try:
-        return hub.request_quota_refresh(**({"blocked_accounts": blocked_accounts} if blocked_accounts else {}))
+        result = hub.request_quota_refresh(**({"blocked_accounts": blocked_accounts} if blocked_accounts else {}))
+        managed = _managed_codex_rate_limits()
+        if managed:
+            result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
+        return result
     except hub.QuotaRequestError as exc:
         cached = _read_quota_cache(ROOT / "state" / "quota_snapshot.json")
         result = {}
@@ -332,6 +336,9 @@ def _gui_rate_limits(*, blocked_accounts=None):
             block["signed_out"] = False
             block["query_state"] = "unknown"
             result[provider] = block
+        managed = _managed_codex_rate_limits()
+        if managed:
+            result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
         return result
 
 
@@ -466,8 +473,28 @@ def _rate_limits(refresh=False, *, blocked_accounts=None):
         note = quota_applicability.Store(ROOT / "state").get("claude", claude["account_id"])
         if note:
             claude["subscription_confirmation"] = note
+    managed = _managed_codex_rate_limits()
+    if managed:
+        result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
     if refresh and hub.enabled():
         _save_quota_cache(cache_path, result)
+    return result
+
+
+def _managed_codex_rate_limits():
+    """Passive observations from account-bound homes; no login/refresh calls."""
+    from parsers import codex_profiles
+    result = []
+    for profile in codex_profiles.discover():
+        if profile.account is None:
+            continue
+        account = accounts.Account(profile.account["account_id"], profile.account["email"], None)
+        values = [codex.load_rate_limits(profile.home / child, profile.home / "state_5.sqlite")
+                  for child in ("sessions", "archived_sessions")]
+        value = max((v for v in values if v is not None), key=lambda v: v.updated_at, default=None)
+        block = _rate_limit_block(value or RateLimits(None, None, None, None), account)
+        block.update(account_profile=profile.account["name"], signed_out=False, query_state="passive")
+        result.append(block)
     return result
 
 

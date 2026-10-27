@@ -1930,7 +1930,7 @@ def _conversation_stats(entries, key, index, aliases=None):
     identity = index.metadata.get(key, {})
     own = next((entry for entry in entries if (entry.agent_id, entry.session_id) == key), None)
     result.update(session_id=key[1], agent_id=key[0], title=identity.get("title"),
-                  created_at=identity.get("created_at"),
+                  created_at=identity.get("created_at"), account=identity.get("account"),
                   relationship_status=index.status(key),
                   subagent_count=len({(e.agent_id, e.session_id) for e in entries} - {key}),
                   project=own.project if own else canonical_project(identity.get("project") or result["project"], aliases))
@@ -2073,8 +2073,12 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
             rate_limits = QUOTA_REFRESH.merge(current, machine)
         if not isinstance(rate_limits, dict):
             rate_limits = {}
-        for provider, buckets in grouped.items():
-            block = rate_limits.get(provider)
+        observations = [(provider, rate_limits.get(provider)) for provider in grouped]
+        managed = (rate_limits.get("codex") or {}).get("managed_accounts", []) if isinstance(rate_limits.get("codex"), dict) else []
+        if isinstance(managed, list):
+            observations.extend(("codex", block) for block in managed if isinstance(block, dict) and _account_id(block))
+        for provider, block in observations:
+            buckets = grouped[provider]
             # Not every machine signs into every provider, and one that does not
             # has nothing to fix. It is recorded as a state so the page can say
             # why its name is absent from the figures, and kept out of
@@ -2100,7 +2104,10 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
                 and block.get("signed_out") is True
                 and block.get("refresh_error") is None
             ):
-                signed_out[provider].append(current.host)
+                # A logged-out legacy home does not mean the machine's managed
+                # account homes are logged out too.
+                if provider != "codex" or not managed:
+                    signed_out[provider].append(current.host)
             # A missing `refresh_error` is not by itself evidence of an old
             # exporter. A current one omits the key on every passive export —
             # absent means "this export ran no active query", which the 120-second
@@ -2136,7 +2143,7 @@ def _live_rate_limits_from_admission(admission, sync_status=None):
             evidence = quota_applicability.observation(block.get("quota_observation"))
             updated_at = _observed_at(evidence["observed_at"] if evidence and evidence["observed_at"] else block.get("updated_at"))
             if updated_at is None:
-                if not (_account_id(block) and (refresh_error or provider == "claude")):
+                if not (_account_id(block) and (refresh_error or provider == "claude" or block.get("account_profile"))):
                     continue
                 # A failed quota request does not sign the current account out.
                 # Keep its presence so account memory can supply an older value.
@@ -2792,6 +2799,7 @@ def _account_entry(block, machines, self_machine=None, reading_from=None):
     return {
         "account_id": account_id,
         "account_label": _text(block.get("account_label")),
+        "account_profile": _text(block.get("account_profile")),
         # Derived here, not taken from the block. The exporter derives the same
         # value, but it is one of several writers — every other machine runs its
         # own, at its own version, and nothing between them validates that a
