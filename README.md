@@ -46,44 +46,55 @@ The core log-analysis flow can run without a provider login or a model call. The
 
 ## First installation
 
-Use a Git clone, including when starting from a release: collection verifies committed source identity, which GitHub's downloadable ZIP/tar archives do not contain.
+Choose **one** path before running the installer: [isolated sample](#try-the-included-sample-without-your-accounts) for a first look, or [your own data](#use-your-own-data) for regular use. Both need a new Git clone: collection verifies committed source identity, which GitHub's downloadable ZIP/tar archives do not contain. Existing private installations must use the [transition guide](docs/public-usage.md#transition-an-existing-installation).
+
+The installer creates or updates `agent-monitor` and `ip-check` links under the selected HOME's `.local/bin`, even with `--no-services`. An ordinary installation can replace links to another checkout. It does not add that directory to PATH; commands below use `./agent-monitor`. Use `AGENT_MONITOR_PYTHON=/path/to/python3` on the installation command to select Python 3.10+; an older existing `.venv` is preserved and requires [runtime recovery](docs/public-usage.md#python-runtime-rebuild).
+
+### Try the included sample without your accounts
+
+Use this separate checkout only for fabricated data. Its HOME stays in the ignored `.runtime/demo-home` directory so installation, restart and update can reuse the same account-free environment. Neither installation nor startup uses your normal HOME's CLI links or agent stores.
+
+```bash
+git clone https://github.com/lindong28/agent-monitor agent-monitor-demo
+cd agent-monitor-demo
+demo_home="$PWD/.runtime/demo-home"
+mkdir -p "$demo_home"
+cp -R examples/demo-home/. "$demo_home/"
+HOME="$demo_home" CLAUDE_CONFIG_DIR="$demo_home/.claude" CODEX_HOME="$demo_home/.codex" \
+  ./install.sh --no-services
+```
+
+Start or restart the sample from this checkout using the same environment:
+
+```bash
+demo_home="$PWD/.runtime/demo-home"
+HOME="$demo_home" CLAUDE_CONFIG_DIR="$demo_home/.claude" CODEX_HOME="$demo_home/.codex" \
+  AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
+./agent-monitor status
+```
+
+The sample has two fabricated Claude usage observations in one session on January 15, 2026: 1,500 input tokens and 300 output tokens. It contains no credentials and cannot validate live quotas or provider login.
+
+Open the printed URL and choose **总览 → 全部** to view historical cost including the sample date. Then choose **会话 → 全部** and open the row labeled `~/example-project`, which shows 1,800 total tokens in the list and session details. In the details, expand **用量记录** to inspect the two observations and **会话标识与记录范围** to confirm the ID `demo-session`; that ID is not the list label.
+
+This is the normal parser and dashboard flow with fabricated input. Automatic quota refresh still runs, but the sample has no signed-in account metadata; unavailable quota is expected. Do not click provider login/send or network diagnostics for this sample check. The server can attempt a public pricing refresh and falls back to bundled prices, so this is not an offline mode; no model request is needed. Stop with `./agent-monitor stop` before removing this disposable installation. Keep its HOME for any restart or update; use the same sample command above. State belongs to this checkout, so changing HOME alone does not clear earlier collected data. Do not turn a sample checkout into a real-data installation; use a separate checkout for that.
+
+### Use your own data
+
+Using your real HOME lets the monitor read local agent logs and current provider account state. Opening the dashboard, including `./agent-monitor open`, can automatically query current-account quota using an existing login. Proceed only if you authorize these reads and queries; otherwise use the sample above. Account login and sending messages are separate optional actions.
 
 ```bash
 git clone https://github.com/lindong28/agent-monitor agent-monitor
 cd agent-monitor
 ./install.sh --no-services
-```
-
-The installer creates CLI links in `~/.local/bin`; it does not add that directory to your shell's PATH. Commands below use `./agent-monitor` so they also work before changing PATH. On first installation, `AGENT_MONITOR_PYTHON=/path/to/python3 ./install.sh --no-services` selects a Python interpreter.
-
-Existing environments must also use Python 3.10 or newer. An older `.venv` is preserved and installation stops with recovery instructions; selecting another interpreter does not silently replace it. See [runtime recovery](docs/public-usage.md#troubleshooting).
-
-Using your real HOME lets the monitor read your local agent logs and current provider account state. Opening the dashboard, including `./agent-monitor open`, can automatically query current-account quota using an existing login. Proceed only if you authorize both the local reads and quota queries described in [usage and data](docs/public-usage.md); otherwise use the isolated sample below. Then run:
-
-```bash
 AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 ./agent-monitor status
 ./agent-monitor open
 ```
 
-Open the address printed by `start`. In **总览**, inspect recorded tokens and estimated cost. Open **会话**, select **全部** for the date range, then select a session to see its usage records. Missing logs produce an empty view; they do not mean zero historical spending. Account login and sending messages are separate optional actions and are not required for this flow.
+Open the address printed by `start`. In **总览**, inspect recorded tokens and estimated cost. Open **会话**, select **全部** for the date range, then select a session to see its usage records. Missing logs produce an empty view; they do not mean zero historical spending.
 
-The source default binds `0.0.0.0`, with port 39001 or the next free port. The local-only command above uses loopback. **The dashboard has no client authentication.** Keep it off the public Internet and untrusted networks; read [SECURITY.md](SECURITY.md) before sharing network access. `AGENT_MONITOR_PORT` selects a different starting port.
-
-### Try the included sample without your accounts
-
-Use a separate checkout that has never contained real state. The sample has two fabricated Claude usage observations in one session on January 15, 2026: 1,500 input tokens and 300 output tokens. It contains no credentials and cannot validate live quotas or provider login.
-
-```bash
-demo_home="$(mktemp -d)"
-cp -R examples/demo-home/. "$demo_home/"
-HOME="$demo_home" CLAUDE_CONFIG_DIR="$demo_home/.claude" CODEX_HOME="$demo_home/.codex"   AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
-./agent-monitor status
-```
-
-Open the printed URL and choose **总览 → 全部** to view historical cost including the sample date. Then choose **会话 → 全部** and open the row labeled `~/example-project`, which shows 1,800 total tokens in the list and session details. In the details, expand **用量记录** to inspect the two observations and **会话标识与记录范围** to confirm the ID `demo-session`; that ID is not the list label.
-
-This is the normal parser and dashboard flow with fabricated input. Automatic quota refresh still runs, but the sample has no signed-in account metadata; unavailable quota is expected. Do not click provider login/send or network diagnostics for this sample check. The server can attempt a public pricing refresh and falls back to bundled prices, so this is not an offline mode; no model request is needed. Stop with `./agent-monitor stop` before deleting the disposable sample HOME or starting with another HOME. State belongs to this checkout, so changing HOME alone does not clear earlier collected data.
+The source default binds `0.0.0.0`, with port 39001 or the next free port; these examples bind only to loopback. `AGENT_MONITOR_PORT` selects a different starting port. Record any custom HOME, source overrides, bind address and port with your installation instructions so updates can reuse them. See [usage and data](docs/public-usage.md#local-data-and-first-results).
 
 ## Configuration and updates
 
@@ -91,36 +102,48 @@ A new installation starts with one local machine and Hub mode disabled. For cust
 
 Only one machine has `self: true`. Keep names, SSH identities and `retired_names` stable once data has been collected. Do not copy the sample over an existing configuration. The installer preserves local files, existing `state` (including symlinks) and persistent locks. Local configuration and runtime data are ignored by Git. See [configuration and retained data](docs/public-usage.md#configuration-and-retained-data) for migration and multi-machine details.
 
-To update an installation from the public `main`, stop the service, preserve a backup of state and local configuration, and fast-forward the same checkout. Do not discard local source changes to make an update pass:
+Choose the update path **before stopping anything**: [manual updates](docs/public-usage.md#manual-updates) preserve the sample or real-data startup environment; [service-managed deployment](docs/public-usage.md#services-and-deployment) preserves managed process settings. Do not run the ordinary real-data startup command against a sample checkout. Reinstallation does not migrate machine identities or erase retained history.
 
-```bash
-./agent-monitor stop
-git pull --ff-only
-./install.sh --no-services
-AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
-```
+## Common operations and services
 
-For a service-managed deployment, use the existing [published-main deployment entry](docs/public-usage.md#services-and-deployment). Reinstallation does not migrate machine identities or erase retained history. `./uninstall.sh` removes owned service/CLI integration while retaining source and state.
+| Task | Entry |
+| --- | --- |
+| Inspect or stop a manually started dashboard | `./agent-monitor status` / `./agent-monitor stop` |
+| Inspect all owned components | `./agent-monitor service status` (also `./status.sh`) |
+| Enable scheduled collection or a macOS Hub | [Service setup and component operations](docs/public-usage.md#services-and-deployment) |
+| Aggregate your configured machines | [Multi-machine setup](docs/public-usage.md#optional-multi-machine-collection) |
+| Use optional account or browser-device actions | [Account and connector guide](docs/public-usage.md#optional-quota-and-account-actions) |
+| Remove owned service/CLI integration | `./uninstall.sh`; source, state and locks remain. See [ownership and selectors](docs/public-usage.md#services-and-deployment) |
 
-## Services
-
-On macOS, the installer manages the periodic collector and the configured Hub. An optional browser-device connector is enabled explicitly with `./agent-monitor connect install --server URL`; later installations update it while preserving its server address and state path. A fresh installation leaves the connector disabled. `--no-services` leaves all services unchanged. Linux retains the CLI and manually started dashboard.
-
-Standalone scheduled collection runs local `rollup`, independently of whether a dashboard is running. Hub machines retain their configured `collect` schedule. Changing a Hub role with `hub MACHINE --no-services` is rejected; stage with `./install.sh --no-services`, then apply the role with `./install.sh hub MACHINE`.
-
-Use `./agent-monitor service status` (also `./status.sh`) for the role, central target, local Web, collector and optional connector. `service restart local-web|hub|collector|connector` selects one component; `service deploy` uses the published-main deployment entry. Deployment also updates an already-running local Web, retaining its bind address, port and environment; a stopped local Web stays stopped. For Python replacement, use `service rebuild-runtime --python /absolute/path/to/python3`; see [rebuild and recovery](docs/public-usage.md#python-runtime-rebuild).
-
-Existing dashboard and connector commands remain compatible. `./uninstall.sh` removes this checkout's service integration and CLI links; `web`, `rollup-daemon` and `connector` select one component. Foreign or unrecognized service ownership is preserved and reported. Saved data and locks remain.
-
-On a Hub client, `open` and `refresh` target the central Hub; default Web management commands direct you to that host. To keep a local dashboard on the client, use `./agent-monitor local start|stop|restart|status|open`. Installation preserves an already running local dashboard. The `local` selector does not manage the Hub, collector or connector.
-
-Published-main deployment restarts managed processes when their source or selected configuration changes and checks their local HTTP identity. This can interrupt active operations: let account operations finish first, and never replay an uncertain send. An unchanged, confirmed process is retained. A failed replacement returns nonzero with its remaining state; inspect status and logs before retrying. See [deployment and recovery](docs/public-usage.md#services-and-deployment) for the supported entry and verification limits.
+`--no-services` leaves services unchanged. On macOS, normal installation manages scheduled collection and the configured Hub; the connector is opt-in. Linux retains the CLI and manually started dashboard. A Hub client normally opens the central dashboard; the [local selector](docs/public-usage.md#services-and-deployment) manages an optional local instance. Managed updates can interrupt active operations: let account operations finish first and never replay an uncertain send. Component restart, recovery and runtime replacement details live in the linked guide.
 
 ## What the numbers mean
 
 Usage is derived from retained local observations, not provider invoices. Known costs are subtotals for priceable observations; unknown price or incomplete usage is not zero. Codex inherited pagination usage and repeated Claude streaming observations are deduplicated under the existing accounting rules. Aggregate history can outlive detailed session records. Quotas are observations with their own timestamps; an expired reset does not prove fresh quota is available. Date boundaries use Asia/Shanghai.
 
-See [usage, optional features and troubleshooting](docs/public-usage.md) and [architecture](docs/public-architecture.md). For development, use [CONTRIBUTING.md](CONTRIBUTING.md).
+## Repository and documentation
+
+```text
+agent-monitor / install.sh / deploy.py   CLI, installation and deployment entries
+*.py                                    Backend modules; grouped by responsibility in the map below
+parsers/                                Claude/Codex log and account-source readers
+web/                                    Static dashboard pages, JavaScript and styles
+proxy_runtime/                          System-proxy resolver helper
+ip_check/                               Network diagnostics and attribution
+examples/                               Public configuration examples and fabricated sample
+scripts/ / tests/                       Explicit acceptance, measurements and regression tests
+docs/                                   Usage, architecture, operations and accounting guides
+```
+
+| Reader task | Start here |
+| --- | --- |
+| Configure, update or troubleshoot | [Usage and operations](docs/public-usage.md) |
+| Find the module and regression for a change | [Responsibility map](docs/public-architecture.md#responsibility-map) |
+| Set up development and choose checks | [Contributing and validation](CONTRIBUTING.md) |
+| Understand accounting and parser boundaries | [Accounting contracts](docs/references/metrics.md) |
+| Report a sensitive issue | [Security policy](SECURITY.md) |
+
+`.venv/`, `.runtime/`, `web/vendor/`, `state/` and `*.local.json` are local runtime/configuration, not tracked source. Preserve existing state symlinks and identities during updates.
 
 ## Attribution
 

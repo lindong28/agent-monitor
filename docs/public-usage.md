@@ -73,6 +73,43 @@ Account operations use isolated managed profiles under state. Review the account
 
 The optional connector supports `./agent-monitor connect --server URL` in the foreground and macOS service installation via `./agent-monitor connect install --server URL`. It pairs the browser device's network route with the account action. This is separate from the network diagnostics page, which reports the server machine's route.
 
+## Manual updates
+
+This section is for a **manually started standalone dashboard** already on public `main`. A configured Hub or service-managed installation uses [services and deployment](#services-and-deployment) instead; the older private history uses [transition an existing installation](#transition-an-existing-installation). Finish active account operations before stopping. Preserve a recoverable backup of state and local configuration outside the checkout; do not discard source edits to make `git pull --ff-only` succeed.
+
+For the README's **sample checkout**, first confirm `.runtime/demo-home` is the existing sample HOME. The checks below stop the sequence if it is absent; do not substitute your real HOME. An older sample created with `mktemp -d` must use its original HOME path instead. If that path is lost, stop the old sample and create a new isolated sample checkout rather than restarting it against real data.
+
+```bash
+(
+  export HOME="$PWD/.runtime/demo-home"
+  export CLAUDE_CONFIG_DIR="$HOME/.claude" CODEX_HOME="$HOME/.codex"
+  export AGENT_MONITOR_BIND=127.0.0.1
+  test -f "$CLAUDE_CONFIG_DIR/projects/demo/session.jsonl" || exit 1
+  ./agent-monitor stop &&
+  git pull --ff-only &&
+  ./install.sh --no-services &&
+  ./agent-monitor start &&
+  ./agent-monitor status
+)
+```
+
+The subshell keeps this HOME out of your normal shell. If you selected another sample bind address or port, restore those values before stopping and retain them through restart. Check **总览 → 全部** and **会话 → 全部** again: the included session should still show 1,800 tokens and two usage records. An unexpected source or account is a reason to stop and inspect the chosen HOME and retained state.
+
+For the README's **default real-data setup**, run the following from its original checkout and original HOME. If you customized `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `AGENT_MONITOR_BIND` or `AGENT_MONITOR_PORT`, set those same values for the entire sequence first; the commands do not recover them from the old process. Do not use this real-data path for a sample installation.
+
+```bash
+(
+  export AGENT_MONITOR_BIND="${AGENT_MONITOR_BIND:-127.0.0.1}"
+  ./agent-monitor stop &&
+  git pull --ff-only &&
+  ./install.sh --no-services &&
+  ./agent-monitor start &&
+  ./agent-monitor status
+)
+```
+
+Open the printed address and check the expected machines, totals and a retained session. Successful installation or process startup alone does not verify those results. On failure, keep state/configuration and inspect the reported error and `state/server.log`; do not retry with different data sources or clear retained history. To remove integration, use the ownership-aware `./uninstall.sh` described below; it retains source and state.
+
 ## Services and deployment
 
 `./install.sh --no-services` installs dependencies/assets and CLI links without changing services or running the post-install public probe. `./install.sh` on macOS additionally configures hourly collection with `com.agent-monitor.rollup`; Linux skips that LaunchAgent. The default installer is therefore a service-changing action. `./status.sh rollup-daemon` reports the scheduler.
@@ -102,7 +139,7 @@ For the configured macOS Hub and an already installed connector, installation co
 
 `./agent-monitor service deploy` forwards the same arguments and source checks to `deploy.py`. Normal deployment updates an already-running owned local dashboard as well as managed components. It captures the local Web's full startup environment privately before stopping, retains its bind address and port, and checks the replacement's HTTP source/configuration identity. Matching processes are retained; a stopped optional Web is not started. `--no-services` and the targeted `rollup-daemon` installer do not update Web processes. Default `open` on a client still opens the central Hub; use `local open` for the local page.
 
-Managed updates use stop/start and can interrupt requests or connector routes. Finish account operations before updating; uncertain sends are not automatically replayed. The installer preserves retained state and startup definitions after a failed replacement, reports nonzero, and does not claim that the old process is still available. Use `./status.sh`, `state/hub.log` and `./agent-monitor connect status` to locate the remaining failure before rerunning the same deployment entry. A source rollback is only appropriate when compatible with the retained data/configuration; this update does not migrate their schemas. Manually started dashboards keep the README's explicit stop/update/start procedure.
+Managed updates use stop/start and can interrupt requests or connector routes. Finish account operations before updating; uncertain sends are not automatically replayed. The installer preserves retained state and startup definitions after a failed replacement, reports nonzero, and does not claim that the old process is still available. Use `./status.sh`, `state/hub.log` and `./agent-monitor connect status` to locate the remaining failure before rerunning the same deployment entry. A source rollback is only appropriate when compatible with the retained data/configuration; this update does not migrate their schemas. Manually started standalone dashboards use [manual updates](#manual-updates).
 
 `./agent-monitor service status` and `./status.sh` include the role, central target (availability unchecked), owned local Web with HTTP identity, collector result and optional connector. Checks continue when one component fails and the overall exit is nonzero. A disabled optional component is not a failure. The older `status.sh web|rollup-daemon|connector` selectors retain their meaning. `service restart local-web|hub|collector|connector` manages one component through its existing lifecycle owner. Local Web restart preserves startup conditions, including from the private recovery record if a replacement failed; first enablement still uses `local start`. Collector restart refuses to interrupt a running collection; completion must be checked afterward. Connector restart retains its existing semantics: old routes can fail and uncertain sends are not replayed.
 

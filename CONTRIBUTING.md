@@ -21,6 +21,34 @@ Python 3.10+ and Node are required by the existing tests. A subset can be run wi
 
 To exercise the reader's main flow, use the README's isolated sample and inspect the session in a browser. Tests, sample usage and real provider/account verification are distinct claims. Do not make paid provider requests merely to run the tests.
 
+## Choose a validation entry
+
+Start with the [responsibility map](docs/public-architecture.md#responsibility-map), then run the existing checks for the behavior you changed. Keep the disposable HOME and source overrides from development setup for each command that loads product code. Use Node 24 to match CI; Python-only commands use this checkout's `.venv/bin/python`.
+
+| Purpose | Command / guide | Scope |
+| --- | --- | --- |
+| Full regression suite | `.venv/bin/python -m unittest discover -s tests` | Python tests and the JavaScript checks invoked by their Python wrappers; mocks do not establish provider availability |
+| One affected Python test module | `.venv/bin/python -m unittest discover -s tests -p 'test_machine_config.py'` | Replace the pattern with the affected module from the map |
+| Acceptance runner's failure/cleanup regression | `node --test scripts/accept_device_connection.test.mjs` | Separate Node test, not included by unittest discovery; uses synthetic browser-tool failures |
+| First-use browser check | [README sample](README.md#try-the-included-sample-without-your-accounts) | Real parser/dashboard with fabricated logs; inspect 1,800 tokens and two records |
+| Connector/device browser acceptance | [Explicit procedure below](#explicit-browser-and-connector-acceptance) | Optional browser tooling; `--launchd` changes an isolated macOS test job |
+| Backend and background measurements | [Isolated benchmark commands](docs/operations/services.md#isolated-backend-investigation) | Synthetic snapshots/history, not production latency or live provider evidence |
+
+## Explicit browser and connector acceptance
+
+`scripts/accept_device_connection.mjs` is an optional developer acceptance runner, not a runtime dependency or part of the default CI command. It starts isolated synthetic account fixtures and a headless Chrome instance. It requires an externally installed `browser-task.mjs` exporting `cdp` and `inspect`, plus the sibling `test-chrome.mjs` exporting `launchTestChrome`. Those helper files are not shipped or installed by this repository; an arbitrary browser CLI path does not satisfy that interface. If they are unavailable, use the README's manual sample check and report device/connector automation as unverified. Ordinary installation and the default regression suite do not require them.
+
+With that tooling already available, supply its absolute path and an installed Chrome executable:
+
+```bash
+node scripts/accept_device_connection.mjs \
+  --browser-tool /absolute/path/to/browser-task.mjs \
+  --browser /absolute/path/to/Chrome \
+  --python "$PWD/.venv/bin/python"
+```
+
+The runner creates disposable HOME/state and checks six synthetic accounts without provider-account requests. It should exit zero after its assertions and teardown; a cleanup failure is a failure, not a successful acceptance. On macOS with a desktop login, explicitly adding `--launchd` also exercises installation/removal of a temporary connector job through `scripts/accept_connector_lifecycle.py`. Do not use that option on a production host as a routine unit-test step. Real provider quotas, login and message delivery remain separate, authorized checks.
+
 ## Changes and reports
 
 Keep changes tied to a concrete problem. Include expected and actual behavior, reproduction steps, OS/Python/Node versions, the source revision and relevant test results. For dashboard problems, identify the page and filters. Do not attach raw provider logs, account profiles, device codes, whole state directories or unredacted screenshots. Follow [SECURITY.md](SECURITY.md) for sensitive reports.
