@@ -45,3 +45,50 @@ jobs:
           .venv/bin/python -m pip install -r requirements-dev.txt
       - name: Run Python and JavaScript regression tests
         run: .venv/bin/python -m unittest discover -s tests
+      - name: Diagnose Linux resolver startup after failure
+        if: failure() && runner.os == 'Linux'
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, signal, subprocess, tempfile
+          from pathlib import Path
+          from proxy_runtime.install import executable
+          with tempfile.TemporaryDirectory() as profile, tempfile.TemporaryFile() as errors:
+              env = {key: os.environ[key] for key in ('PATH', 'HOME', 'LD_LIBRARY_PATH') if key in os.environ}
+              env['AGENT_MONITOR_PROXY_DATA'] = profile
+              child = subprocess.Popen([str(executable()), '--ozone-platform=headless', '--disable-gpu',
+                  str(Path('proxy_runtime/main.cjs').resolve())], stdin=subprocess.PIPE,
+                  stdout=subprocess.DEVNULL, stderr=errors, env=env, start_new_session=True)
+              try:
+                  try:
+                      child.stdin.write((json.dumps({'token': 'ci-startup-probe-no-account'}) + '\n').encode())
+                      child.stdin.flush()
+                  except BrokenPipeError:
+                      pass
+                  try:
+                      child.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      print('Resolver remained running for the diagnostic window.')
+              finally:
+                  try:
+                      for stop_signal in (signal.SIGTERM, signal.SIGKILL):
+                          if child.poll() is not None:
+                              break
+                          try:
+                              os.killpg(child.pid, stop_signal)
+                          except ProcessLookupError:
+                              pass
+                          try:
+                              child.wait(timeout=5)
+                          except subprocess.TimeoutExpired:
+                              continue
+                  finally:
+                      try:
+                          child.stdin.close()
+                      except BrokenPipeError:
+                          pass
+                      errors.seek(0)
+                      print(errors.read().decode(errors='replace'))
+                      print('Diagnostic process exit:', child.poll())
+          PY
