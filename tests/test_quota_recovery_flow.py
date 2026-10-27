@@ -152,7 +152,8 @@ class EvidenceTests(unittest.TestCase):
     def test_session_reading_identifies_its_source(self):
         stamp = "2026-10-26T06:00:00Z"
         value = codex._build_rate_limits({"secondary": {"used_percent": 2}}, stamp, "fixture", {})
-        self.assertEqual(value.quota_observation, {"source": "codex_session", "observed_at": stamp})
+        self.assertEqual(value.quota_observation, {
+            "source": "codex_session", "observed_at": stamp, "session_id": "fixture"})
 
     def test_scoped_failure_does_not_query_same_account_or_block_independent_provider(self):
         with tempfile.TemporaryDirectory() as tmp:
