@@ -6,6 +6,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -107,6 +108,7 @@ else: sys.exit(9)
         self.ledger = (self.home / "ledger").read_text()
         return r
 
+    @unittest.skipUnless(sys.platform == "darwin", "native macOS launchd integration")
     def test_default_installs_and_repeat_reuses_loaded_schedule(self):
         r = self.install()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -154,6 +156,7 @@ else: sys.exit(9)
         self.assertFalse((self.home / "calls").exists())
         self.assertFalse((self.home / 'connector-actions').exists())
 
+    @unittest.skipUnless(sys.platform == "darwin", "native macOS launchd integration")
     def test_hub_role_preserves_120_second_local_collector(self):
         result = self.install("hub", "node-c")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -240,6 +243,7 @@ pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text('fixture')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(chart.read_text(), 'fixture')
 
+    @unittest.skipUnless(sys.platform == "darwin", "native macOS launchd integration")
     def test_bootstrap_failure_is_failed_and_retry_recovers(self):
         self.env["FAIL_BOOTSTRAP"] = "1"
         r = self.install("rollup-daemon")
@@ -250,6 +254,7 @@ pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text('fixture')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("\tagent-monitor rollup\tupdated\t", self.ledger)
 
+    @unittest.skipUnless(sys.platform == "darwin", "native macOS launchd integration")
     def test_foreign_plist_and_loaded_job_are_not_taken_over(self):
         self.plist.parent.mkdir(parents=True)
         original = plistlib.dumps({"ProgramArguments": ["/other/agent-monitor", "rollup"]})
@@ -265,6 +270,7 @@ pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text('fixture')
             self.assertEqual(self.plist.read_bytes(), original)
             self.assertFalse((self.home / "calls").exists())
 
+    @unittest.skipUnless(sys.platform == "darwin", "native macOS launchd integration")
     def test_failed_unload_preserves_old_config_then_retry_updates(self):
         self.assertEqual(self.install("rollup-daemon").returncode, 0)
         old = self.plist.read_bytes()

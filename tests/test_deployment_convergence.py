@@ -119,6 +119,7 @@ class ShellLifecycleTests(unittest.TestCase):
         return subprocess.run(['bash', str(self.root / name), *arguments], env=self.env,
                               capture_output=True, text=True, timeout=10)
 
+    @unittest.skipUnless(sys.platform == "darwin", "native macOS launchd integration")
     def test_rollup_uninstall_preserves_foreign_disk_and_loaded_owners(self):
         dest = self.home / 'Library/LaunchAgents/com.agent-monitor.rollup.plist'
         dest.parent.mkdir(parents=True)

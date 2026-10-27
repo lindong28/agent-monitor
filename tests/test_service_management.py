@@ -39,6 +39,9 @@ class IsolatedCheckout(unittest.TestCase):
         (self.root / 'hub.py').write_text("def is_hub(): return False\ndef enabled(): return False\nif __name__ == '__main__': print('standalone')\n")
         (self.root / 'server.py').write_text('''import argparse, json
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import TCPServer
+class FixtureServer(HTTPServer):
+    server_bind = TCPServer.server_bind  # The fixture does not need reverse DNS.
 from pathlib import Path
 import service_runtime
 p = argparse.ArgumentParser(); p.add_argument('--host'); p.add_argument('--port', type=int); a = p.parse_args()
@@ -48,9 +51,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         data = json.dumps(identity).encode(); self.send_response(200); self.end_headers(); self.wfile.write(data)
     def log_message(self, *args): pass
-HTTPServer((a.host, a.port), Handler).serve_forever()
+FixtureServer((a.host, a.port), Handler).serve_forever()
 ''')
-        self.stack = self.enterContext(ExitStack())
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             port = listener.getsockname()[1]

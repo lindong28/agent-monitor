@@ -15,6 +15,9 @@ import client_network
 
 class AccountHttpTests(unittest.TestCase):
     def setUp(self):
+        dns = mock.patch.object(server.socket, "getfqdn", return_value="fixture.example")
+        dns.start()
+        self.addCleanup(dns.stop)
         patch = mock.patch.object(codex_accounts, "START_INTERVAL_SECONDS", 0)
         patch.start()
         self.addCleanup(patch.stop)

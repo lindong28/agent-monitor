@@ -97,6 +97,9 @@ class FreshnessWiringTests(unittest.TestCase):
             fake_bin = sandbox / "bin"
             fake_bin.mkdir()
             os.symlink(sys.executable, fake_bin / "python3")
+            # This fixture exercises the macOS opener; Linux paths have separate tests.
+            (fake_bin / "uname").write_text("#!/bin/sh\necho Darwin\n")
+            (fake_bin / "uname").chmod(0o755)
             curl_log = sandbox / "curl.log"
             open_log = sandbox / "open.log"
             (fake_bin / "curl").write_text(

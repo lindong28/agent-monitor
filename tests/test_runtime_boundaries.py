@@ -189,12 +189,15 @@ class ProcessGroupTests(unittest.TestCase):
             (root/'hub.py').write_text('print("standalone")\n')
             (root/'server.py').write_text('''import argparse,json,threading
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from socketserver import TCPServer
+class FixtureServer(ThreadingHTTPServer):
+ server_bind=TCPServer.server_bind  # The fixture does not need reverse DNS.
 p=argparse.ArgumentParser();p.add_argument('--host');p.add_argument('--port',type=int);a=p.parse_args()
 class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
   self.send_response(200);self.send_header('Content-Length','2');self.end_headers();self.wfile.write(b'{}')
  def log_message(self,*args):pass
-s=ThreadingHTTPServer((a.host,a.port),Handler)
+s=FixtureServer((a.host,a.port),Handler)
 timer=threading.Timer(15,s.shutdown);timer.daemon=True;timer.start()
 s.serve_forever()
 ''')
