@@ -233,7 +233,11 @@ class OAuthTransportTests(unittest.TestCase):
 
     def test_reset_dates_preserve_rounding_and_utc(self):
         module = load_module()
-        self.assertEqual(module.to_epoch("2026-01-01T00:00:00.1Z"), 1767225601)
+        for fraction in ("1", "12", "123", "1234", "12345", "123456", "1234567"):
+            with self.subTest(fraction=fraction):
+                self.assertEqual(module.to_epoch(f"2026-01-01T00:00:00.{fraction}Z"), 1767225601)
+        self.assertEqual(module.to_epoch("2026-01-01T01:00:00.12+01:00"), 1767225601)
+        self.assertEqual(module.to_epoch("2026-01-01T00:00:00.12"), 1767225601)
         self.assertEqual(module.to_epoch("2026-01-01T00:00:00"), 1767225600)
         self.assertEqual(module.to_epoch("invalid"), 0)
         self.assertEqual(module.to_epoch(None), 0)

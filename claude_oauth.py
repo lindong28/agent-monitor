@@ -76,6 +76,10 @@ def to_epoch(value: object) -> int:
     if text.endswith("Z"):
         # fromisoformat rejects the military-zone suffix before Python 3.11.
         text = text[:-1] + "+00:00"
+    # Python 3.10 accepts only three or six fractional digits. Normalize to
+    # datetime's microsecond precision, matching newer Python's truncation.
+    text = re.sub(r"(\d{2}:\d{2}:\d{2})\.(\d+)",
+                  lambda match: match[1] + "." + match[2][:6].ljust(6, "0"), text)
     try:
         stamp = datetime.fromisoformat(text)
     except ValueError:
