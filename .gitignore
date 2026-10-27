@@ -1,5 +1,6 @@
 __pycache__/
 .venv/
+node_modules/
 .runtime/
 .pytest_cache/
 .DS_Store

@@ -1,0 +1,9 @@
+# Use a public dependency for device acceptance
+
+Accepted 2026-10-27 after independent decision review. This affects only the optional developer browser acceptance runner, its dependencies, tests and contribution instructions.
+
+The runner required `browser-task.mjs` and `test-chrome.mjs` from a maintainer's private harness. The public contribution guide described their interface but provided no acquisition path. Replace that interface with the public `agent-browser` CLI, pinned to 0.39.4 in development dependencies. Keep the six-account synthetic workflow, actual browser clicks, failure reporting, bounded execution and cleanup. Normal product installation does not install this developer dependency.
+
+Merely documenting the unavailable acquisition instructions would not make this path reproducible. Copying the private harness would import unrelated authorization and CLI-pinning machinery. A second automation framework is unnecessary while the public CLI exposes the required operations. Use a fresh HOME, explicit empty configuration, isolated session/socket directory and an environment allowlist; never inherit a cloud provider, attached browser, profile or credentials. A small executable wrapper rejects sandbox-disabling arguments before invoking the selected Chrome executable, because this CLI version can otherwise add them automatically in containers. Such environments fail explicitly rather than weakening the sandbox. This runner is not added to default CI.
+
+At decision acceptance, public package installation and upstream interfaces had been checked, but the rewritten runner's popup behavior, six-account flow, fault handling and process cleanup were not yet verified. Those checks are required before delivering the implementation. Real accounts, production services and existing user browsers are outside this acceptance path; the optional macOS lifecycle check remains explicit.

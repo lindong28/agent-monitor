@@ -36,18 +36,18 @@ Start with the [responsibility map](docs/public-architecture.md#responsibility-m
 
 ## Explicit browser and connector acceptance
 
-`scripts/accept_device_connection.mjs` is an optional developer acceptance runner, not a runtime dependency or part of the default CI command. It starts isolated synthetic account fixtures and a headless Chrome instance. It requires an externally installed `browser-task.mjs` exporting `cdp` and `inspect`, plus the sibling `test-chrome.mjs` exporting `launchTestChrome`. Those helper files are not shipped or installed by this repository; an arbitrary browser CLI path does not satisfy that interface. If they are unavailable, use the README's manual sample check and report device/connector automation as unverified. Ordinary installation and the default regression suite do not require them.
-
-With that tooling already available, supply its absolute path and an installed Chrome executable:
+`scripts/accept_device_connection.mjs` is an optional developer acceptance runner, not a runtime dependency or part of the default CI command. It uses the public [agent-browser](https://github.com/vercel-labs/agent-browser) CLI pinned in `package-lock.json`; no maintainer helper or private harness is required. Run the development setup above first, then install the optional Node dependency and supply an installed Chrome/Chromium executable:
 
 ```bash
+npm ci
 node scripts/accept_device_connection.mjs \
-  --browser-tool /absolute/path/to/browser-task.mjs \
   --browser /absolute/path/to/Chrome \
   --python "$PWD/.venv/bin/python"
 ```
 
-The runner creates disposable HOME/state and checks six synthetic accounts without provider-account requests. It should exit zero after its assertions and teardown; a cleanup failure is a failure, not a successful acceptance. On macOS with a desktop login, explicitly adding `--launchd` also exercises installation/removal of a temporary connector job through `scripts/accept_connector_lifecycle.py`. Do not use that option on a production host as a routine unit-test step. Real provider quotas, login and message delivery remain separate, authorized checks.
+For Google Chrome on macOS the executable is usually `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`; on Linux, use the absolute path returned by `command -v chromium` or `command -v google-chrome`. A browser installation and its system libraries are prerequisites; `npm ci` installs the CLI, not Chrome. Use a normal non-root desktop host. The runner rejects any sandbox-disabling arguments, including defaults the upstream CLI can add in containers; it does not repair system sandbox configuration. See [the dependency decision](docs/adr/20261027-a39d-public-browser-acceptance.md) for this boundary.
+
+The runner creates disposable HOME/state, browser configuration and a dedicated session; it does not inherit browser/provider configuration or attach to your browser. It checks six synthetic accounts, preview/cancel, one confirmed batch, pairing failure and pairing cancellation without provider-account requests. It should exit zero after its assertions and teardown; a cleanup failure is a failure, not a successful acceptance. On macOS with a desktop login, explicitly adding `--launchd` also exercises installation/removal of a temporary connector job through `scripts/accept_connector_lifecycle.py`. Do not use that option on a production host as a routine unit-test step. Real provider quotas, login and message delivery remain separate, authorized checks.
 
 ## Changes and reports
 

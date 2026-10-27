@@ -6,7 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {test} from 'node:test';
 
-test('browser cleanup failure still stops the fixture and removes isolated HOME',async()=>{
+for(const scenario of ['startup-and-cleanup-failure','json-error','sandbox-refusal']) test(scenario,async()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'accept-cleanup-'));
   const marker=path.join(root,'fixture.json');
   const python=path.join(root,'fixture.cjs');
@@ -15,19 +15,34 @@ test('browser cleanup failure still stops the fixture and removes isolated HOME'
     fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,home:process.env.HOME}));
     const server=http.createServer((req,res)=>res.end('{}'));
     server.listen(0,'127.0.0.1',()=>console.log(JSON.stringify({url:'http://127.0.0.1:'+server.address().port})));`,{mode:0o700});
-  const tool=path.join(root,'browser-task.mjs');
-  fs.writeFileSync(tool,'export const cdp=()=>{},inspect=()=>{};');
-  fs.writeFileSync(path.join(root,'test-chrome.mjs'),`export function launchTestChrome(){return {ready:Promise.reject(new Error('injected startup failure')),stop:async()=>{throw new Error('injected cleanup failure')}}}`);
+  const tool=path.join(root,'browser.cjs'), browser=path.join(root,'chrome.cjs');
+  const browserMarker=path.join(root,'browser-called');
+  fs.writeFileSync(browser,`#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(browserMarker)},'called');`,{mode:0o700});
+  fs.writeFileSync(tool,`#!${process.execPath}
+    const assert=require('node:assert/strict');
+    for(const key of ['AGENT_BROWSER_CDP','AGENT_BROWSER_PROVIDER','AGENT_BROWSER_PROFILE','NODE_OPTIONS','AI_GATEWAY_API_KEY']) assert.equal(process.env[key],undefined,key+' must not be inherited');
+    assert.equal(process.env.CLAUDE_CONFIG_DIR,process.env.HOME+'/.claude');
+    assert.equal(process.env.CODEX_HOME,process.env.HOME+'/.codex');
+    if(process.argv.at(-1)==='close') {console.error('injected cleanup failure');process.exit(1);}
+    if(${JSON.stringify(scenario)}==='json-error') {console.log(JSON.stringify({success:false,error:'injected startup failure from JSON'}));process.exit(1);}
+    if(${JSON.stringify(scenario)}==='sandbox-refusal') {
+      const launcher=process.argv[process.argv.indexOf('--executable-path')+1];
+      const result=require('child_process').spawnSync(launcher,['--no-sandbox'],{encoding:'utf8'});
+      process.stderr.write(result.stderr);process.exit(result.status || 0);
+    }
+    console.error('injected startup failure');process.exit(1);`,{mode:0o700});
   let observation;
   try {
     let result;
-    try {await promisify(execFile)(process.execPath,[new URL('./accept_device_connection.mjs',import.meta.url).pathname,'--browser-tool',tool,'--python',python],{timeout:8000});}
+    try {await promisify(execFile)(process.execPath,[new URL('./accept_device_connection.mjs',import.meta.url).pathname,'--agent-browser',tool,'--browser',browser,'--python',python],
+      {timeout:8000,env:{...process.env,AGENT_BROWSER_CDP:'http://127.0.0.1:1',AGENT_BROWSER_PROVIDER:'injected',AGENT_BROWSER_PROFILE:root,AI_GATEWAY_API_KEY:'synthetic'}});}
     catch(error){result=error;}
     observation=JSON.parse(fs.readFileSync(marker));
     assert.equal(result?.code,1,'must exit nonzero without hanging on the fixture');
     assert.equal(result.killed,false);
     assert.match(result.stderr,/injected cleanup failure/);
-    assert.match(result.stderr,/injected startup failure/);
+    assert.match(result.stderr,scenario==='sandbox-refusal'?/Refusing sandbox-disabled/:/injected startup failure/);
+    assert.equal(fs.existsSync(browserMarker),false,'unsafe browser must not launch');
     assert.throws(()=>process.kill(observation.pid,0),{code:'ESRCH'});
     assert.equal(fs.existsSync(observation.home),false);
   } finally {
