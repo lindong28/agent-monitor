@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.10'
+          - os: macos-latest
+            python: '3.13'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install in an isolated HOME
+        shell: bash
+        run: |
+          test_home="$RUNNER_TEMP/agent-monitor-home"
+          mkdir -p "$test_home"
+          echo "HOME=$test_home" >> "$GITHUB_ENV"
+          echo "CLAUDE_CONFIG_DIR=$test_home/.claude" >> "$GITHUB_ENV"
+          echo "CODEX_HOME=$test_home/.codex" >> "$GITHUB_ENV"
+          HOME="$test_home" CLAUDE_CONFIG_DIR="$test_home/.claude" CODEX_HOME="$test_home/.codex" \
+            AGENT_MONITOR_PYTHON="$(command -v python)" ./install.sh --no-services
+          .venv/bin/python -m pip install -r requirements-dev.txt
+      - name: Run Python and JavaScript regression tests
+        run: .venv/bin/python -m unittest discover -s tests

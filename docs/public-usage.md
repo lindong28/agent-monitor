@@ -20,7 +20,7 @@ Keep backups of state and local configuration outside the checkout before migrat
 
 ## Transition an existing installation
 
-This is distinct from updating an installation already based on the public `main`. The release candidate uses a separate publication history, so `git pull --ff-only` from the old history is not a migration command. Publication and replacement of the old main/history require the owner's separate decision. Do not force-push, reset or remove the old checkout as part of these preparation steps.
+This is distinct from updating an installation already based on the public `main`. The public repository uses a separate history from the earlier private installation, so `git pull --ff-only` from that old history is not a migration command. Replacing an old installation's source requires its operator's decision. Do not force-push, reset or remove the old checkout as part of these preparation steps.
 
 1. Record the old source revision, checkout path, selected machine/Hub configuration paths and service entrypoints. Preserve the old Git history and private operational documentation outside the public candidate. Keep a recoverable backup of the actual state target as well as the `state` symlink itself; archiving only the link does not back up its data. Coordinate a quiet window for the final state backup.
 2. Before replacing tracked defaults, retain the selected configuration as `machines.local.json` and `hub.local.json`. If the local file already exists, preserve it; otherwise copy the corresponding current tracked file. For example, from the old checkout:
@@ -53,7 +53,7 @@ This is distinct from updating an installation already based on the public `main
 
    Compare the actual returned totals and admitted names; an empty result does not establish retained-data continuity. This reads a copy of retained state and may create local reader leases/locks; it is not a live health or exporter check. Retain the old-source and candidate outputs privately.
 
-5. After publication/history replacement is explicitly authorized, make the agreed public `main` authoritative at the existing primary checkout path, preserving the backed-up local configuration and state. Coordinate any source-path changes with CLI links and service definitions. Follow [services and deployment](#services-and-deployment) at the verified published revision; an uncommitted overlay or rehearsal checkout is not deployable source. Verify the actual dashboard and collection results before retiring the old recovery copy.
+5. After the operator approves replacing the old installation's source, make the public `main` authoritative at the existing primary checkout path, preserving the backed-up local configuration and state. Coordinate any source-path changes with CLI links and service definitions. Follow [services and deployment](#services-and-deployment) at the verified published revision; an uncommitted overlay or rehearsal checkout is not deployable source. Verify the actual dashboard and collection results before retiring the old recovery copy.
 
 If any identity, retained-data or source check fails, stop before enabling collection. Preserve the failing state and logs; restore the prior source and configuration from the recovery copy under the same service-ownership checks. Do not delete locks, reset identities or accept a new source simply to pass preflight. This guide does not claim a production cutover has occurred.
 

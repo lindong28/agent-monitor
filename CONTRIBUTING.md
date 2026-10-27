@@ -1,6 +1,6 @@
 # Contributing
 
-Read [README.md](README.md), [AGENTS.md](AGENTS.md) and [architecture](docs/public-architecture.md). Contributions are covered by the [MIT license](LICENSE). This candidate has not yet been published at its planned public repository address.
+Read [README.md](README.md), [AGENTS.md](AGENTS.md) and [architecture](docs/public-architecture.md). Contributions are covered by the [MIT license](LICENSE). Open issues and pull requests at [lindong28/agent-monitor](https://github.com/lindong28/agent-monitor); target `main` for changes.
 
 ## Development setup
 
@@ -16,6 +16,8 @@ HOME="$test_home" CLAUDE_CONFIG_DIR="$test_home/.claude" CODEX_HOME="$test_home/
 ```
 
 Python 3.10+ and Node are required by the existing tests. A subset can be run with `-p 'test_machine_config.py'`. Some platform-specific tests are skipped on other platforms. The test suite does not require a Gateway checkout. Installer tests isolate launchd and downloads; their pass is not evidence of a production deployment or a fresh dependency download.
+
+[GitHub Actions](https://github.com/lindong28/agent-monitor/actions/workflows/ci.yml) runs the existing suite on Linux with Python 3.10 and macOS with Python 3.13, using Node 24 and an isolated HOME. Each job first runs the real installer with `--no-services`, including public dependency downloads. These two combinations are the CI coverage, not every supported OS, CPU or Python version. The jobs do not query provider accounts or install user services. A passing test suite does not replace the browser sample check below.
 
 To exercise the reader's main flow, use the README's isolated sample and inspect the session in a browser. Tests, sample usage and real provider/account verification are distinct claims. Do not make paid provider requests merely to run the tests.
 

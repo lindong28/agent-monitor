@@ -1,6 +1,6 @@
 # Third-party notices
 
-agent-monitor's own code is distributed under [MIT](LICENSE). Incorporated third-party source and dependencies keep their own licenses. The public source candidate excludes downloaded Python environments, Electron binaries, Chart.js bundles and font binaries; the installer obtains them from their upstream distributions.
+agent-monitor's own code is distributed under [MIT](LICENSE). Incorporated third-party source and dependencies keep their own licenses. The source distribution excludes downloaded Python environments, Electron binaries, Chart.js bundles and font binaries; the installer obtains them from their upstream distributions.
 
 ## Incorporated source
 
@@ -23,6 +23,6 @@ The `ai-ipcheck` 0.2.0 CLI matches [ipcheck snapshot efd9d1a446de2bae9e5304f53dd
 | IBM Plex Sans / Mono | Browser fonts | [SIL Open Font License 1.1](https://github.com/IBM/plex/blob/master/LICENSE.txt); the installer attempts to save the license beside downloaded fonts |
 | Electron 45.0.0 | Chromium system-proxy runtime | [Electron license](https://github.com/electron/electron/blob/v45.0.0/LICENSE) and the license/Chromium notice files inside its release archive |
 
-Redistributors who bundle these generated artifacts must include the corresponding notices from the actual downloaded versions. This source-only candidate does not grant ownership of third-party components or guarantee license compliance for a separately built binary bundle.
+Redistributors who bundle these generated artifacts must include the corresponding notices from the actual downloaded versions. This source distribution does not grant ownership of third-party components or guarantee license compliance for a separately built binary bundle.
 
 The implementation originated in the author's `tt-web` project in ai-agent-config, extracted at commit `3d61487d5386dfe9bb6ba7d26807005bbf0bd7f2`. Parser comments retain their token-tracker provenance, and `token_cost.py` retains its shared arithmetic contract. These are source attributions, not runtime installation prerequisites.

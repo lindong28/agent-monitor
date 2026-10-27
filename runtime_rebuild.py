@@ -173,7 +173,11 @@ def no_runtime_users():
                     executable = next((path for path in candidates if os.access(path, os.X_OK)), None)
                     if executable is None:
                         raise ValueError('Process interpreter path is unverified; runtime retained.')
-            if inside(executable) or (env.get('VIRTUAL_ENV') and inside(env['VIRTUAL_ENV'])):
+            # Framework Python replaces argv[0]; its launcher preserves the
+            # original venv path in the kernel's initial environment.
+            launcher = env.get('__PYVENV_LAUNCHER__') if sys.platform == 'darwin' else None
+            if (inside(executable) or (env.get('VIRTUAL_ENV') and inside(env['VIRTUAL_ENV']))
+                    or (launcher and inside(launcher))):
                 raise ValueError('Processes still use this runtime; stop the owning CLI/foreground task and retry. Runtime retained.')
         except (OSError, ValueError, subprocess.SubprocessError):
             if process_identity.identity(pid) is not None:

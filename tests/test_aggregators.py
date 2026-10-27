@@ -667,7 +667,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py"):
+            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             source_path = cli_root / "repo"
@@ -758,7 +758,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py"):
+            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             state = cli_root / "state"
@@ -829,7 +829,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py"):
+            for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             state = cli_root / "state"

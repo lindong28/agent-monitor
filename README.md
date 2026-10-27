@@ -1,12 +1,29 @@
 # agent-monitor
 
+[![CI](https://github.com/lindong28/agent-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/lindong28/agent-monitor/actions/workflows/ci.yml)
+
 A personal CLI and Web dashboard for **Claude Code and Codex usage**. Explore recorded tokens and estimated costs, find sessions, compare account quota observations, and inspect collection or network failures. The dashboard currently uses Chinese labels.
 
 agent-monitor reads local agent logs. It can also aggregate snapshots from machines you explicitly configure over SSH. It does not route model requests and does not require another project's services or configuration.
 
+Use it to answer: **Which project or session used these tokens, and what can the retained records tell me about its cost?** Start with **总览 (Overview)**, open **会话 (Sessions)**, then inspect a session's **用量记录 (Usage records)**. Costs are estimates from recorded usage, not provider invoices; quotas are timestamped observations, not a guarantee that a request will succeed.
+
+**Run it on your own computer or a trusted network.** The dashboard has no client authentication. The quick-start commands below bind to `127.0.0.1`; plain `./agent-monitor start` defaults to all network interfaces. Do not expose it directly to the public Internet. For a first look without accessing your accounts, follow the [included sample](#try-the-included-sample-without-your-accounts).
+
+The included fabricated sample shows how one session's 1,800 tokens break down into two usage records:
+
+![Session details with 1,800 tokens and two fabricated usage records](docs/images/demo-session.png)
+
+<details>
+<summary>See the sample cost overview</summary>
+
+![Overview with the fabricated sample's historical estimated cost](docs/images/demo-overview.png)
+
+</details>
+
 ## Release status
 
-The project's own code is MIT-licensed; incorporated third-party source retains its respective license. The canonical source is `https://github.com/lindong28/agent-monitor`; use this repository's `main` for development and deployment. The preparation candidate is not a second maintained fork. Installations based on the earlier history must follow the [existing-installation transition](docs/public-usage.md#transition-an-existing-installation) before updating; preserve their configuration and retained data. See [LICENSE](LICENSE), [third-party notices](THIRD-PARTY-NOTICES.md) and [contributing](CONTRIBUTING.md).
+The public source is [lindong28/agent-monitor](https://github.com/lindong28/agent-monitor). Use `main` for development and the supported deployment entry; [releases](https://github.com/lindong28/agent-monitor/releases) identify tested source snapshots and their verification limits. The project's own code is MIT-licensed; incorporated third-party source retains its respective license. See [LICENSE](LICENSE), [third-party notices](THIRD-PARTY-NOTICES.md) and [contributing](CONTRIBUTING.md). Installations from the earlier private history must follow the [existing-installation transition](docs/public-usage.md#transition-an-existing-installation) before updating.
 
 ## Install with your coding agent
 
@@ -28,6 +45,8 @@ The prompt can be used before cloning. The repository's instructions contain the
 The core log-analysis flow can run without a provider login or a model call. The installer starts the proxy helper briefly to check it, but `--no-services` does not install background services or run public network probes.
 
 ## First installation
+
+Use a Git clone, including when starting from a release: collection verifies committed source identity, which GitHub's downloadable ZIP/tar archives do not contain.
 
 ```bash
 git clone https://github.com/lindong28/agent-monitor agent-monitor
@@ -68,11 +87,11 @@ This is the normal parser and dashboard flow with fabricated input. Automatic qu
 
 ## Configuration and updates
 
-A new public candidate starts with one local machine and Hub mode disabled. For custom machine names or SSH targets, copy `examples/machines.json` to **`machines.local.json`** and edit that file. For an optional Hub, similarly use **`hub.local.json`**. The local file takes precedence over its corresponding tracked default at process startup. Invalid local configuration fails visibly; it does not fall back to another fleet. Restart after adding or removing a local file.
+A new installation starts with one local machine and Hub mode disabled. For custom machine names or SSH targets, copy `examples/machines.json` to **`machines.local.json`** and edit that file. For an optional Hub, similarly use **`hub.local.json`**. The local file takes precedence over its corresponding tracked default at process startup. Invalid local configuration fails visibly; it does not fall back to another fleet. Restart after adding or removing a local file.
 
 Only one machine has `self: true`. Keep names, SSH identities and `retired_names` stable once data has been collected. Do not copy the sample over an existing configuration. The installer preserves local files, existing `state` (including symlinks) and persistent locks. Local configuration and runtime data are ignored by Git. See [configuration and retained data](docs/public-usage.md#configuration-and-retained-data) for migration and multi-machine details.
 
-To update a public candidate installed from `main`, stop the service, preserve a backup of state and local configuration, and fast-forward the same checkout. Do not discard local source changes to make an update pass:
+To update an installation from the public `main`, stop the service, preserve a backup of state and local configuration, and fast-forward the same checkout. Do not discard local source changes to make an update pass:
 
 ```bash
 ./agent-monitor stop
