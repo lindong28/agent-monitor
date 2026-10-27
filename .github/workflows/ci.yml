@@ -49,6 +49,9 @@ jobs:
           case ",$mount_options," in
             *,nosuid,*|*,noexec,*) echo 'CI sandbox needs an executable, suid-enabled mount.' >&2; exit 1 ;;
           esac
+          ln -sf "$sandbox" "$runtime/chrome-sandbox"
+          test "$(readlink "$runtime/chrome-sandbox")" = "$sandbox"
+          test "$(stat -Lc '%u:%a' "$runtime/chrome-sandbox")" = 0:4755
           echo "CHROME_DEVEL_SANDBOX=$sandbox" >> "$GITHUB_ENV"
       - name: Install in an isolated HOME
         shell: bash

@@ -9,6 +9,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 SCRIPT = r'''
+import faulthandler
+faulthandler.dump_traceback_later(5)
 import os, signal, subprocess, sys, threading, time
 from pathlib import Path
 from unittest import mock
@@ -65,6 +67,7 @@ else:
     original_server = server.ThreadingHTTPServer
     class ReadyServer(original_server):
         def serve_forever(self, *args, **kwargs):
+            faulthandler.cancel_dump_traceback_later()
             print('READY', os.getpid(), flush=True)
             return super().serve_forever(*args, **kwargs)
     server.ThreadingHTTPServer = ReadyServer
@@ -90,7 +93,14 @@ class AccountLifecycleTests(unittest.TestCase):
                     import selectors
                     with selectors.DefaultSelector() as selector:
                         selector.register(peer.stdout, selectors.EVENT_READ)
-                        self.assertTrue(selector.select(6), 'fixture did not start')
+                        if not selector.select(6):
+                            import signal
+                            try:
+                                os.killpg(peer.pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                            _, err = peer.communicate(timeout=3)
+                            self.fail('fixture did not start; isolated child diagnostics:\n' + err)
                         self.assertTrue(peer.stdout.readline().startswith('READY'))
                     peer.terminate()
                 out, err = peer.communicate(timeout=12)

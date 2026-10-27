@@ -114,16 +114,9 @@ For runtime observations and backend investigation, see [service diagnostics](op
 
 The Electron system-proxy helper requires a working Chromium sandbox even though it opens no browser window. On Linux systems that restrict unprivileged user namespaces, the downloaded helper may abort because its bundled `chrome-sandbox` is not a root-owned setuid executable. The installer reports this as `runtime_protocol_failed`; do not treat it as a provider login failure.
 
-If Google Chrome is already installed by your system administrator, Chromium supports using its existing sandbox helper. Confirm that `/opt/google/chrome/chrome-sandbox` is root-owned, executable and setuid before selecting it:
+Ask the machine administrator to provide a protected sandbox helper compatible with the pinned Electron runtime. The actual runtime's `chrome-sandbox` path must resolve to this helper: Chromium prefers that adjacent file over `CHROME_DEVEL_SANDBOX`, so setting the environment variable alone does not replace the downloaded file. An administrator may install the helper in a protected directory and point the runtime's adjacent path to it with a symbolic link.
 
-```bash
-stat -c '%U %a %n' /opt/google/chrome/chrome-sandbox
-export CHROME_DEVEL_SANDBOX=/opt/google/chrome/chrome-sandbox
-./install.sh --no-services
-AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
-```
-
-The expected owner and mode are `root 4755`; its parent directories must also be protected from unprivileged writes and its mount must permit execution and setuid. Keep this environment variable in the environment that starts agent-monitor. If the helper is absent or has different ownership or permissions, ask the machine administrator to configure a supported sandbox using [Chromium's Linux guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md). The installer does not elevate privileges or configure host security policy. Do not disable sandboxing to make installation pass. On disposable GitHub Linux runners, CI separately prepares a protected copy of the pinned Electron sandbox before running the normal installer; see the [CI sandbox decision](adr/20261027-b648-ci-linux-sandbox.md) and its [mount correction](adr/20261027-c291-ci-sandbox-mount.md).
+The resolved helper must be root-owned, executable and mode 4755; its target parent directories must be protected from unprivileged writes and its mount must permit execution and setuid. See [Chromium's Linux guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md). Rerun `./install.sh --no-services` after the administrator prepares the sandbox; the installer checks actual startup before replacing services. Repeat this preparation if an update changes the pinned runtime directory. The installer does not elevate privileges or configure host security policy. Do not disable sandboxing to make installation pass. On disposable GitHub Linux runners, CI separately prepares and links a protected copy of the pinned Electron sandbox before running the normal installer; see the [CI sandbox decision](adr/20261027-b648-ci-linux-sandbox.md) and its [mount correction](adr/20261027-c291-ci-sandbox-mount.md).
 
 ## Python runtime rebuild
 
