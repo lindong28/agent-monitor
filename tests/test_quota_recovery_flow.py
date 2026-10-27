@@ -186,15 +186,28 @@ class RecoveryHttpTests(unittest.TestCase):
                     mock.patch("server.sync.load_machine_config", return_value=SimpleNamespace(by_name={"fixture": machine})), \
                     mock.patch("server.generation.generation_admission_snapshot", return_value=admitted), \
                     mock.patch("quota_recovery.run", return_value=receipt) as run:
-                httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+                request_finished = threading.Event()
+
+                class Handler(server.Handler):
+                    def finish(self):
+                        try:
+                            super().finish()
+                        finally:
+                            request_finished.set()
+
+                httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
                 thread = threading.Thread(target=httpd.serve_forever)
                 thread.start()
                 def post(value=request, origin=None):
+                    request_finished.clear()
                     connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=3)
                     try:
                         connection.request("POST", "/api/quota-recovery", json.dumps(value), {"Content-Type": "application/json", "X-Agent-Monitor": "action", "Origin": origin or f"http://127.0.0.1:{httpd.server_port}"})
                         response = connection.getresponse()
                         body = json.loads(response.read())
+                        # A response can arrive before the handler's finally
+                        # clears recovering; finish one scenario before the next.
+                        self.assertTrue(request_finished.wait(3), "HTTP handler did not finish")
                         if response.status == 200:
                             self.assertEqual(body["network"], network)
                         return response.status
