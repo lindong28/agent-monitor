@@ -7,7 +7,9 @@ import subprocess
 import sys
 import deployment_guard
 
-ROOT = Path(__file__).resolve().parent
+from project_paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 
 
 class PreflightError(Exception):

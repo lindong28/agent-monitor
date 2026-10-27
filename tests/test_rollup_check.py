@@ -6,6 +6,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -671,6 +672,8 @@ class RollupCheckTests(unittest.TestCase):
             ):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
+            shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
+            shutil.copy2(source_root / "project_paths.py", cli_root / "project_paths.py")
             state = cli_root / "state"
             state.mkdir()
             pricing_cache = state / "pricing_cache.json"
@@ -858,7 +861,7 @@ class RollupCheckTests(unittest.TestCase):
             self.assertEqual(result["would_write"]["count"], 1)
             self.assertEqual(result["verdict"], "attention")
             help_result = subprocess.run(
-                [str(module_path), "--help"],
+                [sys.executable, str(module_path), "--help"],
                 capture_output=True,
                 text=True,
                 check=False,

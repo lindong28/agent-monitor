@@ -17,10 +17,10 @@ class CollectionPageTests(unittest.TestCase):
         admitted = object()
         status = {"coverage": {"admitted": 1, "declared": 2}}
         readings = {"codex": {"accounts": [{"account_state": "unstamped", "five_hour_used_pct": 0}]}}
-        with mock.patch.object(server, "_query_admission", return_value=nullcontext(admitted)), \
-             mock.patch.object(server, "_sync_status", return_value=status) as sync, \
-             mock.patch.object(server, "_live_rate_limits_from_admission", return_value=readings) as quota, \
-             mock.patch.object(server, "_maybe_sync_remotes", side_effect=AssertionError("refresh")), \
+        with mock.patch.object(server.COLLECTION, "admission", return_value=nullcontext(admitted)), \
+             mock.patch.object(server.COLLECTION, "status", return_value=status) as sync, \
+             mock.patch.object(server.QUOTA_VIEW, "live_from_admission", return_value=readings) as quota, \
+             mock.patch.object(server.COLLECTION, "request", side_effect=AssertionError("refresh")), \
              mock.patch.object(server.rollup, "query_pivot", side_effect=AssertionError("cost query")):
             self.assertEqual(server.ROUTES["/api/collection"]({}), {"sync": status, "rate_limits": readings})
             sync.assert_called_once_with(admission=admitted)
@@ -45,7 +45,7 @@ class CollectionPageTests(unittest.TestCase):
         with mock.patch.object(server.hub, "enabled", return_value=True), \
              mock.patch.object(server.generation, "generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=hosts))), \
              mock.patch.object(server.statistics_snapshot, "read_admitted_usage", return_value=entries) as read, \
-             mock.patch.object(server, "_maybe_sync_remotes", side_effect=AssertionError("refresh")):
+             mock.patch.object(server.COLLECTION, "request", side_effect=AssertionError("refresh")):
             self.assertEqual(server.cost_diagnostics_endpoint(query), expected)
             self.assertEqual(read.call_count, 1)
             self.assertEqual(read.call_args.kwargs["query"]["cost_status"], ["unknown"])
@@ -63,7 +63,7 @@ const nodes=Object.fromEntries(['#cost-diagnostics-status','#cost-diagnostics-bo
  '#incomplete-cost-records','#incomplete-cost-summary','#incomplete-cost-body'].map(id=>[id,{}]));
 global.document={readyState:'loading',addEventListener(){},querySelector:s=>nodes[s]||null,querySelectorAll:()=>[]};
 global.window={location:{origin:'http://example.test',pathname:'/collection',search:'?range=custom&start=2026-10-01&end=2026-10-02&project=a%26b&project=c',hash:''}};
-eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { renderCostDiagnostics, costDiagnosticsQuery,'));
+require("./web/app.js")();
 const am=window.AgentMonitor;
 assert.deepEqual(am.costDiagnosticsQuery().getAll('project'),['a&b','c']);
 am.renderCostDiagnostics({groups:[{machine:'mac',agent:'codex',model:'<model>',reason:'unknown_model',entries:1}]});
@@ -111,7 +111,7 @@ const source='/explore?range=all&model=M';
 const collection='/collection?range=all&return='+encodeURIComponent(source)+'#cost-diagnostics';
 global.window={location:{origin:'http://example.test',pathname:'/sessions',
  search:'?range=all&model=M&return='+encodeURIComponent(collection),hash:''},addEventListener(){}};
-eval(fs.readFileSync('web/app.js','utf8'));
+require("./web/app.js")();
 window.AgentMonitor.initClientNavigation();
 for(const modified of [true,false]) {
  const link={id:'sessions-diagnostics-return',href:collection,hasAttribute:()=>false};
@@ -147,7 +147,7 @@ const nav={href:'/collection'};
 global.document={readyState:'loading',addEventListener(){},querySelector:s=>nodes[s]||null,
  querySelectorAll:s=>s==='.quota-observation-details[open]'?[{dataset:{observationKey:'fixture-account'}}]:s.includes('a[data-nav]')?[nav]:[]};
 global.window={location:{origin:'http://example.test',pathname:'/sessions',search:'?range=custom&start=2026-10-01&end=2026-10-12&model=a%2Fb&session=fixture&usage_page=2',hash:'#detail'}};
-eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { collectionUrl, currentPageUrl, quotaFilter, updateSyncOverviewLink,'));
+require("./web/app.js")();
 const source=window.location.pathname+window.location.search+window.location.hash;
 let target=new URL(window.AgentMonitor.collectionUrl(),window.location.origin);
 assert.equal(target.pathname,'/collection');assert.equal(target.searchParams.get('return'),source);

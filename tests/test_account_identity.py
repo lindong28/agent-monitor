@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import exporter
+from agent_monitor import quota_service
 from parsers import RateLimits, accounts
 
 
@@ -175,7 +175,7 @@ class StampingTests(unittest.TestCase):
     def test_a_reading_carries_the_account_it_was_stamped_with(self):
         account = accounts.Account("acct-1", "a@b.c", "plus")
 
-        block = exporter._rate_limit_block(self.limits, account)
+        block = quota_service.rate_limit_block(self.limits, account)
 
         self.assertEqual(block["account_id"], "acct-1")
         self.assertEqual(block["account_label"], "a@b.c")
@@ -186,13 +186,13 @@ class StampingTests(unittest.TestCase):
         """Present-and-null is what separates "signed out" from "reported by an
         exporter too old to stamp accounts", which omits the key entirely. The
         two have different remedies, so they must stay distinguishable."""
-        block = exporter._rate_limit_block(self.limits, None)
+        block = quota_service.rate_limit_block(self.limits, None)
 
         self.assertIn("account_id", block)
         self.assertIsNone(block["account_id"])
 
     def test_no_reading_publishes_no_block_even_when_signed_in(self):
-        self.assertIsNone(exporter._rate_limit_block(None, accounts.Account("acct-1")))
+        self.assertIsNone(quota_service.rate_limit_block(None, accounts.Account("acct-1")))
 
 
 class PlanSourceTests(unittest.TestCase):
@@ -210,14 +210,14 @@ class PlanSourceTests(unittest.TestCase):
     account = accounts.Account("acct-1", "a@b.c", "prolite")
 
     def test_the_shown_plan_comes_from_the_reading_not_the_credential_file(self):
-        block = exporter._rate_limit_block(self.reading, self.account)
+        block = quota_service.rate_limit_block(self.reading, self.account)
 
         self.assertEqual(block["account_plan"], "pro")
         self.assertEqual(block["reading_plan"], "pro")
         self.assertEqual(block["credential_plan"], "prolite")
 
     def test_a_reading_without_a_plan_falls_back_to_the_credential_file(self):
-        block = exporter._rate_limit_block(self.planless, self.account)
+        block = quota_service.rate_limit_block(self.planless, self.account)
 
         self.assertEqual(block["account_plan"], "prolite")
         self.assertIsNone(block["reading_plan"])
@@ -235,10 +235,10 @@ class PlanSourceTests(unittest.TestCase):
         pro_account = accounts.Account("acct-1", "a@b.c", "pro")
         # Both of these land on account_plan == "pro" — that collision is the
         # point, not an accident of the fixture.
-        both_agree = exporter._rate_limit_block(self.reading, pro_account)
-        credential_only = exporter._rate_limit_block(self.planless, pro_account)
-        reading_only = exporter._rate_limit_block(self.reading, None)
-        disagree = exporter._rate_limit_block(self.reading, self.account)
+        both_agree = quota_service.rate_limit_block(self.reading, pro_account)
+        credential_only = quota_service.rate_limit_block(self.planless, pro_account)
+        reading_only = quota_service.rate_limit_block(self.reading, None)
+        disagree = quota_service.rate_limit_block(self.reading, self.account)
 
         def state(block):
             return (block["reading_plan"], block["credential_plan"])
@@ -264,7 +264,7 @@ class PlanSourceTests(unittest.TestCase):
         """
         for value in (self.reading, self.planless):
             with self.subTest(reading=value):
-                self.assertNotIn("plan", exporter._rate_limit_block(value, self.account))
+                self.assertNotIn("plan", quota_service.rate_limit_block(value, self.account))
 
 
 if __name__ == "__main__":

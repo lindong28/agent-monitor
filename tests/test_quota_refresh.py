@@ -1,3 +1,4 @@
+from agent_monitor import account_memory, quota_view, quota_service
 import dataclasses
 import json
 import sys
@@ -53,7 +54,7 @@ class ProviderTests(unittest.TestCase):
         child = SimpleNamespace(pid=0, returncode=0, communicate=lambda *a, **k: (payload, ""))
         cache = self.root / "state/quota_snapshot.json"
         cache.write_text(json.dumps({"claude": {"account_id": "other", "refresh_error": "retained"}}))
-        save = exporter._save_quota_cache
+        save = quota_service.save_cache
 
         def save_while_paused(path, result):
             self.assertEqual(set(result), {"codex"})
@@ -61,9 +62,9 @@ class ProviderTests(unittest.TestCase):
                 controls.acquire("codex")
             save(path, result)
 
-        with mock.patch("exporter.accounts.codex_account", return_value=account), \
+        with mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
                 mock.patch("quota_refresh.subprocess.Popen", return_value=child) as spawn, \
-                mock.patch("exporter._save_quota_cache", side_effect=save_while_paused):
+                mock.patch("agent_monitor.quota_service.save_cache", side_effect=save_while_paused):
             exporter.recover_codex_quota(account.label, pause_id)
         self.assertEqual(spawn.call_count, 1)
         state = controls.read("codex")
@@ -88,9 +89,9 @@ class ProviderTests(unittest.TestCase):
                 payload = {"error": "fixture failure"} if mode == "upstream" else {"reading": dataclasses.asdict(reading)}
                 child = SimpleNamespace(pid=0, returncode=0, communicate=lambda *a, **k: (json.dumps(payload), ""))
                 identities = [other] if mode == "before" else [account, other if mode == "after" else account]
-                with mock.patch("exporter.accounts.codex_account", side_effect=identities), \
+                with mock.patch("agent_monitor.quota_service.accounts.codex_account", side_effect=identities), \
                         mock.patch("quota_refresh.subprocess.Popen", return_value=child) as spawn, \
-                        mock.patch("exporter._save_quota_cache", side_effect=OSError("fixture cache failure")) as save:
+                        mock.patch("agent_monitor.quota_service.save_cache", side_effect=OSError("fixture cache failure")) as save:
                     with self.assertRaises((quota_refresh.RefreshError, OSError)):
                         exporter.recover_codex_quota(account.label, mode)
                 self.assertEqual(spawn.call_count, 0 if mode == "before" else 1)
@@ -112,7 +113,7 @@ class ProviderTests(unittest.TestCase):
                 cache = root / "state/quota_snapshot.json"
                 cache.parent.mkdir()
                 account = accounts.Account("a")
-                previous = exporter._rate_limit_block(old, account)
+                previous = quota_service.rate_limit_block(old, account)
                 previous["refresh_error"] = "previous failure"
                 cache.write_text(json.dumps({"claude": previous}))
                 calls = {"claude": 0, "codex": 0}
@@ -130,11 +131,11 @@ class ProviderTests(unittest.TestCase):
                 self.sleep.reset_mock()
                 with mock.patch.object(exporter, "ROOT", root), \
                         mock.patch("hub.enabled", return_value=True), \
-                        mock.patch("exporter.quota_refresh.load_rate_limits", side_effect=live), \
-                        mock.patch("exporter.claude_status.load_rate_limits", return_value=old), \
-                        mock.patch("exporter.codex.load_rate_limits", return_value=old), \
-                        mock.patch("exporter.accounts.claude_account", return_value=account), \
-                        mock.patch("exporter.accounts.codex_account", return_value=account):
+                        mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=live), \
+                        mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=old), \
+                        mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=old), \
+                        mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=account), \
+                        mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account):
                     result = exporter._rate_limits(refresh=True)["claude"]
                     passive = exporter._rate_limits(refresh=False)["claude"]
                 signed_out = isinstance(outcome, quota_refresh.NotSignedIn)
@@ -225,10 +226,10 @@ class ProviderTests(unittest.TestCase):
                 raise quota_refresh.RefreshError("request failed")
             return fresh
 
-        with mock.patch("exporter.quota_refresh.load_rate_limits", side_effect=live), \
-                mock.patch("exporter.claude_status.load_rate_limits", return_value=old), \
-                mock.patch("exporter.accounts.claude_account", return_value=accounts.Account("a")), \
-                mock.patch("exporter.accounts.codex_account", return_value=accounts.Account("b")):
+        with mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=live), \
+                mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=old), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=accounts.Account("a")), \
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=accounts.Account("b")):
             result = exporter._rate_limits(refresh=True)
         self.assertEqual(result["claude"]["updated_at"], old.updated_at)
         self.assertEqual(result["claude"]["seven_day_pct"], 20)
@@ -334,7 +335,7 @@ class ProviderTests(unittest.TestCase):
         would regress without a sound.
         """
         account = accounts.Account("acct-1", "me@example.test", "pro")
-        cached = exporter._rate_limit_block(
+        cached = quota_service.rate_limit_block(
             RateLimits(8, None, 41, None, updated_at="2026-09-14T00:00:00+00:00"), account
         )
         cached["refresh_error"] = None
@@ -343,12 +344,12 @@ class ProviderTests(unittest.TestCase):
         def passive(local_reading):
             import hub
             with mock.patch.object(hub, "enabled", return_value=True), \
-                    mock.patch("exporter._read_quota_cache",
+                    mock.patch("agent_monitor.quota_service.read_cache",
                                return_value={"claude": cached, "codex": cached}), \
-                    mock.patch("exporter.claude_status.load_rate_limits", return_value=local_reading), \
-                    mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                    mock.patch("exporter.accounts.claude_account", return_value=account), \
-                    mock.patch("exporter.accounts.codex_account", return_value=None):
+                    mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=local_reading), \
+                    mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                    mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=account), \
+                    mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=None):
                 return exporter._rate_limits(refresh=False)["claude"]
 
         # Signed back in but not used yet: the old verdict is all there is.
@@ -368,17 +369,17 @@ class ProviderTests(unittest.TestCase):
         """
         import hub
         account = accounts.Account("acct-1", "me@example.test", "pro")
-        lapsed = exporter._rate_limit_block(
+        lapsed = quota_service.rate_limit_block(
             RateLimits(8, None, 41, None, updated_at="2026-09-14T00:00:00+00:00"), account
         )
         lapsed["refresh_error"] = None
         lapsed["signed_out"] = True
 
         # (a) the hub is unreachable, so the cached block is restored and stamped.
-        with mock.patch("exporter._read_quota_cache",
+        with mock.patch("agent_monitor.quota_service.read_cache",
                         return_value={"claude": lapsed, "codex": lapsed}), \
-                mock.patch("exporter.accounts.claude_account", return_value=account), \
-                mock.patch("exporter.accounts.codex_account", return_value=account), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=account), \
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
                 mock.patch.object(hub, "request_quota_refresh",
                                   side_effect=hub.QuotaRequestError("Hub is unreachable")):
             restored = exporter._gui_rate_limits()
@@ -391,13 +392,13 @@ class ProviderTests(unittest.TestCase):
         newer = dict(lapsed, updated_at="2026-09-16T00:00:00+00:00")
         written = {}
         with mock.patch.object(hub, "enabled", return_value=True), \
-                mock.patch("exporter._read_quota_cache",
+                mock.patch("agent_monitor.quota_service.read_cache",
                            return_value={"claude": newer, "codex": newer}), \
-                mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-                mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                mock.patch("exporter.accounts.claude_account", return_value=account), \
-                mock.patch("exporter.accounts.codex_account", return_value=account), \
-                mock.patch("exporter.quota_refresh.load_rate_limits",
+                mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=account), \
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
+                mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits",
                            side_effect=quota_refresh.RefreshError("Quota request timed out")), \
                 mock.patch("exporter.json.dump", side_effect=lambda obj, *a, **k: written.update(obj)), \
                 mock.patch("exporter.os.fsync"), mock.patch("exporter.os.chmod"):
@@ -440,12 +441,12 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIsInstance(caught.exception, quota_refresh.NotSignedIn)
 
     def test_exporter_publishes_a_signed_out_block_with_no_error(self):
-        with mock.patch("exporter.quota_refresh.load_rate_limits",
+        with mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits",
                         side_effect=quota_refresh.NotSignedIn("no account")), \
-                mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-                mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                mock.patch("exporter.accounts.claude_account", return_value=None), \
-                mock.patch("exporter.accounts.codex_account", return_value=None):
+                mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=None):
             result = exporter._rate_limits(refresh=True)
         for provider in ("claude", "codex"):
             self.assertIsNone(result[provider]["refresh_error"])
@@ -460,10 +461,10 @@ class ProviderTests(unittest.TestCase):
         that the exporter was too old to confirm quota refresh, which named a
         remedy the reader did not need.
         """
-        with mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-                mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                mock.patch("exporter.accounts.claude_account", return_value=None), \
-                mock.patch("exporter.accounts.codex_account", return_value=None):
+        with mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=None):
             result = exporter._rate_limits(refresh=False)
         for provider in ("claude", "codex"):
             self.assertIsInstance(result[provider], dict)
@@ -480,18 +481,18 @@ class ProviderTests(unittest.TestCase):
         rely on that shape. Narrowing it this way is what keeps the change to
         the one case that was being misreported.
         """
-        with mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-                mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                mock.patch("exporter.accounts.claude_account", return_value=accounts.Account("a")), \
-                mock.patch("exporter.accounts.codex_account", return_value=accounts.Account("b")):
+        with mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=accounts.Account("a")), \
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=accounts.Account("b")):
             result = exporter._rate_limits(refresh=False)
         for provider in ("claude", "codex"):
             self.assertIsNone(result[provider])
 
     def test_no_cached_reading_still_reports_refresh_failure(self):
-        with mock.patch("exporter.quota_refresh.load_rate_limits", side_effect=quota_refresh.RefreshError("failed")), \
-                mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-                mock.patch("exporter.codex.load_rate_limits", return_value=None):
+        with mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=quota_refresh.RefreshError("failed")), \
+                mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None):
             result = exporter._rate_limits(refresh=True)
         self.assertEqual(result["claude"]["updated_at"], "")
         self.assertEqual(result["codex"]["refresh_error"], "failed")
@@ -499,9 +500,9 @@ class ProviderTests(unittest.TestCase):
     def test_failure_without_timestamp_survives_server_projection(self):
         admission = SimpleNamespace(admitted=[SimpleNamespace(host="node-d", meta={
             "rate_limits": {"claude": {"updated_at": "", "refresh_error": "failed"}}})])
-        with mock.patch("server._self_machine_name", return_value="node-b"), \
-                mock.patch("server._quota_unavailable_reason", return_value="No reading"):
-            result = server._live_rate_limits_from_admission(admission)
+        with mock.patch("agent_monitor.quota_view.self_machine_name", return_value="node-b"), \
+                mock.patch("agent_monitor.quota_view.quota_unavailable_reason", return_value="No reading"):
+            result = server.QUOTA_VIEW.live_from_admission(admission)
         self.assertEqual(result["claude"]["accounts"], [])
         self.assertEqual(result["claude"]["refresh_errors"], [{"machine": "node-d", "reason": "failed"}])
         self.assertIn("无法确认", result["codex"]["refresh_errors"][0]["reason"])
@@ -520,24 +521,24 @@ class ProviderTests(unittest.TestCase):
         signed_in = accounts.Account("account-new", "new@example.test", "max")
         reading = RateLimits(24, None, 34, None, updated_at="2026-09-19T03:03:47Z")
         # Same machine, one provider switched and one not, as the hub saw it.
-        stale_cache = {"claude": {**exporter._rate_limit_block(
+        stale_cache = {"claude": {**quota_service.rate_limit_block(
             RateLimits(22, None, 18, None, updated_at="2026-09-19T02:40:43Z"),
             accounts.Account("account-old", "old@example.test", "max")),
             "refresh_error": None, "signed_out": False}}
         with mock.patch("hub.enabled", return_value=True), \
-                mock.patch("exporter._read_quota_cache", return_value=stale_cache), \
-                mock.patch("exporter.claude_status.load_rate_limits", return_value=reading), \
-                mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                mock.patch("exporter.accounts.claude_account", return_value=signed_in), \
-                mock.patch("exporter.accounts.codex_account", return_value=None):
+                mock.patch("agent_monitor.quota_service.read_cache", return_value=stale_cache), \
+                mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=reading), \
+                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=signed_in), \
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=None):
             blocks = exporter._rate_limits(refresh=False)
         self.assertNotIn("refresh_error", blocks["claude"])
 
         admission = SimpleNamespace(admitted=[
             SimpleNamespace(host="node-c", meta={"rate_limits": blocks})])
-        with mock.patch("server._self_machine_name", return_value="node-b"), \
-                mock.patch("server._quota_unavailable_reason", return_value="No reading"):
-            result = server._live_rate_limits_from_admission(admission)
+        with mock.patch("agent_monitor.quota_view.self_machine_name", return_value="node-b"), \
+                mock.patch("agent_monitor.quota_view.quota_unavailable_reason", return_value="No reading"):
+            result = server.QUOTA_VIEW.live_from_admission(admission)
         self.assertEqual(result["claude"]["refresh_errors"], [])
         # The reading it did publish is still the one on the row, with its own
         # age left to say how current it is.
@@ -552,42 +553,42 @@ class ProviderTests(unittest.TestCase):
         block carrying neither is the one that genuinely cannot confirm that an
         active refresh ran.
         """
-        block = exporter._rate_limit_block(
+        block = quota_service.rate_limit_block(
             RateLimits(8, None, 55, None, updated_at="2026-09-08T12:00:00Z"),
             accounts.Account("account-a"))
         block.pop("refresh_error", None)
         block.pop("signed_out", None)
         admission = SimpleNamespace(admitted=[
             SimpleNamespace(host="node-a", meta={"rate_limits": {"claude": block}})])
-        with mock.patch("server._self_machine_name", return_value="node-b"), \
-                mock.patch("server._quota_unavailable_reason", return_value="No reading"):
-            result = server._live_rate_limits_from_admission(admission)
+        with mock.patch("agent_monitor.quota_view.self_machine_name", return_value="node-b"), \
+                mock.patch("agent_monitor.quota_view.quota_unavailable_reason", return_value="No reading"):
+            result = server.QUOTA_VIEW.live_from_admission(admission)
         self.assertEqual(result["claude"]["refresh_errors"][0]["machine"], "node-a")
         self.assertIn("无法确认", result["claude"]["refresh_errors"][0]["reason"])
 
     def test_success_then_failure_keeps_latest_reading_and_current_presence(self):
         account = accounts.Account("account-a", "a@example.test", "pro")
-        newest = exporter._rate_limit_block(
+        newest = quota_service.rate_limit_block(
             RateLimits(8, None, 55, None, updated_at="2026-09-08T12:00:00Z"), account)
         newest["refresh_error"] = None
-        latest_entry = server._account_entry(newest, ["node-d"], "node-d")
-        key, record = server._account_memory_entry("claude", latest_entry)
+        latest_entry = quota_view.account_entry(newest, ["node-d"], "node-d")
+        key, record = account_memory.account_memory_entry("claude", latest_entry)
         memory = {"version": 1, "accounts": {key: record}}
         old = RateLimits(2, None, 20, None, updated_at="2026-09-08T08:00:00Z")
         for cached in (old, None):
             with self.subTest(cache_present=cached is not None), \
-                    mock.patch("exporter.quota_refresh.load_rate_limits", side_effect=quota_refresh.RefreshError("offline")), \
-                    mock.patch("exporter.claude_status.load_rate_limits", return_value=cached), \
-                    mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                    mock.patch("exporter.accounts.claude_account", return_value=account), \
-                    mock.patch("exporter.accounts.codex_account", return_value=None), \
-                    mock.patch("server._load_account_memory", return_value=("valid", memory)), \
-                    mock.patch("server._self_machine_name", return_value="node-d"), \
-                    mock.patch("server._quota_unavailable_reason", return_value="No reading"):
+                    mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=quota_refresh.RefreshError("offline")), \
+                    mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=cached), \
+                    mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                    mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=account), \
+                    mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=None), \
+                    mock.patch("server.ACCOUNT_MEMORY.read", return_value=("valid", memory)), \
+                    mock.patch("agent_monitor.quota_view.self_machine_name", return_value="node-d"), \
+                    mock.patch("agent_monitor.quota_view.quota_unavailable_reason", return_value="No reading"):
                 blocks = exporter._rate_limits(refresh=True)
                 admission = SimpleNamespace(admitted=[SimpleNamespace(host="node-d", meta={"rate_limits": blocks})])
-                result = server._live_rate_limits_from_admission(admission)
-                server._merge_remembered_rate_limit_accounts(result)
+                result = server.QUOTA_VIEW.live_from_admission(admission)
+                server.QUOTA_VIEW.merge_remembered(result)
                 entry = result["claude"]["accounts"][0]
                 self.assertEqual(entry["seven_day_used_pct"], 55)
                 self.assertEqual(entry["updated_at"], record["observed_at"])
@@ -599,15 +600,15 @@ class ProviderTests(unittest.TestCase):
     def test_refresh_status_is_normalized_at_consumer_boundary(self):
         for value in (None, "offline", "", " ", False, {}, json.loads("1e400")):
             with self.subTest(value=value):
-                block = exporter._rate_limit_block(
+                block = quota_service.rate_limit_block(
                     RateLimits(8, None, 55, None, updated_at="2026-09-08T12:00:00Z"),
                     accounts.Account("account-a"))
                 block["refresh_error"] = value
                 admission = SimpleNamespace(admitted=[SimpleNamespace(host="node-d", meta={
                     "rate_limits": {"claude": block}})])
-                with mock.patch("server._self_machine_name", return_value="node-d"), \
-                        mock.patch("server._quota_unavailable_reason", return_value="No reading"):
-                    result = server._live_rate_limits_from_admission(admission)
+                with mock.patch("agent_monitor.quota_view.self_machine_name", return_value="node-d"), \
+                        mock.patch("agent_monitor.quota_view.quota_unavailable_reason", return_value="No reading"):
+                    result = server.QUOTA_VIEW.live_from_admission(admission)
                 json.dumps(result, allow_nan=False)
                 self.assertEqual(result["claude"]["accounts"][0]["seven_day_used_pct"], 55)
                 errors = result["claude"]["refresh_errors"]
@@ -619,22 +620,22 @@ class ProviderTests(unittest.TestCase):
 
     def test_memory_replacement_does_not_borrow_a_healthy_machine_source(self):
         account = accounts.Account("a", "a@example.test")
-        old = exporter._rate_limit_block(RateLimits(2, None, 20, None, updated_at="2026-09-29T01:00:00Z"), account)
+        old = quota_service.rate_limit_block(RateLimits(2, None, 20, None, updated_at="2026-09-29T01:00:00Z"), account)
         old["refresh_error"] = None
         failed = {**old, "refresh_error": "offline"}
         latest = {**old, "updated_at": "2026-09-29T07:00:00Z", "seven_day_pct": 80}
-        key, record = server._account_memory_entry("claude", server._account_entry(latest, ["node-b"], "node-b"))
+        key, record = account_memory.account_memory_entry("claude", quota_view.account_entry(latest, ["node-b"], "node-b"))
         for remembered in (False, True):
             admission = SimpleNamespace(admitted=[
                 SimpleNamespace(host="node-d", meta={"rate_limits": {"claude": old}}),
                 SimpleNamespace(host="node-b", meta={"rate_limits": {"claude": failed}}),
             ])
             with self.subTest(remembered=remembered), \
-                    mock.patch("server._load_account_memory", return_value=("valid", {"version": 1, "accounts": {key: record} if remembered else {}})), \
-                    mock.patch("server._self_machine_name", return_value="node-d"), \
-                    mock.patch("server._quota_unavailable_reason", return_value="No reading"):
-                result = server._live_rate_limits_from_admission(admission)
-                server._merge_remembered_rate_limit_accounts(result)
+                    mock.patch("server.ACCOUNT_MEMORY.read", return_value=("valid", {"version": 1, "accounts": {key: record} if remembered else {}})), \
+                    mock.patch("agent_monitor.quota_view.self_machine_name", return_value="node-d"), \
+                    mock.patch("agent_monitor.quota_view.quota_unavailable_reason", return_value="No reading"):
+                result = server.QUOTA_VIEW.live_from_admission(admission)
+                server.QUOTA_VIEW.merge_remembered(result)
                 entry = result["claude"]["accounts"][0]
                 self.assertEqual(entry["reading_from"], None if remembered else "node-d")
                 self.assertEqual(entry["seven_day_used_pct"], 80 if remembered else 20)

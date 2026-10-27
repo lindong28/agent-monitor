@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 import rollup
+from agent_monitor import storage
 
 
 class WalFramePredicateTests(unittest.TestCase):
@@ -18,7 +19,7 @@ class WalFramePredicateTests(unittest.TestCase):
             wal.write_bytes(b"")
             Path(str(db_path) + "-shm").write_bytes(b"")
 
-            with rollup._read_connection(db_path, immutable=True) as conn:
+            with storage.read_connection(db_path, immutable=True) as conn:
                 self.assertEqual(
                     conn.execute("SELECT COUNT(*) FROM daily_rollup").fetchone()[0], 1
                 )
@@ -29,7 +30,7 @@ class WalFramePredicateTests(unittest.TestCase):
             Path(str(db_path) + "-wal").write_bytes(b"\x00" * 32)
 
             with self.assertRaises(sqlite3.OperationalError):
-                with rollup._read_connection(db_path, immutable=True):
+                with storage.read_connection(db_path, immutable=True):
                     pass
 
     @staticmethod

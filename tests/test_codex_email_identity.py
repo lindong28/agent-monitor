@@ -1,4 +1,5 @@
 """Different Codex emails sharing a workspace must retain separate readings."""
+from agent_monitor import quota_service
 
 import json
 import unittest
@@ -25,7 +26,7 @@ class CodexEmailIdentityTests(unittest.TestCase):
         return block
 
     def read_members(self, *members):
-        return server._rate_limits(admission=self.admission(*members))["codex"]["accounts"]
+        return server.QUOTA_VIEW.rate_limits(admission=self.admission(*members))["codex"]["accounts"]
 
     def test_switch_preserves_old_email_and_its_reading(self):
         self.read_members(self.current("studio", codex=self.member("first@example.com")))
@@ -42,15 +43,15 @@ class CodexEmailIdentityTests(unittest.TestCase):
     def test_remove_one_member_does_not_remove_or_block_another(self):
         self.read_members(self.current("studio", codex=self.member("first@example.com")))
         live = self.admission(self.current("mini", codex=self.member("second@example.com")))
-        rows = server._rate_limits(admission=live)["codex"]["accounts"]
+        rows = server.QUOTA_VIEW.rate_limits(admission=live)["codex"]["accounts"]
         old = next(row for row in rows if row["presence"] == "remembered")
-        live_limits = server._live_rate_limits_from_admission(live)
-        code, _ = server._remove_account_memory("codex", "shared-workspace", old["updated_at"], live_limits)
+        live_limits = server.QUOTA_VIEW.live_from_admission(live)
+        code, _ = server.ACCOUNT_MEMORY.remove("codex", "shared-workspace", old["updated_at"], live_limits)
         self.assertEqual(code, 409, "Legacy selector must reject ambiguous identities")
-        code, _ = server._remove_account_memory("codex", "shared-workspace", old["updated_at"],
+        code, _ = server.ACCOUNT_MEMORY.remove("codex", "shared-workspace", old["updated_at"],
                                                 live_limits, account_label="second@example.com")
         self.assertEqual(code, 409, "The live member remains protected")
-        code, _ = server._remove_account_memory("codex", "shared-workspace", old["updated_at"],
+        code, _ = server.ACCOUNT_MEMORY.remove("codex", "shared-workspace", old["updated_at"],
                                                 live_limits, account_label="first@example.com")
         self.assertEqual(code, 200)
         self.assertEqual([row["account_label"] for row in self.read_members()], ["second@example.com"])
@@ -61,7 +62,7 @@ class CodexEmailIdentityTests(unittest.TestCase):
         rows = self.read_members()
         self.assertEqual(len(rows), 2)
         unknown = next(row for row in rows if row["account_label"] is None)
-        code, _ = server._remove_account_memory("codex", "shared-workspace", unknown["updated_at"],
+        code, _ = server.ACCOUNT_MEMORY.remove("codex", "shared-workspace", unknown["updated_at"],
                                                 {}, account_label=None)
         self.assertEqual(code, 200)
         self.assertEqual([row["account_label"] for row in self.read_members()], ["first@example.com"])
@@ -78,11 +79,11 @@ class CodexEmailIdentityTests(unittest.TestCase):
                     reading = RateLimits(20, 100, 21, 200, updated_at="2026-09-24T06:01:00Z")
                     with mock.patch.object(exporter, "ROOT", self.memory_path.parent.parent), \
                          mock.patch("hub.enabled", return_value=True), \
-                         mock.patch.object(exporter.accounts, "codex_account", return_value=accounts.Account("shared-workspace", email)), \
-                         mock.patch.object(exporter.accounts, "claude_account", return_value=None), \
-                         mock.patch.object(exporter.codex, "load_rate_limits", return_value=reading), \
-                         mock.patch.object(exporter.claude_status, "load_rate_limits", return_value=None), \
-                         mock.patch.object(exporter.quota_refresh, "load_rate_limits", return_value=reading):
+                         mock.patch.object(quota_service.accounts, "codex_account", return_value=accounts.Account("shared-workspace", email)), \
+                         mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
+                         mock.patch.object(quota_service.codex, "load_rate_limits", return_value=reading), \
+                         mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=None), \
+                         mock.patch.object(quota_service.quota_refresh, "load_rate_limits", return_value=reading):
                         result = exporter._rate_limits(refresh=refresh)
                     block = json.loads(cache.read_text())["codex"] if refresh else result["codex"]
                     self.assertEqual(block["account_label"], email)
@@ -107,6 +108,6 @@ class CodexEmailIdentityTests(unittest.TestCase):
             "second@example.com", "2026-09-24T06:01:00Z", 80)))
         self.assertEqual({row["account_label"] for row in rows}, {"first@example.com", "second@example.com"})
         self.assertEqual(json.loads(self.memory_path.read_text())["version"], 2)
-        state, _ = server._load_account_memory()
+        state, _ = server.ACCOUNT_MEMORY._load()
         self.assertEqual(state, "valid")
         self.assertEqual(len(self.read_members()), 2)

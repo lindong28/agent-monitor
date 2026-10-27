@@ -24,8 +24,8 @@ class AccountHttpTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.manager = codex_accounts.Manager(Path(temporary.name) / "profiles")
-        self.real_catalog = server._codex_action_catalog
-        catalog = mock.patch.object(server, "_codex_action_catalog", side_effect=lambda: [
+        self.real_catalog = server.QUOTA_VIEW.action_catalog
+        catalog = mock.patch.object(server.QUOTA_VIEW, "action_catalog", side_effect=lambda: [
             {"account_state": "known", "account_id": a["account_id"], "account_label": a["email"]}
             for a in self.manager.list()["accounts"]])
         catalog.start()

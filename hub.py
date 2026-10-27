@@ -16,8 +16,10 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 import service_runtime
+from project_paths import PROJECT_ROOT
 
-ROOT = Path(__file__).resolve().parent
+
+ROOT = PROJECT_ROOT
 CONFIG_PATH = ROOT / "hub.json"
 _LOCAL_CONFIG_PATH = ROOT / "hub.local.json"
 if _LOCAL_CONFIG_PATH.exists() or _LOCAL_CONFIG_PATH.is_symlink():
@@ -214,14 +216,15 @@ def collect():
     failures = []
 
     def query(request):
-        import exporter
+        from agent_monitor import quota_service
         # Capture the complete request once: timeout cleanup/replacement cannot
         # convert an already admitted restricted request into an unrestricted one.
         nonce = request["nonce"] if request else None
         version = request["version"] if request else ""
         exclusions = request["blocked_accounts"] if request else {}
         # Provider refresh has its own deadlines and persists its observed state.
-        limits = exporter._rate_limits(refresh=True, **({"blocked_accounts": exclusions} if exclusions else {}))
+        limits = quota_service.rate_limits(refresh=True, use_cache=enabled(), root=ROOT,
+                                           **({"blocked_accounts": exclusions} if exclusions else {}))
         if nonce is not None:
             _write_quota_message(ROOT / "state" / ("quota-refresh-receipt" + version + ".json"),
                                  {"nonce": nonce, "rate_limits": limits, **({"blocked_accounts": exclusions} if version else {})})

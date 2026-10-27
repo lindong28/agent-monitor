@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 import rollup
+from agent_monitor import storage
 
 
 class _UnopenableConnection:
@@ -43,7 +44,7 @@ class ReadConnectionWalTests(unittest.TestCase):
             with rollup.rollup_lock(db_path):
                 pass
             with self.mode_ro_refused() as refusals:
-                with rollup._read_connection(db_path) as conn:
+                with storage.read_connection(db_path) as conn:
                     rows = conn.execute("SELECT COUNT(*) FROM daily_rollup").fetchone()[0]
 
             self.assertEqual(refusals, ["?mode=ro"])
@@ -58,7 +59,7 @@ class ReadConnectionWalTests(unittest.TestCase):
 
             with self.mode_ro_refused():
                 with self.assertRaises(sqlite3.OperationalError):
-                    with rollup._read_connection(db_path):
+                    with storage.read_connection(db_path):
                         pass
 
     def test_immutable_read_still_refuses_rather_than_falling_back(self):
@@ -67,7 +68,7 @@ class ReadConnectionWalTests(unittest.TestCase):
 
             with self.mode_ro_refused(pattern="immutable=1"):
                 with self.assertRaises(sqlite3.OperationalError):
-                    with rollup._read_connection(db_path, immutable=True):
+                    with storage.read_connection(db_path, immutable=True):
                         pass
 
     def test_quiet_wal_database_reads_on_this_sqlite_build(self):
@@ -78,7 +79,7 @@ class ReadConnectionWalTests(unittest.TestCase):
             db_path = self.make_quiet_wal_db(Path(tmp) / "rollup.db")
             self.assertEqual(self.siblings(db_path), [])
 
-            with rollup._read_connection(db_path) as conn:
+            with storage.read_connection(db_path) as conn:
                 self.assertEqual(
                     conn.execute("SELECT COUNT(*) FROM daily_rollup").fetchone()[0], 2
                 )

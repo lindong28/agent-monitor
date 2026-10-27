@@ -11,3 +11,4 @@ hub.local.json
 .env
 .env.*
 !.env.example
+/.local-data

@@ -54,7 +54,7 @@ class EvidenceTests(unittest.TestCase):
                 done.set()
                 return {"codex": {}, "claude": {}}
             with mock.patch.object(hub, "_pending_quota_request", side_effect=capture_then_delete), \
-                    mock.patch("exporter._rate_limits", side_effect=query) as read, \
+                    mock.patch("agent_monitor.quota_service.rate_limits", side_effect=query) as read, \
                     mock.patch("rollup.run", side_effect=lambda: done.wait(2)):
                 hub.collect()
             read.assert_called_once()
@@ -65,11 +65,11 @@ class EvidenceTests(unittest.TestCase):
         from upstream_controls import Controls
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)), \
                 mock.patch("hub.enabled", return_value=False), \
-                mock.patch("exporter.accounts.codex_account", return_value=accounts.Account("a", "a@example.test")), \
-                mock.patch("exporter.accounts.claude_account", return_value=None), \
-                mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-                mock.patch("exporter.quota_refresh.load_rate_limits") as query:
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=accounts.Account("a", "a@example.test")), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
+                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits") as query:
             controls = Controls(Path(tmp) / "state/upstream_controls")
             lease = controls.acquire("codex")
             lease.pause("fixture")
@@ -84,8 +84,8 @@ class EvidenceTests(unittest.TestCase):
         from upstream_controls import Controls
         account = accounts.Account("a", "fixture@example.test")
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)), \
-                mock.patch("exporter.accounts.codex_account", return_value=account), \
-                mock.patch("exporter.quota_refresh.load_rate_limits", return_value=RateLimits(5, 1, None, None)) as query:
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
+                mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", return_value=RateLimits(5, 1, None, None)) as query:
             controls = Controls(Path(tmp) / "state/upstream_controls")
             lease = controls.acquire("codex")
             lease.pause("fixture")
@@ -160,11 +160,11 @@ class EvidenceTests(unittest.TestCase):
             b = accounts.Account("other", "two@example.test")
             blocked = {"codex": [quota_refresh.account_fingerprint("codex", a)]}
             with mock.patch.object(exporter, "ROOT", Path(tmp)), mock.patch("hub.enabled", return_value=False), \
-                 mock.patch("exporter.accounts.codex_account", return_value=a), \
-                 mock.patch("exporter.accounts.claude_account", return_value=b), \
-                 mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                 mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-                 mock.patch("exporter.quota_refresh.load_rate_limits", side_effect=quota_refresh.NotSignedIn("fixture")) as query:
+                 mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=a), \
+                 mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=b), \
+                 mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                 mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+                 mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=quota_refresh.NotSignedIn("fixture")) as query:
                 result = exporter._rate_limits(refresh=True, blocked_accounts=blocked)
             self.assertEqual([c.args[0] for c in query.call_args_list], ["claude"])
             self.assertEqual(result["codex"]["query_state"], "blocked")

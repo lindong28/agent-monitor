@@ -1,3 +1,4 @@
+from agent_monitor import quota_view, quota_service
 import contextlib
 import fcntl
 import json
@@ -36,20 +37,20 @@ class GuiQuotaTests(unittest.TestCase):
             mock.patch.object(hub, "enabled", return_value=True),
             mock.patch.object(hub, "QUOTA_POLL_INTERVAL", 0.002),
             mock.patch.object(hub, "QUOTA_KICK_INTERVAL", 0.01),
-            mock.patch.object(exporter.accounts, "claude_account", return_value=accounts.Account("a")),
-            mock.patch.object(exporter.accounts, "codex_account", return_value=accounts.Account("a")),
-            mock.patch.object(exporter.claude_status, "load_rate_limits", return_value=None),
-            mock.patch.object(exporter.codex, "load_rate_limits", return_value=None),
-            mock.patch.object(exporter.quota_refresh, "load_rate_limits", side_effect=AssertionError("no real provider calls")),
+            mock.patch.object(quota_service.accounts, "claude_account", return_value=accounts.Account("a")),
+            mock.patch.object(quota_service.accounts, "codex_account", return_value=accounts.Account("a")),
+            mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=None),
+            mock.patch.object(quota_service.codex, "load_rate_limits", return_value=None),
+            mock.patch.object(quota_service.quota_refresh, "load_rate_limits", side_effect=AssertionError("no real provider calls")),
         ):
             self.stack.enter_context(patch)
         self.loaded = "program = %s\narguments = {\n%s\ncollect\n}\n" % ((self.root / "agent-monitor",) * 2)
-        self.limits = {provider: {**exporter._rate_limit_block(
+        self.limits = {provider: {**quota_service.rate_limit_block(
             RateLimits(12, None, 34, None, updated_at="2026-09-09T00:00:00Z"), accounts.Account("a")),
             "refresh_error": None} for provider in ("claude", "codex")}
 
     def run_collector(self):
-        with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(exporter, "_rate_limits", return_value=self.limits):
+        with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(quota_service, "rate_limits", return_value=self.limits):
             hub.collect()
 
     def test_quota_request_is_served_while_statistics_are_blocked(self):
@@ -60,7 +61,7 @@ class GuiQuotaTests(unittest.TestCase):
             release.wait(3)
             return {}
         with mock.patch.object(rollup, "run", side_effect=statistics), \
-                mock.patch.object(exporter, "_rate_limits", return_value=self.limits):
+                mock.patch.object(quota_service, "rate_limits", return_value=self.limits):
             collector = threading.Thread(target=hub.collect)
             collector.start()
             try:
@@ -92,7 +93,7 @@ class GuiQuotaTests(unittest.TestCase):
         self.assertTrue(all("-k" not in args for args in calls))
         self.assertFalse(self.request.exists())
         self.assertEqual(self.receipt.stat().st_mode & 0o777, 0o600)
-        with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(exporter, "_rate_limits") as read:
+        with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(quota_service, "rate_limits") as read:
             hub.collect()
         read.assert_not_called()
 
@@ -102,7 +103,7 @@ class GuiQuotaTests(unittest.TestCase):
             entered.set()
             self.assertTrue(release.wait(2))
             return self.limits
-        with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(exporter, "_rate_limits", side_effect=old_read):
+        with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(quota_service, "rate_limits", side_effect=old_read):
             collector = threading.Thread(target=hub.collect)
             collector.start()
             self.assertTrue(entered.wait(1))
@@ -221,7 +222,7 @@ class GuiQuotaTests(unittest.TestCase):
         def read(**kwargs):
             hub._write_quota_message(self.request, {"nonce": "b" * 32})
             return limits
-        with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(exporter, "_rate_limits", side_effect=read):
+        with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(quota_service, "rate_limits", side_effect=read):
             hub.collect()
         self.assertEqual(json.loads(self.receipt.read_text()), {"nonce": "a" * 32, "rate_limits": limits})
         self.assertEqual(hub._pending_quota_nonce(), "b" * 32)
@@ -230,7 +231,7 @@ class GuiQuotaTests(unittest.TestCase):
         (self.state / "quota_snapshot.json").write_text(json.dumps(self.limits))
         for account in (accounts.Account("a"), accounts.Account("b"), None):
             with self.subTest(account=account), mock.patch.object(hub, "request_quota_refresh", side_effect=hub.QuotaRequestError("GUI unavailable")), \
-                    mock.patch.object(exporter.accounts, "claude_account", return_value=account):
+                    mock.patch.object(quota_service.accounts, "claude_account", return_value=account):
                 result = exporter._gui_rate_limits()
             self.assertEqual(result["codex"]["updated_at"], self.limits["codex"]["updated_at"])
             self.assertEqual(result["claude"]["updated_at"], self.limits["claude"]["updated_at"] if account and account.account_id == "a" else "")
@@ -278,9 +279,9 @@ class GuiQuotaTests(unittest.TestCase):
         with mock.patch.object(hub, "request_quota_refresh", side_effect=hub.QuotaRequestError("GUI unavailable")):
             blocks = exporter._gui_rate_limits()
         admission = SimpleNamespace(admitted=[SimpleNamespace(host="fixture", meta={"rate_limits": blocks})])
-        with mock.patch.object(server, "_self_machine_name", return_value="another"), \
-                mock.patch.object(server, "_quota_unavailable_reason", return_value="No reading"):
-            projected = server._live_rate_limits_from_admission(admission)
+        with mock.patch.object(quota_view, "self_machine_name", return_value="another"), \
+                mock.patch.object(quota_view, "quota_unavailable_reason", return_value="No reading"):
+            projected = server.QUOTA_VIEW.live_from_admission(admission)
         for provider in ("claude", "codex"):
             self.assertEqual(projected[provider]["refresh_errors"], [{"machine": "fixture", "reason": "GUI unavailable"}])
 

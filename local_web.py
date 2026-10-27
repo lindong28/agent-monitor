@@ -13,7 +13,9 @@ import deployment_guard
 import process_identity
 import service_runtime
 
-ROOT = Path(__file__).resolve().parent
+from project_paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 
 
 @contextmanager

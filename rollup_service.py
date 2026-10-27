@@ -16,7 +16,9 @@ import tempfile
 
 import service_runtime
 
-ROOT = Path(__file__).resolve().parent
+from project_paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 LABEL = "com.agent-monitor.rollup"
 LAUNCH_TIMEOUT = 15
 

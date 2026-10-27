@@ -34,7 +34,7 @@ const context={URL,URLSearchParams,console,Date,Intl,AbortController,setTimeout,
    return response();
  }};
 (async()=>{
- vm.runInNewContext(fs.readFileSync('web/app.js','utf8'),context);
+ require("./web/app.js")(context);
  await context.window.AgentMonitor.initSessions();
  const visible=()=>nodes['#sessions-body'].children.filter(n=>n.className==='session-row');
  assert.equal(visible().length,1,nodes['#page-status'].textContent);
@@ -72,7 +72,7 @@ async function scenario(query, expected) {
     document:{readyState:'loading',querySelector:k=>nodes[k]||null,querySelectorAll:()=>[],addEventListener(){},createElement:node,createTextNode:text=>({textContent:text})},
     window:{location,history:{state:null,replaceState(_,__,url){const next=new URL(url,location);location.href=next.href;}},addEventListener(){}},
     fetch:async url=>{calls.push(String(url)); return {ok:true,json:async()=>String(url).includes('/api/sessions')?{sessions:[],filters:{}}:{machines:[],syncing:false}};}};
-  vm.runInNewContext(source,context); await context.window.AgentMonitor.initSessions();
+  require("./web/app.js")(context); await context.window.AgentMonitor.initSessions();
   if(expected) {
     assert.equal(calls.filter(x=>x.includes('/api/sessions')).length,0,query+' must not query an invalid window');
     assert(nodes['#page-status'].textContent.includes(expected),nodes['#page-status'].textContent);

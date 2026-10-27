@@ -34,7 +34,8 @@ class IsolatedCheckout(unittest.TestCase):
         (self.root / 'state').symlink_to(self.home / 'retained-state', target_is_directory=True)
         (self.root / '.venv/bin').mkdir(parents=True)
         (self.root / '.venv/bin/python').symlink_to(sys.executable)
-        for name in ('agent-monitor', 'deployment_guard.py', 'process_identity.py', 'service_runtime.py', 'local_web.py'):
+        shutil.copytree(SOURCE / 'agent_monitor', self.root / 'agent_monitor', ignore=shutil.ignore_patterns('__pycache__'))
+        for name in ('project_paths.py', 'agent-monitor', 'deployment_guard.py', 'process_identity.py', 'service_runtime.py', 'local_web.py'):
             shutil.copy2(SOURCE / name, self.root / name)
         (self.root / 'hub.py').write_text("def is_hub(): return False\ndef enabled(): return False\nif __name__ == '__main__': print('standalone')\n")
         (self.root / 'server.py').write_text('''import argparse, json

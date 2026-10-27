@@ -62,7 +62,7 @@ def main():
         manager.add("unsigned@example.test", "workspace-unsigned")
 
         ca.manager = manager
-        server._codex_action_catalog = lambda: [{"account_state": "known", "account_label": a["email"],
+        server.QUOTA_VIEW.action_catalog = lambda: [{"account_state": "known", "account_label": a["email"],
             "account_id": a["account_id"]} for a in manager.list()["accounts"]]
         source = (ROOT / "web/index.html").read_text()
         panel = source.split('<details id="codex-account-actions"', 1)[1].split('</section>', 1)[0]

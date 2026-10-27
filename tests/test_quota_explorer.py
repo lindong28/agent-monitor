@@ -40,7 +40,7 @@ function descendants(n) {return [n,...n.children.flatMap(descendants)];}
 global.window={location:{origin:'http://fixture.test',pathname:'/fixture',search:''},history:{replaceState(){}}};
 global.document={readyState:'loading',body:node(),addEventListener(){},querySelector(s){return nodes[s]||descendants(nodes['#quota-accounts']).find(n=>'#'+n.id===s)||null;},
   querySelectorAll(){return [];},createElement:node,createTextNode(t){const n=node();n.textContent=t;return n;}};
-eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { renderQuotaAccounts, removeRenderedAccount, snapshot: () => renderedQuotaRateLimits,'));
+require('./web/app.js')();
 const ui=window.AgentMonitor, table=nodes['#quota-accounts'];
 function account(id,state='known',presence='in_use',machine='alpha') {
   return {account_id:id,account_label:id+'@example.test',account_state:state,account_plan:'pro',presence,
@@ -308,7 +308,7 @@ search('nobody'); assert(table.textContent.includes('没有匹配的配额记录
 nodes['#quota-clear'].click(); assert.equal(nodes['#quota-search'].value,''); assert(count().includes('匹配 3 / 3'));
 search('PRO alice'); assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'alice');
 search('old-b'); assert(count().includes('匹配 0 / 3')); assert(count().includes('机器关联 0')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
-search('past'); assert(table.textContent.includes('移除')); assert.strictEqual(ui.snapshot(),data);
+search('past'); assert(table.textContent.includes('移除')); assert.strictEqual(ui.quotaSnapshot(),data);
 // The delete request can finish after the user hides its row with a filter.
 search('bob'); assert.equal(rows().length,1);
 nodes['#quota-window'].value='seven_day'; nodes['#quota-window'].listeners.change();

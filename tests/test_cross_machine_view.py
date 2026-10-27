@@ -1,3 +1,5 @@
+from agent_monitor import collection
+from component_fixtures import reset_collection
 import contextlib
 import hashlib
 import json
@@ -30,8 +32,8 @@ _ACCOUNT_MEMORY_PATCHER = None
 def setUpModule():
     global _ACCOUNT_MEMORY_TEMP, _ACCOUNT_MEMORY_PATCHER
     _ACCOUNT_MEMORY_TEMP = tempfile.TemporaryDirectory()
-    memory_path = Path(_ACCOUNT_MEMORY_TEMP.name) / "account_memory.json"
-    _ACCOUNT_MEMORY_PATCHER = mock.patch("server._ACCOUNT_MEMORY_PATH", memory_path)
+    memory_path = Path(_ACCOUNT_MEMORY_TEMP.name) / "agent_monitor.account_memory.json"
+    _ACCOUNT_MEMORY_PATCHER = mock.patch("server.ACCOUNT_MEMORY.path", memory_path)
     _ACCOUNT_MEMORY_PATCHER.start()
 
 
@@ -42,7 +44,8 @@ def tearDownModule():
 
 class CrossMachineOverviewTests(unittest.TestCase):
     def setUp(self):
-        server._ACCOUNT_MEMORY_PATH.unlink(missing_ok=True)
+        reset_collection()
+        server.ACCOUNT_MEMORY.path.unlink(missing_ok=True)
 
     def test_iv11_overview_usage_fields_are_all_computed_from_rollup(self):
         def pivot(x_dim, group_dim, metric, **_kwargs):
@@ -93,10 +96,10 @@ class CrossMachineOverviewTests(unittest.TestCase):
                 "server.load_all_entries",
                 side_effect=AssertionError("Overview must not read live entries"),
             ),
-            mock.patch("server._maybe_sync_remotes", return_value=False),
-            mock.patch("server._sync_status", return_value=sync_status),
+            mock.patch("server.COLLECTION.request", return_value=False),
+            mock.patch("server.COLLECTION.status", return_value=sync_status),
             mock.patch(
-                "server._rate_limits",
+                "server.QUOTA_VIEW.rate_limits",
                 return_value={
                     "claude": {"accounts": [], "unavailable_reason": None},
                     "codex": {"accounts": [], "unavailable_reason": None},
@@ -169,13 +172,13 @@ class CrossMachineOverviewTests(unittest.TestCase):
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
-            "server.claude_status.load_rate_limits",
+            "parsers.claude_status.load_rate_limits",
             side_effect=AssertionError("must not read viewer-local quota"),
         ), mock.patch(
-            "server.codex.load_rate_limits",
+            "parsers.codex.load_rate_limits",
             side_effect=AssertionError("must not read viewer-local quota"),
         ):
-            limits = server._rate_limits()
+            limits = server.QUOTA_VIEW.rate_limits()
 
         claude = limits["claude"]["accounts"]
         self.assertEqual(len(claude), 1)
@@ -209,7 +212,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
         )
         admission = SimpleNamespace(admitted=admitted, records=())
 
-        limits = server._rate_limits(admission=admission)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission)
 
         entries = limits["codex"]["accounts"]
         self.assertEqual(len(entries), 2)
@@ -233,7 +236,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
             records=(),
         )
 
-        limits = server._rate_limits(admission=admission)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission)
 
         states = {
             entry["machines"][0]: entry["account_state"]
@@ -257,7 +260,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
             ),
         )
 
-        limits = server._rate_limits(admission=admission)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission)
 
         marks = {e["account_id"]: e["this_machine"] for e in limits["codex"]["accounts"]}
         self.assertEqual(marks, {"A": "node-b", "B": None})
@@ -270,7 +273,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
             records=(),
         )
 
-        limits = server._rate_limits(admission=admission)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission)
 
         self.assertIsNone(limits["codex"]["accounts"][0]["this_machine"])
 
@@ -289,7 +292,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
             records=(),
         )
 
-        limits = server._rate_limits(admission=admission)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission)
 
         entries = {entry["machines"][0]: entry for entry in limits["codex"]["accounts"]}
         self.assertEqual(entries["node-a"]["account_id"], "codex-Y")
@@ -310,7 +313,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
             records=(),
         )
 
-        limits = server._rate_limits(admission=admission)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission)
 
         self.assertEqual(
             [entry["account_id"] for entry in limits["codex"]["accounts"]],
@@ -338,7 +341,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
             ],
         }
 
-        limits = server._rate_limits(admission=admission, sync_status=sync_status)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission, sync_status=sync_status)
 
         expected = (
             "最近一次同步在拿到 claude 配额数据前就失败了："
@@ -359,7 +362,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
             }],
         }
 
-        limits = server._rate_limits(admission=admission, sync_status=sync_status)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission, sync_status=sync_status)
 
         reason = limits["claude"]["unavailable_reason"]
         self.assertIn("需要一次成功的刷新", reason)
@@ -392,7 +395,7 @@ class BackgroundSyncTests(unittest.TestCase):
         while getattr(server, "_SYNC_STATE", {}).get("running") and time.monotonic() < deadline:
             time.sleep(0.01)
         if hasattr(server, "_reset_sync_state_for_tests"):
-            server._reset_sync_state_for_tests()
+            reset_collection()
 
     def test_iv10_force_starts_one_nonblocking_round_and_status_reaches_terminal(self):
         self.release = threading.Event()
@@ -409,37 +412,37 @@ class BackgroundSyncTests(unittest.TestCase):
             }
 
         if hasattr(server, "_reset_sync_state_for_tests"):
-            server._reset_sync_state_for_tests()
+            reset_collection()
         admission = SimpleNamespace(records=tuple(
             SimpleNamespace(machine=SimpleNamespace(name=name))
             for name in ("node-b", "node-c", "node-d", "node-a")
         ))
         with mock.patch("server.sync.sync_all", side_effect=slow_sync_all), mock.patch(
             "server.generation.generation_admission_snapshot", side_effect=lambda: contextlib.nullcontext(admission)
-        ), mock.patch("server._remember_accounts_after_sync_publish"):
+        ), mock.patch("server.COLLECTION.remember_accounts"):
             started = time.monotonic()
-            server._maybe_sync_remotes({"force": ["1"]})
-            server._maybe_sync_remotes({"force": ["1"]})
+            server.COLLECTION.request({"force": ["1"]})
+            server.COLLECTION.request({"force": ["1"]})
             elapsed = time.monotonic() - started
             self.assertLess(elapsed, 0.1)
             deadline = time.monotonic() + 1
             while not calls and time.monotonic() < deadline:
                 time.sleep(0.01)
             self.assertEqual(calls, ["started"])
-            self.assertTrue(server._sync_runtime_snapshot()["syncing"])
+            self.assertTrue(server.COLLECTION.snapshot()["syncing"])
             self.release.set()
             deadline = time.monotonic() + 2
-            while server._sync_runtime_snapshot()["syncing"] and time.monotonic() < deadline:
+            while server.COLLECTION.snapshot()["syncing"] and time.monotonic() < deadline:
                 time.sleep(0.01)
 
-        final = server._sync_runtime_snapshot()
+        final = server.COLLECTION.snapshot()
         self.assertFalse(final["syncing"])
         self.assertTrue(final["terminal"])
         self.assertEqual(final["errors"], {"node-c": "timeout", "node-a": "offline"})
 
     def test_g6_outcome_less_sync_result_is_malformed_not_contact_success(self):
         machine, admission = self.single_admitted_machine()
-        server._reset_sync_state_for_tests()
+        reset_collection()
         with mock.patch(
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
@@ -447,17 +450,17 @@ class BackgroundSyncTests(unittest.TestCase):
             "server.sync.sync_all",
             return_value={machine.name: sync.SyncResult()},
         ):
-            self.assertTrue(server._maybe_sync_remotes({"force": ["1"]}))
+            self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
             self.wait_for_terminal()
 
-        row = server._sync_status(admission=admission)["machines"][0]
+        row = server.COLLECTION.status(admission=admission)["machines"][0]
         self.assertEqual(row["availability"], "unknown")
         self.assertEqual(row["last_attempt_outcome"], "malformed_result")
         self.assertIn("没有明确结论", row["reason"])
 
     def test_g6_none_result_cannot_bypass_terminal_commit(self):
         machine, admission = self.single_admitted_machine()
-        server._reset_sync_state_for_tests()
+        reset_collection()
         with mock.patch(
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
@@ -465,11 +468,11 @@ class BackgroundSyncTests(unittest.TestCase):
             "server.sync.sync_all",
             return_value={machine.name: None},
         ):
-            self.assertTrue(server._maybe_sync_remotes({"force": ["1"]}))
+            self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
             self.wait_for_terminal()
 
-        runtime = server._sync_runtime_snapshot()
-        row = server._sync_status(admission=admission)["machines"][0]
+        runtime = server.COLLECTION.snapshot()
+        row = server.COLLECTION.status(admission=admission)["machines"][0]
         self.assertTrue(runtime["terminal"])
         self.assertFalse(runtime["syncing"])
         self.assertEqual(row["last_attempt_outcome"], "malformed_result")
@@ -499,14 +502,14 @@ class BackgroundSyncTests(unittest.TestCase):
                 return {"node-b": sync.SyncResult(generation=SimpleNamespace(meta={}))}
             return result
 
-        server._reset_sync_state_for_tests()
+        reset_collection()
         with mock.patch(
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch("server.sync.sync_all", side_effect=sync_all):
-            self.assertTrue(server._maybe_sync_remotes({"force": ["1"]}))
+            self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
             self.wait_for_terminal()
-            failed = server._sync_status(admission=admission)
+            failed = server.COLLECTION.status(admission=admission)
             self.assertEqual(failed["machines"][0]["availability"], "unreachable")
             self.assertEqual(failed["machines"][0]["reason"], "ssh timeout")
             self.assertEqual(
@@ -514,8 +517,8 @@ class BackgroundSyncTests(unittest.TestCase):
                 "2026-08-04T11:00:00Z",
             )
 
-            self.assertTrue(server._maybe_sync_remotes({"force": ["1"]}))
-            during = server._sync_status(admission=admission)
+            self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
+            during = server.COLLECTION.status(admission=admission)
             self.release.set()
             self.wait_for_terminal()
 
@@ -534,16 +537,16 @@ class BackgroundSyncTests(unittest.TestCase):
             records=(generation.AdmissionRecord(machine, True, False, current=current),),
             config=SimpleNamespace(machines=(machine,)),
         )
-        server._reset_sync_state_for_tests()
+        reset_collection()
         with self.assertLogs("agent-monitor", level="ERROR") as logs:
             with mock.patch(
                 "server.generation.generation_admission_snapshot",
                 return_value=contextlib.nullcontext(admission),
             ), mock.patch("server.threading.Thread.start", side_effect=RuntimeError("no thread")):
-                self.assertFalse(server._maybe_sync_remotes({"force": ["1"]}))
+                self.assertFalse(server.COLLECTION.request({"force": ["1"]}))
 
-        runtime = server._sync_runtime_snapshot()
-        status = server._sync_status(admission=admission)
+        runtime = server.COLLECTION.snapshot()
+        status = server.COLLECTION.status(admission=admission)
         self.assertTrue(runtime["terminal"])
         self.assertFalse(runtime["syncing"])
         self.assertEqual(status["machines"][0]["availability"], "unknown")
@@ -568,7 +571,7 @@ class BackgroundSyncTests(unittest.TestCase):
         )
         current = mock.Mock()
         current.close.side_effect = OSError("close failed")
-        server._reset_sync_state_for_tests()
+        reset_collection()
         with self.assertLogs("agent-monitor", level="ERROR") as logs:
             with mock.patch(
                 "server.generation.generation_admission_snapshot",
@@ -577,11 +580,11 @@ class BackgroundSyncTests(unittest.TestCase):
                 "server.sync.sync_all",
                 return_value={"node-b": sync.SyncResult(generation=current)},
             ):
-                self.assertTrue(server._maybe_sync_remotes({"force": ["1"]}))
+                self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
                 self.wait_for_terminal()
 
-        runtime = server._sync_runtime_snapshot()
-        status = server._sync_status(admission=admission)
+        runtime = server.COLLECTION.snapshot()
+        status = server.COLLECTION.status(admission=admission)
         self.assertTrue(runtime["terminal"])
         self.assertEqual(status["machines"][0]["availability"], "reachable")
         self.assertEqual(status["machines"][0]["last_attempt_outcome"], "cleanup_failed")
@@ -604,7 +607,7 @@ class BackgroundSyncTests(unittest.TestCase):
             records=(generation.AdmissionRecord(machine_a, False, True),),
             config=SimpleNamespace(machines=(machine_a,)),
         )
-        server._reset_sync_state_for_tests()
+        reset_collection()
         with mock.patch(
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(starting),
@@ -615,12 +618,12 @@ class BackgroundSyncTests(unittest.TestCase):
                 "node-c": sync.SyncResult(error="ssh timeout"),
             },
         ):
-            self.assertTrue(server._maybe_sync_remotes({"force": ["1"]}))
+            self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
             self.wait_for_terminal()
 
-        status = server._sync_status(admission=final)
+        status = server.COLLECTION.status(admission=final)
         self.assertEqual([row["name"] for row in status["machines"]], ["node-b"])
-        removed = server._sync_runtime_snapshot()["observations"]["node-c"]
+        removed = server.COLLECTION.snapshot()["observations"]["node-c"]
         self.assertEqual(removed["contact_status"], "unreachable")
         self.assertEqual(removed["reason"], "ssh timeout")
         self.assertEqual(status["coverage"], {"admitted": 0, "declared": 1})
@@ -632,10 +635,10 @@ class BackgroundSyncTests(unittest.TestCase):
             "server.sync.sync_all",
             return_value={"node-b": sync.SyncResult(error="self still dirty")},
         ):
-            self.assertTrue(server._maybe_sync_remotes({"force": ["1"]}))
+            self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
             self.wait_for_terminal()
 
-        after_later_round = server._sync_status(admission=final)
+        after_later_round = server.COLLECTION.status(admission=final)
         self.assertEqual(
             [row["name"] for row in after_later_round["machines"]],
             ["node-b"],
@@ -652,9 +655,9 @@ class BackgroundSyncTests(unittest.TestCase):
             records=(generation.AdmissionRecord(machine, True, False, current=current),),
             config=SimpleNamespace(machines=(machine,)),
         )
-        server._reset_sync_state_for_tests()
+        reset_collection()
 
-        row = server._sync_status(admission=admission)["machines"][0]
+        row = server.COLLECTION.status(admission=admission)["machines"][0]
 
         self.assertEqual(row["availability"], "unknown")
         self.assertEqual(row["last_attempt_outcome"], "unknown_since_restart")
@@ -670,11 +673,11 @@ class BackgroundSyncTests(unittest.TestCase):
             records=initial.records + (generation.AdmissionRecord(machine_b, False, True),),
             config=SimpleNamespace(machines=(machine_a, machine_b)),
         )
-        server._reset_sync_state_for_tests()
-        server._sync_status(admission=initial)
+        reset_collection()
+        server.COLLECTION.status(admission=initial)
 
         added = next(
-            row for row in server._sync_status(admission=expanded)["machines"]
+            row for row in server.COLLECTION.status(admission=expanded)["machines"]
             if row["name"] == "node-c"
         )
 
@@ -684,9 +687,9 @@ class BackgroundSyncTests(unittest.TestCase):
 
     def wait_for_terminal(self):
         deadline = time.monotonic() + 2
-        while server._sync_runtime_snapshot()["syncing"] and time.monotonic() < deadline:
+        while server.COLLECTION.snapshot()["syncing"] and time.monotonic() < deadline:
             time.sleep(0.01)
-        self.assertTrue(server._sync_runtime_snapshot()["terminal"])
+        self.assertTrue(server.COLLECTION.snapshot()["terminal"])
 
     @staticmethod
     def single_admitted_machine():
@@ -713,7 +716,7 @@ class BackgroundSyncTests(unittest.TestCase):
             }
         )
 
-        row = server._sync_status(admission=admission)["machines"][0]
+        row = server.COLLECTION.status(admission=admission)["machines"][0]
 
         self.assertEqual(row["totals_schema_version"], 2)
         self.assertEqual(
@@ -742,22 +745,22 @@ class BackgroundSyncTests(unittest.TestCase):
             )
 
         now = datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc)
-        with mock.patch("server._aware_now", return_value=now), mock.patch(
+        with mock.patch("agent_monitor.collection.aware_now", return_value=now), mock.patch(
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission(599.999)),
         ), mock.patch("server.threading.Thread") as thread:
-            self.assertFalse(server._maybe_sync_remotes({}))
+            self.assertFalse(server.COLLECTION.request({}))
             thread.assert_not_called()
 
-        server._reset_sync_state_for_tests()
-        with mock.patch("server._aware_now", return_value=now), mock.patch(
+        reset_collection()
+        with mock.patch("agent_monitor.collection.aware_now", return_value=now), mock.patch(
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission(600)),
         ), mock.patch("server.threading.Thread") as thread:
-            self.assertTrue(server._maybe_sync_remotes({}))
+            self.assertTrue(server.COLLECTION.request({}))
             thread.assert_called_once()
             self.assertTrue(thread.call_args.kwargs["daemon"])
-        server._reset_sync_state_for_tests()
+        reset_collection()
 
         for age, expected_stale in (
             (600, False),
@@ -765,11 +768,11 @@ class BackgroundSyncTests(unittest.TestCase):
             (6 * 60 * 60, True),
         ):
             with self.subTest(age=age):
-                status = server._sync_status(now=now, admission=admission(age))
+                status = server.COLLECTION.status(now=now, admission=admission(age))
                 self.assertEqual(status["machines"][0]["stale"], expected_stale)
 
-        self.assertEqual(server._SYNC_DUE_AFTER_SECONDS, 600)
-        self.assertEqual(server._STALE_AFTER_SECONDS, 6 * 60 * 60)
+        self.assertEqual(collection.SYNC_DUE_AFTER_SECONDS, 600)
+        self.assertEqual(collection.STALE_AFTER_SECONDS, 6 * 60 * 60)
 
     def test_g6_failed_sync_remains_terminal_during_normal_overview_polling(self):
         machine = Machine("node-b", "node-b", True)
@@ -784,7 +787,7 @@ class BackgroundSyncTests(unittest.TestCase):
             config=SimpleNamespace(machines=(machine,)),
         )
 
-        server._reset_sync_state_for_tests()
+        reset_collection()
         with mock.patch(
             "server.sync.sync_all",
             return_value={
@@ -796,29 +799,29 @@ class BackgroundSyncTests(unittest.TestCase):
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
-            "server._utc_timestamp",
+            "agent_monitor.collection.utc_timestamp",
             side_effect=("2026-08-04T11:59:00Z", "2026-08-04T11:59:30Z"),
         ):
-            self.assertTrue(server._maybe_sync_remotes({"force": ["1"]}))
+            self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
             deadline = time.monotonic() + 2
-            while server._sync_runtime_snapshot()["syncing"] and time.monotonic() < deadline:
+            while server.COLLECTION.snapshot()["syncing"] and time.monotonic() < deadline:
                 time.sleep(0.01)
 
-        failed = server._sync_runtime_snapshot()
+        failed = server.COLLECTION.snapshot()
         self.assertTrue(failed["terminal"])
         self.assertEqual(
             failed["errors"],
             {"node-b": "exporter runtime authority differs from HEAD"},
         )
 
-        with mock.patch("server._aware_now", return_value=datetime(2026, 8, 4, 12, 9, 29, 999000, tzinfo=timezone.utc)), mock.patch(
+        with mock.patch("agent_monitor.collection.aware_now", return_value=datetime(2026, 8, 4, 12, 9, 29, 999000, tzinfo=timezone.utc)), mock.patch(
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch("server.threading.Thread") as thread:
-            self.assertFalse(server._maybe_sync_remotes({}))
+            self.assertFalse(server.COLLECTION.request({}))
             thread.assert_not_called()
 
-        final = server._sync_runtime_snapshot()
+        final = server.COLLECTION.snapshot()
         self.assertTrue(final["terminal"])
         self.assertFalse(final["syncing"])
         self.assertEqual(
@@ -826,13 +829,13 @@ class BackgroundSyncTests(unittest.TestCase):
             {"node-b": "exporter runtime authority differs from HEAD"},
         )
 
-        with mock.patch("server._aware_now", return_value=datetime(2026, 8, 4, 12, 9, 30, tzinfo=timezone.utc)), mock.patch(
+        with mock.patch("agent_monitor.collection.aware_now", return_value=datetime(2026, 8, 4, 12, 9, 30, tzinfo=timezone.utc)), mock.patch(
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch("server.threading.Thread") as thread:
-            self.assertTrue(server._maybe_sync_remotes({}))
+            self.assertTrue(server.COLLECTION.request({}))
             thread.assert_called_once()
-        server._reset_sync_state_for_tests()
+        reset_collection()
 
     def test_g6_http_failure_polling_reaches_terminal_and_surfaces_quota_cause(self):
         self.release = threading.Event()
@@ -865,7 +868,7 @@ class BackgroundSyncTests(unittest.TestCase):
                 )
             }
 
-        server._reset_sync_state_for_tests()
+        reset_collection()
         httpd = server.ThreadingHTTPServer(("0.0.0.0", 0), server.Handler)
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
@@ -1163,8 +1166,8 @@ class AdmissionStatusTests(unittest.TestCase):
                         root=root,
                     ),
                 ):
-                    limits = server._rate_limits()
-                    status = server._sync_status(
+                    limits = server.QUOTA_VIEW.rate_limits()
+                    status = server.COLLECTION.status(
                         now=datetime(2026, 8, 4, 12, 20, tzinfo=timezone.utc)
                     )
 
@@ -1401,7 +1404,7 @@ class AdmissionStatusTests(unittest.TestCase):
                 root=root,
             ),
         ), mock.patch(
-            "server._sync_runtime_snapshot",
+            "server.COLLECTION.snapshot",
             return_value={
                 "syncing": running,
                 "terminal": not running,
@@ -1414,7 +1417,7 @@ class AdmissionStatusTests(unittest.TestCase):
                 "errors": errors or {},
             },
         ):
-            return server._sync_status(
+            return server.COLLECTION.status(
                 now=now or datetime(2026, 8, 4, 12, 20, tzinfo=timezone.utc)
             )
 
@@ -1424,7 +1427,7 @@ class AdmissionStatusTests(unittest.TestCase):
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
-            "server._sync_runtime_snapshot",
+            "server.COLLECTION.snapshot",
             return_value={
                 "syncing": running,
                 "terminal": not running,
@@ -1440,7 +1443,7 @@ class AdmissionStatusTests(unittest.TestCase):
                 "errors": errors,
             },
         ):
-            return server._sync_status(now=now)
+            return server.COLLECTION.status(now=now)
 
 
 class FrontendStatusRenderTests(unittest.TestCase):
@@ -1532,7 +1535,7 @@ function state() {
   return row && row.dataset ? row.dataset.sessionState || null : null;
 }
 
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 (async () => {
   const firstLoad = window.AgentMonitor.initSessions();
   await flush();
@@ -1661,7 +1664,7 @@ global.fetch = (url) => {
   if (path === "/api/sync-status") return Promise.resolve({ ok: true, json: () => Promise.resolve(unknown) });
   throw new Error(path);
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 const reachable = JSON.parse(JSON.stringify(unknown));
 reachable.instance_id = "process-A";
 reachable.machines[0].availability = "reachable";
@@ -1714,7 +1717,7 @@ global.fetch = (url) => {
   if (path === "/api/sync-status") return new Promise((resolve) => { resolveOldPoll = resolve; });
   throw new Error(path);
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 function status(name, availability, syncing, reason) {
   return {
     coverage: { admitted: 1, declared: 1 }, all_machines: [name], syncing, terminal: !syncing,
@@ -1771,7 +1774,7 @@ global.document = {
 };
 global.setTimeout = (callback) => { callback(); return 1; };
 global.fetch = () => Promise.reject(new Error("connection reset"));
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 const initial = {
   coverage: { admitted: 1, declared: 1 },
   all_machines: ["node-b"],
@@ -1883,7 +1886,7 @@ global.AgentMonitor = {
     throw new Error(path);
   },
 };
-eval(fs.readFileSync("web/pivot.js", "utf8"));
+window.AgentMonitorPivot = require('./web/pivot.js')(global.AgentMonitor || window.AgentMonitor);
 (async () => {
   await window.AgentMonitorPivot.init();
   controls["#machine-filter"].value = "A";
@@ -1945,7 +1948,7 @@ global.document = {
   querySelector(selector) { return nodes[selector] || null; },
   querySelectorAll() { return []; },
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 function base(name) {
   return {
     name,
@@ -2100,7 +2103,7 @@ global.document = {
   querySelector(selector) { return nodes[selector] || null; },
   querySelectorAll() { return []; },
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 function machine(overrides) {
   return Object.assign({
     name: "node-b",
@@ -2241,15 +2244,15 @@ class WriteSetTests(unittest.TestCase):
             ), mock.patch(
                 "generation.self_certified_host_identity", return_value=source_identity
             ):
-                server._reset_sync_state_for_tests()
+                reset_collection()
                 server.overview({})
                 after_load = self.tree_manifest(sandbox)
                 server.overview({"force": ["1"]})
                 deadline = time.monotonic() + 2
-                while server._sync_runtime_snapshot()["syncing"] and time.monotonic() < deadline:
+                while server.COLLECTION.snapshot()["syncing"] and time.monotonic() < deadline:
                     time.sleep(0.01)
                 after_refresh = self.tree_manifest(sandbox)
-                self.assertEqual(server._sync_runtime_snapshot()["errors"], {})
+                self.assertEqual(server.COLLECTION.snapshot()["errors"], {})
 
             self.assert_write_subset(clean_manifest, after_load, "state/")
             self.assert_write_subset(after_load, after_refresh, "state/")

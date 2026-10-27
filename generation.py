@@ -28,7 +28,9 @@ from project_alias import validate_alias_proofs
 from rollup import USAGE_ROLLUP_AUTHORITY_FLOOR_KEY
 
 
-ROOT = Path(__file__).resolve().parent
+from project_paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 DEFAULT_GENERATIONS_ROOT = ROOT / "state" / "generations"
 GENERATION_SCHEMA_VERSION = 2
 SUPPORTED_GENERATION_SCHEMA_VERSIONS = {1, GENERATION_SCHEMA_VERSION}

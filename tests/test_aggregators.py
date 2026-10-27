@@ -259,8 +259,8 @@ class AggregatorTests(unittest.TestCase):
             # _read_connection still owns the marker contract and the choice of
             # read mode; it delegates only the opening itself, so this is the
             # same chokepoint rather than a second way in.
-            ("rollup.py", "_connect_read_only", "rollup_read_chokepoint"),
-            ("rollup.py", "_private_read_copy", "locked_source_private_copy_recovery"),
+            ("agent_monitor/storage.py", "_connect_read_only", "rollup_read_chokepoint"),
+            ("agent_monitor/storage.py", "_private_read_copy", "locked_source_private_copy_recovery"),
             ("usage_archive.py", "read", "retained_usage_read_only"),
             ("usage_archive.py", "collect", "retained_usage_transaction_write"),
             ("statistics_snapshot.py", "write_snapshot", "unpublished_statistics_write"),
@@ -274,7 +274,7 @@ class AggregatorTests(unittest.TestCase):
         }
         actual = []
         root = Path(aggregators.__file__).resolve().parent
-        for path in sorted(root.glob("*.py")):
+        for path in sorted([*root.glob("*.py"), *(root / "agent_monitor").rglob("*.py")]):
             tree = ast.parse(path.read_text())
             parents = {
                 child: node
@@ -296,9 +296,9 @@ class AggregatorTests(unittest.TestCase):
                 ):
                     owner = parents[owner]
                 function_name = owner.name if hasattr(owner, "name") else "<module>"
-                key = (path.name, function_name)
+                key = (path.relative_to(root).as_posix(), function_name)
                 actual.append(
-                    (path.name, function_name, dispositions.get(key, "UNCLASSIFIED"))
+                    (path.relative_to(root).as_posix(), function_name, dispositions.get(key, "UNCLASSIFIED"))
                 )
 
         self.assertCountEqual(actual, expected)
@@ -356,6 +356,7 @@ class AggregatorTests(unittest.TestCase):
             ),
         }
         explicitly_excluded = {
+            "agent_monitor/storage.py": "shared read chokepoint and bucket timezone checks",
             "rollup.py": (
                 "daily_rollup helpers receive chokepoint connections except the named explicit adoption transaction"
             ),
@@ -406,7 +407,7 @@ class AggregatorTests(unittest.TestCase):
                 if (
                     isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Name)
-                    and node.func.id == "_read_connection"
+                    and node.func.id in {"_read_connection", "read_connection"}
                 ):
                     read_gates.append((relative_path, function_name))
                     lines_by_kind.setdefault(
@@ -670,6 +671,8 @@ class AggregatorTests(unittest.TestCase):
             for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
+            shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
+            shutil.copy2(source_root / "project_paths.py", cli_root / "project_paths.py")
             source_path = cli_root / "repo"
             source = str(source_path)
             candidate = "github.com/owner/new-name"
@@ -761,6 +764,8 @@ class AggregatorTests(unittest.TestCase):
             for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
+            shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
+            shutil.copy2(source_root / "project_paths.py", cli_root / "project_paths.py")
             state = cli_root / "state"
             state.mkdir()
             identity_db = state / "project_identity.db"
@@ -832,6 +837,8 @@ class AggregatorTests(unittest.TestCase):
             for name in ("agent-monitor", "aggregators.py", "rollup.py", "rollup_identity.py", "session_identity.py"):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
+            shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
+            shutil.copy2(source_root / "project_paths.py", cli_root / "project_paths.py")
             state = cli_root / "state"
             state.mkdir()
             with sqlite3.connect(state / "project_identity.db") as conn:

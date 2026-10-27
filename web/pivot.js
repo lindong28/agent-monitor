@@ -1,4 +1,7 @@
-(function () {
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory;
+  else root.AgentMonitorPivot = factory(root.AgentMonitor);
+})(typeof window === "undefined" ? globalThis : window, function createPivot(AgentMonitor) {
   const presets = {
     "daily-cost": { x: "day", group: "agent", metric: "cost" },
     "project-cost": { x: "project", group: "none", metric: "cost" },
@@ -635,5 +638,5 @@
       .replace(/"/g, "&quot;");
   }
 
-  window.AgentMonitorPivot = { init, chartType, chartData, rankingData };
-})();
+  return { init, chartType, chartData, rankingData, renderChart, renderRanking, validDates };
+});

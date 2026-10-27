@@ -11,6 +11,7 @@ from logging.handlers import RotatingFileHandler
 import os
 import re
 from pathlib import Path
+from project_paths import PROJECT_ROOT
 import threading
 import time
 import uuid
@@ -29,7 +30,8 @@ _ERROR_TYPES = {"Exception", "RuntimeError", "RefreshError", "NotSignedIn", "Loc
                 "CalledProcessError", "HTTPError", "URLError", "JSONDecodeError", "ValueError",
                 "KeyError", "TypeError", "BrokenPipeError", "ConnectionError", "ConnectionResetError"}
 _SOURCE_FILES = {"server.py", "codex_accounts.py", "upstream_controls.py", "quota_refresh.py",
-                 "quota_sync.py", "sync.py", "diagnostics.py"}
+                 "quota_sync.py", "sync.py", "diagnostics.py", "account_memory.py",
+                 "collection.py", "quota_view.py", "quota_service.py"}
 
 
 def safe_upstream_detail(value):
@@ -89,7 +91,7 @@ def failure_details(exc, *, stage="unknown", kind="exception", **facts):
     trace = exc.__traceback__
     while trace is not None:
         path = Path(trace.tb_frame.f_code.co_filename)
-        if path.parent == Path(__file__).parent and path.name in _SOURCE_FILES:
+        if path.parent in (PROJECT_ROOT, PROJECT_ROOT / "agent_monitor") and path.name in _SOURCE_FILES:
             frames.append({"file": path.name, "line": trace.tb_lineno})
         trace = trace.tb_next
     if frames:

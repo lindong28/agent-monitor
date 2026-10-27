@@ -1,3 +1,4 @@
+from component_fixtures import reset_collection
 import copy
 import tempfile
 import threading
@@ -208,7 +209,7 @@ class IndependentQuotaTests(unittest.TestCase):
                 self.assertEqual(result["seven_day_pct"], 20)
 
     def test_query_starts_while_existing_statistics_round_is_busy(self):
-        server._reset_sync_state_for_tests()
+        reset_collection()
         manager = quota_sync.Manager(self.path)
         entered, release = threading.Event(), threading.Event()
         def run(machines, complete):
@@ -216,11 +217,11 @@ class IndependentQuotaTests(unittest.TestCase):
             release.wait(2)
             complete("mini", self.payload(), None)
         try:
-            with mock.patch.object(server, "QUOTA_REFRESH", manager), \
+            with mock.patch.object(server.COLLECTION, "quota_refresh", manager), \
                     mock.patch.object(server.hub, "enabled", return_value=True), \
                     mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(machines=[self.machine])), \
                     mock.patch.object(quota_sync, "run_queries", side_effect=run):
-                server._SYNC_STATE["running"] = True
+                server.COLLECTION._state["running"] = True
                 receipt = server.refresh_endpoint({"ack": ["1"]})
                 self.assertTrue(entered.wait(1), "quota waited for the active statistics round")
                 self.assertTrue(receipt["queued_refresh"])
@@ -229,7 +230,7 @@ class IndependentQuotaTests(unittest.TestCase):
                 self.assertTrue(manager.wait(1, timeout=2))
         finally:
             release.set()
-            server._reset_sync_state_for_tests()
+            reset_collection()
 
     def test_supervised_protocol_streams_results_and_rejects_incomplete_exit(self):
         real_popen = subprocess.Popen

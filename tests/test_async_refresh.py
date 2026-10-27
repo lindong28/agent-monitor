@@ -1,3 +1,5 @@
+from agent_monitor import collection
+from component_fixtures import reset_collection
 import json
 import contextlib
 import os
@@ -129,7 +131,7 @@ global.fetch = async url => {
   if (++calls > 1) throw new Error('waited for followup');
   return {ok:true,json:async()=>({instance_id:'hub',refresh_requested:2,refresh_completed:1,syncing:!background,queued_refresh:!background,machines:[]})};
 };
-eval(fs.readFileSync('web/app.js','utf8'));
+require('./web/app.js')();
 window.AgentMonitor.waitForSyncTerminal({instance_id:'hub',refresh_request:1,refresh_requested:2,refresh_completed:0,syncing:true,machines:[]})
  .then(async value=>{
    if(value.polling_error||calls!==1)process.exitCode=1;
@@ -155,7 +157,7 @@ const base = {instance_id:'hub',refresh_request:1,refresh_requested:1,refresh_co
 let polls=0, progress=[];
 global.fetch=async url => ({ok:true,json:async()=>url.pathname==='/api/timezone'?{timezone:'UTC'}:
   Object.assign({},base,{quota_refresh:{revision:1},refresh_completed:++polls===2?1:0})});
-eval(fs.readFileSync('web/app.js','utf8'));
+require('./web/app.js')();
 window.AgentMonitor.waitForSyncTerminal(base,{onProgress:async s=>progress.push(s.refresh_completed)})
  .then(()=>assert.deepStrictEqual(progress,[0])).catch(e=>{console.error(e);process.exitCode=1;});
 '''
@@ -163,25 +165,25 @@ window.AgentMonitor.waitForSyncTerminal(base,{onProgress:async s=>progress.push(
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_request_receipt_survives_later_request_before_response(self):
-        server._reset_sync_state_for_tests()
+        reset_collection()
         admission = SimpleNamespace(records=())
         def later_request():
-            server._maybe_sync_remotes({"force": ["1"]})
-            return server._sync_runtime_snapshot()
+            server.COLLECTION.request({"force": ["1"]})
+            return server.COLLECTION.snapshot()
         try:
             with mock.patch("server.generation.generation_admission_snapshot", side_effect=lambda: contextlib.nullcontext(admission)), \
                  mock.patch("server.sync.load_machine_config", return_value=SimpleNamespace(machines=())), \
                  mock.patch("server.threading.Thread"), \
-                 mock.patch("server._sync_status", side_effect=later_request):
+                 mock.patch("server.COLLECTION.status", side_effect=later_request):
                 status = server.refresh_endpoint({})
             self.assertEqual(status["refresh_request"], 1)
             self.assertEqual(status["refresh_requested"], 2)
             self.assertTrue(status["queued_refresh"])
         finally:
-            server._reset_sync_state_for_tests()
+            reset_collection()
 
     def test_ack_does_not_read_snapshots_or_wait_for_publication(self):
-        server._reset_sync_state_for_tests()
+        reset_collection()
         try:
             with mock.patch("server.generation.generation_admission_snapshot", side_effect=AssertionError("snapshot lock reached")), \
                  mock.patch("server.sync.load_machine_config", return_value=SimpleNamespace(machines=())), \
@@ -191,4 +193,41 @@ window.AgentMonitor.waitForSyncTerminal(base,{onProgress:async s=>progress.push(
             self.assertTrue(status["syncing"])
             self.assertEqual(status["instance_id"], server.SERVER_INSTANCE_ID)
         finally:
-            server._reset_sync_state_for_tests()
+            reset_collection()
+
+
+class CollectionComponentTests(unittest.TestCase):
+    def test_coordinators_do_not_share_round_state(self):
+        manager = mock.Mock()
+        first = collection.CollectionCoordinator(manager, mock.Mock(), "first")
+        second = collection.CollectionCoordinator(manager, mock.Mock(), "second")
+        config = SimpleNamespace(machines=[Machine("fixture", "fixture", True)])
+        with mock.patch.object(collection.hub, "enabled", return_value=False), \
+                mock.patch.object(collection.sync, "load_machine_config", return_value=config), \
+                mock.patch.object(collection.threading, "Thread") as thread:
+            self.assertTrue(first.request({"force": ["1"]}, request_receipt={}))
+        thread.return_value.start.assert_called_once_with()
+        self.assertTrue(first.snapshot()["syncing"])
+        self.assertEqual(first.snapshot()["refresh_requested"], 1)
+        self.assertFalse(second.snapshot()["syncing"])
+        self.assertEqual(second.snapshot()["refresh_requested"], 0)
+
+    def test_query_view_and_scheduler_share_coordinator_lifetime(self):
+        manager = mock.Mock()
+        coordinator = collection.CollectionCoordinator(manager, mock.Mock(), "fixture")
+        with mock.patch.object(coordinator, "capture_startup_config") as capture, \
+                mock.patch.object(collection.hub, "enabled", return_value=True), \
+                mock.patch.object(collection.hub, "is_hub", return_value=True), \
+                mock.patch.object(collection.hub, "interval", return_value=120), \
+                mock.patch.object(collection.query_view, "QueryView") as view, \
+                mock.patch.object(collection.threading, "Thread") as thread:
+            coordinator.start()
+            thread.assert_not_called()
+            capture.assert_called_once_with()
+            view.return_value.start.assert_called_once_with(interval=10)
+            coordinator.start_schedule()
+            thread.return_value.start.assert_called_once_with()
+            coordinator.close()
+        self.assertTrue(coordinator._stop.is_set())
+        manager.shutdown.assert_called_once_with()
+        view.return_value.close.assert_called_once_with()

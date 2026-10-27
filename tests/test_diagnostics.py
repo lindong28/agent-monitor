@@ -17,6 +17,19 @@ import quota_sync
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_extracted_component_frames_remain_visible_without_external_paths(self):
+        for relative, expected in (("agent_monitor/collection.py", "collection.py"),
+                                   ("agent_monitor/quota_service.py", "quota_service.py"),
+                                   ("server.py", "server.py"),
+                                   ("untrusted/collection.py", None)):
+            with self.subTest(source=relative):
+                try:
+                    exec(compile("raise ValueError('synthetic')", str(diagnostics.PROJECT_ROOT / relative), "exec"))
+                except ValueError as exc:
+                    facts = diagnostics.failure_details(exc)
+                files = [frame["file"] for frame in facts.get("frames", [])]
+                self.assertEqual(files, [] if expected is None else [expected])
+
     def test_quota_worker_reports_machine_and_provider_failures(self):
         for failure in (None, "machine", "provider"):
             with self.subTest(failure=failure):
@@ -48,7 +61,7 @@ class DiagnosticsTests(unittest.TestCase):
                 try:
                     with mock.patch.object(diagnostics, "monitor", monitor), mock.patch.object(server.threading, "Timer") as timer, \
                          mock.patch.object(server.codex_accounts.manager, "close", side_effect=RuntimeError("cleanup") if failure == "cleanup" else None), \
-                         mock.patch.object(server.QUOTA_REFRESH, "shutdown"), mock.patch.object(server, "QUERY_VIEW", None), \
+                         mock.patch.object(server.QUOTA_REFRESH, "shutdown"), mock.patch.object(server.COLLECTION, "query_view", None), \
                          mock.patch.object(server.os, "execv", side_effect=OSError("exec") if failure == "exec" else None) as execute:
                         guard = server.deployment_guard.deployment_lock(Path(tmp), inherit=False)
                         guard.__enter__()

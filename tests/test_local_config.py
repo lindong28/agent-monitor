@@ -20,7 +20,7 @@ class LocalConfigTests(unittest.TestCase):
         # Real modules, with their imports resolved in this disposable source tree.
         for path in ROOT.glob("*.py"):
             shutil.copy2(path, self.root / path.name)
-        for name in ("parsers", "ip_check", "proxy_runtime"):
+        for name in ("agent_monitor", "parsers", "ip_check", "proxy_runtime"):
             shutil.copytree(ROOT / name, self.root / name, ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(ROOT / "pricing.json", self.root / "pricing.json")
         for name in ("machines.json", "hub.json"):

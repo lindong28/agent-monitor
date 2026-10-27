@@ -12,8 +12,9 @@ from unittest import mock
 import hub
 import machine_config
 import server
+from component_fixtures import reset_collection
 import sync
-import exporter
+from agent_monitor import quota_service
 import generation
 from parsers import RateLimits
 
@@ -46,7 +47,7 @@ class HubTests(unittest.TestCase):
         self.machines_path.write_text(json.dumps({"machines": [
             {"name": name, "ssh_host": name, "self": name == "node-b"}
             for name in ("node-b", "node-c", "node-d")], "retired_names": []}))
-        server._reset_sync_state_for_tests()
+        reset_collection()
 
     def test_three_local_identities_select_same_hub_without_copying_self(self):
         self.assertIsNone(hub.origin())
@@ -68,7 +69,7 @@ class HubTests(unittest.TestCase):
         (self.root / "state/quota-collection-at").write_text("9999999999")
         with mock.patch.object(hub, "ROOT", self.root), mock.patch("rollup.run", return_value={}) as save, \
                 mock.patch("sync.sync_all", side_effect=AssertionError("collector must stay local")), \
-                mock.patch("exporter._rate_limits", side_effect=AssertionError("Quota is not due")):
+                mock.patch("agent_monitor.quota_service.rate_limits", side_effect=AssertionError("Quota is not due")):
             hub.collect()
         save.assert_called_once_with()
 
@@ -182,24 +183,24 @@ class HubTests(unittest.TestCase):
                 pass
 
         with mock.patch("server.generation.generation_admission_snapshot", side_effect=lambda: contextlib.nullcontext(admission)), \
-                mock.patch("server.threading.Thread", Thread), \
-                mock.patch("server._automatic_sync_due", return_value=True), \
+                mock.patch("agent_monitor.collection.threading.Thread", Thread), \
+                mock.patch("server.COLLECTION.automatic_due", return_value=True), \
                 mock.patch("server.hub.enabled", return_value=True), \
-                mock.patch("server.sync_process.sync_all", return_value={}), \
-                mock.patch("server._remember_accounts_after_sync_publish"):
-            server._maybe_sync_remotes({})
-            server._maybe_sync_remotes({"force": ["1"]})
+                mock.patch("agent_monitor.collection.sync_process.sync_all", return_value={}), \
+                mock.patch("server.COLLECTION.remember_accounts"):
+            server.COLLECTION.request({})
+            server.COLLECTION.request({"force": ["1"]})
             self.assertEqual(len(scheduled), 1)
-            self.assertEqual(server._SYNC_STATE["refresh_requested"], 1)
-            self.assertEqual(server._SYNC_STATE["refresh_completed"], 0)
+            self.assertEqual(server.COLLECTION._state["refresh_requested"], 1)
+            self.assertEqual(server.COLLECTION._state["refresh_completed"], 0)
             target, args = scheduled[0]
             target(*args)
             self.assertEqual(len(scheduled), 2)
-            self.assertEqual(server._SYNC_STATE["refresh_completed"], 0)
+            self.assertEqual(server.COLLECTION._state["refresh_completed"], 0)
             target, args = scheduled[1]
             target(*args)
-            self.assertEqual(server._SYNC_STATE["refresh_completed"], 1)
-            self.assertFalse(server._SYNC_STATE["running"])
+            self.assertEqual(server.COLLECTION._state["refresh_completed"], 1)
+            self.assertFalse(server.COLLECTION._state["running"])
 
     def test_service_uses_foreground_process_and_carries_ssh_agent_environment(self):
         plist = hub.web_plist(self.root, "/usr/bin/python3", ssh_auth_sock="/agent/socket", path="/bin:/usr/bin")
@@ -325,22 +326,22 @@ class HubTests(unittest.TestCase):
         for timestamp in ("2026-09-09T01:00:00+00:00", "2026-09-09T01:01:00+00:00"):
             for error in (None, "Quota refresh timed out"):
                 with self.subTest(timestamp=timestamp, error=error):
-                    previous = exporter._rate_limit_block(active, account)
+                    previous = quota_service.rate_limit_block(active, account)
                     previous["refresh_error"] = error
                     local = RateLimits(44, 1234, 55, 2345, updated_at=timestamp)
-                    with mock.patch.object(exporter, "ROOT", self.root), \
-                            mock.patch("exporter._read_quota_cache", return_value={"claude": previous, "codex": previous}), \
-                            mock.patch("exporter.accounts.claude_account", return_value=account), \
-                            mock.patch("exporter.accounts.codex_account", return_value=account), \
-                            mock.patch("exporter.claude_status.load_rate_limits", return_value=local), \
-                            mock.patch("exporter.codex.load_rate_limits", return_value=local), \
-                            mock.patch("exporter.quota_refresh.load_rate_limits", side_effect=AssertionError("no active query")):
-                        cached = exporter._rate_limits(refresh=False)
+                    with mock.patch.object(quota_service, "ROOT", self.root), \
+                            mock.patch("agent_monitor.quota_service.read_cache", return_value={"claude": previous, "codex": previous}), \
+                            mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=account), \
+                            mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
+                            mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=local), \
+                            mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=local), \
+                            mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no active query")):
+                        cached = quota_service.rate_limits(refresh=False, use_cache=True)
                         for provider in ("claude", "codex"):
                             self.assertEqual(cached[provider]["refresh_error"], error)
                             self.assertEqual(cached[provider]["updated_at"], timestamp)
                         account.account_id = "different-account"
-                        changed = exporter._rate_limits(refresh=False)
+                        changed = quota_service.rate_limits(refresh=False, use_cache=True)
                         for provider in ("claude", "codex"):
                             self.assertNotIn("refresh_error", changed[provider])
                         account.account_id = "fixture-account"
@@ -352,22 +353,22 @@ class HubTests(unittest.TestCase):
         later = RateLimits(44, 1234, 55, 2345, updated_at="2026-09-09T02:00:00+00:00")
         for timestamp in ("2026-09-09T00:00:00+00:00", "2026-09-09T01:00:00+00:00", "2026-09-09T01:01:00+00:00"):
             fallback = RateLimits(11, 1234, 22, 2345, updated_at=timestamp)
-            with self.subTest(fallback_time=timestamp), mock.patch.object(exporter, "ROOT", self.root), \
-                    mock.patch("exporter.accounts.claude_account", return_value=account), \
-                    mock.patch("exporter.accounts.codex_account", return_value=account), \
-                    mock.patch("exporter.claude_status.load_rate_limits", return_value=fallback) as claude_local, \
-                    mock.patch("exporter.codex.load_rate_limits", return_value=fallback) as codex_local, \
-                    mock.patch("exporter.quota_refresh.load_rate_limits", return_value=fresh) as live, \
-                    mock.patch("server._load_account_memory", return_value=("valid", {"version": 1, "accounts": {}})), \
-                    mock.patch("server._self_machine_name", return_value="node-c"):
-                exporter._rate_limits(refresh=True)
-                live.side_effect = exporter.quota_refresh.RefreshError("offline")
-                exporter._rate_limits(refresh=True)
+            with self.subTest(fallback_time=timestamp), mock.patch.object(quota_service, "ROOT", self.root), \
+                    mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=account), \
+                    mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
+                    mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=fallback) as claude_local, \
+                    mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=fallback) as codex_local, \
+                    mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", return_value=fresh) as live, \
+                    mock.patch("server.ACCOUNT_MEMORY.read", return_value=("valid", {"version": 1, "accounts": {}})), \
+                    mock.patch("agent_monitor.quota_view.self_machine_name", return_value="node-c"):
+                quota_service.rate_limits(refresh=True, use_cache=True)
+                live.side_effect = quota_service.quota_refresh.RefreshError("offline")
+                quota_service.rate_limits(refresh=True, use_cache=True)
                 active_calls = live.call_count
                 claude_local.return_value = codex_local.return_value = later
-                cached = exporter._rate_limits(refresh=False)
+                cached = quota_service.rate_limits(refresh=False, use_cache=True)
                 admission = SimpleNamespace(admitted=[SimpleNamespace(host="node-c", meta={"rate_limits": cached})])
-                result = server._live_rate_limits_from_admission(admission)
+                result = server.QUOTA_VIEW.live_from_admission(admission)
                 for provider in ("claude", "codex"):
                     self.assertEqual(result[provider]["refresh_errors"], [{"machine": "node-c", "reason": "offline"}])
                     self.assertEqual(cached[provider]["updated_at"], later.updated_at)
@@ -377,19 +378,19 @@ class HubTests(unittest.TestCase):
         self.marker.write_text("node-c")
         account = SimpleNamespace(account_id="fixture-account", label="Fixture", plan="pro")
         reading = RateLimits(22, 1234, 33, 2345, updated_at="2026-09-09T01:00:00+00:00")
-        with mock.patch.object(exporter, "ROOT", self.root), \
-                mock.patch("exporter.accounts.claude_account", return_value=account), \
-                mock.patch("exporter.accounts.codex_account", return_value=account), \
-                mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-                mock.patch("exporter.codex.load_rate_limits", return_value=None), \
-                mock.patch("exporter.quota_refresh.load_rate_limits", return_value=reading) as live:
-            active = exporter._rate_limits(refresh=True)
+        with mock.patch.object(quota_service, "ROOT", self.root), \
+                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=account), \
+                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
+                mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
+                mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", return_value=reading) as live:
+            active = quota_service.rate_limits(refresh=True, use_cache=True)
             self.assertEqual(live.call_count, 2)
-            cached = exporter._rate_limits(refresh=False)
+            cached = quota_service.rate_limits(refresh=False, use_cache=True)
             self.assertEqual(live.call_count, 2)
             self.assertEqual(cached, active)
             account.account_id = "different-account"
-            changed = exporter._rate_limits(refresh=False)
+            changed = quota_service.rate_limits(refresh=False, use_cache=True)
             self.assertIsNone(changed["claude"])
             self.assertIsNone(changed["codex"])
 

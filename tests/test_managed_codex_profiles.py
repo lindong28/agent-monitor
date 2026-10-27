@@ -1,3 +1,4 @@
+from agent_monitor import quota_service
 import contextlib
 import json
 import os
@@ -81,22 +82,22 @@ class ManagedCodexTests(unittest.TestCase):
     def test_passive_quota_reaches_existing_accounts_consumer(self):
         for name, used in (("alpha", 21), ("beta", 82)):
             self.session(self.profile(name), name, 10, used)
-        with mock.patch("exporter.quota_refresh.load_rate_limits", side_effect=AssertionError("no active queries")):
-            blocks = exporter._managed_codex_rate_limits()
+        with mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no active queries")):
+            blocks = quota_service.managed_codex_rate_limits()
         current = SimpleNamespace(host="fixture", meta={"rate_limits": {"codex": {"signed_out": True, "managed_accounts": blocks}}})
         admission = SimpleNamespace(admitted=[current])
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server._self_machine_name", return_value="fixture"):
-            rows = server._live_rate_limits_from_admission(admission)["codex"]["accounts"]
+        with mock.patch("server.hub.enabled", return_value=False), mock.patch("agent_monitor.quota_view.self_machine_name", return_value="fixture"):
+            rows = server.QUOTA_VIEW.live_from_admission(admission)["codex"]["accounts"]
         self.assertEqual({r["account_label"]: r["five_hour_used_pct"] for r in rows}, {"alpha@example.test": 21, "beta@example.test": 82})
         self.assertEqual({r["account_profile"] for r in rows}, {"alpha", "beta"})
 
     def test_exporter_includes_profiles_without_refreshing_them(self):
         self.session(self.profile("alpha"), "alpha", 10, 21)
         with mock.patch("hub.enabled", return_value=False), mock.patch.object(exporter, "ROOT", self.root), \
-             mock.patch("exporter.accounts.codex_account", return_value=None), \
-             mock.patch("exporter.accounts.claude_account", return_value=None), \
-             mock.patch("exporter.claude_status.load_rate_limits", return_value=None), \
-             mock.patch("exporter.quota_refresh.load_rate_limits", side_effect=AssertionError("no active queries")):
+             mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=None), \
+             mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
+             mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
+             mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no active queries")):
             limits = exporter._rate_limits(refresh=False)
         self.assertEqual(set(limits), {"claude", "codex"})
         self.assertEqual(limits["codex"]["managed_accounts"][0]["five_hour_pct"], 21)
@@ -113,8 +114,8 @@ class ManagedCodexTests(unittest.TestCase):
                     "codex": {**older, "managed_accounts": [newer]}}}) for host in hosts])
                 before = json.dumps([current.meta for current in admission.admitted])
                 with mock.patch("server.hub.enabled", return_value=False), \
-                     mock.patch("server._self_machine_name", return_value="first"):
-                    rows = server._live_rate_limits_from_admission(admission)["codex"]["accounts"]
+                     mock.patch("agent_monitor.quota_view.self_machine_name", return_value="first"):
+                    rows = server.QUOTA_VIEW.live_from_admission(admission)["codex"]["accounts"]
                 self.assertEqual(len(rows), 1)
                 self.assertEqual(rows[0]["machines"], list(hosts))
                 self.assertEqual(rows[0]["five_hour_used_pct"], 35)
@@ -167,7 +168,7 @@ class ManagedCodexTests(unittest.TestCase):
 const fs=require('fs'),assert=require('assert');
 global.document={readyState:'loading',addEventListener(){}};
 global.window={location:{origin:'http://fixture.invalid'}};
-eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { codexSessionAccountLabel, quotaAccountName,'));
+require('./web/app.js')();
 const ui=window.AgentMonitor;
 assert.equal(ui.codexSessionAccountLabel({name:'alpha',email:'alpha@example.test'}),'账号：alpha · alpha@example.test');
 assert.equal(ui.codexSessionAccountLabel(null),'账号归属未记录或冲突');

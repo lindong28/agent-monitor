@@ -83,6 +83,9 @@ class FreshnessWiringTests(unittest.TestCase):
             shutil.copy2(ROOT / "hub.py", launcher_root / "hub.py")
             shutil.copy2(ROOT / "deployment_guard.py", launcher_root / "deployment_guard.py")
             shutil.copy2(ROOT / "service_runtime.py", launcher_root / "service_runtime.py")
+            shutil.copy2(ROOT / "project_paths.py", launcher_root / "project_paths.py")
+            shutil.copytree(ROOT / "agent_monitor", launcher_root / "agent_monitor",
+                            ignore=shutil.ignore_patterns("__pycache__"))
             shutil.copy2(ROOT / "hub.json", launcher_root / "hub.json")
             shutil.copy2(ROOT / "process_identity.py", launcher_root / "process_identity.py")
 

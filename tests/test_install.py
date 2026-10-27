@@ -58,6 +58,9 @@ class RollupInstallerTests(unittest.TestCase):
         shutil.copy2(ROOT / "requirements.txt", self.component / "requirements.txt")
         shutil.copy2(ROOT / "hub.py", self.component / "hub.py")
         shutil.copy2(ROOT / "service_runtime.py", self.component / "service_runtime.py")
+        shutil.copy2(ROOT / "project_paths.py", self.component / "project_paths.py")
+        shutil.copytree(ROOT / "agent_monitor", self.component / "agent_monitor",
+                        ignore=shutil.ignore_patterns("__pycache__"))
         (self.component / "connector_service.py").write_text("import pathlib\npathlib.Path.home().joinpath('connector-actions').write_text('converge')\n")
         # Fixtures must not depend on the operator's deployment configuration.
         (self.component / "hub.json").write_text(json.dumps({

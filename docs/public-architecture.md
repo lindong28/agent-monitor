@@ -4,24 +4,45 @@ agent-monitor is an independent Python service with a static JavaScript dashboar
 
 ## Responsibility map
 
-The backend currently consists of root-level Python modules rather than an installed Python package. Keep the public shell/CLI entries stable; use this map to locate a behavior before changing it. Tests below are starting points for the affected responsibility, not a substitute for other consumers of a shared contract.
+The root scripts remain checkout-based public entrypoints. Internal components with shared ownership live in `agent_monitor/`; this is not an installed Python distribution. Keep the public shell/CLI entries stable and use this map to locate a behavior before changing it. Tests below are starting points for the affected responsibility, not a substitute for other consumers of a shared contract.
 
 | Responsibility | Source entry | Regression starting point |
 | --- | --- | --- |
 | CLI, install, runtime and service lifecycle | `agent-monitor`, `install.sh`, `deploy.py`, `deployment_guard.py`, `local_web.py`, `service_manager.py`, `service_runtime.py`, `runtime_rebuild.py`, `*_service.py` | `tests/test_install.py`, `tests/test_deployment_guard.py`, `tests/test_deployment_convergence.py` |
+| Checkout paths and source identity | `project_paths.py`, `agent_monitor/source_inventory.py` | `tests/test_source_inventory.py`, `tests/test_service_signature.py`, `tests/test_freshness.py`, `tests/test_exporter.py` |
 | Log parsing and source/account attribution | `parsers/`, `session_identity.py`, `project_alias.py` | `tests/test_managed_codex_profiles.py`, `tests/test_conversation_sessions.py` |
-| Retained usage and accounting | `usage_archive.py`, `rollup.py`, `aggregators.py`, `token_cost.py`, `pricing_fetcher.py` | `tests/test_usage_archive.py`, `tests/test_rollup.py`, [accounting contracts](references/metrics.md) |
+| Retained usage and accounting | `usage_archive.py`, `rollup.py`, `aggregators.py`, `agent_monitor/storage.py`, `token_cost.py`, `pricing_fetcher.py` | `tests/test_usage_archive.py`, `tests/test_rollup.py`, `tests/test_rollup_lock.py`, [accounting contracts](references/metrics.md) |
 | Snapshot export, admission and cross-machine collection | `exporter.py`, `statistics_snapshot.py`, `generation.py`, `query_view.py`, `sync.py`, `sync_process.py`, `machine_config.py`, `hub.py` | `tests/test_usage_evidence_snapshot.py`, `tests/test_query_view.py`, `tests/test_snapshot_contention.py`, `tests/test_sync_process.py` |
 | Sessions and conversation views | `session_cache.py`, `conversation_cache.py`, `server.py` | `tests/test_sessions_cache.py`, `tests/test_conversation_sessions.py` |
 | Quotas and optional account actions | `quota_*.py`, `codex_accounts.py`, `codex_messages.py`, `claude_oauth.py`, `upstream_controls.py` | `tests/test_quota_refresh.py`, `tests/test_quota_recovery_flow.py`, `tests/test_managed_codex_profiles.py` |
+| Collection coordination, quota views and remembered accounts | `agent_monitor/collection.py`, `agent_monitor/quota_view.py`, `agent_monitor/account_memory.py`, `agent_monitor/quota_service.py` | `tests/test_async_refresh.py`, `tests/test_account_memory.py`, `tests/test_quota_refresh.py` |
 | Network policy and browser-device routing | `network_policy.py`, `proxy_runtime/`, `network_report.py`, `ip_check/`, `account_egress.py`, `client_network.py`, `client_connector.py` | `tests/test_network_policy.py`, `tests/test_client_network.py`, `tests/test_device_connection.py` |
 | HTTP and dashboard | `server.py`, `asset_delivery.py`, `web/*.html`, `web/app.js`, `web/pivot.js`, account modules and `web/styles.css` | `tests/test_web_static.py`, `tests/test_http_delivery.py`; [browser acceptance](../CONTRIBUTING.md#explicit-browser-and-connector-acceptance) |
 
-`server.py` owns HTTP dispatch, view handlers and collection scheduling; `web/app.js` owns shared UI behavior and several page initializers. These are useful starting points, but a change there can affect multiple pages or background collection. The [backend cost map](#backend-performance-checks) identifies their distinct runtime consumers. `examples/` holds synthetic inputs and public configuration; `scripts/` holds explicit acceptance/measurement tools; `tests/fixtures/` holds test inputs. See [development checks](../CONTRIBUTING.md#choose-a-validation-entry) before running optional tools.
+`server.py` composes the HTTP handlers with one account-memory instance, quota view and collection coordinator. The coordinator owns scheduling state and query-view admission; the account-memory component owns its lock, deletion epochs and JSON persistence. Components do not import `server.py` or share its mutable globals. `web/app.js` composes shared UI and page modules; see the frontend boundaries below. The [backend cost map](#backend-performance-checks) identifies distinct runtime consumers. `examples/` holds synthetic inputs and public configuration; `scripts/` holds explicit acceptance/measurement tools; `tests/fixtures/` holds test inputs. See [development checks](../CONTRIBUTING.md#choose-a-validation-entry) before running optional tools.
 
 ### Paths are part of runtime identity
 
-Module moves require more than import changes. The CLI and service launchers address scripts relative to the checkout; modules derive `state` and resource paths from their source location. `server._source_files()` and `service_runtime.signature()` enumerate specific source directories, while `exporter._RUNTIME_AUTHORITY_PATHS` defines clean-source admission. A new package directory must be included in these mechanisms and their tests, or new code could escape drift/admission checks. Preserve public commands, state location, machine identity and the shared `token_cost.py` arithmetic contract when reorganizing code.
+`project_paths.py` anchors the checkout independently of the current working directory and internal module location. Its state/resource helpers retain the `state` symlink rather than resolving, creating or replacing it. Entry scripts that execute themselves still use their own script identity. Internal modules use the shared root; tests can provide explicit roots or component instances.
+
+`agent_monitor/source_inventory.py` registers application package roots once and exposes different views: Python compilation and server drift include runtime Python; service identity also includes proxy CJS, requirements, the Hub marker and selected local/default configuration; exporter clean-source admission uses Git pathspecs for code and accounting resources, excluding operator configuration. CLI compilation and server drift consume the same Python view. New nested modules inside registered packages are included automatically; a new package root must be registered and verified with `tests/test_source_inventory.py`. Do not replace these views with an unrestricted checkout scan. Preserve public commands, state location, machine identity and the shared `token_cost.py` arithmetic contract when reorganizing code.
+
+### Dependency and state boundaries
+
+| Boundary | Ownership and consumers | When changing it |
+| --- | --- | --- |
+| Rollup storage | `agent_monitor/storage.py` owns lock identity, thread/file lock registries, fork handling and safe read connections. Both rollup and aggregators consume it; storage does not import either consumer. | Run lock/read-connection and identity-recovery tests as well as rollup/aggregator tests. Preserve SQLite/WAL read behavior and one registry. |
+| Quota acquisition | `agent_monitor/quota_service.py` owns acquisition/recovery; exporter and Hub supply their role, root and cache options. Exporter compatibility adapters remain for existing callers. | Check standalone, Hub and GUI cache/refresh paths without real provider calls; view tests alone do not cover acquisition. |
+| Account memory | One `AccountMemory` instance owns `state/account_memory.json` and concurrent deletion/upsert coordination. Quota views and HTTP deletion use that same instance. | Preserve admission → epoch registration → live candidate derivation; deleting an account must not allow an older in-flight candidate to restore it. |
+| Collection | One coordinator owns round state, refresh requests and callbacks; HTTP handlers request or read it. | Check automatic/manual refresh, overlapping requests, completion/failure and query-view lifetime. Extraction does not add collection work or change cadence. |
+
+Runtime data remains under `state/`: archives and rollup preserve usage history, generations hold admitted snapshots, account memory preserves remembered readings, and identity/lock files protect those owners. These are distinct from developer task evidence. [Task storage](../storage/README.md) describes local evidence navigation; it does not relocate business data.
+
+### Frontend boundaries
+
+The static dashboard uses explicit module factories shared by browser script loading and Node tests. `web/app.js` composes page behavior, navigation and page lifetime; separate modules own charts, quota rendering, network rendering and sessions. The factories receive their dependencies and expose the interfaces tested by Node, so tests do not rewrite source strings to reveal private functions. `web/pivot.js` also exposes a factory. Browser globals retained by the page composition remain compatibility surfaces, not independent copies of application state.
+
+HTML loads shared modules through the existing versioned asset delivery. Dynamic account modules propagate the document version explicitly; adding a module dependency must preserve this through the entire loading chain. A page's subscriptions, timers and charts end with that page's lifetime. Validate both initial entry and navigation away/back when changing shared modules; normal imports passing in Node do not establish browser loading or cleanup.
 
 ## Usage path
 

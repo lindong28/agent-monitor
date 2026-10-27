@@ -1,3 +1,5 @@
+import agent_monitor
+from component_fixtures import reset_collection
 import json
 import subprocess
 import threading
@@ -30,7 +32,7 @@ global.AgentMonitor = {
   snapshotFingerprint: s => JSON.stringify(s.machines),
   api: (path, query) => {requested.push({path, query}); return new Promise(resolve => pending.push({path, resolve}));},
 };
-eval(fs.readFileSync("web/pivot.js", "utf8"));
+window.AgentMonitorPivot = require('./web/pivot.js')(global.AgentMonitor || window.AgentMonitor);
 (async () => {
   const loading = window.AgentMonitorPivot.init();
   if (requested.length !== 1 || requested[0].path !== "/api/sync-status") throw Error("queries crossed status barrier");
@@ -60,7 +62,7 @@ global.document = {readyState: "loading", addEventListener() {}, querySelector()
 global.setTimeout = fn => fn();
 let replies = [];
 global.fetch = async () => ({ok: true, json: async () => replies.shift()});
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 function status(quota, gen, syncing) {return {instance_id: "one", syncing,
   machines: [{name: "one", admitted: true, generation_id: gen}], quota_refresh: {requested: quota}};}
 (async () => {
@@ -83,17 +85,17 @@ function status(quota, gen, syncing) {return {instance_id: "one", syncing,
         return json.loads(result.stdout)
 
     def setUp(self):
-        server._reset_sync_state_for_tests()
-        self.addCleanup(server._reset_sync_state_for_tests)
+        reset_collection()
+        self.addCleanup(reset_collection)
 
     def test_hub_interval_is_start_to_start_even_after_a_slow_or_failed_round(self):
-        server._SYNC_STATE.update(started_at="2026-09-28T00:00:00Z", completed_at="2026-09-28T00:01:10Z")
+        server.COLLECTION._state.update(started_at="2026-09-28T00:00:00Z", completed_at="2026-09-28T00:01:10Z")
         with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.hub.interval", return_value=120):
             for seconds, expected in ((119, False), (120, True), (180, True)):
                 now = datetime.fromtimestamp(1790553600 + seconds, timezone.utc)
-                self.assertEqual(server._automatic_sync_due(now), expected)
-            server._SYNC_STATE["running"] = True
-            self.assertFalse(server._automatic_sync_due(now))
+                self.assertEqual(server.COLLECTION.automatic_due(now), expected)
+            server.COLLECTION._state["running"] = True
+            self.assertFalse(server.COLLECTION.automatic_due(now))
 
     def test_sync_reports_fast_machine_before_slow_machine_finishes(self):
         release = threading.Event()
@@ -119,34 +121,34 @@ function status(quota, gen, syncing) {return {instance_id: "one", syncing,
 
     def test_statistics_progress_uses_cached_quota_and_request_stays_pending(self):
         events = []
-        server._SYNC_STATE.update(running=True, round_quota_refresh=True, round_refresh=1,
+        server.COLLECTION._state.update(running=True, round_quota_refresh=True, round_refresh=1,
                                   refresh_requested=1, pending_machines=("fast", "slow"),
                                   statistics_pending=("fast", "slow"), phase="statistics")
         def collect(*, quota_refresh, progressive, on_complete, on_statistics):
             events.append(quota_refresh)
             self.assertFalse(progressive)
-            self.assertEqual(server._SYNC_STATE["refresh_completed"], 0)
-            self.assertEqual(server._SYNC_STATE["phase"], "statistics")
-            result = server.sync_process.Outcome(True)
+            self.assertEqual(server.COLLECTION._state["refresh_completed"], 0)
+            self.assertEqual(server.COLLECTION._state["phase"], "statistics")
+            result = agent_monitor.collection.sync_process.Outcome(True)
             on_statistics("fast", result)
-            self.assertIn("fast", server._SYNC_STATE["pending_machines"])
-            self.assertNotIn("fast", server._SYNC_STATE["statistics_pending"])
+            self.assertIn("fast", server.COLLECTION._state["pending_machines"])
+            self.assertNotIn("fast", server.COLLECTION._state["statistics_pending"])
             on_complete("fast", result)
-            self.assertNotIn("fast", server._SYNC_STATE["pending_machines"])
-            self.assertIn("slow", server._SYNC_STATE["pending_machines"])
-            failed = server.sync_process.Outcome(False, "offline")
+            self.assertNotIn("fast", server.COLLECTION._state["pending_machines"])
+            self.assertIn("slow", server.COLLECTION._state["pending_machines"])
+            failed = agent_monitor.collection.sync_process.Outcome(False, "offline")
             on_complete("slow", failed)
-            self.assertEqual(server._SYNC_STATE["phase"], "quota")
-            self.assertEqual(server._SYNC_STATE["refresh_completed"], 0)
+            self.assertEqual(server.COLLECTION._state["phase"], "quota")
+            self.assertEqual(server.COLLECTION._state["refresh_completed"], 0)
             return {"fast": result, "slow": failed}
-        with mock.patch("server.sync_process.sync_all", side_effect=collect), mock.patch("server._remember_accounts_after_sync_publish"), mock.patch("server.hub.enabled", return_value=True):
-            server._run_sync_round(("fast", "slow"))
+        with mock.patch("agent_monitor.collection.sync_process.sync_all", side_effect=collect), mock.patch("server.COLLECTION.remember_accounts"), mock.patch("server.hub.enabled", return_value=True):
+            server.COLLECTION.run_round(("fast", "slow"))
         self.assertEqual(events, [False])
-        self.assertEqual(server._SYNC_STATE["refresh_completed"], 1)
-        self.assertFalse(server._SYNC_STATE["running"])
-        self.assertEqual(server._SYNC_STATE["observations"]["fast"]["last_attempt_outcome"], "success")
-        self.assertEqual(server._SYNC_STATE["observations"]["slow"]["last_attempt_outcome"], "failure")
-        self.assertEqual(server._SYNC_STATE["observations"]["slow"]["reason"], "offline")
+        self.assertEqual(server.COLLECTION._state["refresh_completed"], 1)
+        self.assertFalse(server.COLLECTION._state["running"])
+        self.assertEqual(server.COLLECTION._state["observations"]["fast"]["last_attempt_outcome"], "success")
+        self.assertEqual(server.COLLECTION._state["observations"]["slow"]["last_attempt_outcome"], "failure")
+        self.assertEqual(server.COLLECTION._state["observations"]["slow"]["reason"], "offline")
 
     def test_browser_rereads_each_new_generation_before_terminal_and_stops_on_navigation(self):
         script = r'''
@@ -156,7 +158,7 @@ global.document = { readyState: "loading", addEventListener() {}, querySelector(
 global.setTimeout = (fn) => { fn(); };
 let replies = [];
 global.fetch = async () => ({ ok: true, json: async () => replies.shift() });
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 function status(id, running) { return {instance_id: "one", syncing: running,
   refresh_requested: 1, refresh_completed: running ? 0 : 1,
   machines: [{name: "fast", admitted: true, generation_id: id}]}; }
@@ -188,7 +190,7 @@ global.fetch = async url => {
   return {ok: true, json: async () => ({instance_id: "one", syncing: true,
     refresh_requested: 1, refresh_completed: 0, machines: []})};
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 window.AgentMonitor.refreshStatistics().then(() => {
   throw Error("incomplete refresh resolved");
 }, error => process.stdout.write(JSON.stringify(error.message)));
@@ -218,7 +220,7 @@ global.fetch = async url => {
   }
   return {ok: true, json: async () => payload};
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require('./web/app.js')();
 (async () => {
   await window.AgentMonitor.initSessions();
   nodes["#page-next"].listeners.click();

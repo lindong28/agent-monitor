@@ -197,14 +197,12 @@ status() {
 }
 
 compile_ok() {
-  # Mirror server.py's _source_files(): top-level *.py + parsers/**/*.py. Returns
-  # nonzero if any fails to compile, so we never restart into broken code.
+  # Use the same runtime inventory as the server; reject broken nested modules.
   "$AGENT_MONITOR_PYTHON" - "$ROOT_DIR" <<'PY' 2>/dev/null
-import pathlib, py_compile, sys
-root = pathlib.Path(sys.argv[1])
-files = sorted(root.glob("*.py")) + sorted((root / "parsers").glob("**/*.py"))
-for f in files:
-    py_compile.compile(str(f), doraise=True)
+import sys
+sys.path.insert(0, sys.argv[1])
+from agent_monitor.source_inventory import compile_sources
+compile_sources(sys.argv[1])
 PY
 }
 

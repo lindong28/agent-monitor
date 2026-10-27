@@ -47,7 +47,7 @@ class SessionsCacheTests(unittest.TestCase):
         Clock.value = NOW
         for patcher in (mock.patch.object(server, "datetime", Clock),
                         mock.patch.object(server.hub, "enabled", return_value=True),
-                        mock.patch.object(server, "_maybe_sync_remotes"),
+                        mock.patch.object(server.COLLECTION, "request"),
                         mock.patch.object(server, "_SESSION_CACHE", SessionCache()),
                         mock.patch.object(server, "_CONVERSATION_CACHE", ConversationCache()),
                         mock.patch.object(server.generation, "generation_admission_snapshot")):

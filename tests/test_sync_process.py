@@ -1,3 +1,5 @@
+from agent_monitor import collection
+from component_fixtures import reset_collection
 import json
 from pathlib import Path
 import signal
@@ -16,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class SyncProcessTests(unittest.TestCase):
     def setUp(self):
         self.popen = subprocess.Popen
-        server._reset_sync_state_for_tests()
-        self.addCleanup(server._reset_sync_state_for_tests)
+        reset_collection()
+        self.addCleanup(reset_collection)
 
     def launch_fixture(self, body, *args, **kwargs):
         script = "import sys;sys.path.insert(0,%r)\n" % str(ROOT) + body
@@ -46,7 +48,7 @@ sync_process._worker()
                          [("statistics", "fast"), ("complete", "fast"), ("complete", "slow")])
         self.assertEqual(results, {"fast": sync_process.Outcome(True),
                                    "slow": sync_process.Outcome(False, "source unavailable")})
-        self.assertEqual(server._normalize_sync_outcomes(results, ("fast", "slow"))["fast"],
+        self.assertEqual(collection.normalize_sync_outcomes(results, ("fast", "slow"))["fast"],
                          {"kind": "success", "generation": None, "reason": None})
         self.assertFalse(sync_process._active)
 
@@ -109,7 +111,7 @@ sync_process._worker()
                 sync_process._stopping = False
 
     def test_hub_progress_and_account_memory_remain_in_parent(self):
-        server._SYNC_STATE.update(running=True, round_quota_refresh=True, round_refresh=1,
+        server.COLLECTION._state.update(running=True, round_quota_refresh=True, round_refresh=1,
                                  refresh_requested=1, pending_machines=("fast", "slow"),
                                  statistics_pending=("fast", "slow"), phase="statistics")
         def collect(**kwargs):
@@ -117,27 +119,27 @@ sync_process._worker()
             self.assertFalse(kwargs['quota_refresh'])
             ok, fail = sync_process.Outcome(True), sync_process.Outcome(False, 'offline')
             kwargs['on_statistics']('fast', ok)
-            self.assertIn('fast', server._SYNC_STATE['pending_machines'])
-            self.assertNotIn('fast', server._SYNC_STATE['statistics_pending'])
+            self.assertIn('fast', server.COLLECTION._state['pending_machines'])
+            self.assertNotIn('fast', server.COLLECTION._state['statistics_pending'])
             kwargs['on_complete']('fast', ok)
             kwargs['on_complete']('slow', fail)
             return {'fast':ok, 'slow':fail}
         with mock.patch('server.hub.enabled', return_value=True), \
-             mock.patch('server.sync_process.sync_all', side_effect=collect), \
-             mock.patch('server._remember_accounts_after_sync_publish') as remember:
-            server._run_sync_round(('fast', 'slow'))
+             mock.patch('agent_monitor.collection.sync_process.sync_all', side_effect=collect), \
+             mock.patch('server.COLLECTION.remember_accounts') as remember:
+            server.COLLECTION.run_round(('fast', 'slow'))
         remember.assert_called_once_with()
-        self.assertEqual(server._SYNC_STATE['refresh_completed'], 1)
-        self.assertFalse(server._SYNC_STATE['running'])
-        self.assertEqual(server._SYNC_STATE['observations']['fast']['last_attempt_outcome'], 'success')
-        self.assertEqual(server._SYNC_STATE['observations']['slow']['last_attempt_outcome'], 'failure')
-        self.assertEqual(server._SYNC_STATE['observations']['slow']['reason'], 'offline')
+        self.assertEqual(server.COLLECTION._state['refresh_completed'], 1)
+        self.assertFalse(server.COLLECTION._state['running'])
+        self.assertEqual(server.COLLECTION._state['observations']['fast']['last_attempt_outcome'], 'success')
+        self.assertEqual(server.COLLECTION._state['observations']['slow']['last_attempt_outcome'], 'failure')
+        self.assertEqual(server.COLLECTION._state['observations']['slow']['reason'], 'offline')
 
     def test_reexec_waits_for_sync_shutdown(self):
         events = []
         with mock.patch('server.threading.Timer') as timer, \
              mock.patch('server.codex_accounts.manager.close', side_effect=lambda: events.append('accounts')), \
-             mock.patch('server.sync_process.shutdown', side_effect=lambda: events.append('shutdown')), \
+             mock.patch('agent_monitor.collection.sync_process.shutdown', side_effect=lambda: events.append('shutdown')), \
              mock.patch('server.os.execv', side_effect=lambda *args: events.append('exec')):
             server._schedule_reexec(mock.MagicMock())
             timer.call_args.args[1]()

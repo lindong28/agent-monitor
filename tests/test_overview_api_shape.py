@@ -1,3 +1,4 @@
+from component_fixtures import reset_collection
 import contextlib
 import dataclasses
 import os
@@ -20,8 +21,8 @@ _ACCOUNT_MEMORY_PATCHER = None
 def setUpModule():
     global _ACCOUNT_MEMORY_TEMP, _ACCOUNT_MEMORY_PATCHER
     _ACCOUNT_MEMORY_TEMP = tempfile.TemporaryDirectory()
-    memory_path = Path(_ACCOUNT_MEMORY_TEMP.name) / "account_memory.json"
-    _ACCOUNT_MEMORY_PATCHER = mock.patch("server._ACCOUNT_MEMORY_PATH", memory_path)
+    memory_path = Path(_ACCOUNT_MEMORY_TEMP.name) / "agent_monitor.account_memory.json"
+    _ACCOUNT_MEMORY_PATCHER = mock.patch("server.ACCOUNT_MEMORY.path", memory_path)
     _ACCOUNT_MEMORY_PATCHER.start()
 
 
@@ -32,13 +33,13 @@ def tearDownModule():
 
 class OverviewApiShapeTests(unittest.TestCase):
     def setUp(self):
-        server._ACCOUNT_MEMORY_PATH.unlink(missing_ok=True)
-        self.real_rate_limits = server._rate_limits
-        self.sync_trigger_patcher = mock.patch("server._maybe_sync_remotes")
+        server.ACCOUNT_MEMORY.path.unlink(missing_ok=True)
+        self.real_rate_limits = server.QUOTA_VIEW.rate_limits
+        self.sync_trigger_patcher = mock.patch("server.COLLECTION.request")
         self.sync_trigger = self.sync_trigger_patcher.start()
         self.addCleanup(self.sync_trigger_patcher.stop)
         self.sync_status_patcher = mock.patch(
-            "server._sync_status",
+            "server.COLLECTION.status",
             return_value={
                 "coverage": {"admitted": 0, "declared": 0},
                 "all_machines": [],
@@ -50,7 +51,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         self.sync_status_patcher.start()
         self.addCleanup(self.sync_status_patcher.stop)
         self.rate_limits_patcher = mock.patch(
-            "server._rate_limits",
+            "server.QUOTA_VIEW.rate_limits",
             return_value={
                 "claude": {"accounts": [], "unavailable_reason": None},
                 "codex": {"accounts": [], "unavailable_reason": None},
@@ -246,7 +247,7 @@ class OverviewApiShapeTests(unittest.TestCase):
 
         for claude_limits, codex_limits in cases:
             with self.subTest(claude=claude_limits, codex=codex_limits):
-                server._ACCOUNT_MEMORY_PATH.unlink(missing_ok=True)
+                server.ACCOUNT_MEMORY.path.unlink(missing_ok=True)
                 payload = self.overview_with(claude_limits, codex_limits)
 
                 if claude_limits is None:
@@ -405,15 +406,15 @@ class OverviewApiShapeTests(unittest.TestCase):
 
     def test_background_sync_spawns_daemon_thread(self):
         self.sync_trigger_patcher.stop()
-        server._reset_sync_state_for_tests()
+        reset_collection()
         with mock.patch("server.threading.Thread") as thread:
             created = thread.return_value
-            server._maybe_sync_remotes({"force": ["1"]})
+            server.COLLECTION.request({"force": ["1"]})
 
         thread.assert_called_once()
         self.assertTrue(thread.call_args.kwargs["daemon"])
         created.start.assert_called_once()
-        server._reset_sync_state_for_tests()
+        reset_collection()
 
     def test_overview_history_gap_is_not_a_viewer_local_claim(self):
         with (
@@ -604,7 +605,7 @@ class SignedOutMachinesAreNotFailuresTests(unittest.TestCase):
             "server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ):
-            return server._live_rate_limits_from_admission(admission, sync_status)
+            return server.QUOTA_VIEW.live_from_admission(admission, sync_status)
 
     @staticmethod
     def block(*, signed_out, account=None, updated_at="", refresh_error=None):

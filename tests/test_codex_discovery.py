@@ -1,4 +1,5 @@
 """Known metadata reaches real HTTP actions without manual additions or provider access."""
+from agent_monitor import account_memory
 import contextlib
 import http.client
 import json
@@ -32,7 +33,7 @@ class DiscoveryTests(unittest.TestCase):
         self.addCleanup(self.hub.close)
         self.route = self.hub.register("fixture-browser-device")
         self.connection = {"id": self.route.id, "capability": self.route.browser}
-        self.memory = self.root / "account_memory.json"
+        self.memory = self.root / "agent_monitor.account_memory.json"
         self.currents = []
         self.scenarios = {}
         original = subprocess.Popen
@@ -52,7 +53,7 @@ class DiscoveryTests(unittest.TestCase):
         for patch in (mock.patch.object(ca, "manager", self.manager),
                       mock.patch.object(client_network, "hub", self.hub),
                       mock.patch.object(ca.subprocess, "Popen", side_effect=spawn),
-                      mock.patch.object(server, "_ACCOUNT_MEMORY_PATH", self.memory),
+                      mock.patch.object(server.ACCOUNT_MEMORY, "path", self.memory),
                       mock.patch.object(server.generation, "generation_admission_snapshot", admission)):
             patch.start()
             self.addCleanup(patch.stop)
@@ -76,8 +77,8 @@ class DiscoveryTests(unittest.TestCase):
         for workspace, email in identities:
             record = {"provider": "codex", "account_id": workspace, "account_label": email,
                       "account_plan": None, "observed_at": "2026-10-06T00:00:00+00:00",
-                      **{name: None for name in server._ACCOUNT_MEMORY_NUMERIC_FIELDS}}
-            records[server._account_key("codex", record)] = record
+                      **{name: None for name in account_memory.NUMERIC_FIELDS}}
+            records[account_memory.account_key("codex", record)] = record
         self.memory.write_text(json.dumps({"version": 2, "accounts": records}))
 
     def request(self, action="", payload=None):

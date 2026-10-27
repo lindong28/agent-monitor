@@ -16,7 +16,7 @@ const ids=['#sessions-body','#sort','#session-count','#page-status','#page-statu
 const nodes=Object.fromEntries(ids.map(id=>[id,node()]));nodes['#sort'].value='time';
 global.document={readyState:'loading',addEventListener(){},querySelector(s){return nodes[s]||null;},createElement(){return node();}};
 global.window={location:{origin:'http://fixture.test',pathname:'/sessions',search:'?range=30d&page=9'},history:{replaceState(a,b,next){window.location.search=new URL(next,window.location.origin).search;}}};
-eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { sessionDateGroups, sessionsView, renderSessions,'));
+require("./web/app.js")();
 const ui=window.AgentMonitor, state=ui.sessionsView;
 const row=(id,day,cost=1)=>({session_id:id,agent_id:'codex',machine:'fixture',project:'/fixture',started_at:'2026-10-01T01:00:00Z',ended_at:day+'T12:00:00Z',cost_usd:cost,tokens:10});
 const rows=Array.from({length:105},(_,i)=>row(String(i),'2026-10-20'));

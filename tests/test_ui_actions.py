@@ -7,17 +7,41 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ActionTests(unittest.TestCase):
+    def test_connect_shares_action_busy_state_and_recovers(self):
+        script = r'''
+const assert=require('assert');
+let finish, renders=0, previews=0;
+const notice={textContent:''};
+const actions=require('./web/codex-accounts.js').createAccountActions({
+ current:()=>true, render:()=>renders++, notice,
+ requireDevice:()=>new Promise(resolve=>finish=resolve),
+ previewEgress:async()=>previews++, controller:new AbortController(),
+});
+(async()=>{
+ const connection=actions.connect();
+ assert.equal(actions.busy,true);
+ await actions.preview(); assert.equal(previews,0,'connecting excludes another action');
+ finish(); await connection;
+ assert.equal(actions.busy,false); assert.equal(renders,2);
+ const failed=require('./web/codex-accounts.js').createAccountActions({
+  current:()=>true, render(){}, notice, requireDevice:async()=>{throw Error('pairing unavailable');},
+ });
+ await failed.connect(); assert.equal(failed.busy,false);
+ assert.equal(notice.textContent,'pairing unavailable');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=ROOT, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_standalone_preview_reports_module_load_failure(self):
         script = r'''
 const fs=require('fs'),assert=require('assert');
-const source=fs.readFileSync('web/codex-accounts.js','utf8');
-let handler,submittingBatch=false,renders=0;
-const egressPreview={addEventListener:(_event,callback)=>handler=callback};
+let renders=0;
 const current=()=>true, render=()=>renders++,request=()=>{},controller=new AbortController(),notice={textContent:''};
 const requireDevice=async()=>({id:'fixture',capability:'fixture'});
 const previewEgress=async()=>{throw Error('fixture module load failure');};
-eval(source.slice(source.indexOf('  egressPreview?.addEventListener('),source.indexOf('  root.querySelector("#codex-select-all")')));
-(async()=>{await handler();assert(notice.textContent.includes('fixture module load failure'));assert.equal(submittingBatch,false);assert.equal(renders,2);})()
+const actions=require('./web/codex-accounts.js').createAccountActions({current,render,request,controller,notice,requireDevice,previewEgress});
+(async()=>{await actions.preview();assert(notice.textContent.includes('fixture module load failure'));assert.equal(actions.busy,false);assert.equal(renders,2);})()
 .catch(error=>{console.error(error);process.exitCode=1;});
 '''
         result = subprocess.run(['node', '-e', script], cwd=ROOT, text=True, capture_output=True, timeout=15)
@@ -26,7 +50,7 @@ eval(source.slice(source.indexOf('  egressPreview?.addEventListener('),source.in
     def test_only_same_successful_operation_collapses_batch_status(self):
         script = r'''
 const fs=require('fs'),assert=require('assert');
-eval(fs.readFileSync('web/codex-accounts.js','utf8').replace('export function init','function init'));
+const {sameSuccessfulBatchOperation}=require('./web/codex-accounts.js');
 const op={id:'send-1',batch_id:'batch-1',stage:'succeeded',message_status:'succeeded',refresh_only:false};
 assert.equal(sameSuccessfulBatchOperation(op,{...op}),true);
 for(const changed of [{id:'query-2',refresh_only:true},{id:'send-2'},{batch_id:'older-batch'},
@@ -43,10 +67,8 @@ assert.equal(sameSuccessfulBatchOperation(null,op),false);
         script = r'''
 const fs=require('fs'),assert=require('assert');
 global.document={readyState:'loading',addEventListener(){}};global.window={};
-eval(fs.readFileSync('web/app.js','utf8'));
-const source=fs.readFileSync('web/codex-accounts.js','utf8');
-const declaration=source.split('\n').find(line=>line.includes('const latestReading ='));
-const operationReading=new Function('account',declaration+';return latestReading;');
+require("./web/app.js")();
+const {operationReading}=require('./web/codex-accounts.js');
 const before={observed_at:'2026-10-18T01:00:00Z',seven_day_used_pct:1};
 const after={observed_at:'2026-10-18T02:00:00Z',seven_day_used_pct:2};
 for(const last of [before,{observed_at:'2026-10-18T03:00:00Z',seven_day_used_pct:54}]) {
@@ -56,7 +78,7 @@ for(const last of [before,{observed_at:'2026-10-18T03:00:00Z',seven_day_used_pct
  delete account.operation.after;
  assert.strictEqual(operationReading(account),before,'failed post-send query retains the successful before observation');
 }
-assert(source.includes('本次操作的最近观测'));
+assert(fs.readFileSync('web/codex-accounts.js','utf8').includes('本次操作的最近观测'));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -64,13 +86,14 @@ assert(source.includes('本次操作的最近观测'));
     def test_invalid_dates_invalidate_loaded_status_and_summary(self):
         script = r'''
 const fs=require('fs'), assert=require('assert');
-const source=fs.readFileSync('web/pivot.js','utf8'), nodes={};
+const nodes={};
 for(const id of ['#date-error','#pivot-panel','#ranking-panel','#pivot-status','#query-summary']) nodes[id]={textContent:'old loaded result'};
 nodes['#metric']={selectedOptions:[{textContent:'总 token'}]};
-nodes['#start-date']=nodes['#end-date']={checkValidity:()=>true};
+nodes['#start-date']={checkValidity:()=>true,get value(){return dates.start;}};
+nodes['#end-date']={checkValidity:()=>true,get value(){return dates.end;}};
 let dates={start:'',end:'2026-10-16'}; const dateParams=()=>dates;
 const AgentMonitor={getRange:()=> 'custom',qs:id=>nodes[id]};
-eval(source.slice(source.indexOf('  function validDates('),source.indexOf('  function setDimensions(')));
+const {validDates}=require('./web/pivot.js')(AgentMonitor);
 assert.equal(validDates(),false);assert.equal(nodes['#pivot-status'].textContent,'未加载 · 日期无效');
 assert.equal(nodes['#query-summary'].textContent,'总 token · 请选择起始和终止日期。');
 assert.equal(nodes['#ranking-panel'].hidden,true);
@@ -84,8 +107,7 @@ dates.start='2026-10-10';assert.equal(validDates(),true);assert.equal(nodes['#da
     def test_batch_confirmation_freezes_selection_and_preserves_failure(self):
         script = r'''
 const fs=require('fs'), assert=require('assert');
-const source=fs.readFileSync('web/codex-accounts.js','utf8');
-let submittingBatch=false, selectedIds=new Set(['a']), batch={id:'old'};
+let selectedIds=new Set(['a']), batch={id:'old'};
 let accounts=[{id:'a',email:'a@example.test',account_id:'workspace-a'}, {id:'b',email:'b@example.test',account_id:'workspace-b'}];
 const notice={textContent:''}, calls=[]; let accept=false, fail=false;
 const current=()=>true, render=()=>{}, load=async()=>{notice.textContent='';};
@@ -93,14 +115,15 @@ const request=async(action,payload)=>{calls.push({action,payload}); if(fail)thro
 const controller=new AbortController();
 const connection={id:'fixture',capability:'fixture'},requireDevice=async()=>connection;
 const previewEgress=async(request,targets,signal)=>{assert.deepEqual(targets.map(a=>a.id),['a']);selectedIds=new Set(['b']);batch={id:'new'};return accept;};
-eval(source.slice(source.indexOf('  async function performBatch('),source.indexOf('  function renderBatch(')));
+const actions=require('./web/codex-accounts.js').createAccountActions({getAccounts:()=>accounts,getBatch:()=>batch,getSelectedIds:()=>selectedIds,current,render,load,request,controller,notice,requireDevice,previewEgress});
+const {performBatch}=actions;
 (async()=>{
  await performBatch('batch-start');assert.equal(calls.length,0,'cancel sends nothing');
  selectedIds=new Set(['a']);batch={id:'old'};accept=true;
  await performBatch('batch-start');
  assert.deepEqual(calls[0],{action:'batch-start',payload:{expected_batch_id:'old',profile_ids:['a'],connection,confirmation:true}});
  fail=true;selectedIds=new Set(['a']);
- await performBatch('batch-start');assert(notice.textContent.includes('selection expired'));assert.equal(submittingBatch,false);
+ await performBatch('batch-start');assert(notice.textContent.includes('selection expired'));assert.equal(actions.busy,false);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, text=True, capture_output=True)
@@ -109,14 +132,14 @@ eval(source.slice(source.indexOf('  async function performBatch('),source.indexO
     def test_navigation_resets_scroll_before_background_data_finishes(self):
         script = r'''
 const fs=require('fs'), assert=require('assert');
-const source=fs.readFileSync('web/app.js','utf8');
-let finish, inFlightNavigation, pageGeneration=0, renderedRoute;
+let finish;
 const waiting=new Promise(resolve=>finish=resolve), positions=[];
-const clientRouteFor=()=>()=>waiting, endPageLifetime=()=>{}, applyDocument=()=>true;
-const routeKey=url=>url.pathname, pageIsCurrent=()=>true;
-global.window={history:{pushState(){}},scrollTo(options){positions.push(options.top);}};
+const main={replaceWith(){}};
+global.document={readyState:'loading', addEventListener(){}, querySelector:s=>s==='main'?main:null, querySelectorAll:()=>[]};
+global.DOMParser=class {parseFromString(){return {querySelector:()=>main,title:'next'};}};
+global.window={location:new URL('http://fixture/'),history:{pushState(){}},scrollTo(options){positions.push(options.top);},AgentMonitorPivot:{init:()=>waiting}};
 global.fetch=async()=>({ok:true,text:async()=>'<main>next page</main>'});
-eval(source.slice(source.indexOf('  async function renderRoute('),source.indexOf('  function initClientNavigation(')));
+const {renderRoute}=require('./web/app.js')();
 (async()=>{
  const navigation=renderRoute(new URL('http://fixture/explore'),{push:true});
  await new Promise(resolve=>setImmediate(resolve));

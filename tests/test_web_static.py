@@ -8,6 +8,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def app_source():
+    return "\n".join((ROOT / "web" / name).read_text() for name in ("app.js", "charts.js", "quota.js", "network.js", "sessions.js"))
+
 
 class WebStaticTests(unittest.TestCase):
     def test_restart_conflict_is_not_reported_as_syntax_error(self):
@@ -15,7 +18,7 @@ class WebStaticTests(unittest.TestCase):
 const fs=require('fs'), assert=require('assert');
 global.document={readyState:'loading',addEventListener(){}};
 global.window={location:{origin:'http://fixture.invalid',reload(){throw Error('must not reload on rejection');}}};
-eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { restartAndReload,'));
+require("./web/app.js")();
 (async()=>{
   for(const status of [409,200]) {
     global.fetch=async()=>({status,json:async()=>({restarting:false,error:'fixture diagnostic'})});
@@ -33,7 +36,7 @@ eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','win
 const fs=require("fs"), assert=require("assert"), node={innerHTML:""};
 global.document={readyState:"loading",addEventListener(){},querySelector(){return node;}};
 global.window={};
-eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { renderRiskNetwork,"));
+require("./web/app.js")();
 const render=data=>{window.AgentMonitor.renderRiskNetwork(data);return node.innerHTML;};
 let html=render({risk:null,spam:null,public:{},errors:[]});
 assert.equal((html.match(/未取得读数/g)||[]).length,2);
@@ -67,7 +70,7 @@ const nodes = {'[data-area="console"]':consoleLink, '.sidebar .nav':consoleNav, 
 global.document = {readyState:"loading", addEventListener(){}, querySelector(s){return nodes[s]||null;},
   querySelectorAll(s){return s==="[data-area]"?[consoleLink,guideLink]:s===".guide-nav a"?[chapter]:[];}};
 global.window = {location:{origin:"http://example.test",pathname:"/guide",search:"?range=7d",hash:""}};
-eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { updateAreaNavigation,"));
+require("./web/app.js")();
 const sync = window.AgentMonitor.updateAreaNavigation;
 sync(); assert.equal(consoleLink.href,"/?range=7d");
 for (const query of ["?range=custom&start=2026-10-01&end=2026-10-14&session=s1&session_machine=m1&sort=tokens&page=2", "?range=7d&machine=m2&model=a%2Fb&sort=cost"]) {
@@ -98,7 +101,7 @@ global.document={readyState:"loading",addEventListener(){},querySelector(){retur
 let redirects=[];
 global.window={location:{origin:"http://example.test",pathname:"/guide",search:"?range=7d&model=a%2Fb",hash:"",replace(url){redirects.push(url);}}};
 global.fetch=()=>{throw Error("static guide must not fetch collection status");};
-eval(fs.readFileSync("web/app.js","utf8"));
+require("./web/app.js")();
 (async()=>{
  for(const chapter of ["sources","collection","setup","questions"]){
   window.location.pathname="/guide"; window.location.hash="#"+chapter;
@@ -122,7 +125,7 @@ eval(fs.readFileSync("web/app.js","utf8"));
 const fs = require("fs"), assert = require("assert");
 global.document={readyState:"loading",addEventListener(){},getElementById(){return {textContent:"first\nsecond"};}};
 global.window={};
-eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { copyGuideCode,"));
+require("./web/app.js")();
 (async()=>{
   let copied;
   Object.defineProperty(globalThis,"navigator",{value:{clipboard:{async writeText(s){copied=s;}}},configurable:true});
@@ -148,7 +151,7 @@ eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "wi
 const fs = require("fs"), assert = require("assert");
 global.window = { location: { origin: "http://example.test", pathname: "/", search: "" }, history: { replaceState() {} } };
 global.document = { readyState: "loading", addEventListener() {} };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require("./web/app.js")();
 const ui = window.AgentMonitor;
 for (const values of [[0], [null, 8, null], [undefined, 4]]) {
   assert(ui.dataset("sample", values, 0).pointRadius > 0, "one valid observation must remain visible");
@@ -179,7 +182,7 @@ const table = node("table");
 global.window = {location: {origin: "http://example.test", pathname: "/", search: ""}, history: {replaceState() {}}};
 global.document = {readyState: "loading", addEventListener() {},
   querySelector(selector) {return selector === "#sample table" ? table : null;}, createElement: node};
-eval(fs.readFileSync("web/app.js", "utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { chartReading, renderChartTable, categoryTick,"));
+require("./web/app.js")();
 const ui = window.AgentMonitor;
 assert.strictEqual(ui.chartReading(null, "USD"), "未知");
 assert.strictEqual(ui.chartReading(undefined, "tokens"), "未知");
@@ -219,12 +222,9 @@ assert.strictEqual(ui.categoryTick.call({chart: {width: 324, ctx}, getLabelForVa
 const fs = require("fs"), assert = require("assert");
 global.window = {location: {origin: "http://example.test", pathname: "/", search: ""}, history: {replaceState() {}}};
 global.document = {readyState: "loading", addEventListener() {}};
-const source = fs.readFileSync("web/app.js", "utf8");
-// Extract the callback actually wired to dailyCost, rather than testing an unused formatter.
-const daily = source.slice(source.indexOf('chart("dailyCost"'), source.indexOf('const costMeta'));
-const match = daily.match(/y: \{ ticks: \{ callback: (.*?) \} \}, x:/);
-assert(match, "dailyCost currency callback exists");
-const ui = eval(source.slice(0, source.lastIndexOf('})();')) + '\nreturn {chartReading, callback: (' + match[1] + ')};\n})();');
+const ui = require("./web/app.js")();
+ui.callback = ui.chartMoneyTick;
+assert(fs.readFileSync("web/app.js", "utf8").includes("callback: (value) => chartMoneyTick(value)"), "daily cost chart uses the currency formatter");
 for (const values of [[0, .001, .002, .003, .004], [0, .000001, .000002, .000003], [0, 10, 20, 30]]) {
   const labels = values.map(ui.callback);
   assert.strictEqual(new Set(labels).size, values.length, `distinct ticks collapsed: ${labels}`);
@@ -255,24 +255,22 @@ global.fetch = async (url, options) => {
   if (failure) throw Error("test unavailable");
   return {ok: true, json: async () => ({accounts: [], unavailable_accounts: [], batch: {id: "b1", created_at: "2026-10-09T00:00:00Z", items: [{profile_id: "former", operation: {message_status: "succeeded"}}]}})};
 };
-let source = fs.readFileSync("web/codex-accounts.js", "utf8").replace("export function init()", "function init()");
-source = source.replace("  load();\n  window.AgentMonitor.pageInterval(load, 30000);", "  window.testLoad = load;");
-eval(source); init();
+const controller = require("./web/codex-accounts.js").init({autoLoad: false});
 (async () => {
-  await window.testLoad();
+  await controller.load();
   assert(nodes["#codex-batch-status"].textContent.includes("读取失败"));
   assert(!nodes["#codex-batch-status"].textContent.includes("正在读取"));
-  failure = false; await window.testLoad();
+  failure = false; await controller.load();
   const good = nodes["#codex-batch-status"].textContent;
   assert(good.includes("本轮发送成功 1/1"));
   assert(!good.includes("读取失败"));
-  failure = true; await window.testLoad();
+  failure = true; await controller.load();
   const stale = nodes["#codex-batch-status"].textContent;
   assert(stale.includes(good), "preserve the last batch result when refresh fails");
   assert(stale.includes("刷新失败"));
-  await window.testLoad();
+  await controller.load();
   assert.strictEqual(nodes["#codex-batch-status"].textContent, stale, "repeated failure must not duplicate notices");
-  failure = false; await window.testLoad();
+  failure = false; await controller.load();
   assert.strictEqual(nodes["#codex-batch-status"].textContent, good);
   assert.strictEqual(nodes["#codex-account-notice"].textContent, "");
 })().catch(error => { console.error(error); process.exitCode = 1; });
@@ -290,7 +288,7 @@ const nodes = {
 };
 global.window = {location: {origin: "http://example.test", pathname: "/", search: "?range=7d", hash: ""}};
 global.document = {readyState: "loading", addEventListener() {}, querySelector: key => nodes[key] || null, querySelectorAll: () => []};
-eval(fs.readFileSync("web/app.js", "utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { showOverviewLoadError,"));
+require("./web/app.js")();
 const machine = {name: "fixture", admitted: true, stale: false, availability: "reachable", last_attempt_outcome: "success"};
 for (const route of ["/", "/explore", "/sessions"]) {
   window.location.pathname = route;
@@ -338,7 +336,7 @@ const link = {href: "http://example.test/collection#cost-diagnostics"};
 const nodes = Object.fromEntries(["#sync-coverage", "#sync-summary", "#sync-machines"].map(id => [id, {textContent: "", innerHTML: ""}]));
 global.window = {location: {origin: "http://example.test", pathname: "/sessions", search: "?range=custom&start=2026-10-01&end=2026-10-12&model=fixture", hash: ""}};
 global.document = {readyState: "loading", addEventListener() {}, querySelector: key => nodes[key] || null, querySelectorAll: selector => selector.includes("data-collection-link") ? [link] : []};
-eval(fs.readFileSync("web/app.js", "utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = { updateSyncOverviewLink,"));
+require("./web/app.js")();
 window.AgentMonitor.updateSyncOverviewLink();
 const target = new URL(link.href, window.location.origin);
 assert.equal(target.pathname, "/collection");
@@ -382,9 +380,8 @@ const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice"
 const root = new Node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag), createTextNode: text => {const n=new Node();n.textContent=text;return n;}};
 global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x, latestCodexQuotaReading: () => null}};
-let source = fs.readFileSync("web/codex-accounts.js", "utf8").replace("export function init()", "function init()");
-source = source.replace("  load();\n  window.AgentMonitor.pageInterval(load, 30000);", "  window.testRender = (values, currentBatch = null) => {accounts = values; batch = currentBatch; selectedIds = new Set(values.map(a => a.id)); render();};");
-eval(source); init();
+const controller = require("./web/codex-accounts.js").init({autoLoad: false});
+const renderAccounts = (accounts, batch = null) => controller.update({accounts, batch});
 const oldTime = "2026-10-08T02:00:00.000Z";
 const values = [
   {id: "a", email: "a@example.test", has_credentials: true, operation: {id: "send-a", stage: "succeeded", message: "现在几点了？", message_status: "succeeded", started_at: oldTime, after: {seven_day_used_pct: 8, observed_at: oldTime}}},
@@ -392,7 +389,7 @@ const values = [
 ];
 const text = n => n.textContent + n.children.map(text).join(" ");
 const visible = n => n.tag === "details" && !n.open ? text(n.children[0]) : n.textContent + n.children.map(visible).join(" ");
-window.testRender(values);
+renderAccounts(values);
 const list = nodes["#codex-account-list"], card = list.children[0];
 assert(!visible(card).includes("7 天"), "quota comparison belongs in the table");
 assert(text(card.querySelector("details")).includes(oldTime), "operation observation time remains in details");
@@ -402,10 +399,10 @@ assert(visible(list.children[1]).includes("失败；结果未知"));
 assert(text(list.children[1].querySelector("details")).includes("服务端未返回"));
 assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
 card.querySelector("details").open = true;
-window.testRender(values);
+renderAccounts(values);
 assert.strictEqual(list.children[0], card, "unchanged poll must preserve the focused card");
 values[0].operation.after.seven_day_used_pct = 9;
-window.testRender(values);
+renderAccounts(values);
 assert(list.children[0].querySelector("details").open, "changed result must preserve detail expansion");
 assert(visible(list.children[0]).includes("7 天窗口已用") && visible(list.children[0]).includes("9%"));
 const selected = () => list.children.map(n => n.querySelector("input").checked);
@@ -421,7 +418,7 @@ assert.deepEqual(selected(), [false, false]);
 assert(nodes["#codex-selection-count"].textContent.includes("0 / 2"));
 values[0].batch_result = {...values[0].operation, batch_id: "old-batch"};
 values[0].operation = {id: "refresh-a", stage: "succeeded", refresh_only: true, started_at: oldTime};
-window.testRender(values);
+renderAccounts(values);
 assert(text(list.children[0].querySelector("details")).includes("保留的批次消息：现在几点了？"));
 assert(!text(list.children[0].querySelector("details")).includes("本次抽取的消息"), "quota refresh does not select another message");
 for (const stage of ["failed", "succeeded"]) {
@@ -429,7 +426,7 @@ for (const stage of ["failed", "succeeded"]) {
     message_status: stage === "succeeded" ? "succeeded" : "not_sent",
     ...(stage === "succeeded" ? {message: "你好！"} : {})};
   values[0].operation = op;
-  window.testRender(values, {id: "new-batch", created_at: oldTime, items: [{profile_id: "a", operation: op}]});
+  renderAccounts(values, {id: "new-batch", created_at: oldTime, items: [{profile_id: "a", operation: op}]});
   const detailText = text(list.children[0].querySelector("details"));
   assert(detailText.includes("保留的批次结果"));
   assert(detailText.includes("保留的批次消息：现在几点了？"), `${stage}: previous batch text must remain visible`);
@@ -437,7 +434,7 @@ for (const stage of ["failed", "succeeded"]) {
   assert(!detailText.includes("保留的批次消息：你好！"), "current operation must not be repeated as retained");
 }
 values[0].batch_result = values[0].operation;
-window.testRender(values, {id: "new-batch", created_at: oldTime, items: [{profile_id: "a", operation: values[0].operation}]});
+renderAccounts(values, {id: "new-batch", created_at: oldTime, items: [{profile_id: "a", operation: values[0].operation}]});
 assert(!text(list.children[0].querySelector("details")).includes("保留的批次消息"), "the same operation is shown only once");
 
 '''
@@ -508,7 +505,7 @@ global.fetch = async u => {
     ? {machines: [], refresh_requested: 1, refresh_completed: 1, syncing: false}
     : {entries: []} };
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require("./web/app.js")();
 (async () => {
   await window.AgentMonitor.initSessions(); calls.length = 0;
   Object.defineProperty(globalThis, "navigator", {value: {}, configurable: true});
@@ -539,7 +536,7 @@ eval(fs.readFileSync("web/app.js", "utf8"));
 
     def test_overview_supports_reported_codex_five_hour_quota(self):
         """Both reported windows render; absent observations remain unknown."""
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
 
         claude = self.quota_provider_config(js, "claude")
         codex = self.quota_provider_config(js, "codex")
@@ -578,7 +575,7 @@ global.document = {
   querySelector(selector) { return nodes[selector] || null; },
   querySelectorAll() { return []; },
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require("./web/app.js")();
 function base(name) {
   return { name, admitted: true, availability: "reachable", stale: false, syncing: false, reason: null,
     generated_at: "2026-09-14T08:15:42Z", last_attempt_outcome: "success", totals_schema_version: 2,
@@ -643,7 +640,7 @@ global.document = {
   querySelectorAll() { return []; },
   createElement(tag) { return { tag, className: "", textContent: "" }; },
 };
-eval(fs.readFileSync("web/app.js", "utf8"));
+require("./web/app.js")();
 window.AgentMonitor.chart("dailyCost", "daily-cost-chart", { type: "line" });
 window.AgentMonitor.chart("dailyCost", "daily-cost-chart", { type: "line" });
 process.stdout.write(JSON.stringify(box.children));
@@ -689,11 +686,7 @@ global.document = {
   createElement() { return makeNode(); },
 };
 
-const source = fs.readFileSync("web/app.js", "utf8").replace(
-  "window.AgentMonitor = {",
-  "window.AgentMonitor = { renderRangeCost,",
-);
-eval(source);
+require("./web/app.js")();
 
 const spend = { cost_usd: 54057.3423242, tokens: 68056341922 };
 
@@ -771,7 +764,7 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(payload["legacyPayload"]["cost"], "—")
         self.assertEqual(payload["legacyPayload"]["context"], "此服务未提供")
 
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
         self.assertIn('自周一 00:00 · GMT+8', js)
 
     def test_overview_quota_is_a_table_with_a_column_per_window(self):
@@ -779,7 +772,7 @@ process.stdout.write(JSON.stringify({
         it by construction; the card layout it replaced needed fixed CSS slots
         to simulate it, and got it wrong by 260px before that."""
         html = (ROOT / "web" / "index.html").read_text()
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
         prose = " ".join(html.split())
 
         self.assertIn('<table id="quota-accounts"', prose)
@@ -811,7 +804,7 @@ process.stdout.write(JSON.stringify({
         """The section states what has been used directly, without making the
         reader invert a remaining percentage before comparing accounts."""
         html = (ROOT / "web" / "index.html").read_text()
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
         prose = " ".join(html.split())
 
         self.assertIn("配额用量", prose)
@@ -825,7 +818,7 @@ process.stdout.write(JSON.stringify({
         self.assertIn("quotaMeter(used)", js)
 
     def test_overview_quota_uses_numeric_headroom_without_duplicate_warnings(self):
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
         cell = js[js.index("  function quotaWindowCell"):js.index("  function quotaMeter")]
         self.assertIn("`${used}%`", cell)
         self.assertIn("quotaMeter(used)", cell)
@@ -907,11 +900,7 @@ global.document = {
   createTextNode(text) { const node = makeNode("#text"); node.textContent = text; return node; },
 };
 
-const source = fs.readFileSync("web/app.js", "utf8").replace(
-  "window.AgentMonitor = {",
-  "window.AgentMonitor = { quotaPlanCell,",
-);
-eval(source);
+require("./web/app.js")();
 
 function reading(account) {
   const cell = window.AgentMonitor.quotaPlanCell(account);
@@ -1090,11 +1079,7 @@ global.document = {
   createTextNode(text) { const node = makeNode("#text"); node.textContent = text; return node; },
 };
 
-const source = fs.readFileSync("web/app.js", "utf8").replace(
-  "window.AgentMonitor = {",
-  "window.AgentMonitor = { quotaAccountRow, quotaWindowCell, resetText,",
-);
-eval(source);
+require("./web/app.js")();
 
 const now = 2000000000;
 Date.now = () => now * 1000;
@@ -1408,11 +1393,7 @@ global.document = {
   createTextNode(text) { const node = makeNode("#text"); node.textContent = text; return node; },
 };
 
-const source = fs.readFileSync("web/app.js", "utf8").replace(
-  "window.AgentMonitor = {",
-  "window.AgentMonitor = { renderQuotaAccounts, removeRenderedAccount,",
-);
-eval(source);
+require("./web/app.js")();
 
 function account(id, state, machines, presence) {
   const row = {
@@ -1717,11 +1698,7 @@ global.document = {
   createTextNode(text) { const node = makeNode("#text"); node.textContent = text; return node; },
 };
 
-const source = fs.readFileSync("web/app.js", "utf8").replace(
-  "window.AgentMonitor = {",
-  "window.AgentMonitor = { quotaAccountRow, formatDate,",
-);
-eval(source);
+require("./web/app.js")();
 
 const account = {
   account_id: "old-account",
@@ -1884,7 +1861,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         """A clock time makes the reader subtract, and is ambiguous the moment
         the reset is not today. Durations answer the question directly — but
         must never round the nearly-there case down to a bare "0h"."""
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
 
         # The invariant, not the expression that currently carries it: a floor of
         # one minute, and no clock-time formatting left to be ambiguous across a
@@ -1898,7 +1875,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         """Collapsing rows that have no account must not silence them: a machine
         at 96% used is still at 96% used, and 'the fleet is behind on updates' is
         exactly when it has no account stamp."""
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
 
         self.assertIn("quotaWorstUsage", js)
         self.assertIn("${worst.machine} 观测：${worst.spec.key} 已用 ${worst.used}%", js)
@@ -1914,7 +1891,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         return js[start : js.index("]", start)]
 
     def test_overview_keeps_the_latest_successful_response(self):
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
 
         self.assertIn("overviewGeneration", js)
         self.assertIn("renderedOverviewGeneration", js)
@@ -1922,7 +1899,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn("overview-load-error", js)
 
     def test_new_javascript_removes_the_visible_legacy_codex_card(self):
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
 
         self.assertIn('qs("#codex-five-hour")', js)
         self.assertIn('closest(".kpi-card")', js)
@@ -1977,7 +1954,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn('<button id="page-next" type="button" disabled>', html)
 
     def test_sessions_loader_distinguishes_loading_empty_error_and_retry(self):
-        js = (ROOT / "web" / "app.js").read_text()
+        js = app_source()
 
         self.assertIn('renderSessionState("loading")', js)
         self.assertIn('renderSessionState("empty"', js)
@@ -2035,7 +2012,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
     def test_g4_status_surface_and_refresh_terminal_polling_are_present(self):
         overview = (ROOT / "web" / "index.html").read_text()
         explore = (ROOT / "web" / "explore.html").read_text()
-        app = (ROOT / "web" / "app.js").read_text()
+        app = app_source()
 
         sessions = (ROOT / "web" / "sessions.html").read_text()
         for html in (overview, explore, sessions):
@@ -2098,7 +2075,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
     def test_usage_event_labels_do_not_call_codex_events_messages(self):
         sessions = (ROOT / "web" / "sessions.html").read_text()
         explore = (ROOT / "web" / "explore.html").read_text()
-        app = (ROOT / "web" / "app.js").read_text()
+        app = app_source()
 
         self.assertIn("用量事件数", sessions)
         self.assertIn('<option value="messages">用量事件数</option>', explore)
@@ -2129,7 +2106,7 @@ class ClientNavigationPrerequisitesTests(unittest.TestCase):
     """
 
     PAGES = ("index.html", "explore.html", "sessions.html", "network.html")
-    REQUIRED = ("/web/app.js", "/web/pivot.js", "/web/vendor/chart.umd.min.js")
+    REQUIRED = ("/web/charts.js", "/web/quota.js", "/web/network.js", "/web/sessions.js", "/web/app.js", "/web/pivot.js", "/web/vendor/chart.umd.min.js")
 
     def test_every_page_loads_every_route_handler_it_might_have_to_run(self):
         for name in self.PAGES:
@@ -2144,7 +2121,7 @@ class ClientNavigationPrerequisitesTests(unittest.TestCase):
         Pinning the script set is only half the contract — a route added to the
         table without a matching global fails the same quiet way.
         """
-        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        app = app_source()
         table = app.split("const CLIENT_ROUTES", 1)[1].split("]);", 1)[0]
         defined = {
             "initOverview": app,
@@ -2157,7 +2134,7 @@ class ClientNavigationPrerequisitesTests(unittest.TestCase):
                 with self.subTest(handler=handler):
                     bare = handler.rsplit(".", 1)[-1]
                     self.assertTrue(
-                        f"window.{bare} =" in source
+                        f"root.{bare} =" in source or f"window.{bare} =" in source
                         or f"function {bare}(" in source
                         or f"{bare}," in source,
                         f"{handler} is routed but not defined by its script",
@@ -2270,9 +2247,7 @@ global.document = {
   createTextNode(text) { const n = makeNode("#text"); n.textContent = text; return n; },
 };
 
-const source = fs.readFileSync("web/app.js", "utf8")
-  .replace("window.AgentMonitor = {", "window.AgentMonitor = { renderQuotaAccounts, renderQuotaSignedOut,");
-eval(source);
+require("./web/app.js")();
 
 const payload = __PAYLOAD__;
 window.AgentMonitor.renderQuotaAccounts(payload);

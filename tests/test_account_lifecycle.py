@@ -62,7 +62,7 @@ if sys.argv[1] == 'exec':
         server._schedule_reexec(guard)
         timer.call_args.args[1]()
 else:
-    server._capture_startup_machine_config = lambda: None
+    server.COLLECTION.capture_startup_config = lambda: None
     server.hub.is_hub = lambda: False
     original_server = server.ThreadingHTTPServer
     class ReadyServer(original_server):

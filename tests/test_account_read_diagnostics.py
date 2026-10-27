@@ -87,7 +87,7 @@ class AccountReadDiagnosticsTests(unittest.TestCase):
     def test_failure_reason_is_readable_through_account_http_api(self):
         result = self.run_case("account_read_workspace")
         catalog = [{"account_state": "known", "account_label": result["email"], "account_id": result["account_id"]}]
-        with mock.patch.object(ca, "manager", self.manager), mock.patch.object(server, "_codex_action_catalog", return_value=catalog):
+        with mock.patch.object(ca, "manager", self.manager), mock.patch.object(server.QUOTA_VIEW, "action_catalog", return_value=catalog):
             http_server = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
             thread = threading.Thread(target=http_server.serve_forever, daemon=True)
             thread.start()

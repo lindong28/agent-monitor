@@ -10,6 +10,7 @@ from unittest import mock
 
 import generation
 import rollup
+from agent_monitor import storage
 import test_generation as generation_fixtures
 
 
@@ -21,7 +22,7 @@ class StorageContractTests(unittest.TestCase):
             attempted = threading.Event()
             completed = threading.Event()
             errors = []
-            copyfile = rollup.shutil.copyfile
+            copyfile = storage.shutil.copyfile
 
             def write():
                 attempted.set()
@@ -43,12 +44,12 @@ class StorageContractTests(unittest.TestCase):
                 return copyfile(source, target)
 
             try:
-                with mock.patch("rollup.shutil.copyfile", side_effect=copy_while_writer_waits):
-                    with rollup._private_read_copy(path) as private:
+                with mock.patch("agent_monitor.storage.shutil.copyfile", side_effect=copy_while_writer_waits):
+                    with storage._private_read_copy(path) as private:
                         self.assertTrue(completed.wait(2))
-                        with rollup._read_connection(private, immutable=True) as conn:
+                        with storage.read_connection(private, immutable=True) as conn:
                             self.assertIsNone(conn.execute("SELECT value FROM rollup_meta WHERE key='later'").fetchone())
-                with rollup._read_connection(path) as conn:
+                with storage.read_connection(path) as conn:
                     self.assertEqual(conn.execute("SELECT value FROM rollup_meta WHERE key='later'").fetchone()[0], "1")
             finally:
                 if writer.ident is not None:
@@ -105,7 +106,7 @@ class StorageContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "rollup.db"
             rollup.run(db_path=path, entries_loader=list)
-            connect = rollup._connect_read_only
+            connect = storage._connect_read_only
 
             def unavailable_source(uri):
                 if uri == path.resolve().as_uri() + "?mode=ro":
@@ -116,8 +117,8 @@ class StorageContractTests(unittest.TestCase):
                 with rollup.rollup_lock(path):
                     writer.execute("INSERT INTO rollup_meta VALUES ('test', 'committed')")
                     writer.commit()
-                with mock.patch("rollup._connect_read_only", side_effect=unavailable_source):
-                    with rollup._read_connection(path) as conn:
+                with mock.patch("agent_monitor.storage._connect_read_only", side_effect=unavailable_source):
+                    with storage.read_connection(path) as conn:
                         self.assertEqual(conn.execute("SELECT value FROM rollup_meta WHERE key='test'").fetchone()[0], "committed")
 
     def test_published_time_excludes_preparation(self):

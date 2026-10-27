@@ -17,7 +17,9 @@ import local_web
 import process_identity
 import service_runtime
 
-ROOT = Path(__file__).resolve().parent
+from project_paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 LABELS = ('com.agent-monitor.rollup', 'com.agent-monitor.hub', 'com.agent-monitor.connector')
 
 

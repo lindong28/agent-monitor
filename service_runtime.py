@@ -4,17 +4,12 @@ import json
 from pathlib import Path
 import time
 import urllib.request
+from agent_monitor.source_inventory import deployment_sources
 
 
 def signature(root):
     root = Path(root)
-    files = list(root.glob('*.py')) + list((root / 'parsers').glob('**/*.py'))
-    files += list((root / 'proxy_runtime').glob('**/*.py'))
-    files += list((root / 'proxy_runtime').glob('**/*.cjs'))
-    files += [root / 'requirements.txt', root / 'state/hub-machine']
-    for name in ('machines', 'hub'):
-        local = root / (name + '.local.json')
-        files.append(local if local.exists() or local.is_symlink() else root / (name + '.json'))
+    files = deployment_sources(root)
     digest = hashlib.sha256()
     for path in sorted(files):
         digest.update(str(path.relative_to(root)).encode())

@@ -20,8 +20,9 @@ from urllib.parse import parse_qs, urlsplit
 import client_network
 import network_policy
 import service_runtime
+from project_paths import PROJECT_ROOT
 
-BOOT_DEPLOYMENT_SIGNATURE = service_runtime.signature(Path(__file__).resolve().parent)
+BOOT_DEPLOYMENT_SIGNATURE = service_runtime.signature(PROJECT_ROOT)
 
 
 def response_header(sock):
@@ -120,7 +121,7 @@ class Connector:
                 expected_host = "127.0.0.1:" + str(self.server.server_port)
                 if self.path == "/health" and self.headers.get("Host") == expected_host:
                     body = json.dumps({"service": "com.agent-monitor.connector",
-                        "source_root": str(Path(__file__).resolve().parent), "pid": os.getpid(),
+                        "source_root": str(PROJECT_ROOT), "pid": os.getpid(),
                         "deployment_signature": connector.deployment_signature,
                         "server": connector.server, "label": connector.label,
                         "instance_id": connector.instance_id,

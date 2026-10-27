@@ -8,9 +8,9 @@ class MetricWebTests(unittest.TestCase):
 const fs = require("fs"), assert = require("assert");
 global.document = {readyState: "loading", addEventListener() {}};
 global.window = {};
-eval(fs.readFileSync("web/app.js", "utf8"));
+require("./web/app.js")();
 global.AgentMonitor = window.AgentMonitor;
-eval(fs.readFileSync("web/pivot.js", "utf8"));
+window.AgentMonitorPivot = require("./web/pivot.js")(global.AgentMonitor || window.AgentMonitor);
 const data = {dimensions: ["day", "agent"], rows: [
   {key: ["d1", "codex"], value: 0, cost_coverage: {known: 1, unknown: 0}},
   {key: ["d2", "codex"], value: null, cost_coverage: {known: 0, unknown: 2}},
@@ -42,7 +42,7 @@ const fs=require("fs"), assert=require("assert");
 const nodes=Object.fromEntries(["#network-local","#network-risk","#network-banner","#network-verdict","#network-updated"].map(key=>[key,{}]));
 global.document={readyState:"loading",addEventListener(){},querySelector(key){return nodes[key];}};
 global.window={};
-eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = {renderNetworkBanner,renderLocalNetwork,renderRiskNetwork,"));
+require("./web/app.js")();
 const ui=window.AgentMonitor;
 ui.renderLocalNetwork({local:{ipv6:null,dns:[{ip:"192.0.2.1",country:null}],dns_has_cn:false}});
 assert(!nodes["#network-local"].innerHTML.includes("已关闭"));
@@ -70,10 +70,8 @@ assert(nodes["#network-updated"].textContent.includes("IPv6 公网泄漏未核�
     def test_batch_reset_uses_latest_whole_observation(self):
         script = r'''
 const fs=require("fs"),assert=require("assert");
-global.document={readyState:"loading",addEventListener(){}};global.window={};
-eval(fs.readFileSync("web/app.js","utf8"));
-const source=fs.readFileSync("web/codex-accounts.js","utf8");
-const renderSource=source.slice(source.indexOf("  function renderBatch()"),source.indexOf("  batchStart.addEventListener"));
+global.document={readyState:"loading",addEventListener(){},createElement:(tag)=>({tag})};global.window={};
+require("./web/app.js")();
 const batchStart={},batchNext={},batchRetry={},batchStatus={},batchHelp={replaceChildren(...children){this.children=children;}};
 const root={querySelector(){return null;}}, selectedIds=new Set(['p']);
 const element=(tag,text)=>({tag,textContent:text});
@@ -83,7 +81,9 @@ const before={observed_at:"2026-10-14T00:00:00Z",seven_day_resets_at:Date.now()/
 const op={message_status:"succeeded",before};
 const batch={id:"b",created_at:"2026-10-13T00:00:00Z",items:[{profile_id:"p",operation:op}]};
 const accounts=[{id:"p"}];
-eval(renderSource);
+const renderBatch=()=>require("./web/codex-accounts.js").renderAccountBatch(
+ {accounts,batch,selectedIds,unavailable,busy:submittingBatch,upstreamPause},
+ {root,batchStart,batchNext,batchRetry,batchStatus,batchHelp,egressPreview,deviceConnect});
 renderBatch(); assert(batchStatus.textContent.includes("已知 1/1"));
 op.after={observed_at:"2026-10-14T01:00:00Z",seven_day_resets_at:null};
 renderBatch(); assert(batchStatus.textContent.includes("已知 0/1"));
@@ -100,7 +100,7 @@ renderBatch(); assert(batchStatus.textContent.includes("已知 0/1"));
 const fs=require("fs"),assert=require("assert");
 const node=()=>({children:[],textContent:"",classList:{add(){}},style:{setProperty(){}},setAttribute(){},appendChild(child){this.children.push(child);}});
 global.document={readyState:"loading",addEventListener(){},createElement:node};global.window={};
-eval(fs.readFileSync("web/app.js","utf8").replace("window.AgentMonitor = {", "window.AgentMonitor = {quotaWindowCell,QUOTA_PROVIDERS,QUOTA_WINDOW_5H,"));
+require("./web/app.js")();
 const ui=window.AgentMonitor,provider=ui.QUOTA_PROVIDERS.find(p=>p.key==="codex");
 const text=n=>n.textContent+n.children.map(text).join(" ");
 const known=text(ui.quotaWindowCell(provider,ui.QUOTA_WINDOW_5H,{five_hour_used_pct:73,five_hour_resets_at:Date.now()/1000+3600}));

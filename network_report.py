@@ -24,7 +24,9 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+from project_paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 STATE_DIR = ROOT / "state"
 
 # The server gives ip-check 30s before it times out; we must outlive that so a

@@ -39,9 +39,9 @@ class QueryViewTests(unittest.TestCase):
         for index in (1, 2):
             current = self.publish(index)
             self.view.refresh()
-            with mock.patch.object(server, "QUERY_VIEW", self.view), mock.patch.object(server, "_maybe_sync_remotes"), \
+            with mock.patch.object(server.COLLECTION, "query_view", self.view), mock.patch.object(server.COLLECTION, "request"), \
                     mock.patch.object(server.hub, "enabled", return_value=False), \
-                    mock.patch.object(server, "_rate_limits", return_value={}), \
+                    mock.patch.object(server.QUOTA_VIEW, "rate_limits", return_value={}), \
                     mock.patch.object(generation, "_validate_generation", side_effect=AssertionError("HTTP did validation")), \
                     mock.patch.object(generation, "generation_admission_snapshot", side_effect=AssertionError("HTTP did admission")):
                 for repeat in (1, 2):

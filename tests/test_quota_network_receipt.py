@@ -28,7 +28,7 @@ class RecoveryNetworkTests(unittest.TestCase):
                         "HTTPS_PROXY": "http://127.0.0.1:49999", "NO_PROXY": "*"}, clear=True), \
                     mock.patch.object(exporter, "ROOT", Path(tmp)), \
                     mock.patch.object(quota_refresh, "ROOT", Path(tmp)), \
-                    mock.patch("exporter.accounts.codex_account", return_value=account), \
+                    mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
                     mock.patch("exporter.exporter_version", return_value="a" * 40), \
                     mock.patch("generation.self_certified_host_identity", return_value="fixture-host"):
                 controls = Controls(Path(tmp) / "state/upstream_controls")

@@ -10,6 +10,7 @@ from unittest import mock
 
 import aggregators
 import rollup
+from agent_monitor import storage
 
 
 class ReviewedIdentityTests(unittest.TestCase):
@@ -133,7 +134,7 @@ class ReviewedIdentityTests(unittest.TestCase):
             else:
                 del item["expected_blocker"]["pin_candidate"]
             bad.append(manifest)
-        with mock.patch.object(rollup, "rollup_lock", side_effect=AssertionError("lock opened")):
+        with mock.patch.object(storage, "rollup_lock", side_effect=AssertionError("lock opened")):
             for manifest in bad:
                 with self.subTest(manifest=manifest), self.assertRaises(aggregators.ProjectIdentityRecoveryError):
                     aggregators.recover_reviewed_project_identities(manifest, apply=True)
@@ -169,6 +170,8 @@ class ReviewedIdentityTests(unittest.TestCase):
         for name in ("agent-monitor", "rollup_identity.py", "aggregators.py", "rollup.py", "session_identity.py"):
             shutil.copy2(src / name, cli / name)
         shutil.copytree(src / "parsers", cli / "parsers")
+        shutil.copytree(src / "agent_monitor", cli / "agent_monitor")
+        shutil.copy2(src / "project_paths.py", cli / "project_paths.py")
         (cli / "state").symlink_to(self.root, target_is_directory=True)
         manifest = self.root / "reviewed.json"
         manifest.write_text(json.dumps(self.manifest))

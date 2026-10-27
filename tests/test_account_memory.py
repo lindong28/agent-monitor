@@ -1,3 +1,5 @@
+from agent_monitor import account_memory, quota_view
+from component_fixtures import reset_collection
 import contextlib
 import hashlib
 import http.client
@@ -27,12 +29,15 @@ class AccountMemoryTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.memory_path = Path(self.temporary.name) / "state" / "account_memory.json"
-        self.path_patcher = mock.patch("server._ACCOUNT_MEMORY_PATH", self.memory_path)
-        self.path_patcher.start()
-        self.addCleanup(self.path_patcher.stop)
-        server._reset_sync_state_for_tests()
-        self.addCleanup(server._reset_sync_state_for_tests)
+        self.memory_path = Path(self.temporary.name) / "state" / "agent_monitor.account_memory.json"
+        self.memory = account_memory.AccountMemory(self.memory_path)
+        self.view = quota_view.QuotaView(self.memory, server.QUOTA_REFRESH)
+        for name, value in (("ACCOUNT_MEMORY", self.memory), ("QUOTA_VIEW", self.view)):
+            patcher = mock.patch.object(server, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        reset_collection()
+        self.addCleanup(reset_collection)
 
     def test_overview_remembers_every_known_account_once(self):
         admission = self.admission(
@@ -52,11 +57,11 @@ class AccountMemoryTests(unittest.TestCase):
             ),
         )
 
-        limits = server._rate_limits(admission=admission)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission)
         first_bytes = self.memory_path.read_bytes()
         first_mtime = self.memory_path.stat().st_mtime_ns
         time.sleep(0.01)
-        server._rate_limits(admission=admission)
+        server.QUOTA_VIEW.rate_limits(admission=admission)
 
         payload = json.loads(first_bytes)
         self.assertEqual(payload["version"], 2)
@@ -83,11 +88,11 @@ class AccountMemoryTests(unittest.TestCase):
             for entry in limits[provider]["accounts"]:
                 if entry["account_state"] != "known":
                     continue
-                key = server._account_key(provider, entry)
+                key = account_memory.account_key(provider, entry)
                 if provider == "claude":
                     self.assertIsNone(entry["updated_at"])
                     self.assertEqual(entry["quota_status"], "unverified")
-                    for field in server._ACCOUNT_MEMORY_NUMERIC_FIELDS:
+                    for field in account_memory.NUMERIC_FIELDS:
                         self.assertEqual(payload["accounts"][key][field], entry["last_observation"][field])
                     self.assertEqual(payload["accounts"][key]["observed_at"], entry["last_observation"]["recorded_at"])
                     continue
@@ -102,7 +107,7 @@ class AccountMemoryTests(unittest.TestCase):
                         "five_hour_resets_at": entry["five_hour_resets_at"],
                         "seven_day_used_pct": entry["seven_day_used_pct"],
                         "seven_day_resets_at": entry["seven_day_resets_at"],
-                        "observed_at": server._observed_at(entry["updated_at"])
+                        "observed_at": account_memory.parse_observed_at(entry["updated_at"])
                         .astimezone(server.timezone.utc)
                         .isoformat(),
                     },
@@ -117,7 +122,7 @@ class AccountMemoryTests(unittest.TestCase):
                 claude=self.limit("2026-08-20T08:00:00Z", 40, "claude-a"),
             )
         )
-        server._rate_limits(admission=newest)
+        server.QUOTA_VIEW.rate_limits(admission=newest)
         expected = self.memory_path.read_bytes()
 
         for observed_at, pct in (
@@ -131,7 +136,7 @@ class AccountMemoryTests(unittest.TestCase):
                         claude=self.limit(observed_at, pct, "claude-a"),
                     )
                 )
-                server._rate_limits(admission=stale)
+                server.QUOTA_VIEW.rate_limits(admission=stale)
                 self.assertEqual(self.memory_path.read_bytes(), expected)
 
         later = self.admission(
@@ -140,7 +145,7 @@ class AccountMemoryTests(unittest.TestCase):
                 claude=self.limit("2026-08-20T08:00:01Z", 41, "claude-a"),
             )
         )
-        server._rate_limits(admission=later)
+        server.QUOTA_VIEW.rate_limits(admission=later)
         remembered = json.loads(self.memory_path.read_bytes())["accounts"][
             "claude:claude-a"
         ]
@@ -177,7 +182,7 @@ class AccountMemoryTests(unittest.TestCase):
             )
         )
 
-        limits = server._rate_limits(admission=admission)
+        limits = server.QUOTA_VIEW.rate_limits(admission=admission)
 
         self.assertEqual(
             [entry["account_id"] for entry in limits["claude"]["accounts"]],
@@ -197,12 +202,12 @@ class AccountMemoryTests(unittest.TestCase):
             {"in_use", "remembered"},
         )
         remembered = {
-            server._account_key(provider, entry): entry
+            account_memory.account_key(provider, entry): entry
             for provider, entry in entries
             if entry["presence"] == "remembered"
         }
         live = {
-            server._account_key(provider, entry)
+            account_memory.account_key(provider, entry)
             for provider, entry in entries
             if entry["presence"] == "in_use" and entry["account_state"] == "known"
         }
@@ -233,7 +238,7 @@ class AccountMemoryTests(unittest.TestCase):
             )
         )
 
-        accounts = server._rate_limits(admission=admission)["claude"]["accounts"]
+        accounts = server.QUOTA_VIEW.rate_limits(admission=admission)["claude"]["accounts"]
 
         self.assertEqual(len(accounts), 1)
         self.assertEqual(accounts[0]["account_id"], "claude-a")
@@ -275,7 +280,7 @@ class AccountMemoryTests(unittest.TestCase):
             }
         )
 
-        limits = server._rate_limits(
+        limits = server.QUOTA_VIEW.rate_limits(
             admission=self.admission(self.current("node-b", claude=malformed_live))
         )
 
@@ -329,7 +334,7 @@ class AccountMemoryTests(unittest.TestCase):
                 self.memory_path.parent.mkdir(parents=True, exist_ok=True)
                 self.memory_path.write_bytes(original)
                 with self.assertLogs("agent-monitor", level="WARNING") as logs:
-                    limits = server._rate_limits(admission=live)
+                    limits = server.QUOTA_VIEW.rate_limits(admission=live)
                 self.assertEqual(limits["claude"]["accounts"][0]["account_id"], "claude-a")
                 self.assertEqual(self.memory_path.read_bytes(), original)
                 self.assertIn("account memory", "\n".join(logs.output).lower())
@@ -345,7 +350,7 @@ class AccountMemoryTests(unittest.TestCase):
         with mock.patch(
             "server.generation._fsync_file", side_effect=PermissionError("read-only state")
         ), self.assertLogs("agent-monitor", level="WARNING") as logs:
-            limits = server._rate_limits(admission=live)
+            limits = server.QUOTA_VIEW.rate_limits(admission=live)
 
         self.assertEqual(limits["claude"]["accounts"][0]["account_id"], "claude-a")
         self.assertIn("read-only state", "\n".join(logs.output))
@@ -503,7 +508,7 @@ class AccountMemoryTests(unittest.TestCase):
                 self.assertIn(expected_machine, payload["machines"])
                 self.assertEqual(self.memory_path.read_bytes(), before)
                 if name == "malformed account id":
-                    entry = server._live_rate_limits_from_admission(admission)[
+                    entry = server.QUOTA_VIEW.live_from_admission(admission)[
                         "claude"
                     ]["accounts"][0]
                     self.assertEqual(entry["account_state"], "unstamped")
@@ -526,7 +531,7 @@ class AccountMemoryTests(unittest.TestCase):
             self.assertEqual(set(payload), {"account_label", "observed_at"})
             self.assertIsNone(payload["account_label"])
             self.assertEqual(payload["observed_at"], target["observed_at"])
-            self.assertIsNotNone(server._observed_at(payload["observed_at"]))
+            self.assertIsNotNone(account_memory.parse_observed_at(payload["observed_at"]))
             self.assertNotIn(
                 "claude:claude-old",
                 json.loads(self.memory_path.read_bytes())["accounts"],
@@ -627,7 +632,7 @@ class AccountMemoryTests(unittest.TestCase):
         before = self.memory_path.read_bytes()
 
         with mock.patch(
-            "server._write_account_memory", side_effect=OSError("disk full")
+            "server.ACCOUNT_MEMORY._write", side_effect=OSError("disk full")
         ):
             status, payload = self.post_remove(self.admission())
 
@@ -647,7 +652,7 @@ class AccountMemoryTests(unittest.TestCase):
                 codex=self.limit("2026-08-20T08:00:00Z", 40, "codex-live"),
             )
         )
-        delete_live = server._live_rate_limits_from_admission(self.admission())
+        delete_live = server.QUOTA_VIEW.live_from_admission(self.admission())
 
         for first_name in ("overview", "remove"):
             with self.subTest(first=first_name):
@@ -662,10 +667,10 @@ class AccountMemoryTests(unittest.TestCase):
                         errors.append((name, exc))
 
                 actions = {
-                    "overview": lambda: server._rate_limits(
+                    "overview": lambda: server.QUOTA_VIEW.rate_limits(
                         admission=overview_admission
                     ),
-                    "remove": lambda: server._remove_account_memory(
+                    "remove": lambda: server.ACCOUNT_MEMORY.remove(
                         "claude",
                         "claude-old",
                         target["observed_at"],
@@ -673,7 +678,7 @@ class AccountMemoryTests(unittest.TestCase):
                     ),
                 }
                 second_name = "remove" if first_name == "overview" else "overview"
-                with mock.patch("server._ACCOUNT_MEMORY_LOCK", lock):
+                with mock.patch("server.ACCOUNT_MEMORY._lock", lock):
                     first = threading.Thread(
                         target=run,
                         args=(first_name, actions[first_name]),
@@ -721,7 +726,7 @@ class AccountMemoryTests(unittest.TestCase):
         self.write_memory({target_key: target})
         candidate_derived = threading.Event()
         allow_upsert = threading.Event()
-        original_upsert = server._upsert_account_memory
+        original_upsert = server.ACCOUNT_MEMORY.upsert
         errors = []
 
         def delayed_upsert(*args, **kwargs):
@@ -732,11 +737,11 @@ class AccountMemoryTests(unittest.TestCase):
 
         def load_stale_overview():
             try:
-                server._rate_limits(admission=stale_overview)
+                server.QUOTA_VIEW.rate_limits(admission=stale_overview)
             except BaseException as exc:
                 errors.append(exc)
 
-        with mock.patch("server._upsert_account_memory", side_effect=delayed_upsert):
+        with mock.patch("server.ACCOUNT_MEMORY.upsert", side_effect=delayed_upsert):
             overview_thread = threading.Thread(target=load_stale_overview)
             overview_thread.start()
             self.assertTrue(candidate_derived.wait(1))
@@ -781,7 +786,7 @@ class AccountMemoryTests(unittest.TestCase):
         self.write_memory({target_key: target})
         candidate_derived = threading.Event()
         allow_upsert = threading.Event()
-        original_remember = server._remember_rate_limit_accounts
+        original_remember = server.QUOTA_VIEW.remember
         errors = []
 
         def delayed_remember(*args, **kwargs):
@@ -792,7 +797,7 @@ class AccountMemoryTests(unittest.TestCase):
 
         def remember_stale_sync():
             try:
-                server._remember_accounts_after_sync_publish()
+                server.QUOTA_VIEW.remember_published()
             except BaseException as exc:
                 errors.append(exc)
 
@@ -800,7 +805,7 @@ class AccountMemoryTests(unittest.TestCase):
             "server.generation.generation_admission_snapshot",
             side_effect=lambda: contextlib.nullcontext(stale_sync),
         ), mock.patch(
-            "server._remember_rate_limit_accounts", side_effect=delayed_remember
+            "server.QUOTA_VIEW.remember", side_effect=delayed_remember
         ):
             sync_thread = threading.Thread(target=remember_stale_sync)
             sync_thread.start()
@@ -861,7 +866,7 @@ class AccountMemoryTests(unittest.TestCase):
                 def delayed_overview(_query, admission, **_kwargs):
                     wait_before_derivation()
                     return {
-                        "rate_limits": server._rate_limits(admission=admission)
+                        "rate_limits": server.QUOTA_VIEW.rate_limits(admission=admission)
                     }
 
                 @contextlib.contextmanager
@@ -871,17 +876,17 @@ class AccountMemoryTests(unittest.TestCase):
 
                 def load_sync():
                     try:
-                        server._remember_accounts_after_sync_publish()
+                        server.QUOTA_VIEW.remember_published()
                     except BaseException as exc:
                         errors.append(exc)
 
                 if entrypoint == "overview":
                     patches = (
                         mock.patch(
-                            "server._sync_runtime_snapshot",
+                            "server.COLLECTION.snapshot",
                             return_value={"completed_at": None},
                         ),
-                        mock.patch("server._maybe_sync_remotes", return_value=False),
+                        mock.patch("server.COLLECTION.request", return_value=False),
                         mock.patch(
                             "server.generation.generation_admission_snapshot",
                             side_effect=lambda: contextlib.nullcontext(post_delete),
@@ -944,28 +949,28 @@ class AccountMemoryTests(unittest.TestCase):
         self.write_memory({target_key: target})
 
         with self.assertRaisesRegex(RuntimeError, "derived candidate failed"):
-            with server._account_memory_upsert_epoch() as first_epoch:
-                with server._account_memory_upsert_epoch() as second_epoch:
+            with server.ACCOUNT_MEMORY.upsert_epoch() as first_epoch:
+                with server.ACCOUNT_MEMORY.upsert_epoch() as second_epoch:
                     self.assertEqual(second_epoch, first_epoch)
                     status, _ = self.post_remove(signed_out)
                     self.assertEqual(status, 200)
                     self.assertEqual(
-                        server._ACCOUNT_MEMORY_ACTIVE_UPSERT_EPOCHS[first_epoch],
+                        server.ACCOUNT_MEMORY.epoch_status()["active_upsert_epochs"][first_epoch],
                         2,
                     )
                     self.assertIn(
-                        target_key, server._ACCOUNT_MEMORY_DELETED_AT_EPOCH
+                        target_key, server.ACCOUNT_MEMORY.epoch_status()["deleted_at_epoch"]
                     )
 
                 self.assertEqual(
-                    server._ACCOUNT_MEMORY_ACTIVE_UPSERT_EPOCHS[first_epoch],
+                    server.ACCOUNT_MEMORY.epoch_status()["active_upsert_epochs"][first_epoch],
                     1,
                 )
-                self.assertIn(target_key, server._ACCOUNT_MEMORY_DELETED_AT_EPOCH)
+                self.assertIn(target_key, server.ACCOUNT_MEMORY.epoch_status()["deleted_at_epoch"])
                 raise RuntimeError("derived candidate failed")
 
-        self.assertEqual(server._ACCOUNT_MEMORY_ACTIVE_UPSERT_EPOCHS, {})
-        self.assertEqual(server._ACCOUNT_MEMORY_DELETED_AT_EPOCH, {})
+        self.assertEqual(server.ACCOUNT_MEMORY.epoch_status()["active_upsert_epochs"], {})
+        self.assertEqual(server.ACCOUNT_MEMORY.epoch_status()["deleted_at_epoch"], {})
 
     def post_remove(
         self,
@@ -1037,9 +1042,9 @@ class AccountMemoryTests(unittest.TestCase):
 
     def wait_for_sync(self):
         deadline = time.monotonic() + 2
-        while server._sync_runtime_snapshot()["syncing"] and time.monotonic() < deadline:
+        while server.COLLECTION.snapshot()["syncing"] and time.monotonic() < deadline:
             time.sleep(0.01)
-        self.assertFalse(server._sync_runtime_snapshot()["syncing"])
+        self.assertFalse(server.COLLECTION.snapshot()["syncing"])
 
     @staticmethod
     def make_generation_db(path, multiplier):
@@ -1111,6 +1116,20 @@ class AccountMemoryTests(unittest.TestCase):
             "seven_day_resets_at": 200,
             "observed_at": observed_at,
         }
+
+
+class AccountMemoryInstanceTests(unittest.TestCase):
+    def test_files_and_epoch_registrations_belong_to_each_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first = account_memory.AccountMemory(Path(directory) / "first.json")
+            second = account_memory.AccountMemory(Path(directory) / "second.json")
+            with first.upsert_epoch() as epoch:
+                self.assertEqual(first.epoch_status()["active_upsert_epochs"], {epoch: 1})
+                self.assertEqual(second.epoch_status()["active_upsert_epochs"], {})
+                self.assertEqual(second.read(), ("missing", {"version": 2, "accounts": {}}))
+            self.assertEqual(first.epoch_status()["active_upsert_epochs"], {})
+            self.assertFalse(first.path.exists())
+            self.assertFalse(second.path.exists())
 
 
 if __name__ == "__main__":

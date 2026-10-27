@@ -20,14 +20,13 @@ class GroupedPivotTests(unittest.TestCase):
 const fs = require("fs"), assert = require("assert");
 global.window = {};
 global.document = {readyState: "loading", addEventListener() {}};
-eval(fs.readFileSync("web/app.js", "utf8"));
+require("./web/app.js")();
 const ui = window.AgentMonitor;
 const expected = {"claude-code": "#2a78d6", codex: "#eb6834"};
 let captured;
 global.AgentMonitor = {...ui, qs: () => null,
   chart: (key, id, config) => {captured = config;}};
-eval(fs.readFileSync("web/pivot.js", "utf8").replace(
-  "window.AgentMonitorPivot = {", "window.AgentMonitorPivot = { renderChart,"));
+window.AgentMonitorPivot = require("./web/pivot.js")(global.AgentMonitor || window.AgentMonitor);
 const pivot = window.AgentMonitorPivot;
 for (const agents of [["claude-code", "codex"], ["codex", "claude-code"], ["codex"], ["claude-code"]]) {
   for (const metric of ["cost", "tokens"]) {
@@ -62,7 +61,7 @@ assert.equal(ui.dataset("other", [1], 2, {agentId: "future-agent"}).borderColor,
 const fs = require("fs"), assert = require("assert");
 global.window = {};
 global.document = {readyState: "loading", addEventListener() {}};
-eval(fs.readFileSync("web/app.js", "utf8"));
+require("./web/app.js")();
 const nodes = new Map();
 const node = id => {
   if (!nodes.has(id)) nodes.set(id, {style: {}, parentElement: {}, innerHTML: "", textContent: "", scrollTop: 0,
@@ -74,8 +73,7 @@ global.AgentMonitor = {...window.AgentMonitor,
   qs: node, qsa: () => [], params: () => new URLSearchParams("range=30d"),
   getRange: () => "30d", chart: (key, id, config) => {captured = config;}
 };
-eval(fs.readFileSync("web/pivot.js", "utf8").replace(
-  "window.AgentMonitorPivot = {", "window.AgentMonitorPivot = { renderRanking,"));
+window.AgentMonitorPivot = require("./web/pivot.js")(global.AgentMonitor || window.AgentMonitor);
 window.AgentMonitorPivot.renderRanking({dimensions: ["day", "agent"], rows: [
   {key: ["2026-10-19", "codex"], value: 20, cost_coverage: {known: 1, unknown: 0}},
   {key: ["2026-10-20", "codex"], value: 10, cost_coverage: {known: 1, unknown: 1}},
@@ -111,7 +109,7 @@ assert(html.includes("无已知金额"));
         script = r'''
 global.window = {};
 global.AgentMonitor = {};
-eval(require('fs').readFileSync('web/pivot.js', 'utf8'));
+window.AgentMonitorPivot = require("./web/pivot.js")(global.AgentMonitor || window.AgentMonitor);
 const rows = Array.from({length: 12}, (_, i) => [
   {key: ['2026-09-01', 'agent', 'project-' + i], value: i},
   {key: ['2026-09-02', 'agent', 'project-' + i], value: i}
@@ -227,7 +225,7 @@ process.stdout.write(JSON.stringify(window.AgentMonitorPivot.rankingData({dimens
         for suffix in ("", "&start=2026-09-01", "&start=bad&end=2026-09-01",
                        "&start=2026-02-30&end=2026-09-01", "&start=2026-09-02&end=2026-09-01"):
             for endpoint in (server.pivot_endpoint, server.pivot_filters_endpoint):
-                with self.subTest(suffix=suffix, endpoint=endpoint.__name__), mock.patch.object(server, "_maybe_sync_remotes") as sync:
+                with self.subTest(suffix=suffix, endpoint=endpoint.__name__), mock.patch.object(server.COLLECTION, "request") as sync:
                     with self.assertRaises(ValueError):
                         endpoint(parse_qs("range=custom" + suffix))
                     sync.assert_not_called()

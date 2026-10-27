@@ -8,7 +8,9 @@ from pathlib import Path
 
 import machine_config
 
-ROOT = Path(__file__).resolve().parent
+from project_paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 
 
 class RefreshError(RuntimeError):

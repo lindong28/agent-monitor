@@ -1178,5 +1178,7 @@ class Manager:
         raise RuntimeError("账号子进程清理未完成，已拒绝重启；请检查服务日志。")
 
 
-manager = Manager(Path(__file__).resolve().parent / "state/codex-accounts")
+from project_paths import state_path
+
+manager = Manager(state_path("codex-accounts"))
 atexit.register(manager.close)

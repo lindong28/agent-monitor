@@ -107,7 +107,8 @@ class ShellLifecycleTests(unittest.TestCase):
         self.bin.mkdir()
         self.env = dict(os.environ, HOME=str(self.home), PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         AGENT_MONITOR_PYTHON=sys.executable, SSH_CONNECTION='', DISPLAY='', WAYLAND_DISPLAY='')
-        for name in ('uninstall.sh', 'status.sh', 'agent-monitor', 'rollup_service.py', 'service_runtime.py', 'deployment_guard.py'):
+        shutil.copytree(ROOT / 'agent_monitor', self.root / 'agent_monitor', ignore=shutil.ignore_patterns('__pycache__'))
+        for name in ('project_paths.py', 'uninstall.sh', 'status.sh', 'agent-monitor', 'rollup_service.py', 'service_runtime.py', 'deployment_guard.py'):
             shutil.copy2(ROOT / name, self.root / name)
 
     def executable(self, name, source):

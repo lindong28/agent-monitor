@@ -16,8 +16,8 @@ const assert = require('assert');
 global.window = {location: {origin: 'http://fixture'}};
 global.document = {readyState: 'loading', addEventListener() {}};
 global.fetch = async () => ({ok: true, json: async () => ({timezone: 'Asia/Singapore'})});
-vm.runInThisContext(fs.readFileSync('web/app.js', 'utf8'));
-vm.runInThisContext(fs.readFileSync('web/codex-accounts.js', 'utf8').split('export function init')[0]);
+require("./web/app.js")();
+const {timestamp}=require("./web/codex-accounts.js");
 (async () => {
   await window.AgentMonitor.ensureTimezone();
   assert.equal(timestamp(1900000000, true), '2030/3/18 01:46:40 GMT+8');

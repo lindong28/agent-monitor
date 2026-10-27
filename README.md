@@ -145,7 +145,8 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 
 ```text
 agent-monitor / install.sh / deploy.py   CLI、安装和部署入口
-*.py                                    后端模块；按职责分组见下方职责索引
+project_paths.py / agent_monitor/        共享路径、源码清单与内部职责组件
+*.py                                    公开脚本和既有后端模块；按职责索引定位
 parsers/                                Claude/Codex 日志与账号数据源读取器
 web/                                    仪表盘静态页面、JavaScript 和样式
 proxy_runtime/                          系统代理解析辅助程序
@@ -153,6 +154,7 @@ ip_check/                               网络诊断与归因
 examples/                               公开配置示例与虚构样本
 scripts/ / tests/                       显式验收、测量与回归测试
 docs/                                   使用、架构、运维与核算指南
+storage/README.md                       开发任务材料的本机存储入口说明
 ```
 
 | 阅读目的 | 从这里开始 |
@@ -160,6 +162,7 @@ docs/                                   使用、架构、运维与核算指南
 | 配置、更新或排障 | [使用与运维](docs/public-usage.md) |
 | 查找改动涉及的模块与回归测试 | [职责索引](docs/public-architecture.md#responsibility-map) |
 | 搭建开发环境并选择检查项 | [贡献与验证](CONTRIBUTING.md) |
+| 查找开发任务的本机证据与产物 | [任务存储](storage/README.md) |
 | 理解核算规则与解析器边界 | [核算契约](docs/references/metrics.md) |
 | 报告敏感问题 | [安全政策](SECURITY.md) |
 

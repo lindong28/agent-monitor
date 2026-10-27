@@ -46,13 +46,13 @@ class HttpMutationTests(unittest.TestCase):
             response=conn.getresponse(); response.read(); return response.status
         finally: conn.close()
     def test_all_mutations_share_browser_boundary(self):
-        with mock.patch.object(server,'_compile_check',return_value=[]), mock.patch.object(server,'_schedule_reexec') as restart, mock.patch.object(server,'_remove_account_memory') as remove, mock.patch.object(server,'_maybe_sync_remotes') as refresh, mock.patch.object(server,'_sync_status',return_value={}):
+        with mock.patch.object(server,'_compile_check',return_value=[]), mock.patch.object(server,'_schedule_reexec') as restart, mock.patch.object(server.ACCOUNT_MEMORY,'remove') as remove, mock.patch.object(server.COLLECTION,'request') as refresh, mock.patch.object(server.COLLECTION,'status',return_value={}):
             for path in ('/api/restart','/api/refresh','/api/account-memory/remove'):
                 for headers in ({'Origin':'https://other.example'},{'Origin':None},{'X-Agent-Monitor':None},{'Sec-Fetch-Site':'cross-site'},{'Host':'attacker.example','Origin':'http://attacker.example'}):
                     with self.subTest(path=path,headers=headers): self.assertEqual(self.request('POST',path,headers),403)
             restart.assert_not_called(); remove.assert_not_called(); refresh.assert_not_called()
     def test_safe_methods_cannot_request_explicit_refresh(self):
-        with mock.patch.object(server,'_maybe_sync_remotes') as sync:
+        with mock.patch.object(server.COLLECTION,'request') as sync:
             for method in ('GET','HEAD'):
                 for path in ('/api/refresh','/api/overview?force=1','/api/pivot?force=1','/api/pivot-filters?force=1','/api/sessions?force=1','/api/network?force=1'):
                     with self.subTest(method=method,path=path): self.assertEqual(self.request(method,path),405)
@@ -92,7 +92,7 @@ class HttpMutationTests(unittest.TestCase):
             with self.assertRaises(guard.GuardError), guard.deployment_lock(self.root, inherit=False):
                 pass
             callback = timer.call_args.args[1]
-            with mock.patch.object(server.codex_accounts.manager, 'close'), mock.patch.object(server.client_network.hub, 'close'), mock.patch.object(server.QUOTA_REFRESH, 'shutdown'), mock.patch.object(server, 'QUERY_VIEW', None), mock.patch.object(server.os, 'execv', side_effect=RuntimeError('fixture exec failure')):
+            with mock.patch.object(server.codex_accounts.manager, 'close'), mock.patch.object(server.client_network.hub, 'close'), mock.patch.object(server.QUOTA_REFRESH, 'shutdown'), mock.patch.object(server.COLLECTION, 'query_view', None), mock.patch.object(server.os, 'execv', side_effect=RuntimeError('fixture exec failure')):
                 with self.assertRaisesRegex(RuntimeError, 'fixture exec failure'):
                     callback()
             with guard.deployment_lock(self.root, inherit=False) as fd:
@@ -159,12 +159,12 @@ class ProcessGroupTests(unittest.TestCase):
                 shutil.copy2(ROOT/name,root/name)
             (root/'hub.py').write_text('print("standalone")\n')
             with mock.patch.object(server,'ROOT',root), \
-                 mock.patch.object(server,'_capture_startup_machine_config'), \
+                 mock.patch.object(server.COLLECTION,'capture_startup_config'), \
                  mock.patch.object(server.hub,'enabled',return_value=False), \
                  mock.patch.object(server.hub,'is_hub',return_value=True), \
                  mock.patch.object(server.hub,'interval',return_value=10), \
-                 mock.patch.object(server,'_maybe_sync_remotes'), \
-                 mock.patch.object(server,'QUERY_VIEW',None), \
+                 mock.patch.object(server.COLLECTION,'request'), \
+                 mock.patch.object(server.COLLECTION,'query_view',None), \
                  mock.patch.object(server.diagnostics.monitor,'start'), \
                  mock.patch.object(server.diagnostics.monitor,'close'), \
                  mock.patch.object(server.codex_accounts.manager,'close'), \

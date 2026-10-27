@@ -11,6 +11,7 @@ from unittest import mock
 
 import diagnostics
 import exporter
+from agent_monitor import quota_service
 import hub
 import quota_refresh
 import server
@@ -103,10 +104,10 @@ class FailureEvidenceTests(unittest.TestCase):
                 with mock.patch.object(quota_refresh, "ROOT", root), \
                         mock.patch.object(exporter, "ROOT", root), \
                         mock.patch.object(hub, "enabled", return_value=True), \
-                        mock.patch.object(exporter.accounts, "codex_account", return_value=Account("synthetic")), \
-                        mock.patch.object(exporter.accounts, "claude_account", return_value=None), \
-                        mock.patch.object(exporter.codex, "load_rate_limits", return_value=RateLimits(1, None, 2, None)), \
-                        mock.patch.object(exporter.claude_status, "load_rate_limits", return_value=None), \
+                        mock.patch.object(quota_service.accounts, "codex_account", return_value=Account("synthetic")), \
+                        mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
+                        mock.patch.object(quota_service.codex, "load_rate_limits", return_value=RateLimits(1, None, 2, None)), \
+                        mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=None), \
                         mock.patch.object(quota_refresh.subprocess, "Popen", side_effect=OSError(number, "secret-fixture")):
                     result = exporter._rate_limits(refresh=True)
                 message = result["codex"]["refresh_error"]

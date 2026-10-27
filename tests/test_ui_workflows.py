@@ -123,7 +123,7 @@ class QueryTests(unittest.TestCase):
             self.assertEqual(server.sessions_endpoint({**query, "model":["missing"]})["sessions"], [])
             self.assertEqual(len(server.sessions_endpoint({"range":["all"]})), 2)
         admission = SimpleNamespace(admitted=[SimpleNamespace(host="machine-a"), SimpleNamespace(host="machine-b")])
-        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server._maybe_sync_remotes"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=records):
+        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=records):
             result = server.sessions_endpoint({**query, "machine":["machine-b"]})
             self.assertEqual([r["machine"] for r in result["sessions"]], ["machine-b"])
             self.assertEqual(result["filters"]["machine"], ["machine-a", "machine-b"])
@@ -143,7 +143,7 @@ class QueryTests(unittest.TestCase):
             self.assertEqual(len(server.sessions_endpoint({**query, "cost_status": [""]})["sessions"]), 2)
             self.assertEqual(server.sessions_endpoint({**query, "model": ["missing"]})["sessions"], [])
         current = SimpleNamespace(host="fixture")
-        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server._maybe_sync_remotes"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=[current]))), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=records):
+        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=[current]))), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=records):
             self.assertEqual(server.sessions_endpoint(query)["sessions"][0]["tokens"], 12)
             self.assertEqual(len(server.session_detail("mixed", "fixture")["entries"]), 2)
         with self.assertRaises(ValueError):
@@ -157,7 +157,7 @@ class QueryTests(unittest.TestCase):
         for aliases, canonical in [([], "~/no-remote-project"), ([proof], "~/no-remote-project")]:
             current = SimpleNamespace(host="machine-a", meta={"aliases": aliases})
             admission = SimpleNamespace(admitted=[current])
-            with mock.patch("server.hub.enabled", return_value=True), mock.patch("server._maybe_sync_remotes"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=[entry]) as read:
+            with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch.object(server._CONVERSATION_CACHE, "read", return_value=None), mock.patch("server.statistics_snapshot.read_admitted_usage", return_value=[entry]) as read:
                 for selected in [raw, canonical, "missing"]:
                     result = server.sessions_endpoint({"range":["all"], "project":[selected], "with_filters":["1"]})
                     self.assertEqual(len(result["sessions"]), 0 if selected == "missing" else 1)
@@ -194,7 +194,7 @@ class QueryTests(unittest.TestCase):
         script = r'''const fs=require('fs'),assert=require('assert');
 global.window={location:{search:'',origin:'http://fixture',pathname:'/'}};
 global.document={readyState:'loading',addEventListener(){}};
-eval(fs.readFileSync('web/app.js','utf8').replace('window.AgentMonitor = {','window.AgentMonitor = { sortQuotaAccounts, quotaFilter,'));
+require("./web/app.js")();
 const ui=window.AgentMonitor,provider={key:'codex'},now=1000;
 const records=[{account_id:'unknown',five_hour_used_pct:null}, {account_id:'zero',five_hour_used_pct:0}, {account_id:'full',five_hour_used_pct:100}, {account_id:'updated',account_label:'a@test',account_state:'known',five_hour_used_pct:5,updated_at:'2026-01-01'}];
 ui.updateCodexQuotaReadings([{account_id:'updated',email:'a@test',last_quota:{observed_at:'2026-01-02',five_hour_used_pct:99}}]);

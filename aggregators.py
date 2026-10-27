@@ -15,13 +15,14 @@ from zoneinfo import ZoneInfo
 
 from parsers import UsageEntry
 from parsers import claude, codex, codex_profiles
+from project_paths import PROJECT_ROOT
 
 
 TIME_DIMS = {"day", "week", "month"}
 USAGE_TIMEZONE = ZoneInfo("Asia/Shanghai")
 ALL_DIMS = TIME_DIMS | {"project", "model", "agent"}
 METRICS = {"cost", "input", "output", "cache_read", "cache_creation", "total", "messages"}
-ROOT = Path(__file__).resolve().parent
+ROOT = PROJECT_ROOT
 PROJECT_IDENTITY_DB = ROOT / "state" / "project_identity.db"
 _GLOBAL_USAGE_CACHE = None
 _PROJECT_CACHE = {}
@@ -317,15 +318,14 @@ def _stored_project_identity(path, immutable=False):
 
 
 def _legacy_project_identity(path, resolved_project, immutable=False):
-    # Delayed to avoid the module cycle: rollup imports load_all_entries here.
-    from rollup import RollupBucketTimezoneMigrationRequired, _read_connection
+    from agent_monitor.storage import RollupBucketTimezoneMigrationRequired, read_connection
 
     rollup_db = Path(PROJECT_IDENTITY_DB).with_name("rollup.db")
     if not rollup_db.exists():
         return None, set()
 
     try:
-        with _read_connection(rollup_db, immutable=immutable) as conn:
+        with read_connection(rollup_db, immutable=immutable) as conn:
             if conn is None:
                 return None, set()
             table_exists = conn.execute(
@@ -568,13 +568,13 @@ def _check_reviewed_assignments(conn, assignments):
 def recover_reviewed_project_identities(manifest, apply=False):
     """Assign explicitly reviewed identities without rewriting usage or rollup history."""
     assignments = _validate_reviewed_assignments(manifest)
-    from rollup import RollupBucketTimezoneMigrationRequired, _read_connection, rollup_lock
+    from agent_monitor.storage import RollupBucketTimezoneMigrationRequired, read_connection, rollup_lock
 
     try:
         # Use the same lock as collection; preview never creates the lock file.
         with rollup_lock(_identity_rollup_db(), create=apply), _LOAD_LOCK:
             if not apply:
-                with _read_connection(_identity_rollup_db(), immutable=True) as rollup_conn:
+                with read_connection(_identity_rollup_db(), immutable=True) as rollup_conn:
                     if rollup_conn is None or not rollup_conn.execute(
                         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='daily_rollup'"
                     ).fetchone():
@@ -610,13 +610,12 @@ def _begin_identity_recovery():
     rollup_db = identity_db.with_name("rollup.db")
     if not rollup_db.exists():
         raise ProjectIdentityRecoveryError("Cannot recover identity: daily rollup database does not exist")
-    # Delayed to avoid the module cycle: rollup imports load_all_entries here.
-    from rollup import RollupBucketTimezoneMigrationRequired, _read_connection
+    from agent_monitor.storage import RollupBucketTimezoneMigrationRequired, read_connection
 
     try:
         # The caller holds the sibling rollup lock, so the marker cannot change
         # between this preflight and the ATTACH below.
-        with _read_connection(rollup_db):
+        with read_connection(rollup_db):
             pass
     except RollupBucketTimezoneMigrationRequired as exc:
         raise ProjectIdentityRecoveryError(
@@ -936,7 +935,7 @@ def _codex_source_context(paths, state_db, source_errors):
 
 
 def _identity_rollup_lock():
-    from rollup import rollup_lock
+    from agent_monitor.storage import rollup_lock
 
     return rollup_lock(_identity_rollup_db())
 
@@ -946,12 +945,12 @@ def _identity_rollup_db():
 
 
 def _assert_identity_rollup_lock_held(ownership_token=None):
-    from rollup import RollupLockNotHeld, _assert_lock_held, _normalize_db_path
+    from agent_monitor.storage import RollupLockNotHeld, assert_lock_held, normalize_db_path
 
     identity_db = Path(PROJECT_IDENTITY_DB)
     rollup_db = _identity_rollup_db()
-    normalized_identity_db = _normalize_db_path(identity_db)
-    normalized_rollup_db = _normalize_db_path(rollup_db)
+    normalized_identity_db = normalize_db_path(identity_db)
+    normalized_rollup_db = normalize_db_path(rollup_db)
     if ownership_token is not None and (
         ownership_token.pid != os.getpid()
         or ownership_token.identity_db != normalized_identity_db
@@ -961,7 +960,7 @@ def _assert_identity_rollup_lock_held(ownership_token=None):
             "project identity mutation does not own sibling rollup lock for %s"
             % normalized_rollup_db
         )
-    _assert_lock_held(rollup_db)
+    assert_lock_held(rollup_db)
     return _IdentityRollupLockToken(
         normalized_identity_db,
         normalized_rollup_db,
@@ -970,7 +969,7 @@ def _assert_identity_rollup_lock_held(ownership_token=None):
 
 
 def _assert_identity_connection_matches(conn, ownership_token):
-    from rollup import RollupLockNotHeld, _normalize_db_path
+    from agent_monitor.storage import RollupLockNotHeld, normalize_db_path
 
     _assert_identity_rollup_lock_held(ownership_token)
     if type(conn) is not sqlite3.Connection:
@@ -983,7 +982,7 @@ def _assert_identity_connection_matches(conn, ownership_token):
         if row[1] == "main"
     ]
     main_path = main_rows[0][2] if len(main_rows) == 1 else ""
-    if not main_path or _normalize_db_path(main_path) != ownership_token.identity_db:
+    if not main_path or normalize_db_path(main_path) != ownership_token.identity_db:
         raise RollupLockNotHeld(
             "project identity connection does not match protected database %s"
             % ownership_token.identity_db

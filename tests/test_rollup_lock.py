@@ -16,6 +16,7 @@ from unittest import mock
 
 import aggregators
 import rollup
+from agent_monitor import storage
 from parsers import UsageEntry
 
 
@@ -758,14 +759,14 @@ class RollupLockTests(unittest.TestCase):
                     if child_pid == 0:
                         child_branch = True
                         os.close(read_fd)
-                        original_flock = rollup.fcntl.flock
+                        original_flock = storage.fcntl.flock
                         child_flock_calls = []
 
                         def tracked_flock(fd, operation):
                             child_flock_calls.append(operation)
                             return original_flock(fd, operation)
 
-                        rollup.fcntl.flock = tracked_flock
+                        storage.fcntl.flock = tracked_flock
                         try:
                             with rollup.rollup_lock(db_path, blocking=False):
                                 outcome = "entered"
@@ -878,14 +879,14 @@ class RollupLockTests(unittest.TestCase):
             child_pid = os.fork()
             if child_pid == 0:
                 os.close(read_fd)
-                original_flock = rollup.fcntl.flock
+                original_flock = storage.fcntl.flock
                 child_flock_calls = []
 
                 def tracked_flock(fd, operation):
                     child_flock_calls.append(operation)
                     return original_flock(fd, operation)
 
-                rollup.fcntl.flock = tracked_flock
+                storage.fcntl.flock = tracked_flock
                 try:
                     with rollup.rollup_lock(db_path, blocking=False):
                         outcome = "entered"

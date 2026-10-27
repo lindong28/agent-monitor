@@ -12,8 +12,10 @@ import os
 from pathlib import Path
 import uuid
 from datetime import datetime, timezone
+from project_paths import PROJECT_ROOT
 
-ROOT = Path(__file__).resolve().parent
+
+ROOT = PROJECT_ROOT
 SOURCES = {"active_query", "claude_statusline", "codex_session"}
 
 
@@ -182,8 +184,8 @@ def main():
         elif args.action == "check-restored":
             if not args.expected_label:
                 parser.error("恢复检查需 --expected-label；有本地暂停时还需 --pause-id。仅在明确批准一次上游检查后执行。")
-            import exporter
-            result = exporter.recover_claude_quota(args.account_id, args.expected_label, args.pause_id)
+            from agent_monitor import quota_service
+            result = quota_service.recover_claude_quota(args.account_id, args.expected_label, args.pause_id, root=ROOT)
             message = "该账号已取得新的有效配额，读数已保存，如指定了本地暂停，该暂停已解除。其他机器的本地确认和暂停仍保留，需分别核对恢复。"
         else:
             result = store.get("claude", args.account_id)

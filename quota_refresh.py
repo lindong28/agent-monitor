@@ -32,7 +32,9 @@ import upstream_controls
 import diagnostics
 import quota_applicability
 
-ROOT = Path(__file__).resolve().parent
+from project_paths import PROJECT_ROOT
+
+ROOT = PROJECT_ROOT
 TIMEOUT = 35
 
 
