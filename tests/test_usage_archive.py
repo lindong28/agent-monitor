@@ -229,7 +229,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
             conn.execute("DELETE FROM threads WHERE id='one'")
             conn.commit()
             self.assertEqual({entry.model for entry in self.load()}, {"gpt-5"})
-            self.assertEqual(parse.call_count, 8)
+            self.assertEqual(parse.call_count, 2)
 
     def test_valid_empty_mapping_is_cacheable_but_missing_is_not(self):
         self.session()
@@ -258,7 +258,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
             self.assertEqual(self.load()[0].input_tokens, 200)
             self.assertEqual(parse.call_count, 1)
 
-    def test_any_mapping_change_invalidates_all_codex_files(self):
+    def test_unrelated_mapping_change_preserves_usage_cache(self):
         self.session("one")
         self.session("two")
         conn = self.models_db()
@@ -268,7 +268,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         conn.commit()
         with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=USAGE_LOADER.parse_usage_file) as parse:
             self.assertEqual(self.load(), original)
-            self.assertEqual(parse.call_count, 2)
+            self.assertEqual(parse.call_count, 0)
 
     def test_cache_binds_consumed_mapping_when_database_changes_during_parse(self):
         for change_model in (False, True):
@@ -298,7 +298,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
                         self.assertEqual(archive.execute("SELECT count(*) FROM parsed_files WHERE signature IS NULL").fetchone()[0], 0)
                     with mock.patch.object(USAGE_LOADER, "parse_usage_file", wraps=original_parse) as parse:
                         self.assertEqual(self.load()[0].model, "gpt-5")
-                        self.assertEqual(parse.call_count, 1 if change_model else 0)
+                        self.assertEqual(parse.call_count, 0)
                 finally:
                     conn.close()
 

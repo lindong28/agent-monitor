@@ -27,7 +27,12 @@ class UsageLoader:
         self.cache = cache
         self._lock = threading.RLock()
 
-    def load_all_entries(self, force_reload=False, read_only=False, diagnostic=False, archive_path=None):
+    def load_rollup_entries(self):
+        """Collect fresh sources without materializing retained event history."""
+        return self.load_all_entries(for_rollup=True)
+
+    def load_all_entries(self, force_reload=False, read_only=False, diagnostic=False, archive_path=None,
+                         *, for_rollup=False):
         with self.identity_store.locked():
             with self._lock:
                 from agent_monitor.ingestion.usage_archive import UsageArchive
@@ -35,6 +40,7 @@ class UsageLoader:
                 source_errors = []
                 authority = None
                 session_metadata = []
+                prepared = False
                 if not (read_only or diagnostic) and self.cache is not None and not isinstance(self.cache, UsageArchive):
                     # Retain the existing injectable cache interface for callers.
                     if force_reload:
@@ -44,11 +50,26 @@ class UsageLoader:
                     archive = UsageArchive(archive_path or Path(self.identity_store.path).with_name("usage_archive.sqlite3"))
                     if not (read_only or diagnostic):
                         self.cache = archive
+                    prepare = None
+                    if not (read_only or diagnostic):
+                        from agent_monitor.accounting.pricing_fetcher import get_pricing, PreparedPricing
+                        from agent_monitor.accounting.usage_projection import prepare_usage
+
+                        pricing = PreparedPricing(get_pricing())
+
+                        def prepare(conn):
+                            paths = [json.loads(row[0]) for row in conn.execute(
+                                "SELECT project FROM usage_project_counts WHERE event_count > 0")]
+                            context = self.enrichment_context(sorted(
+                                path for path in paths if self.looks_like_path(path)))
+                            return prepare_usage(conn, pricing, context, source_errors,
+                                                 materialize=not for_rollup)
+                        prepared = True
                     entries, authority = self.load_archived_entries(
-                        archive, source_errors, force_reload, read_only or diagnostic,
+                        archive, source_errors, force_reload, read_only or diagnostic, prepare=prepare,
                     )
                     session_metadata = archive.session_metadata
-                loaded = self.enrich_entries(
+                loaded = entries if prepared else self.enrich_entries(
                     self.deduped(entries, source_errors),
                     read_only=read_only or diagnostic,
                     diagnostic=diagnostic,
@@ -70,7 +91,7 @@ class UsageLoader:
             digest.update(path.read_bytes())
         return digest.hexdigest()
 
-    def load_archived_entries(self, archive, source_errors, force_reload, read_only):
+    def load_archived_entries(self, archive, source_errors, force_reload, read_only, prepare=None):
         links = codex_profiles.session_links(source_errors=source_errors)
         paths = self.usage_paths(source_errors=source_errors)
         fingerprint = self.parser_fingerprint()
@@ -82,11 +103,11 @@ class UsageLoader:
         for root, state_db, account in roots:
             homes.setdefault(state_db, ([], account))[0].extend(path for path in paths if path.is_relative_to(root))
         for state_db, (source_paths, account) in homes.items():
-            accepted, models, history, signature, digest = self.codex_source_context(source_paths, state_db, source_errors)
+            accepted, models, history, signature = self.codex_source_context(source_paths, state_db, source_errors)
             rejected = set(source_paths) - set(accepted)
             paths = [path for path in paths if path not in rejected]
             for path in accepted:
-                contexts[path] = (models, history, signature, digest)
+                contexts[path] = (models, history, signature)
             metadata = codex.session_metadata(history, models)
             for row in metadata:
                 row["account"] = None if links.excludes(row["session_id"]) else account
@@ -96,16 +117,15 @@ class UsageLoader:
             file_stat = path.stat()
             metadata = None
             if path in contexts:
-                codex_models, history, metadata_signature, model_mapping_digest = contexts[path]
+                codex_models, history, metadata_signature = contexts[path]
                 if metadata_signature is None:
                     return None
-                # This signature names the mapping snapshot consumed by this
-                # collection, not the live database after parsing has started.
-                # The next collection reads and validates the mapping again.
+                # Historical usage models come from source records, not the
+                # mutable threads.model mapping. Metadata is refreshed above.
                 dependencies = history.signature(path)
                 if dependencies is None:
                     return None
-                metadata = (model_mapping_digest, dependencies)
+                metadata = dependencies
             return json.dumps((file_stat.st_mtime_ns, file_stat.st_size, fingerprint, metadata))
 
         def parse(path):
@@ -124,11 +144,10 @@ class UsageLoader:
             return self.deduped(list(entries) + retained, source_errors), authority
         return archive.collect(paths, parse, signature_for, source_errors, USAGE_TIMEZONE,
                                force_reload=force_reload, session_metadata=sessions,
-                               session_metadata_transform=links.apply)
+                               session_metadata_transform=links.apply, prepare=prepare)
 
     def codex_source_context(self, paths, state_db, source_errors):
         metadata_signature = None
-        model_mapping_digest = None
         codex_models = {}
         if paths:
             before_errors = len(source_errors)
@@ -153,15 +172,9 @@ class UsageLoader:
                 after = None
             if len(source_errors) != before_errors or after != metadata_signature:
                 metadata_signature = None
-            if metadata_signature is not None:
-                # The same successfully read mapping feeds both the digest and
-                # parser. Unrelated DB/WAL writes do not change parsing inputs.
-                model_mapping_digest = hashlib.sha256(
-                    json.dumps(codex_models, sort_keys=True, separators=(",", ":")).encode("utf-8")
-                ).hexdigest()
 
         history = codex.HistoryResolver(paths)
-        return paths, codex_models, history, metadata_signature, model_mapping_digest
+        return paths, codex_models, history, metadata_signature
 
     def deduped(self, entries, source_errors=None):
         unique = {}
@@ -185,6 +198,24 @@ class UsageLoader:
 
         pricing = PreparedPricing(get_pricing(persist=not read_only))
         project_paths = sorted({entry.project for entry in entries if self.looks_like_path(entry.project)})
+        context = self.enrichment_context(project_paths, read_only=read_only, diagnostic=diagnostic)
+        enriched = []
+        unattributed = []
+        for entry in entries:
+            priced_entry = with_calculated_cost(entry, pricing=pricing)
+            if entry.project in context["blocked_paths"]:
+                unattributed.append(priced_entry)
+                continue
+            project = context["projects"].get(entry.project, entry.project)
+            enriched.append(replace(priced_entry, project=project))
+        enriched.sort(key=lambda entry: entry.timestamp)
+        unattributed.sort(key=lambda entry: entry.timestamp)
+        return LoadedEntries(enriched, unattributed_entries=unattributed,
+                             source_errors=source_errors, scan_complete=not source_errors,
+                             **context["metadata"])
+
+    def enrichment_context(self, project_paths, read_only=False, diagnostic=False):
+        """Resolve dependencies once, independently of retained event count."""
         projects = {}
         pending = []
         blocked = {}
@@ -223,18 +254,7 @@ class UsageLoader:
                     blocked[path] = self.identity_store.record_blocker(exc)
                 logger.warning("Blocking source path %s from this rollup: %s", path, exc)
 
-        enriched = []
-        unattributed = []
         blocked_paths = set(blocked) | set(persisted_by_path)
-        for entry in entries:
-            priced_entry = with_calculated_cost(entry, pricing=pricing)
-            if entry.project in blocked_paths:
-                unattributed.append(priced_entry)
-                continue
-            project = projects.get(entry.project, entry.project)
-            enriched.append(replace(priced_entry, project=project))
-        enriched.sort(key=lambda entry: entry.timestamp)
-        unattributed.sort(key=lambda entry: entry.timestamp)
         blockers_by_path = dict(persisted_by_path)
         for path, blocker in blocked.items():
             if diagnostic:
@@ -258,16 +278,12 @@ class UsageLoader:
                     self.identity_store.stored_identity(source_path, immutable=diagnostic),
                 )))
             authoritative_projects = self.identity_store.stored_projects(immutable=diagnostic) - excluded_projects
-        return LoadedEntries(
-            enriched,
+        return {"projects": projects, "blocked_paths": blocked_paths, "metadata": dict(
             blocked_sources=active_blockers,
             persisted_blockers=persisted_blockers if diagnostic else (),
             current_blockers=current_blockers if diagnostic else (),
-            unattributed_entries=unattributed,
-            source_errors=source_errors,
-            scan_complete=not source_errors,
             history_authoritative_projects=authoritative_projects,
-        )
+        )}
 
     def unpersisted_blocker_dict(self, blocker):
         return {

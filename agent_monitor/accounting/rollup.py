@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from agent_monitor.ingestion import load_all_entries
+from agent_monitor.ingestion import load_all_entries, USAGE_LOADER
+from .usage_buckets import (_bucket_date, _bucket_entries, _bucket_usage_entries,
+                            _add_entry_to_bucket, _empty_bucket)
 from agent_monitor.contracts.rollup import (
     USAGE_ROLLUP_SCHEMA_VERSION, USAGE_ROLLUP_AUTHORITY_FLOOR_KEY,
 )
@@ -170,7 +172,7 @@ def use_admitted_generations(currents):
 def run(
     window_days=DEFAULT_WINDOW_DAYS,
     db_path=DEFAULT_DB_PATH,
-    entries_loader=load_all_entries,
+    entries_loader=None,
     now=None,
     blocking=True,
 ):
@@ -204,14 +206,19 @@ def _run_locked(window_days, db_path, entries_loader, now):
     recompute_dates = [(start_date + timedelta(days=offset)).isoformat() for offset in range(window_days)]
     recompute_date_set = set(recompute_dates)
     migrating_legacy_usage = _validate_usage_migration_state(db_path)
-    loaded_entries = entries_loader()
+    loaded_entries = (entries_loader or USAGE_LOADER.load_rollup_entries)()
     blocked_sources = list(getattr(loaded_entries, "blocked_sources", []))
     history_authoritative_from = getattr(loaded_entries, "history_authoritative_from", None)
-    buckets = _bucket_entries(loaded_entries)
-    usage_entries = list(loaded_entries) + list(
-        getattr(loaded_entries, "unattributed_entries", [])
-    )
-    usage_buckets = _bucket_usage_entries(usage_entries)
+    from .usage_projection import PreparedRollup
+    if isinstance(loaded_entries, PreparedRollup):
+        buckets = loaded_entries.project_buckets
+        usage_buckets = loaded_entries.usage_buckets
+    else:
+        buckets = _bucket_entries(loaded_entries)
+        usage_entries = list(loaded_entries) + list(
+            getattr(loaded_entries, "unattributed_entries", [])
+        )
+        usage_buckets = _bucket_usage_entries(usage_entries)
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(_connect(db_path)) as conn:
@@ -1740,64 +1747,6 @@ def _usage_rollup_version(conn):
 def _now(now):
     value = now() if now else datetime.now().astimezone()
     return value.astimezone()
-
-
-def _bucket_date(value):
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError("usage timestamps must be timezone-aware")
-    return value.astimezone(BUCKET_TIMEZONE).date()
-
-
-def _bucket_entries(entries):
-    buckets = defaultdict(_empty_bucket)
-    for entry in entries:
-        day = _bucket_date(entry.timestamp)
-        key = (
-            day.isoformat(),
-            entry.agent_id or "unknown",
-            entry.project or "unknown",
-            entry.model or "unknown",
-        )
-        _add_entry_to_bucket(buckets[key], entry)
-    return buckets
-
-
-def _bucket_usage_entries(entries):
-    buckets = defaultdict(_empty_bucket)
-    for entry in entries:
-        day = _bucket_date(entry.timestamp)
-        key = (
-            day.isoformat(),
-            entry.agent_id or "unknown",
-            entry.model or "unknown",
-        )
-        _add_entry_to_bucket(buckets[key], entry)
-    return buckets
-
-
-def _add_entry_to_bucket(bucket, entry):
-    bucket["input_tokens"] += entry.input_tokens
-    bucket["output_tokens"] += entry.output_tokens
-    bucket["cache_creation_tokens"] += entry.cache_creation_tokens
-    bucket["cache_read_tokens"] += entry.cache_read_tokens
-    if entry.cost_usd is not None:
-        bucket["cost_usd"] += entry.cost_usd
-        bucket["cost_known_count"] += 1
-    bucket["entry_count"] += 1
-    bucket["message_count"] += entry.message_count
-
-
-def _empty_bucket():
-    return {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_creation_tokens": 0,
-        "cache_read_tokens": 0,
-        "cost_usd": 0.0,
-        "cost_known_count": 0,
-        "entry_count": 0,
-        "message_count": 0,
-    }
 
 
 def _bucket_tuple(key, bucket):

@@ -17,6 +17,21 @@ spec.loader.exec_module(benchmark)
 
 
 class BackgroundBenchmarkTests(unittest.TestCase):
+    def test_rollup_pipeline_avoids_historical_pricing_and_decoding(self):
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/benchmark_backend.py"),
+                                 "background", "--pipeline", "rollup", "--rows", "10", "30",
+                                 "--repeat", "1", "--json"],
+                                capture_output=True, text=True, check=True, timeout=30)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["status"], "completed")
+        for case in report["cases"]:
+            initial, unchanged, append = case["samples"]
+            self.assertEqual(initial["priced_entries"], case["initial_entries"])
+            self.assertEqual(unchanged["archive_decoded_entries"], 0)
+            self.assertEqual(unchanged["priced_entries"], 0)
+            self.assertEqual(append["priced_entries"], 1)
+            self.assertEqual(append["input_tokens"], (case["initial_entries"] + 1) * 100)
+
     def test_actual_cli_two_scales_cache_invalidation_and_accounting(self):
         result = subprocess.run([sys.executable, str(ROOT / "scripts/benchmark_backend.py"),
                                  "background", "--rows", "10", "30", "--repeat", "2", "--json"],

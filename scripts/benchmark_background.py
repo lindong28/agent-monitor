@@ -64,12 +64,14 @@ def cpu_time():
     return time.process_time() + children.ru_utime + children.ru_stime
 
 
-def run_case(path, rows, repeat):
+def run_case(path, rows, repeat, pipeline="export"):
     # Called only after isolated HOME is installed, before any project import.
     from agent_monitor.ingestion import ProjectIdentityStore, UsageLoader
     from parsers import codex
     from agent_monitor.snapshots import exporter
     from agent_monitor.snapshots import statistics_snapshot
+    from agent_monitor.accounting import pricing_fetcher, rollup, usage_projection
+    from agent_monitor.ingestion import usage_archive
 
     sessions = path / "sessions"
     sessions.mkdir()
@@ -111,6 +113,15 @@ def run_case(path, rows, repeat):
             stack.enter_context(patch)
         parsed = stack.enter_context(mock.patch.object(
             loader, "parse_usage_file", wraps=loader.parse_usage_file))
+        work = {"decoded": 0, "priced": 0}
+        def counted(function, key):
+            def call(*args, **kwargs):
+                work[key] += 1
+                return function(*args, **kwargs)
+            return call
+        stack.enter_context(mock.patch.object(usage_archive, "_decode", counted(usage_archive._decode, "decoded")))
+        stack.enter_context(mock.patch.object(usage_projection, "_decode", counted(usage_projection._decode, "decoded")))
+        stack.enter_context(mock.patch.object(pricing_fetcher, "with_calculated_cost", counted(pricing_fetcher.with_calculated_cost, "priced")))
         samples = []
         expected = rows
         for state in ["initial"] + [s for _ in range(repeat) for s in ("unchanged", "append")]:
@@ -121,34 +132,46 @@ def run_case(path, rows, repeat):
                     f.write(json.dumps(event(counts[name])) + "\n")
                 expected += 1
             parsed.reset_mock()
+            work.update(decoded=0, priced=0)
             output = path / "export"
             start_wall, start_cpu = time.perf_counter(), cpu_time()
-            loaded, collect = measured(loader.load_all_entries)
-            _, export = measured(lambda: exporter.export_bundle(
-                db_path=path / "rollup.db", output_path=output,
-                entries_loader=lambda: loaded, generated_at=NOW.isoformat(),
-                rollup_now=lambda: NOW, source_host_identity="host-v1:" + "5" * 64,
-                rate_limits={}, quota_refresh=False))
+            loaded, collect = measured(loader.load_rollup_entries if pipeline == "rollup" else loader.load_all_entries)
+            if pipeline == "rollup":
+                _, export = measured(lambda: rollup.run(
+                    db_path=path / "rollup.db", entries_loader=lambda: loaded, now=lambda: NOW))
+            else:
+                _, export = measured(lambda: exporter.export_bundle(
+                    db_path=path / "rollup.db", output_path=output,
+                    entries_loader=lambda: loaded, generated_at=NOW.isoformat(),
+                    rollup_now=lambda: NOW, source_host_identity="host-v1:" + "5" * 64,
+                    rate_limits={}, quota_refresh=False))
             total = {"wall_seconds": time.perf_counter() - start_wall,
                      "cpu_seconds": cpu_time() - start_cpu}
-            snapshot = statistics_snapshot.read_snapshot(output / "snapshot.db")
-            values = snapshot["usage_entries"]
-            with sqlite3.connect(output / "snapshot.db") as conn:
+            result_db = path / "rollup.db" if pipeline == "rollup" else output / "snapshot.db"
+            values = None if pipeline == "rollup" else statistics_snapshot.read_snapshot(result_db)["usage_entries"]
+            with sqlite3.connect(result_db) as conn:
                 tokens, outputs = conn.execute("SELECT SUM(input_tokens), SUM(output_tokens) FROM daily_usage_rollup").fetchone()
-            if (len(values) != expected or sum(e.input_tokens for e in values) != expected * 100
+                entries, cost, known = conn.execute("SELECT SUM(entry_count), SUM(cost_usd), SUM(cost_known_count) FROM daily_usage_rollup").fetchone()
+            if ((values is not None and (len(values) != expected or sum(e.input_tokens for e in values) != expected * 100
                     or sum(e.output_tokens for e in values) != expected * 2
                     or any(e.cache_read_tokens or e.cache_creation_tokens or e.cache_creation_1h_tokens for e in values)
                     or any(e.cost_usd is None or not math.isclose(e.cost_usd, 0.000104, rel_tol=1e-9)
-                           or e.cost_provenance["basis"] != "nominal" for e in values)
+                           or e.cost_provenance["basis"] != "nominal" for e in values)))
                     or tokens != expected * 100 or outputs != expected * 2
+                    or entries != expected or known != expected
+                    or not math.isclose(cost, expected * 0.000104, rel_tol=1e-9)
                     or not loaded.scan_complete or loaded.source_errors):
                 raise AssertionError("synthetic collection/export accounting mismatch")
             samples.append({"state": state, "entries": expected,
                             "input_tokens": tokens, "output_tokens": outputs,
                             "parsed_files": parsed.call_count,
-                            "collection": collect, "export": export, "total": total,
-                            "snapshot_bytes": (output / "snapshot.db").stat().st_size})
-            shutil.rmtree(output)
+                            "archive_decoded_entries": work["decoded"],
+                            "priced_entries": work["priced"],
+                            "collection": collect, pipeline: export, "total": total,
+                            "archive_bytes": (path / "usage_archive.sqlite3").stat().st_size,
+                            "snapshot_bytes": result_db.stat().st_size})
+            if output.exists():
+                shutil.rmtree(output)
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return {"initial_entries": rows, "source_files": len(counts), "samples": samples,
             "process_peak_rss_bytes": peak * (1 if sys.platform == "darwin" else 1024)}
@@ -158,6 +181,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", nargs="+", type=positive, default=[100, 1000])
     parser.add_argument("--repeat", type=positive, default=2)
+    parser.add_argument("--pipeline", choices=("export", "rollup"), default="export",
+                        help="measure complete export or scheduled collection/rollup")
     parser.add_argument("--timeout", type=positive, default=120, help="seconds per case (default: 120)")
     parser.add_argument("--json", action="store_true", help="machine-readable raw measurements")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
@@ -170,12 +195,12 @@ def main(argv=None):
         (path / "home").mkdir()
         os.environ["HOME"] = str(path / "home")
         sys.path.insert(0, str(ROOT))
-        print(json.dumps(run_case(path, args.rows[0], args.repeat)))
+        print(json.dumps(run_case(path, args.rows[0], args.repeat, args.pipeline)))
         return
     identity = source_identity()
-    report = {"scope": "synthetic local collection + rollup + validated export, one process per case",
+    report = {"scope": "synthetic local collection + " + args.pipeline + ", one process per case",
               "limitations": "excludes imports/setup, price/quota providers, SSH, scheduling, HTTP and production workloads; peak RSS is worker-only, includes setup/readback and is not a phase delta; OS cache uncontrolled",
-              "timing": "total spans collection start through published export; phases do not overlap; CPU includes worker and reaped children (local git identity lookup only)",
+              "timing": "total spans collection start through completed rollup or published export; phases do not overlap; CPU includes worker and reaped children (local git identity lookup only)",
               "fixture": "codex cumulative token events v1; each event adds 100 input and 2 output tokens, zero cache tokens; synthetic nominal cost 0.000104 USD/event; append adds one event to one source",
               "environment": {"python": platform.python_version(), "platform": platform.platform(), "sqlite": sqlite3.sqlite_version},
               "source": identity, "cases": [], "status": "completed"}
@@ -185,7 +210,7 @@ def main(argv=None):
             try:
                 child = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--worker",
                                         "--case-root", temp, "--rows", str(rows),
-                                        "--repeat", str(args.repeat)],
+                                        "--repeat", str(args.repeat), "--pipeline", args.pipeline],
                                        capture_output=True, text=True, timeout=args.timeout)
                 if child.returncode:
                     raise RuntimeError(child.stderr or "worker returned %d" % child.returncode)
