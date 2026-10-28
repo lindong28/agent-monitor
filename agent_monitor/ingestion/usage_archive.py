@@ -85,10 +85,42 @@ class UsageArchive:
             conn.execute("CREATE TRIGGER IF NOT EXISTS usage_events_incremental_%s AFTER %s ON usage_events BEGIN %s %s END" % (operation.lower(), operation, old, new))
 
     @staticmethod
+    def _initialize_source_paths(conn):
+        conn.execute("CREATE TABLE IF NOT EXISTS source_files_v2 (file_id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE)")
+        conn.execute("CREATE TABLE IF NOT EXISTS file_observations_v2 (file_id INTEGER NOT NULL, position INTEGER NOT NULL, dedup_key TEXT NOT NULL, entry TEXT NOT NULL, PRIMARY KEY(file_id, position)) WITHOUT ROWID")
+        conn.execute("CREATE INDEX IF NOT EXISTS file_observations_v2_key ON file_observations_v2(dedup_key, file_id, position)")
+        conn.execute("CREATE TABLE IF NOT EXISTS legacy_observation_paths_v2 (path TEXT PRIMARY KEY)")
+        if not conn.execute("SELECT 1 FROM archive_meta WHERE key=?", ("source_observations_v2",)).fetchone():
+            # Copy exact observations before making their existing signatures
+            # cacheable under v2. NULL/older opaque signatures still retry.
+            conn.execute("INSERT INTO source_files_v2(path) SELECT DISTINCT path FROM file_observations")
+            conn.execute("INSERT INTO file_observations_v2 SELECT s.file_id, o.position, o.dedup_key, o.entry FROM file_observations o JOIN source_files_v2 s ON s.path=o.path")
+            prefix = "observations-v1:"
+            conn.execute("UPDATE parsed_files SET signature=? || substr(signature, ?) WHERE substr(signature, 1, ?)=?",
+                         ("observations-v2:", len(prefix) + 1, len(prefix), prefix))
+            conn.execute("DELETE FROM file_observations")
+            conn.execute("INSERT INTO archive_meta VALUES (?, '1')", ("source_observations_v2",))
+        # Keep the old table/index shape so an actual older writer can run.
+        # Its writes invalidate v2 even if no raw event happened to change.
+        for operation in ("INSERT", "UPDATE", "DELETE"):
+            references = ("NEW",) if operation == "INSERT" else ("OLD",) if operation == "DELETE" else ("OLD", "NEW")
+            statements = " ".join("INSERT INTO legacy_observation_paths_v2 VALUES (%s.path) ON CONFLICT(path) DO NOTHING;" % ref for ref in references)
+            conn.execute("CREATE TRIGGER IF NOT EXISTS file_observations_legacy_v2_%s AFTER %s ON file_observations BEGIN %s END" % (operation.lower(), operation, statements))
+
+    @staticmethod
     def _forget_observations(conn, path, affected):
+        source = conn.execute("SELECT file_id FROM source_files_v2 WHERE path=?", (path,)).fetchone()
+        if source:
+            affected.update(row[0] for row in conn.execute(
+                "SELECT dedup_key FROM file_observations_v2 WHERE file_id=?", source))
+            conn.execute("DELETE FROM file_observations_v2 WHERE file_id=?", source)
+            conn.execute("DELETE FROM source_files_v2 WHERE file_id=?", source)
         affected.update(row[0] for row in conn.execute(
             "SELECT dedup_key FROM file_observations WHERE path=?", (path,)))
         conn.execute("DELETE FROM file_observations WHERE path=?", (path,))
+        # The legacy DELETE above can enqueue this path again. Clear it only
+        # after this path has been handled, in the same writer transaction.
+        conn.execute("DELETE FROM legacy_observation_paths_v2 WHERE path=?", (path,))
 
     @staticmethod
     def _replay(existing, observations):
@@ -117,6 +149,7 @@ class UsageArchive:
                 conn.execute("CREATE TABLE IF NOT EXISTS usage_sessions (agent_id TEXT NOT NULL, session_id TEXT NOT NULL, metadata TEXT NOT NULL, PRIMARY KEY(agent_id, session_id))")
                 conn.execute("CREATE TABLE IF NOT EXISTS parsed_files (path TEXT PRIMARY KEY, signature TEXT, entries TEXT NOT NULL)")
                 self._initialize_incremental(conn)
+                self._initialize_source_paths(conn)
                 current = now or datetime.now(timezone.utc)
                 authority = (current.astimezone(bucket_timezone).date() + timedelta(days=1)).isoformat()
                 conn.execute("INSERT OR IGNORE INTO archive_meta VALUES ('history_authoritative_from', ?)", (authority,))
@@ -125,7 +158,9 @@ class UsageArchive:
                 active_paths = sorted({Path(path) for path in paths})
                 active = {str(path) for path in active_paths}
                 cached_files = dict(conn.execute("SELECT path, signature FROM parsed_files"))
-                for path in cached_files.keys() - active:
+                dictionary_paths = {row[0] for row in conn.execute("SELECT path FROM source_files_v2")}
+                legacy_paths = {row[0] for row in conn.execute("SELECT path FROM legacy_observation_paths_v2")}
+                for path in (cached_files.keys() | dictionary_paths | legacy_paths) - active:
                     self._forget_observations(conn, path, affected)
                     conn.execute("DELETE FROM parsed_files WHERE path=?", (path,))
                 parse_errors = []
@@ -136,8 +171,8 @@ class UsageArchive:
                         signature = signature_for(path)
                         # Old code must reparse rather than trust the empty
                         # compatibility payload; old-format writes invalidate us.
-                        tagged = "observations-v1:" + signature if signature is not None else None
-                        if not force_reload and tagged is not None and cached_files.get(key) == tagged:
+                        tagged = "observations-v2:" + signature if signature is not None else None
+                        if not force_reload and key not in legacy_paths and tagged is not None and cached_files.get(key) == tagged:
                             continue
                         entries = list(parser(path))
                         after = signature_for(path)
@@ -149,10 +184,12 @@ class UsageArchive:
                         conn.execute("UPDATE parsed_files SET signature=NULL WHERE path=?", (key,))
                     else:
                         self._forget_observations(conn, key, affected)
-                        rows = [(key, position, entry.dedup_key, json.dumps(_encode(entry)))
-                                for position, entry in enumerate(entries)]
-                        affected.update(row[2] for row in rows)
-                        conn.executemany("INSERT INTO file_observations VALUES (?, ?, ?, ?)", rows)
+                        if entries:
+                            file_id = conn.execute("INSERT INTO source_files_v2(path) VALUES (?)", (key,)).lastrowid
+                            rows = [(file_id, position, entry.dedup_key, json.dumps(_encode(entry)))
+                                    for position, entry in enumerate(entries)]
+                            affected.update(row[2] for row in rows)
+                            conn.executemany("INSERT INTO file_observations_v2 VALUES (?, ?, ?, ?)", rows)
                         conn.execute("INSERT INTO parsed_files VALUES (?, ?, '[]') ON CONFLICT(path) DO UPDATE SET signature=excluded.signature, entries=excluded.entries", (key, tagged))
                     parse_errors.extend((key, -1, error) for error in source_errors[error_count:])
                     del source_errors[error_count:]
@@ -161,7 +198,7 @@ class UsageArchive:
                     row = conn.execute("SELECT entry FROM usage_events WHERE dedup_key=?", (key,)).fetchone()
                     existing = _decode(json.loads(row[0])) if row else None
                     observations = [(path, position, _decode(json.loads(payload))) for path, position, payload in
-                                    conn.execute("SELECT path, position, entry FROM file_observations WHERE dedup_key=?", (key,))]
+                                    conn.execute("SELECT s.path, o.position, o.entry FROM file_observations_v2 o JOIN source_files_v2 s ON s.file_id=o.file_id WHERE o.dedup_key=?", (key,))]
                     observations.sort(key=lambda item: (Path(item[0]), item[1]))
                     merged, errors = self._replay(existing, observations)
                     round_errors.extend(errors)

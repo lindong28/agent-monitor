@@ -89,6 +89,8 @@ class IncrementalArchiveTests(unittest.TestCase):
         self.assertEqual(len(self.collect()), 2)
         self.assertEqual(len(self.collect(paths=[])), 2)
         self.assertEqual(self.rows("SELECT count(*) FROM file_observations"), [(0,)])
+        self.assertEqual(self.rows("SELECT count(*) FROM file_observations_v2"), [(0,)])
+        self.assertEqual(self.rows("SELECT count(*) FROM source_files_v2"), [(0,)])
         self.assertEqual(len(self.collect(paths=[a])), 2)
 
     def test_claude_completion_and_recurring_conflict(self):

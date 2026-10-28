@@ -32,7 +32,7 @@ AGENT_MONITOR_PYTHON="${AGENT_MONITOR_PYTHON:-$(
 )}"
 : "${AGENT_MONITOR_PYTHON:=python3}"
 # Put this checkout ahead of the caller's cwd without changing relative CLI paths.
-PYTHON_MODULE=("$AGENT_MONITOR_PYTHON" -c 'import sys; sys.path[0]=sys.argv.pop(1); import runpy; runpy.run_module(sys.argv.pop(1),run_name="__main__",alter_sys=True)' "$ROOT_DIR")
+PYTHON_MODULE=("$AGENT_MONITOR_PYTHON" -c 'import sys; sys.path[0]=sys.argv.pop(1); from agent_monitor.runtime.service_logs import initialize; initialize(sys.path[0]); import runpy; runpy.run_module(sys.argv.pop(1),run_name="__main__",alter_sys=True)' "$ROOT_DIR")
 LOCAL_WEB=""
 if [ "${1:-}" = local ]; then
   LOCAL_WEB=local
@@ -48,6 +48,7 @@ if [ "${1:-}" = local ]; then
 fi
 
 usage() {
+  echo "Archive maintenance: agent-monitor archive [stats|compact --backup NEW_PERSISTENT_PATH] [--archive PATH] [--rollup-db PATH] [--budget-seconds N] [--json]"
   echo "Service management: agent-monitor service {status|restart local-web|restart hub|restart collector|restart connector|deploy [--expect SHA]|rebuild-runtime --python /absolute/python}"
   echo "Local dashboard: agent-monitor local {start|stop|restart|status|open}"
   echo "usage: agent-monitor {start|stop|restart|status|open|refresh|connect [install --server URL|status|stop|restart|--server URL]|network [--json] [--force]|session-quota SESSION_ID [--json]|export (--out PATH|--version)|machines (accept NAME [--yes]|retire NAME...)|rollup [--check [--json]|adopt-timezone|blockers|recover|recover-reviewed]}"
@@ -96,7 +97,6 @@ start() {
 
   local port
   port="$(find_port)"
-  : > "$LOG_FILE"
   local pid
   pid="$("${PYTHON_MODULE[@]}" agent_monitor.cli.launch_web "$ROOT_DIR" "$BIND_HOST" "$port" "$LOG_FILE")"
   echo "$pid" > "$PID_FILE"
@@ -302,6 +302,10 @@ if [ -z "$LOCAL_WEB" ]; then
 fi
 
 case "${1:-}" in
+  archive)
+    shift
+    exec "${PYTHON_MODULE[@]}" agent_monitor.cli.archive_maintenance "$@"
+    ;;
   service)
     shift
     exec "${PYTHON_MODULE[@]}" agent_monitor.runtime.service_manager "$@"

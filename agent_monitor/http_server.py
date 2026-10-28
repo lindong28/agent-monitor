@@ -1,3 +1,7 @@
+from pathlib import Path as _LogPath
+from agent_monitor.runtime import service_logs
+service_logs.initialize(_LogPath(__file__).resolve().parents[1])
+
 import argparse
 import ipaddress
 import socket
@@ -315,6 +319,10 @@ class ThreadingHTTPServer(_ThreadingHTTPServer):
         self.views = views if views is not None else create_views()
         self.routes = create_routes(self.views)
         super().__init__(*args, **kwargs)
+
+    def service_actions(self):
+        service_logs.maintain()
+        super().service_actions()
 
     def server_bind(self):
         # No CGI consumer needs a reverse-resolved server_name. Bind/listen

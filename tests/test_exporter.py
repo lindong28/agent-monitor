@@ -19,6 +19,7 @@ class ExporterTests(unittest.TestCase):
     def test_gui_quota_route_uses_receipt_outside_rollup_lock_and_preserves_other_routes(self):
         from agent_monitor.snapshots import exporter
         from agent_monitor.runtime import hub
+        from parsers import codex_profiles
 
         receipt = {"claude": {"updated_at": "2026-09-09T00:00:00Z", "refresh_error": None},
                    "codex": {"updated_at": "2026-09-08T00:00:00Z", "refresh_error": "provider failed"}}
@@ -42,6 +43,8 @@ class ExporterTests(unittest.TestCase):
                 with mock.patch.object(exporter, "exporter_version", return_value="a" * 40),\
                         mock.patch.object(hub.hub_config, "enabled", return_value=enabled),\
                         mock.patch.object(hub, "request_quota_refresh", side_effect=query) as gui_query,\
+                        mock.patch.object(codex_profiles, "session_links", return_value=codex_profiles.SessionLinks()),\
+                        mock.patch.object(codex_profiles, "discover", return_value=[]),\
                         mock.patch.object(exporter, "_rate_limits", return_value={}) as direct:
                     manifest = exporter.export_bundle(source, Path(tmp) / "bundle", gui_quota=gui,
                                                       quota_refresh=quota, refresh=refresh, rate_limits=supplied,

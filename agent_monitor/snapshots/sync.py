@@ -5,7 +5,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,6 +12,7 @@ from pathlib import Path
 
 from agent_monitor.snapshots import exporter
 from agent_monitor.snapshots import generation
+from agent_monitor.snapshots import staging
 from agent_monitor.accounting import rollup
 from agent_monitor.snapshots.machine_config import DEFAULT_CONFIG_PATH; from agent_monitor.snapshots.machine_config import load_machine_config; from agent_monitor.snapshots.machine_config import machine_config_fingerprint
 
@@ -158,11 +158,8 @@ def sync_machine(
     export_kwargs = dict(export_kwargs or {})
     if not quota_refresh:
         export_kwargs["quota_refresh"] = False
-    with tempfile.TemporaryDirectory(
-        prefix=".sync-%s-" % machine.name,
-        dir=root.parent,
-    ) as temporary:
-        local_bundle = Path(temporary) / "bundle"
+    with staging.Staging(root.parent) as temporary:
+        local_bundle = temporary.path / "bundle"
         if machine.is_self:
             local_identity = generation.self_certified_host_identity()
             configured_identity = export_kwargs.pop("source_host_identity", None)
@@ -194,6 +191,7 @@ def sync_machine(
                 local_bundle,
                 timeout=timeout,
                 runner=runner,
+                transfer_runner=temporary.transfer_runner(runner),
                 quota_refresh=quota_refresh,
             )
             accept_first_use = accept_first_use_ssh_target
@@ -326,7 +324,7 @@ def _command_failure_reason(exc):
     )
 
 
-def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refresh=True):
+def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refresh=True, transfer_runner=None):
     from agent_monitor import hub_config as hub
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise ValueError("sync timeout must be positive")
@@ -363,7 +361,7 @@ def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refres
             deadline, stage="remote_export",
         )
         _run(
-            runner,
+            transfer_runner or runner,
             [*_RSYNC_PREFIX, "%s:%s/bundle/" % (ssh_host, remote_temp), str(local_bundle) + "/"],
             deadline, stage="transfer",
         )

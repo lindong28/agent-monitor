@@ -83,6 +83,12 @@ def _timestamp(value=None):
 
 def write_snapshot(snapshot_path, loaded_entries, *, observed_at=None):
     """Write to an unpublished snapshot copy; the caller owns publish/fsync/digest."""
+    _write_snapshot_content(snapshot_path, loaded_entries, observed_at=observed_at)
+    return read_snapshot(snapshot_path)
+
+
+def _write_snapshot_content(snapshot_path, loaded_entries, *, observed_at=None):
+    """Prevalidate and write; private export must perform its own real readback."""
     observed_at = _timestamp(observed_at)
     meta = {"version": VERSION, "observed_at": observed_at,
             "history_authoritative_from": getattr(loaded_entries, "history_authoritative_from", None),
@@ -117,7 +123,6 @@ def write_snapshot(snapshot_path, loaded_entries, *, observed_at=None):
                                json.dumps(row, allow_nan=False, sort_keys=True))
                               for index, row in enumerate(rows)))
         _create_usage_indexes(conn)
-    return read_snapshot(snapshot_path)
 
 
 def _create_usage_indexes(conn):

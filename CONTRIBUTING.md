@@ -4,7 +4,7 @@ Read [README.md](README.md), [AGENTS.md](AGENTS.md) and [architecture](docs/publ
 
 ## Development setup
 
-Use a separate checkout or worktree. Installation writes runtime files in that checkout and CLI links under the selected HOME. Tests must use a disposable HOME and synthetic/mocked provider data; do not read real provider stores or operate production services.
+Use a separate checkout or worktree. Installation writes runtime files in that checkout and CLI links under the selected HOME. Tests must use explicit fixture state and synthetic/mocked provider sources; do not read real provider stores or operate production services. Isolate the entire source-discovery chain, including managed-account discovery and session links, before running collector/loader tests. A disposable HOME or patched default path alone does not establish isolation: account discovery and previously loaded defaults can still resolve other roots. Use an access guard against real provider roots when validating these fixtures; `tests/test_export_work_reuse.py` covers the rollup loader fixtures.
 
 ```bash
 test_home="$(mktemp -d)"
@@ -33,7 +33,7 @@ An ignored checkout-local `.local-data` symlink may point to an existing externa
 
 ## Choose a validation entry
 
-Start with the [responsibility map](docs/public-architecture.md#responsibility-map), then run the existing checks for the behavior you changed. Keep the disposable HOME and source overrides from development setup for each command that loads product code. Use Node 24 to match CI; Python-only commands use this checkout's `.venv/bin/python`.
+Start with the [responsibility map](docs/public-architecture.md#responsibility-map), then run the existing checks for the behavior you changed. Keep the fixture state and source-discovery isolation from development setup for each command that loads product code. When reusing an interpreter, use explicit fixture paths and mocks without changing the invoking session's HOME or CODEX_HOME. Use Node 24 to match CI; Python-only commands use this checkout's `.venv/bin/python`.
 
 Follow [where new code belongs](docs/public-architecture.md#where-new-code-belongs) when adding or moving a responsibility. Construct isolated identity/load/view instances for stateful tests; use the normal frontend factory and route interfaces for Node checks. Keep compatibility aliases only where an existing caller needs them, and include the moved owners in source/fingerprint checks.
 

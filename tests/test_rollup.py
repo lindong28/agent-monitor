@@ -260,7 +260,7 @@ class RollupTests(unittest.TestCase):
             rows = self.fetch_daily_rows(db_path)
             self.assertEqual([(row["project"], row["input_tokens"]) for row in rows], [(source_path, 100)])
             self.assertEqual(sum(row["input_tokens"] for row in rows), 100)
-            self.assertEqual(result["buckets_written"], 1)
+            self.assertEqual(result["buckets_written"], 0)
             self.assertEqual(result["buckets_skipped"], 0)
             self.assertEqual(result["skipped_keys"], [])
             self.assertEqual(second_project, source_path)
@@ -1021,7 +1021,7 @@ class RollupTests(unittest.TestCase):
 
     @staticmethod
     def fetch_daily_rows(db_path):
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn:
             conn.row_factory = sqlite3.Row
             return [
                 dict(row)
@@ -1032,7 +1032,7 @@ class RollupTests(unittest.TestCase):
 
     @staticmethod
     def fetch_meta(db_path, key):
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn:
             row = conn.execute("SELECT value FROM rollup_meta WHERE key = ?", (key,)).fetchone()
             return row[0] if row else None
 
@@ -1065,6 +1065,10 @@ class RollupTests(unittest.TestCase):
                 usage_loader.codex, "STATE_DB", str(Path(sessions_dir).parent / "missing-state.sqlite")
             ), mock.patch.object(
                 usage_loader.claude, "_get_claude_dirs", return_value=[]
+            ), mock.patch.object(
+                usage_loader.codex_profiles, "discover", return_value=[]
+            ), mock.patch.object(
+                usage_loader.codex_profiles, "session_links", return_value=usage_loader.codex_profiles.SessionLinks()
             ), mock.patch.dict(
                 usage_loader.os.environ, {"AGENT_MONITOR_EXTRA_JSONL": ""}, clear=False
             ), mock.patch(

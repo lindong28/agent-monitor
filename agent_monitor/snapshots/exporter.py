@@ -142,12 +142,15 @@ def export_bundle(
             _vacuum_into_locked(db_path, snapshot_path)
 
         if loaded_entries is not None:
-            statistics_snapshot.write_snapshot(
+            statistics_snapshot._write_snapshot_content(
                 snapshot_path, loaded_entries,
                 observed_at=generated_at,
             )
 
-        stats = generation.snapshot_stats(snapshot_path)
+        signature = _snapshot_signature(snapshot_path)
+        transfer_digest = _file_digest(snapshot_path)
+        stats = _validated_snapshot_stats(snapshot_path)
+        _require_snapshot_unchanged(snapshot_path, signature)
         if rate_limits is None and gui_quota and refresh and quota_refresh:
             if hub_config.enabled():
                 rate_limits = _gui_rate_limits()
@@ -161,14 +164,16 @@ def export_bundle(
             "rate_limits": _rate_limits(refresh=refresh and quota_refresh) if rate_limits is None else rate_limits,
             "exporter_commit": resolved_exporter_commit,
             "generated_at": generated_at or _timestamp(),
-            "transfer_digest": _file_digest(snapshot_path),
+            "transfer_digest": transfer_digest,
             **stats,
         }
         manifest["manifest_digest"] = manifest_digest(manifest)
-        validate_export_manifest(manifest, snapshot_path)
+        _validate_manifest_shape(manifest)
+        _validate_manifest_facts(manifest, stats, transfer_digest)
         _write_json(staging / "export.json", manifest)
         file_io.fsync_file(snapshot_path)
         file_io.fsync_directory(staging)
+        _require_snapshot_unchanged(snapshot_path, signature)
         os.replace(staging, output_path)
         file_io.fsync_directory(output_path.parent)
         return manifest
@@ -180,6 +185,15 @@ def export_bundle(
 
 
 def validate_export_manifest(manifest, snapshot_path):
+    _validate_manifest_shape(manifest)
+    transfer_digest = _file_digest(snapshot_path)
+    if transfer_digest != manifest["transfer_digest"]:
+        raise ExportError("transfer_digest does not match snapshot.db")
+    stats = _validated_snapshot_stats(snapshot_path)
+    return _validate_manifest_facts(manifest, stats, transfer_digest)
+
+
+def _validate_manifest_shape(manifest):
     if not isinstance(manifest, dict):
         raise ExportError("export manifest fields do not match schema")
     schema_version = manifest.get("schema_version")
@@ -198,13 +212,17 @@ def validate_export_manifest(manifest, snapshot_path):
         raise ExportError("export schema cannot substantiate alias row lineage")
     if not isinstance(manifest["rate_limits"], dict):
         raise ExportError("rate_limits must be an object")
-    if _file_digest(snapshot_path) != manifest["transfer_digest"]:
-        raise ExportError("transfer_digest does not match snapshot.db")
+
+
+def _validated_snapshot_stats(snapshot_path):
     try:
         statistics_snapshot.validate_snapshot(snapshot_path)
     except statistics_snapshot.StatisticsSnapshotError as exc:
         raise ExportError("statistics extension is invalid") from exc
-    stats = generation.snapshot_stats(snapshot_path)
+    return generation.snapshot_stats(snapshot_path)
+
+
+def _validate_manifest_facts(manifest, stats, transfer_digest):
     if manifest["schema_version"] != stats["schema_version"]:
         raise ExportError("schema_version does not match snapshot.db")
     fields = [
@@ -214,23 +232,43 @@ def validate_export_manifest(manifest, snapshot_path):
         "metric_totals",
         "logical_digest",
     ]
-    if schema_version == EXPORT_SCHEMA_VERSION:
+    if manifest["schema_version"] == EXPORT_SCHEMA_VERSION:
         fields.extend(sorted(_MANIFEST_V2_FIELDS))
     for field in fields:
         if manifest[field] != stats[field]:
             raise ExportError("%s does not match snapshot.db" % field)
-    generation._validate_meta_shape(
-        generation.build_generation_meta(
-            snapshot_path,
-            machine_config_fingerprint="0" * 64,
-            source_host_identity=manifest["source_host_identity"],
-            aliases=manifest["aliases"],
-            rate_limits=manifest["rate_limits"],
-            exporter_commit=manifest["exporter_commit"],
-            generated_at=manifest["generated_at"],
-        )
+    generation._build_generation_meta(
+        stats, transfer_digest,
+        machine_config_fingerprint="0" * 64,
+        source_host_identity=manifest["source_host_identity"],
+        aliases=manifest["aliases"],
+        rate_limits=manifest["rate_limits"],
+        exporter_commit=manifest["exporter_commit"],
+        generated_at=manifest["generated_at"],
     )
     return manifest
+
+
+def _snapshot_signature(snapshot_path):
+    """Local identity only: never a substitute for reading snapshot contents."""
+    signature = []
+    for path in (Path(snapshot_path), Path(str(snapshot_path) + "-wal")):
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            signature.append(None)
+        else:
+            if path != Path(snapshot_path) and stat.st_size:
+                raise ExportError("private export snapshot has a nonempty WAL")
+            signature.append((stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+    if signature[0] is None:
+        raise ExportError("private export snapshot is missing")
+    return tuple(signature)
+
+
+def _require_snapshot_unchanged(snapshot_path, signature):
+    if _snapshot_signature(snapshot_path) != signature:
+        raise ExportError("private export snapshot changed during validation")
 
 
 def manifest_digest(manifest):

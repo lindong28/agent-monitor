@@ -1443,6 +1443,8 @@ def _write_bucket_table(
         table_name=table_name,
         minimum_date=minimum_date,
     )
+    authority = None
+    key_predicate = " AND ".join("%s = ?" % column for column in key_columns)
     if history_authoritative_from is not None:
         authority = max(history_authoritative_from, minimum_date or history_authoritative_from)
         existing_keys = {
@@ -1464,17 +1466,13 @@ def _write_bucket_table(
         # model bucket superseded by metadata reparsing. Legacy dates keep their
         # existing shrink/freeze behavior. Replaying all dates survives a crash
         # between archive commit and this separate rollup transaction.
-        if history_authoritative_projects is None:
-            conn.execute("DELETE FROM %s WHERE date >= ?" % table_name, (authority,))
-        else:
-            conn.executemany(
-                "DELETE FROM %s WHERE date >= ? AND project = ?" % table_name,
-                [(authority, project) for project in sorted(history_authoritative_projects)],
-            )
+        conn.executemany(
+            "DELETE FROM %s WHERE %s" % (table_name, key_predicate),
+            sorted(authoritative_keys - scoped.keys()),
+        )
     backfill_dates = {key[0] for key in scoped} - set(recompute_dates)
     skipped_keys = []
     written = 0
-    key_predicate = " AND ".join("%s = ?" % column for column in key_columns)
     columns = tuple(key_columns) + BUCKET_FIELDS
     placeholders = ", ".join("?" for _ in columns)
     updates = ", ".join(
@@ -1492,7 +1490,10 @@ def _write_bucket_table(
             if old_values is not None
             else None
         )
-        if _classify_bucket_change(old_bucket, bucket) == "skip":
+        change = _classify_bucket_change(old_bucket, bucket)
+        if change == "unchanged":
+            continue
+        if change == "skip" and not _history_authorizes(key, authority, history_authoritative_projects):
             skipped_keys.append(key)
             continue
         conn.execute(

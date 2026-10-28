@@ -1,5 +1,9 @@
 """Opt-in hub deployment; collection and API execution remain local to each Mac."""
 
+from pathlib import Path as _LogPath
+from agent_monitor.runtime import service_logs
+service_logs.initialize(_LogPath(__file__).resolve().parents[2])
+
 import argparse
 import contextlib
 from agent_monitor.runtime import deployment_guard

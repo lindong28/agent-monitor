@@ -202,6 +202,20 @@ def build_generation_meta(
 ):
     snapshot_path = Path(snapshot_path)
     stats = snapshot_stats(snapshot_path)
+    return _build_generation_meta(
+        stats, _file_digest(snapshot_path),
+        machine_config_fingerprint=machine_config_fingerprint,
+        source_host_identity=source_host_identity, aliases=aliases,
+        rate_limits=rate_limits, exporter_commit=exporter_commit,
+        generated_at=generated_at,
+    )
+
+
+def _build_generation_meta(
+    stats, transfer_digest, *, machine_config_fingerprint, source_host_identity,
+    aliases, rate_limits, exporter_commit, generated_at,
+):
+    """Assemble and validate metadata from facts owned by the current caller."""
     validated_aliases = validate_alias_proofs(aliases)
     meta = {
         "schema_version": stats["schema_version"],
@@ -212,7 +226,7 @@ def build_generation_meta(
         "rate_limits": rate_limits,
         "data_start_date": stats["data_start_date"],
         "exporter_commit": exporter_commit,
-        "transfer_digest": _file_digest(snapshot_path),
+        "transfer_digest": transfer_digest,
         "bucket_timezone": stats["bucket_timezone"],
         "row_count": stats["row_count"],
         "metric_totals": stats["metric_totals"],

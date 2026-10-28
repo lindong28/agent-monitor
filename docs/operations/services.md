@@ -4,6 +4,8 @@ Installation, update and existing-installation transition are documented in [usa
 
 Managed deployment checks the Hub's `/api/health?asset_watch=1` and the connector's loopback `/health`. Their `source_root` and `deployment_signature` identify the checkout and source/selected configuration captured at process startup; changing a plist alone is not proof of activation. The installer checks this identity with a bounded wait after replacement and retains an already matching process. This proves local process response, not browser access, collected-data admission, provider availability or completion of account actions. Hub startup diagnostics remain in `state/hub.log`; connector connection/failure observations remain at its configured status-file path. Deployment failures are synchronous nonzero installer results; no new background alert service is installed.
 
+Ordinary Web, Hub and collector log retention is configured in [ordinary service logs](../public-usage.md#ordinary-service-logs). The capacity is checked at existing service boundaries, with possible temporary overshoot and concurrent-write loss during truncation. It does not govern diagnostic events or accounting history. Rotation success is not service-health evidence.
+
 ## Network diagnostic findings
 
 The `agent-monitor network` report describes the server machine's observed route, not the browser device's IP or provider-account availability. Read the timestamp and missing-observation messages before acting on a risk label. A local IPv6 address is not proof of public IPv6 leakage; DNS resolver and IP-reputation observations do not establish whether an account can use a provider.
