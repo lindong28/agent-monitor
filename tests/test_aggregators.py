@@ -267,7 +267,10 @@ class AggregatorTests(unittest.TestCase):
             ("agent_monitor/storage.py", "_private_read_copy", "locked_source_private_copy_recovery"),
             ("agent_monitor/ingestion/usage_archive.py", "read", "retained_usage_read_only"),
             ("agent_monitor/ingestion/usage_archive.py", "collect", "retained_usage_transaction_write"),
-            ("agent_monitor/snapshots/statistics_snapshot.py", "write_snapshot", "unpublished_statistics_write"),
+            ("agent_monitor/snapshots/statistics_snapshot.py", "_write_snapshot_content", "unpublished_statistics_write"),
+            # Read-only stats, locked live compaction, and the private backup
+            # target share this CLI-only opener; lifecycle tests cover each mode.
+            ("agent_monitor/cli/archive_maintenance.py", "_connect", "explicit_archive_maintenance_and_backup"),
             ("agent_monitor/snapshots/statistics_snapshot.py", "read_snapshot", "admitted_statistics_read_only"),
             ("agent_monitor/snapshots/statistics_snapshot.py", "read_metadata", "admitted_statistics_metadata_read_only"),
             ("agent_monitor/snapshots/statistics_snapshot.py", "_admitted_connection", "admitted_statistics_read_only"),
