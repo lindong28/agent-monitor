@@ -284,7 +284,7 @@ def save_cache(cache_path, result, *, session_links=None):
             staging.unlink(missing_ok=True)
 
 
-def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None):
+def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None):
     """One operator-approved probe; retain the pause until its reading is saved."""
     root = Path(root) if root is not None else ROOT
     from agent_monitor.accounts.upstream_controls import Controls
@@ -292,7 +292,8 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     if (not expected_label or account is None or account.label != expected_label
             or (expected_id is not None and account.account_id != expected_id)):
         raise quota_refresh.RefreshError("当前 Codex 账号与批准目标不一致，未开始探测。")
-    value = quota_refresh.load_rate_limits("codex", account, probe_pause_id=pause_id)
+    options = {} if admitted_probe is None else {"admitted_probe": admitted_probe}
+    value = quota_refresh.load_rate_limits("codex", account, probe_pause_id=pause_id, **options)
     current = accounts.codex_account()
     if current is None or accounts.quota_identity("codex", current.account_id, current.label) != accounts.quota_identity(
             "codex", account.account_id, account.label):

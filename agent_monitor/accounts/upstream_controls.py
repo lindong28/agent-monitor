@@ -135,6 +135,24 @@ class Controls:
             handle.close()
 
 
+    def record_recovery(self, receipt, *, attempt_id):
+        """Attach one historical result without overwriting a later operation."""
+        handle = self._lock("codex", threading.Event(), 0)
+        try:
+            state = self.read("codex")
+            requested = receipt["request"]["pause_id"]
+            matching = any(p.get("id") == requested and attempt_id
+                           and (p.get("probe_attempt") or {}).get("id") == attempt_id
+                           for p in (state.get("pause") or {}, state.get("last_pause") or {}))
+            if (state.get("active") or not matching
+                    or (state.get("pause") or {}).get("id") != receipt.get("pause_id")):
+                raise Paused("恢复记录对应的暂停已变化或操作未结束；未覆盖现有记录。")
+            state["last_recovery"] = receipt
+            self._save("codex", state)
+        finally:
+            handle.close()
+
+
 class Lease:
     def __init__(self, controls, provider, handle, state):
         self.controls, self.provider, self.handle, self.state = controls, provider, handle, state

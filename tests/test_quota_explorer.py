@@ -55,11 +55,8 @@ ui.renderQuotaAccounts({codex:{accounts:[passive],refresh_errors:[{machine:'alph
 assert(table.textContent.includes('当前读数来自会话日志'));
 assert(table.textContent.includes('主动查询已暂停'));
 assert(!table.textContent.includes('更新延迟'));
-const recoverButton=descendants(table).find(n=>n.tagName==='BUTTON' && n.textContent==='核对并探测一次');
-assert(recoverButton);
-window.confirm=()=>false;
-recoverButton.click();
-assert(!recoverButton.disabled,'cancel must leave the one-shot opportunity unused');
+const recoverButton=descendants(table).find(n=>n.tagName==='BUTTON' && n.textContent==='查看当前状态与恢复');
+assert(recoverButton, 'read-only recovery entry is available');
 // Confirmed lack of a subscription must not look like available current quota.
 const unsubscribed = {...account('unsubscribed'), quota_status:'no_subscription',
   quota_status_reason:'无有效 Claude Code 订阅（用户已确认）', plan_verification:'unverified',

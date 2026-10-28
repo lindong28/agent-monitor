@@ -275,6 +275,119 @@
     return "error";
   }
 
+  function recoveryDiagnostics(receipt, httpStatus) {
+    const box = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "查看本次诊断";
+    box.appendChild(summary);
+    const add = text => { const p = document.createElement("p"); p.textContent = text; box.appendChild(p); };
+    const f = receipt.failure || {};
+    add(receipt.ok ? "本次配额读取成功；当前暂停状态以重新读取的结果为准。" : "本次配额读取未完成；原因尚未确认，错误码本身不能证明网络故障或登录失效。");
+    if (receipt.observed_at) add(`记录时间：${receipt.observed_at}`);
+    if (receipt.request) add(`本次对象：${receipt.request.machine} · ${receipt.request.account_label} · 工作区 ${receipt.request.account_id}；原暂停 ${receipt.request.pause_id}`);
+    if (httpStatus) add(`Monitor HTTP：${httpStatus}（本地接口结果，不是供应商 HTTP 状态）`);
+    add(`停止阶段：${f.stage === "quota_read" ? "读取配额" : f.stage || "未记录"}；Codex RPC：${f.rpc_code ?? "未取得"}；上游 HTTP：${f.http_status ?? "未取得"}`);
+    if (f.detail) add(`原始原因：${f.detail}`);
+    if (f.returncode != null) add(`CLI 退出码：${f.returncode}`);
+    if (receipt.record_error) add(receipt.record_error);
+    const network = receipt.network;
+    add(`出站策略：${network?.policy === "chromium-system" ? "执行主机的系统代理" : "未记录"}；公网出口 IP／地区：未核实。`);
+    add("以下仅为本次连接观测；connected 表示代理桥建立了连接，不证明配额请求成功，也不能证明最终公网出口。其他设备的出口预览不能代替此读数。");
+    if (!network?.events?.length) add("未保存可用的连接观测；不能据此断定没有发出请求。");
+    for (const e of network?.events || []) add(`${e.at || "时间未记录"} · ${e.target} → ${e.route} · ${e.result}`);
+    return box;
+  }
+
+  function createRecoveryPanel(machine = "self") {
+    const panel = document.createElement("section");
+    panel.className = "quota-recovery-panel";
+    const context = document.createElement("div");
+    const notice = document.createElement("p");
+    notice.setAttribute("role", "status");
+    const details = document.createElement("div");
+    const read = document.createElement("button");
+    const probe = document.createElement("button");
+    read.type = probe.type = "button";
+    read.className = probe.className = "btn";
+    read.textContent = "重新读取状态";
+    probe.textContent = "核对并探测一次";
+    probe.disabled = true;
+    panel.append(context, read, probe, notice, details);
+    let state = null, busy = false;
+    const controller = new AbortController();
+    window.AgentMonitor?.onPageCleanup?.(() => controller.abort());
+    async function requestJSON(url, options = {}, timeout = 20000) {
+      const attempt = new AbortController();
+      const abort = () => attempt.abort();
+      controller.signal.addEventListener("abort", abort, {once:true});
+      const timer = setTimeout(abort, timeout);
+      try {
+        if (controller.signal.aborted) abort();
+        const response = await fetch(url, {...options, signal:attempt.signal});
+        return {response, value:await response.json()};
+      } finally {
+        clearTimeout(timer);
+        controller.signal.removeEventListener("abort", abort);
+      }
+    }
+    function render(value) {
+      context.replaceChildren();
+      const add = text => { const p = document.createElement("p"); p.textContent = text; context.appendChild(p); };
+      const a = value.account || {};
+      add(`执行机器：${value.machine}；状态读取于 ${value.observed_at}。`);
+      add(`查询账号：${a.account_label || "身份未取得"}；工作区：${a.account_id || "未取得"}。`);
+      add(`账号来源：${({default:"默认 Codex 目录",managed:"托管账号 " + (a.profile || ""),configured:"服务配置指定目录"})[a.source] || "未知"}；凭据位置：${a.credential_path || "未取得"}。`);
+      add("以上仅为本地身份记录，不证明上游认证有效。新增托管账号与此失败的因果关系未核实；不会自动切换账号。");
+      add(value.pause ? "Monitor 保护暂停仍生效；不表示所有账号都被供应商拒绝。此前的批次结果仍保留。" : "当前没有本机 Codex 通道暂停；本次状态读取没有发出上游请求，也没有自动发送消息。");
+      if (value.pause) add(`当前暂停：${value.pause.id}；${value.pause.failure?.detail || "原始失败原因未记录"}`);
+      if (value.active) add("当前有未闭合操作；请等待后重新读取状态，勿重复探测。");
+      probe.disabled = busy || !value.pause || value.pause.id === "unreadable" || !!value.pause.probe_attempt || !!value.active || !a.account_id || !a.account_label;
+      details.replaceChildren();
+      if (value.last_recovery) details.appendChild(recoveryDiagnostics(value.last_recovery));
+      else if (value.pause?.failure) details.appendChild(recoveryDiagnostics({ok:false, failure:value.pause.failure}));
+      else { const p = document.createElement("p"); p.textContent = "尚无已保存的恢复诊断。旧记录缺失的网络证据无法追溯补造。"; details.appendChild(p); }
+    }
+    async function refresh() {
+      if (busy || controller.signal.aborted) return;
+      busy = true; read.disabled = probe.disabled = true;
+      notice.textContent = "正在读取目标机器的本地状态，不查询上游…";
+      try {
+        const {response, value} = await requestJSON(`/api/quota-recovery?machine=${encodeURIComponent(machine)}`);
+        if (!response.ok || !value.machine || !value.observed_at) throw new Error(value.error || "状态回执不完整");
+        state = value;
+        busy = false; render(value);
+        notice.textContent = "状态已更新；未发出上游请求。";
+        document.dispatchEvent?.(new Event("agent-monitor:recovery-state"));
+      } catch (error) {
+        state = null;
+        notice.textContent = `${error.message} 当前状态未核实，探测保持禁用。`;
+      } finally { busy = false; read.disabled = false; }
+    }
+    read.addEventListener("click", refresh);
+    probe.addEventListener("click", async () => {
+      if (busy || probe.disabled || !state) return;
+      const request = {machine: state.machine, account_id: state.account.account_id, account_label: state.account.account_label, pause_id: state.pause.id};
+      if (!window.confirm(`仅在 ${request.machine} 为 ${request.account_label} 查询一次 Codex 配额。\n使用该机器既有系统代理；不生成模型回复、不自动重试。\n暂停标识：${request.pause_id}\n有效读数保存后恢复自动查询；失败继续暂停。确认允许这一次查询？`)) return;
+      busy = true; read.disabled = probe.disabled = true;
+      notice.textContent = "正在探测，请等待回执…";
+      let receipt, code;
+      try {
+        const {response, value} = await requestJSON("/api/quota-recovery", {method:"POST", headers:{"Content-Type":"application/json","X-Agent-Monitor":"action"},body:JSON.stringify(request)}, 90000);
+        code = response.status;
+        receipt = value;
+        notice.textContent = receipt.message || receipt.error || "请查看回执并重新读取状态。";
+      } catch (_) { notice.textContent = "回执未取得，执行结果未知；只读取已有记录，勿重复探测。"; }
+      const outcome = notice.textContent;
+      busy = false;
+      await refresh();
+      notice.textContent = outcome + " " + notice.textContent;
+      if (receipt?.ok || receipt?.failure) details.replaceChildren(recoveryDiagnostics({...receipt, request}, code));
+      else if (code) notice.textContent += ` Monitor HTTP：${code}（本地接口结果）；下方保留刚读取的历史诊断。`;
+    });
+    refresh();
+    return panel;
+  }
+
   function quotaFailureDetails(provider, failures) {
     const body = document.createElement("tbody");
     const row = document.createElement("tr");
@@ -303,35 +416,14 @@
       note.textContent = `${failure.machine}：${failure.reason}`;
       entry.appendChild(note);
       const pause = failure.pause;
-      if (provider.key === "codex" && pause?.id && pause.id !== "unreadable"
-          && failure.account_id && failure.account_label) {
-        const context = document.createElement("p");
-        context.textContent = `账号：${failure.account_label}；暂停时间：${pause.at ? new Date(pause.at * 1000).toLocaleString() : "未记录"}。${failure.failure?.detail || "旧记录可能缺少上游原始原因。"}`;
-        entry.appendChild(context);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = pause.probe_attempt ? "本次暂停的探测机会已使用" : "核对并探测一次";
-        button.disabled = !!pause.probe_attempt;
-        button.addEventListener("click", async () => {
-          const confirmed = window.confirm(`仅在 ${failure.machine} 为 ${failure.account_label} 查询一次 Codex 配额。\n暂停标识：${pause.id}\n不生成模型回复、不自动重试。成功保存有效读数后恢复自动查询；失败继续暂停。确认已核对原因并允许这一次查询？`);
-          if (!confirmed) return;
-          button.disabled = true;
-          button.textContent = "正在探测，请等待回执…";
-          try {
-            const response = await fetch("/api/quota-recovery", {method: "POST", headers: {"Content-Type": "application/json", "X-Agent-Monitor": "action"},
-              body: JSON.stringify({machine: failure.machine, account_id: failure.account_id, account_label: failure.account_label, pause_id: pause.id})});
-            const receipt = await response.json();
-            context.textContent = (receipt.message || receipt.error || "未取得有效回执，请核对目标机器状态。")
-              + (receipt.failure?.detail ? ` 原因：${receipt.failure.detail}` : "");
-            button.textContent = receipt.ok ? "恢复成功" : "未恢复，请核对详情";
-            if (receipt.ok) window.location.reload();
-          } catch (_) {
-            context.textContent = "回执未取得，执行结果未知；请核对目标机器的暂停记录，勿重复探测。";
-            button.textContent = "结果未确认";
-          }
-        });
-        entry.appendChild(button);
+      if (provider.key === "codex" && failure.machine) {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.textContent = "查看当前状态与恢复";
+        open.addEventListener("click", () => { open.disabled = true; entry.appendChild(createRecoveryPanel(failure.machine)); });
+        entry.appendChild(open);
       }
+
     });
     cell.appendChild(details);
     row.appendChild(cell);
@@ -1203,5 +1295,5 @@
     renderedQuotaRateLimits = null;
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
-  return { codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
+  return { createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
 });

@@ -186,6 +186,7 @@ class RecoveryHttpTests(unittest.TestCase):
             with mock.patch.object(server, "QUOTA_REFRESH", manager),\
                     mock.patch("agent_monitor.http_server.sync.load_machine_config", return_value=SimpleNamespace(by_name={"fixture": machine})),\
                     mock.patch("agent_monitor.http_server.generation.generation_admission_snapshot", return_value=admitted),\
+                    mock.patch("agent_monitor.quota.quota_recovery.read_status", return_value={"source_host_identity":"host-fixture", "account":block, "pause":{"id":"a"*32}, "active":None}),\
                     mock.patch("agent_monitor.quota.quota_recovery.run", return_value=receipt) as run:
                 request_finished = threading.Event()
 

@@ -64,11 +64,11 @@ assert.match(controls.pauseDetail.textContent, /2026-10-26/);
 assert.equal(controls.pauseRecovery.disabled, false);
 for (const wrong of [null, {...target, pause: {id: "old"}}, {...target, account_id: ""}]) {
   render(pause, wrong);
-  assert.equal(controls.pauseRecovery.disabled, true);
+  assert.equal(controls.pauseRecovery.disabled, false, "local status remains readable even when overview is stale");
   assert.match(controls.pauseDetail.textContent, /未.*匹配|无法.*匹配/);
 }
 render({...pause, id: "unreadable"}, null);
-assert.equal(controls.pauseRecovery.disabled, true);
+assert.equal(controls.pauseRecovery.disabled, false, "local status remains readable even when overview is stale");
 assert.match(controls.pauseDetail.textContent, /无法读取/);
 render(pause, {...target, pause: {id: "p1", probe_attempt: {id: "used"}}});
 assert.equal(controls.pauseRecovery.disabled, false, "used probe still has a readable recovery record");

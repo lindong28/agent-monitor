@@ -21,7 +21,7 @@ const tool = args['agent-browser'] || path.join(repo,'node_modules/.bin/agent-br
 assert.ok(path.isAbsolute(tool) && fs.existsSync(tool), 'Run npm ci first, or supply --agent-browser /absolute/path/to/agent-browser');
 assert.ok(args.browser && path.isAbsolute(args.browser) && fs.existsSync(args.browser), 'Supply --browser /absolute/path/to/Chrome (see CONTRIBUTING.md)');
 const python = args.python || path.join(repo,'.venv/bin/python');
-const root = fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(),'monitor-accept-'));
+const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(),'monitor-accept-'));
 // A fresh HOME alone does not override CLI/provider/profile environment variables.
 const env = {PATH:process.env.PATH || '/usr/bin:/bin', LANG:process.env.LANG || 'en_US.UTF-8',
   HOME:root, TMPDIR:root, XDG_CONFIG_HOME:path.join(root,'config'), XDG_CACHE_HOME:path.join(root,'cache'),
@@ -161,32 +161,30 @@ try {
   await click('#codex-device-cancel',"document.querySelector('#codex-device-cancel').hidden");
   assert.deepEqual([(await stats()).previews,(await stats()).starts.length],[2,1]);
   console.log('PASS: pairing failure and cancellation do not preview or send another batch.');
-  const recovery='#codex-pause-recovery', record='[data-codex-pause-id="fixture-pause"]';
+  const recovery='#codex-pause-recovery', panel='#codex-upstream-pause .quota-recovery-panel';
+  const probe=panel+' > button:nth-of-type(2)', refresh=panel+' > button:first-of-type';
   const paused=`document.querySelector('${primary}').disabled && !document.querySelector('#codex-upstream-pause').hidden`;
-  const focused=`document.activeElement?.dataset.codexPauseId === 'fixture-pause'`;
+  const focused=`!!document.querySelector('${panel}') && document.querySelector('${panel}').textContent.includes('执行机器：fixture-hub')`;
   await configure({paused:true});
   await bt('open',url);
-  await until('pause explanation and quota record',()=>read(`${paused} && !document.querySelector('${recovery}').disabled`));
-  assert.match(await read("document.querySelector('#codex-batch-status').textContent"),/暂停/);
-  assert.match(await read("document.querySelector('#codex-pause-detail').textContent"),/Synthetic RPC failure/);
-  assert.equal(await read("[...document.querySelectorAll('#codex-account-list button')].filter(b=>b.textContent.includes('解除')).length"),0);
+  await until('pause explanation',()=>read(paused));
   await click(recovery,focused);
-  assert.equal(await read(`document.querySelector('${record}').closest('details').open`),true);
-  assert.equal(await read(`(() => {const r=document.querySelector('${record}').getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight})()`),true);
-  assert.equal((await stats()).recoveries.length,0,'navigation makes no recovery request');
-  assert.equal((await stats()).starts.length,1,'navigation never sends a batch');
+  assert.equal((await stats()).recoveries.length,0,'reading status makes no recovery request');
+  assert.equal((await stats()).starts.length,1,'reading status never sends a batch');
+  assert.match(await read(`document.querySelector('${panel}').textContent`),/默认 Codex 目录/);
   for(const pause_record of ['stale','incomplete','duplicate']) {
     await configure({pause_record});
     await bt('open',url);
-    await until('unmatched pause explanation',()=>read(`${paused} && document.querySelector('#codex-pause-detail').textContent.includes('未匹配')`));
-    assert.equal(await read(`document.querySelector('${recovery}').disabled`),true);
+    await until('pause',()=>read(paused));
+    await click(recovery,focused);
+    assert.equal(await read(`document.querySelector('${probe}').disabled`),false,'fresh source status replaces stale overview');
   }
   await configure({pause_record:'matched',probe_used:true});
   await bt('open',url);
-  await until('used probe record',()=>read(`!!document.querySelector('${record} button') && !document.querySelector('${recovery}').disabled`));
+  await until('pause',()=>read(paused));
   await click(recovery,focused);
-  assert.equal(await read(`document.querySelector('${record} button').disabled`),true);
-  console.log('PASS: exact pause navigation issues zero requests; stale/incomplete/ambiguous records stay blocked; used probe stays disabled.');
+  assert.equal(await read(`document.querySelector('${probe}').disabled`),true);
+  console.log('PASS: local status stays readable with stale/incomplete/ambiguous snapshots; used probe stays disabled; no provider request.');
   // Browser dialogs remain native: verify the exact target before accepting.
   async function confirmControl(selector, accept=true) {
     await bt('scrollintoview',selector);
@@ -210,18 +208,32 @@ try {
   for(const recovery_mode of ['failure','unknown','success']) {
     await configure({recovery_mode});
     await bt('open',url);
-    await until('recoverable pause',()=>read(`${paused} && !document.querySelector('${recovery}').disabled`));
+    await until('recoverable pause',()=>read(paused));
     await click(recovery,focused);
     const before=(await stats()).recoveries.length;
-    await confirmControl(`${record} button`,false);
-    assert.equal((await stats()).recoveries.length,before,'cancel does not query');
-    await confirmControl(`${record} button`);
+    const pauseId=(await stats()).pause_id;
+    await confirmControl(probe,false);
+    assert.equal((await stats()).recoveries.length,before);
+    await confirmControl(probe);
     await until('recovery receipt',async()=>(await stats()).recoveries.length===before+1);
-    assert.deepEqual((await stats()).recoveries.at(-1),{machine:'fixture-hub',account_id:'workspace-0',account_label:'fixture0@example.test',pause_id:'fixture-pause'});
-    if(recovery_mode==='success') await until('unpaused reload',()=>read(ready));
+    assert.deepEqual((await stats()).recoveries.at(-1),{machine:'fixture-hub',account_id:'workspace-0',account_label:'fixture0@example.test',pause_id:pauseId});
+    if(recovery_mode==='success') await until('unpaused readback',()=>read(ready));
     else {
-      await until('retained pause after recovery error',()=>read(`document.querySelector('${record} button').textContent.includes('${recovery_mode==='unknown'?'结果未确认':'未恢复'}')`));
+      await until('new pause readback',()=>read(`document.querySelector('${panel}').textContent.includes('pause-after-${before+1}')`));
       assert.equal(await read(paused),true);
+      assert.match(await read(`document.querySelector('${panel}').textContent`),/-32603/,'automatic readback retains stored diagnostics even for a JSON unknown receipt');
+      await bt('open',url);
+      await until('pause after reload',()=>read(paused));
+      await click(recovery,focused);
+      await bt('eval',`document.querySelector('${panel} details').open=true`);
+      const text=await read(`document.querySelector('${panel}').innerText`);
+      assert.match(text,/-32603/); assert.match(text,/上游 HTTP：未取得/);
+      assert.match(text,/公网出口 IP／地区：未核实/); assert.match(text,/127.0.0.1:59527/);
+      const reads=(await stats()).recovery_reads;
+      await bt('click',refresh);
+      await until('explicit state refresh',async()=>(await stats()).recovery_reads>reads);
+      assert((await stats()).recovery_reads>reads);
+      assert.equal((await stats()).recoveries.length,before+1,'readback never retries');
     }
     assert.equal((await stats()).starts.length,1,'recovery never automatically sends');
   }
@@ -249,7 +261,7 @@ finally {
     }
   }
   // A browser cleanup error must not skip the fixture and native daemon cleanup.
-  try { await stopChildren();fs.rmSync(root,{recursive:true,force:true}); }
+  try { await stopChildren();console.log('Isolated evidence retained at '+root); }
   catch(error) { failure ||= error;console.error('Cleanup incomplete; isolated evidence retained at '+root); }
 }
 if(failure) { console.error('FAIL: '+failure.message);process.exitCode=1; }

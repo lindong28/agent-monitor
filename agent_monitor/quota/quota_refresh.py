@@ -77,7 +77,7 @@ class NoSubscription(RefreshError):
     """The user confirmed this account has no quota-bearing subscription."""
 
 
-def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None):
+def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None):
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
     if recovery_account_id is not None and (provider != "claude" or recovery_account_id != account.account_id):
@@ -88,6 +88,8 @@ def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account
     try:
         options = {} if probe_pause_id is None else {"probe_pause_id": probe_pause_id}
         lease = upstream_controls.Controls(ROOT / "state/upstream_controls").acquire(provider, **options)
+        if admitted_probe is not None and probe_pause_id is not None:
+            admitted_probe.update(lease.state['pause']['probe_attempt'])
     except (upstream_controls.Paused, upstream_controls.Busy) as exc:
         failure = None
         if isinstance(exc, upstream_controls.Paused):

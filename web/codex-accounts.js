@@ -251,11 +251,14 @@ export function init({ autoLoad = true } = {}) {
     if (current()) renderAccountPause(upstreamPause, window.AgentMonitor.codexPauseTarget?.(upstreamPause?.id), pauseControls);
   }
   pauseControls.pauseRecovery?.addEventListener("click", () => {
-    if (!window.AgentMonitor.showCodexPauseRecovery?.(upstreamPause?.id)) {
-      renderPause();
-      notice.textContent = "未能定位此暂停的恢复记录；请刷新页面重新读取，暂停仍保留。";
+    let panel = pauseControls.pausePanel.querySelector(".quota-recovery-panel");
+    if (!panel) {
+      panel = window.AgentMonitor.createRecoveryPanel?.("self");
+      if (panel) pauseControls.pausePanel.appendChild(panel);
     }
+    panel?.scrollIntoView({block: "nearest"});
   });
+  document.addEventListener("agent-monitor:recovery-state", load);
   document.addEventListener("agent-monitor:quota-rendered", renderPause);
 
   batchStart.addEventListener("click", () => actions.performBatch("batch-start"));
@@ -417,6 +420,7 @@ export function init({ autoLoad = true } = {}) {
     controller.abort();
     document.removeEventListener("visibilitychange", visibility);
     document.removeEventListener("agent-monitor:quota-rendered", renderPause);
+    document.removeEventListener("agent-monitor:recovery-state", load);
   });
   if (autoLoad) {
     load();
@@ -504,8 +508,9 @@ export function renderAccountPause(pause, target, controls) {
   if (matched) pauseDetail.textContent += ` 恢复查询账号：${target.account_label}。`;
   else pauseDetail.textContent += pause.id === "unreadable"
     ? " 暂停状态无法读取，请在服务端修复状态文件；不能直接解除。"
-    : " 尚未匹配到此暂停的完整机器与账号记录；请刷新页面重新读取。暂停仍保留，不会猜测恢复目标。";
-  pauseRecovery.disabled = !matched || pause.id === "unreadable";
+    : " 概览尚未匹配到当前暂停；请查看当前状态与诊断，直接读取服务端本机记录。暂停仍保留。";
+  pauseRecovery.disabled = false;
+  pauseRecovery.textContent = "查看当前状态与诊断";
 }
 
 export function renderAccountBatch(state, controls) {

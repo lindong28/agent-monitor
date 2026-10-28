@@ -23,9 +23,9 @@ def main():
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
     state = dict(mode='mixed', delay=0, starts=[], previews=0, paused=False,
                  pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
-                 pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False)
+                 pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause')
     def pause():
-        return dict(id='fixture-pause', at=1793004570, failure=dict(detail='Synthetic RPC failure'))
+        return dict(id=state['pause_id'], at=1793004570, failure=dict(detail='Synthetic RPC failure', stage='quota_read', rpc_code=-32603), **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
     def quota():
         target = dict(machine='fixture-hub', account_id='workspace-0', account_label='fixture0@example.test',
                       reason='本机已暂停该服务的自动请求', query_state='paused', pause=pause())
@@ -83,6 +83,12 @@ def main():
                 visible = [dict(a, restrictions={'unknown': True} if state['restricted'] and a['id'] == '0' else {}) for a in accounts]
                 self.send(dict(accounts=visible, batch=dict(id='fixture-old', items=[], created_at='2026-10-23T01:00:00Z'),
                                upstream_pause=pause() if state['paused'] else None))
+            elif self.path.startswith('/api/quota-recovery?'):
+                state['recovery_reads'] += 1
+                self.send(dict(machine='fixture-hub', source_host_identity='fixture-host', observed_at='2026-10-28T00:00:00Z',
+                    pause=pause() if state['paused'] else None, active=None,
+                    account=dict(account_id='workspace-0', account_label='fixture0@example.test', source='default', credential_path='/fixture/.codex/auth.json'),
+                    last_recovery=state['last_recovery']))
             elif self.path == '/fixture/quota':
                 self.send(quota())
             elif self.path == '/fixture/stats':
@@ -132,13 +138,20 @@ def main():
                 self.send(state)
             elif self.path == '/api/quota-recovery':
                 state['recoveries'].append(payload)
+                state['pause_id'] = 'pause-after-' + str(len(state['recoveries']))
+                receipt = dict(ok=state['recovery_mode']=='success', request=payload,
+                    observed_at='2026-10-28T00:00:01Z', pause_id=state['pause_id'],
+                    failure=dict(stage='quota_read', rpc_code=-32603, detail='Synthetic recovery failure'),
+                    network=dict(policy='chromium-system', coverage='recent_connections_only', events=[
+                        dict(target='https://chatgpt.com', route='PROXY 127.0.0.1:59527', result='connected')]))
+                state['last_recovery'] = receipt
                 if state['recovery_mode'] == 'unknown':
-                    self.send(b'not json', 'text/plain')
+                    self.send(dict(ok=False, error='恢复回执未取得，执行结果未知；勿重复探测。'), status=409)
                 elif state['recovery_mode'] == 'failure':
-                    self.send(dict(ok=False, message='Synthetic recovery failure'), status=409)
+                    self.send(receipt, status=409)
                 else:
                     state['paused'] = False
-                    self.send(dict(ok=True, message='Synthetic recovery success'))
+                    self.send(receipt)
             elif self.path == '/api/codex-accounts/resume':
                 state['resumes'].append(payload)
                 state['restricted'] = False

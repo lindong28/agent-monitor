@@ -144,6 +144,19 @@ class Manager:
             with self.condition:
                 self.recovering = False
 
+    def recovery_status(self, machine):
+        from agent_monitor.snapshots import generation
+        from agent_monitor.quota import quota_recovery
+        with generation.generation_admission_snapshot() as admission:
+            current = next((item for item in admission.admitted if item.host == machine.name), None)
+            if current is None:
+                raise ValueError("目标机器尚未通过来源确认。")
+            identity = current.meta["source_host_identity"]
+        status = quota_recovery.read_status(machine)
+        if status.get("source_host_identity") != identity:
+            raise ValueError("目标机器身份变化，未采纳状态；请先重新采集确认来源。")
+        return {**status, "machine": machine.name}
+
     def recover(self, machine, value):
         """Admit and persist one recovery receipt while recovery_scope is held."""
         from agent_monitor.snapshots import generation
@@ -154,9 +167,13 @@ class Manager:
                 return {"error": "目标机器尚未通过来源确认。"}, 409
             meta = dict(current.meta)
             limits = self.merge(current, machine)
-        before = limits.get("codex") or {}
+        status = self.recovery_status(machine)
+        before = status.get("account") or {}
         if (before.get("account_id"), before.get("account_label")) != (value["account_id"], value["account_label"]):
             return {"error": "页面账号已变化，请重新核对。"}, 409
+        if (status.get("active") or (status.get("pause") or {}).get("probe_attempt")
+                or (status.get("pause") or {}).get("id") != value["pause_id"]):
+            return {"error": "暂停状态已变化或仍有操作，请重新读取状态。"}, 409
         receipt = quota_recovery.run(machine, value)
         if receipt.get("ok"):
             block = receipt.get("block") or {}
@@ -175,6 +192,7 @@ class Manager:
                 write_message(self.path, {"version": 1, "machines": self.records})
                 self.revision += 1
             receipt = {"ok": True, "message": "有效读数已保存，目标机器的 Codex 自动查询已恢复。",
+                       **({"record_error": receipt["record_error"]} if receipt.get("record_error") else {}),
                        "network": receipt.get("network", {"coverage": "unavailable", "events": []})}
         return receipt, 200 if receipt.get("ok") else 409
 

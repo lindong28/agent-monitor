@@ -642,6 +642,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_request(self, send_body=True):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/quota-recovery":
+            query = parse_qs(parsed.query)
+            config = sync.load_machine_config()
+            name = _first(query, "machine", "")
+            machine = next((m for m in config.by_name.values() if m.is_self), None) if name == "self" else config.by_name.get(name)
+            if machine is None:
+                self._send_json({"error": "请选择已配置的机器。"}, status=400, send_body=send_body)
+                return
+            try:
+                self._send_json(QUOTA_REFRESH.recovery_status(machine), send_body=send_body)
+            except Exception:
+                self._send_json({"error": "未取得可核验的当前状态；暂停未解除，未发出上游请求。"}, status=503, send_body=send_body)
+            return
         if parsed.path == "/api/codex-accounts":
             self._handle_codex_accounts(parsed.path, send_body=send_body)
             return
