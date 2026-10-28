@@ -52,6 +52,8 @@ class UsageArchive:
 
     @staticmethod
     def _initialize_incremental(conn):
+        from . import usage_models
+        usage_models.initialize(conn)
         conn.execute("CREATE TABLE IF NOT EXISTS archive_dirty (dedup_key TEXT PRIMARY KEY)")
         # Separate from projection dirtiness: ordinary full-read callers do not
         # consume archive_dirty, and downgrade writers must invalidate replay.
