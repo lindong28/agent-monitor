@@ -23,6 +23,14 @@ When reusing an interpreter from another development checkout instead of install
 
 To exercise the reader's main flow, use the README's isolated sample and inspect the session in a browser. Tests, sample usage and real provider/account verification are distinct claims. Do not make paid provider requests merely to run the tests.
 
+## Local task evidence
+
+Runtime state belongs to the checkout's `state/` directory and may be a deployment-owned symlink. Its ownership and maintenance rules are in [architecture](docs/public-architecture.md#persistence-and-maintenance). Do not move it into a task directory.
+
+Developer task materials are separate from source and business data. This maintainer environment uses `~/task-artifacts/`; each task records its inputs, logs, results and continuation state in its own directory. Materials are retained for manual cleanup. Existing historical task locations stay in place and can be linked from that entry; the entry does not imply that every older artifact has been indexed.
+
+An ignored checkout-local `.local-data` symlink may point to an existing external task root. Verify its target before use; a missing or broken link does not mean the data has moved into the checkout. Contributors may use their own external location and record it in their task notes; no maintainer path or harness is required to run this project. Do not put credentials, provider profiles or production state in the evidence directory.
+
 ## Choose a validation entry
 
 Start with the [responsibility map](docs/public-architecture.md#responsibility-map), then run the existing checks for the behavior you changed. Keep the disposable HOME and source overrides from development setup for each command that loads product code. Use Node 24 to match CI; Python-only commands use this checkout's `.venv/bin/python`.

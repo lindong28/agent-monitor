@@ -331,7 +331,7 @@ network_health_hint() {
   local json
   json="$("$BIN_DIR/ip-check" --json 2>/dev/null)" || return 0
   # Script via stdin (`-`); JSON + runbook path via argv so stdin isn't contended.
-  "$py" - "$json" "$ROOT_DIR/NETWORK-REMEDIATION.md" <<'PY' || true
+  "$py" - "$json" "$ROOT_DIR/docs/operations/services.md" <<'PY' || true
 import sys, json
 raw, runbook = sys.argv[1], sys.argv[2]
 try:

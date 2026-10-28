@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
@@ -270,10 +271,15 @@ class RenderTests(unittest.TestCase):
         text = network_report.render(snapshot(proxy_envs={"HTTP_PROXY": "http://127.0.0.1:59625"}), "test")
         self.assertIn("http://127.0.0.1:59625", text)
 
-    def test_remediation_pointer_is_an_absolute_path(self):
+    def test_remediation_pointer_reaches_readable_guidance(self):
         # The command is installed into ~/.local/bin and runs from any directory.
         text = network_report.render(snapshot(conclusions=[{"level": "bad", "text": "IPv6 leak"}]), "test")
-        self.assertIn(str(network_report.ROOT / "NETWORK-REMEDIATION.md"), text)
+        pointer = next(line.split("处置建议见 ", 1)[1] for line in text.splitlines() if "处置建议见 " in line)
+        path = Path(pointer)
+        self.assertTrue(path.is_absolute())
+        guidance = path.read_text(encoding="utf-8")
+        self.assertIn("## Network diagnostic findings", guidance)
+        self.assertIn("agent-monitor network --force", guidance)
 
 
 class ColumnWidthTests(unittest.TestCase):

@@ -149,7 +149,7 @@ project_paths.py / agent_monitor/        共享路径、源码清单与内部职
 agent_monitor/contracts/                共享用量、额度类型与快照常量
 agent_monitor/ingestion/                数据加载、归档合并与项目身份恢复
 agent_monitor/views/                    概览、会话与网络查询及其缓存
-*.py                                    公开脚本和既有后端模块；按职责索引定位
+*.py                                    公开命令适配器、路径引导与共享计费契约
 parsers/                                Claude/Codex 日志与账号数据源读取器
 web/                                    仪表盘页面模块、导航、共享组件和样式
 proxy_runtime/                          系统代理解析辅助程序
@@ -157,7 +157,6 @@ ip_check/                               网络诊断与归因
 examples/                               公开配置示例与虚构样本
 scripts/ / tests/                       显式验收、测量与回归测试
 docs/                                   使用、架构、运维与核算指南
-storage/README.md                       开发任务材料的本机存储入口说明
 ```
 
 | 阅读目的 | 从这里开始 |
@@ -165,7 +164,7 @@ storage/README.md                       开发任务材料的本机存储入口�
 | 配置、更新或排障 | [使用与运维](docs/public-usage.md) |
 | 查找改动涉及的模块与回归测试 | [职责索引](docs/public-architecture.md#responsibility-map) |
 | 搭建开发环境并选择检查项 | [贡献与验证](CONTRIBUTING.md) |
-| 查找开发任务的本机证据与产物 | [任务存储](storage/README.md) |
+| 查找开发任务的本机证据与产物 | [贡献指南：任务材料](CONTRIBUTING.md#local-task-evidence) |
 | 理解核算规则与解析器边界 | [核算契约](docs/references/metrics.md) |
 | 报告敏感问题 | [安全政策](SECURITY.md) |
 

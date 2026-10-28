@@ -111,6 +111,20 @@ else: sys.exit(9)
         self.ledger = (self.home / "ledger").read_text()
         return r
 
+    def test_network_hint_points_to_readable_guidance(self):
+        guide = self.component / "docs/operations/services.md"
+        guide.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "docs/operations/services.md", guide)
+        (self.component / "ip-check").write_text(
+            '#!/bin/sh\nprintf \'%s\\n\' \'{"verdict":"high","conclusions":[{"level":"bad","text":"synthetic finding"}]}\'\n'
+        )
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        pointer = next(line.split("How to fix: ", 1)[1] for line in result.stdout.splitlines() if "How to fix: " in line)
+        path = Path(pointer)
+        self.assertTrue(path.is_absolute())
+        self.assertIn("## Network diagnostic findings", path.read_text(encoding="utf-8"))
+
     @unittest.skipUnless(sys.platform == "darwin", "native macOS launchd integration")
     def test_default_installs_and_repeat_reuses_loaded_schedule(self):
         r = self.install()

@@ -402,7 +402,7 @@ def render_attention(snapshot, gaps, lines):
             continue
         lines.append("  ? %s%s" % (_pad(name, 14), reason))
     if findings:
-        lines.append("  处置建议见 %s" % (ROOT / "NETWORK-REMEDIATION.md"))
+        lines.append("  处置建议见 %s" % (ROOT / "docs/operations/services.md"))
 
 
 def _redact_proxy(value):

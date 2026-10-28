@@ -70,7 +70,7 @@ Root files need a public invocation, bootstrap, shared contract, configuration o
 | Account memory | One `AccountMemory` instance owns `state/account_memory.json` and concurrent deletion/upsert coordination. Quota views and HTTP deletion use that same instance. | Preserve admission → epoch registration → live candidate derivation; deleting an account must not allow an older in-flight candidate to restore it. |
 | Collection | One coordinator owns round state, refresh requests and callbacks; HTTP handlers request or read it. | Check automatic/manual refresh, overlapping requests, completion/failure and query-view lifetime. Extraction does not add collection work or change cadence. |
 
-Runtime data remains under `state/`: archives and rollup preserve usage history, generations hold admitted snapshots, account memory preserves remembered readings, and identity/lock files protect those owners. These are distinct from developer task evidence. [Task storage](../storage/README.md) describes local evidence navigation; it does not relocate business data.
+Runtime data remains under `state/`: archives and rollup preserve usage history, generations hold admitted snapshots, account memory preserves remembered readings, and identity/lock files protect those owners. These are distinct from developer task evidence. [Task storage](../CONTRIBUTING.md#local-task-evidence) describes local evidence navigation; it does not relocate business data.
 
 ### Frontend boundaries
 

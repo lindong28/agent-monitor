@@ -4,6 +4,14 @@ Installation, update and existing-installation transition are documented in [usa
 
 Managed deployment checks the Hub's `/api/health?asset_watch=1` and the connector's loopback `/health`. Their `source_root` and `deployment_signature` identify the checkout and source/selected configuration captured at process startup; changing a plist alone is not proof of activation. The installer checks this identity with a bounded wait after replacement and retains an already matching process. This proves local process response, not browser access, collected-data admission, provider availability or completion of account actions. Hub startup diagnostics remain in `state/hub.log`; connector connection/failure observations remain at its configured status-file path. Deployment failures are synchronous nonzero installer results; no new background alert service is installed.
 
+## Network diagnostic findings
+
+The `agent-monitor network` report describes the server machine's observed route, not the browser device's IP or provider-account availability. Read the timestamp and missing-observation messages before acting on a risk label. A local IPv6 address is not proof of public IPv6 leakage; DNS resolver and IP-reputation observations do not establish whether an account can use a provider.
+
+If the report names an unresponsive proxy, first check the selected system proxy and whether that proxy process is running on the report's machine. Keep the installation's established route; do not switch machines, proxies or direct access merely to make a diagnostic succeed. For partial public-IP, DNS or reputation results, inspect the named section's error and retain the unknown result instead of treating it as a clean reading. Review the intended region and local timezone before changing either setting.
+
+After an authorized correction, run `agent-monitor network --force` on the same machine and compare the affected observation and timestamp. This requests fresh public diagnostics and can contact external services; do not run it as an offline check. Use `agent-monitor network --json` when retaining a structured report, and remove private addresses or metadata before sharing it. Quota holds use the separate [recovery procedure](#paused-codex-quota-queries); a network risk label does not authorize clearing a hold or replaying an account action.
+
 ## Paused Codex quota queries
 
 Quota observation age and active-query health are independent. A recent Codex session log can supply a fresh reading while the machine's active query remains paused. Expand the reading timestamp for its source, and expand **Codex 采集详情** for the affected machine, account, pause time and available failure evidence. Legacy pauses without an upstream reason remain unknown; fresh session activity or a restart does not clear them.
