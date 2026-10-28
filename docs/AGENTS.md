@@ -9,6 +9,7 @@ Public installation and first-use instructions live in [the README](../README.md
 | [operations/services.md](operations/services.md) | Interpret runtime diagnostics and run isolated backend measurements |
 | [references/metrics.md](references/metrics.md) | Preserve accounting and upstream parser boundaries |
 | [design.md](design.md) | Maintain the shared dashboard presentation |
+| [issues/general.md](issues/general.md) | Follow up source-level recovery and diagnostic observations |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Set up isolated development and report changes |
 
 Use one line per Markdown paragraph. Preserve snapshot/accounting semantics and clearly separate synthetic tests, real provider checks and deployed consumer evidence.

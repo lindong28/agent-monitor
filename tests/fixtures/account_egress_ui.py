@@ -23,7 +23,7 @@ def main():
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
     state = dict(mode='mixed', delay=0, starts=[], previews=0, paused=False,
                  pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
-                 pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause')
+                 pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause', recovery_state='ready')
     def pause():
         return dict(id=state['pause_id'], at=1793004570, failure=dict(detail='Synthetic RPC failure', stage='quota_read', rpc_code=-32603), **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
     def quota():
@@ -85,9 +85,13 @@ def main():
                                upstream_pause=pause() if state['paused'] else None))
             elif self.path.startswith('/api/quota-recovery?'):
                 state['recovery_reads'] += 1
+                if state['recovery_state'] == 'unavailable':
+                    self.send(dict(error='Synthetic state read failure'), status=503)
+                    return
                 self.send(dict(machine='fixture-hub', source_host_identity='fixture-host', observed_at='2026-10-28T00:00:00Z',
-                    pause=pause() if state['paused'] else None, active=None,
-                    account=dict(account_id='workspace-0', account_label='fixture0@example.test', source='default', credential_path='/fixture/.codex/auth.json'),
+                    pause=(dict(id='unreadable') if state['recovery_state']=='unreadable' else pause()) if state['paused'] else None,
+                    active=dict(id='active') if state['recovery_state']=='active' else None,
+                    account=dict(account_id='' if state['recovery_state']=='identity' else 'workspace-0', account_label='fixture0@example.test', source='default', credential_path='/fixture/.codex/auth.json'),
                     last_recovery=state['last_recovery']))
             elif self.path == '/fixture/quota':
                 self.send(quota())
@@ -132,7 +136,7 @@ def main():
                 state['starts'].append(payload)
                 self.send({})
             elif self.path == '/fixture/config':
-                for key in ('mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted'):
+                for key in ('mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state'):
                     if key in payload:
                         state[key] = payload[key]
                 self.send(state)

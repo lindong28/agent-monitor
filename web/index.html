@@ -207,8 +207,12 @@
                   <p><strong id="codex-pause-summary"></strong></p>
                   <p id="codex-pause-detail"></p>
                   <button id="codex-pause-recovery" type="button" class="btn">查看暂停原因与恢复</button>
-                  <p>先核对原始失败，再明确批准一次配额探测；保存有效读数后才解除本机暂停。恢复不会自动发送消息，仍需重新点击发送。</p>
+                  <p>打开恢复说明，查看当前能做什么。重新读取状态不会查询上游；检查配额需要单独确认，也不会重新发送消息。</p>
                 </div>
+                <details id="codex-recovery-history" class="note-disclosure">
+                  <summary>暂停诊断与最近恢复结果</summary>
+                  <div id="codex-recovery-body"></div>
+                </details>
                 <details class="note-disclosure">
                   <summary>如何授权、继续发送或开始新一轮</summary>
                   <div id="codex-batch-help" class="quota-scope"></div>
@@ -217,7 +221,7 @@
               </div>
               <div id="codex-account-unavailable" role="status" aria-live="polite"></div>
               <p id="codex-account-notice" role="status" aria-live="polite"></p>
-              <div class="codex-account-controls"><button id="codex-select-all" type="button" class="btn">全选可发送账号</button><button id="codex-select-none" type="button" class="btn">取消选择</button><span id="codex-selection-count" role="status"></span></div>
+              <div class="codex-account-controls"><button id="codex-select-all" type="button" class="btn">全选可纳入账号</button><button id="codex-select-none" type="button" class="btn">取消选择</button><span id="codex-selection-count" role="status"></span></div>
               <div id="codex-account-list"></div>
               <p class="quota-scope">仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>
             </details>

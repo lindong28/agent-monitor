@@ -161,7 +161,7 @@ try {
   await click('#codex-device-cancel',"document.querySelector('#codex-device-cancel').hidden");
   assert.deepEqual([(await stats()).previews,(await stats()).starts.length],[2,1]);
   console.log('PASS: pairing failure and cancellation do not preview or send another batch.');
-  const recovery='#codex-pause-recovery', panel='#codex-upstream-pause .quota-recovery-panel';
+  const recovery='#codex-pause-recovery', panel='#codex-recovery-body .quota-recovery-panel';
   const probe=panel+' > button:nth-of-type(2)', refresh=panel+' > button:first-of-type';
   const paused=`document.querySelector('${primary}').disabled && !document.querySelector('#codex-upstream-pause').hidden`;
   const focused=`!!document.querySelector('${panel}') && document.querySelector('${panel}').textContent.includes('执行机器：fixture-hub')`;
@@ -184,6 +184,29 @@ try {
   await until('pause',()=>read(paused));
   await click(recovery,focused);
   assert.equal(await read(`document.querySelector('${probe}').disabled`),true);
+  assert.match(await read(`document.querySelector('${panel}').innerText`),/检查机会已使用/);
+  for(const [recovery_state, explanation] of [['active','当前操作尚未结束'],['identity','查询账号身份不完整'],['unreadable','暂停记录无法读取'],['unavailable','当前状态未核实']]) {
+    await configure({recovery_state,probe_used:false});
+    await bt('open',url);
+    await until('pause',()=>read(paused));
+    await click(recovery,`document.querySelector('${panel}')?.innerText.includes('${explanation}')`);
+    assert.equal(await read(`document.querySelector('${probe}').disabled`),true,explanation);
+  }
+  await configure({recovery_state:'ready'});
+  await bt('open',url);
+  await until('pause',()=>read(paused));
+  await click(recovery,focused);
+  assert.match(await read(`document.querySelector('${panel}').innerText`),/为什么不能发送[\s\S]*现在可以检查一次[\s\S]*检查后怎么继续/);
+  // HTTP deployments may not expose the Clipboard API; the manual path must work.
+  await bt('eval',"Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined})");
+  const readCount=(await stats()).recovery_reads;
+  await click(panel+' > button:nth-of-type(3)',`!document.querySelector('${panel} textarea').hidden`);
+  const copied=await read(`document.querySelector('${panel} textarea').value`);
+  assert.match(copied,/fixture-hub/); assert.match(copied,/不会发送或重发消息/);
+  assert.equal((await stats()).recovery_reads,readCount,'copy uses displayed diagnostics only');
+  assert.equal((await stats()).recoveries.length,0,'disabled reasons and copy do not probe');
+  assert.equal(await read(`document.querySelector('${panel} textarea').clientWidth > 400`),true,'manual copy has readable width');
+  await bt('screenshot',path.join(root,'recovery-guidance.png'));
   console.log('PASS: local status stays readable with stale/incomplete/ambiguous snapshots; used probe stays disabled; no provider request.');
   // Browser dialogs remain native: verify the exact target before accepting.
   async function confirmControl(selector, accept=true) {
@@ -217,7 +240,17 @@ try {
     await confirmControl(probe);
     await until('recovery receipt',async()=>(await stats()).recoveries.length===before+1);
     assert.deepEqual((await stats()).recoveries.at(-1),{machine:'fixture-hub',account_id:'workspace-0',account_label:'fixture0@example.test',pause_id:pauseId});
-    if(recovery_mode==='success') await until('unpaused readback',()=>read(ready));
+    if(recovery_mode==='success') {
+      await until('unpaused readback',()=>read(ready));
+      assert.equal(await read(`document.querySelector('${panel}').checkVisibility()`),true,'success stays visible after pause banner hides');
+      assert.match(await read(`document.querySelector('${panel}').innerText`),/本机暂停已解除或当前不存在[\s\S]*此前发送结果保留/);
+      await bt('open',url);
+      await until('unpaused page reload',()=>read(ready));
+      await click('#codex-recovery-history > summary',focused);
+      await bt('click',panel+' details > summary');
+      assert.match(await read(`document.querySelector('${panel}').innerText`),/本次配额读取成功/);
+      await bt('screenshot',path.join(root,'recovery-success.png'));
+    }
     else {
       await until('new pause readback',()=>read(`document.querySelector('${panel}').textContent.includes('pause-after-${before+1}')`));
       assert.equal(await read(paused),true);
@@ -238,6 +271,18 @@ try {
     assert.equal((await stats()).starts.length,1,'recovery never automatically sends');
   }
   console.log('PASS: account resume omits shared pause ID; cancel queries zero times; failed/unknown probes retain pause; success enables explicit sending without replay.');
+  await configure({paused:true});
+  await bt('open',url);
+  await until('quota diagnostics entry',()=>read("!!document.querySelector('#quota-accounts [data-codex-pause-id]')"));
+  await bt('click','#quota-accounts .note-disclosure > summary');
+  const quotaPanel='#quota-accounts [data-codex-pause-id]:nth-child(3) .quota-recovery-panel';
+  const beforeQuota=(await stats()).recoveries.length;
+  await click('#quota-accounts [data-codex-pause-id]:nth-child(3) > button',`document.querySelector('${quotaPanel}')?.innerText.includes('现在可以检查一次')`);
+  assert.match(await read(`document.querySelector('${quotaPanel}').innerText`),/为什么不能发送[\s\S]*检查后怎么继续/);
+  assert.equal((await stats()).recoveries.length,beforeQuota,'quota consumer reads without probing');
+  assert.equal((await stats()).starts.length,1);
+  await bt('screenshot',path.join(root,'quota-recovery-guidance.png'));
+  console.log('PASS: quota diagnostics also expose the shared guidance without a recovery request or send.');
 } catch(error) {
   failure=error;
   if (browserAttempted && fs.existsSync(pidFile)) {

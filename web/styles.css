@@ -525,6 +525,8 @@ button:disabled {
 .codex-account-heading strong { min-width: 0; overflow-wrap: anywhere; }
 .codex-account-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .codex-account-card .codex-account-controls, .codex-account-card .note-disclosure { margin: 0; }
+.quota-recovery-panel { overflow-wrap: anywhere; }
+.quota-recovery-panel > textarea { width: 100%; box-sizing: border-box; margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink); background: var(--surface); font: inherit; }
 .codex-account-footer > details { min-width: 0; }
 .codex-account-footer > details[open] { flex-basis: 100%; }
 @media (min-width: 760px) {

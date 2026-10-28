@@ -302,17 +302,28 @@
     const panel = document.createElement("section");
     panel.className = "quota-recovery-panel";
     const context = document.createElement("div");
+    const guidance = document.createElement("div");
     const notice = document.createElement("p");
     notice.setAttribute("role", "status");
     const details = document.createElement("div");
     const read = document.createElement("button");
     const probe = document.createElement("button");
-    read.type = probe.type = "button";
+    const copy = document.createElement("button");
+    const report = document.createElement("textarea");
+    const copyNotice = document.createElement("p");
+    report.hidden = true;
+    report.readOnly = true;
+    report.rows = 12;
+    report.setAttribute("aria-label", "诊断信息，可选择后复制给维护者");
+    copyNotice.setAttribute("role", "status");
+    copy.type = read.type = probe.type = "button";
     read.className = probe.className = "btn";
+    copy.className = "btn";
     read.textContent = "重新读取状态";
-    probe.textContent = "核对并探测一次";
+    probe.textContent = "检查配额一次";
+    copy.textContent = "复制诊断信息";
     probe.disabled = true;
-    panel.append(context, read, probe, notice, details);
+    panel.append(guidance, context, read, probe, notice, details, copy, copyNotice, report);
     let state = null, busy = false;
     const controller = new AbortController();
     window.AgentMonitor?.onPageCleanup?.(() => controller.abort());
@@ -330,7 +341,42 @@
         controller.signal.removeEventListener("abort", abort);
       }
     }
+    function explain(value, unavailable = false) {
+      guidance.replaceChildren();
+      const add = (title, text) => {
+        const p = document.createElement("p");
+        const label = document.createElement("strong");
+        label.textContent = title + "：";
+        p.appendChild(label);
+        const body = document.createElement("span");
+        body.textContent = text;
+        p.appendChild(body); guidance.appendChild(p);
+      };
+      if (unavailable || !value) {
+        add("当前状态未核实", "暂时不能检查配额。点击“重新读取状态”；若仍失败，复制诊断信息交给执行机器的维护者，检查 Monitor 服务是否可达。下方旧记录不代表当前状态。");
+        return;
+      }
+      if (!value.pause) {
+        add("本机暂停已解除或当前不存在", "无需再做恢复检查。返回“Codex 账号操作”，核对选择、账号登录及限制后，按页面提示继续发送或开始新一轮。此前发送结果保留，不会自动重发；这不保证每个账号都能发送。");
+        if (value.active) add("当前操作尚未结束", "先等待，再重新读取状态并查看账号操作结果。");
+        return;
+      }
+      add("为什么不能发送", "Monitor 的本机 Codex 通道处于保护暂停，因此本机通道的发送、登录和配额查询被阻止；这不表示所有账号都被供应商拒绝。触发暂停的原始记录见下方；具体失败原因以诊断证据为准，错误码本身不能确定根因。");
+      const reasons = [];
+      if (value.active) reasons.push("当前操作尚未结束；先等待，再点击“重新读取状态”查看已有结果，不要重复提交。");
+      if (value.pause.id === "unreadable") reasons.push("暂停记录无法读取；请让执行机器的维护者检查 Monitor 的状态记录与服务日志，修复后重新读取状态。");
+      if (value.pause.probe_attempt) reasons.push("本次暂停的检查机会已使用，不能再次提交。先重新读取状态查看已有结果；若仍暂停，复制诊断信息交给维护者排查，页面不能直接重置这次机会。");
+      if (!value.account?.account_id || !value.account?.account_label) reasons.push("查询账号身份不完整；请让执行机器的维护者核对该服务使用的 Codex 账号配置，恢复身份读取后重新读取状态。");
+      if (reasons.length) {
+        add("现在不能检查", reasons.join(" "));
+      } else {
+        add("现在可以检查一次", "先确认下方执行机器与查询账号是你要恢复的对象，再点击“检查配额一次”并确认。它只查询一次配额，使用该机器原有系统代理，不会发送或重发消息，也不保证成功。");
+        if (value.last_recovery?.ok === false) add("上次检查未成功", "建议先复制诊断信息，让执行机器的维护者核对本次错误、账号配置及既有系统代理的运行状态；处理后重新读取状态。再次检查需要你重新确认，不会自动重试。");
+      }
+      add("检查后怎么继续", "有效配额读数保存成功后才解除本机暂停，再回账号操作明确发送。检查失败会保留暂停与结果；回执不明时先重新读取状态，不按没有执行处理。");
+    }
     function render(value) {
+      explain(value);
       context.replaceChildren();
       const add = text => { const p = document.createElement("p"); p.textContent = text; context.appendChild(p); };
       const a = value.account || {};
@@ -340,7 +386,6 @@
       add("以上仅为本地身份记录，不证明上游认证有效。新增托管账号与此失败的因果关系未核实；不会自动切换账号。");
       add(value.pause ? "Monitor 保护暂停仍生效；不表示所有账号都被供应商拒绝。此前的批次结果仍保留。" : "当前没有本机 Codex 通道暂停；本次状态读取没有发出上游请求，也没有自动发送消息。");
       if (value.pause) add(`当前暂停：${value.pause.id}；${value.pause.failure?.detail || "原始失败原因未记录"}`);
-      if (value.active) add("当前有未闭合操作；请等待后重新读取状态，勿重复探测。");
       probe.disabled = busy || !value.pause || value.pause.id === "unreadable" || !!value.pause.probe_attempt || !!value.active || !a.account_id || !a.account_label;
       details.replaceChildren();
       if (value.last_recovery) details.appendChild(recoveryDiagnostics(value.last_recovery));
@@ -360,10 +405,28 @@
         document.dispatchEvent?.(new Event("agent-monitor:recovery-state"));
       } catch (error) {
         state = null;
+        explain(null, true);
         notice.textContent = `${error.message} 当前状态未核实，探测保持禁用。`;
       } finally { busy = false; read.disabled = false; }
     }
     read.addEventListener("click", refresh);
+    copy.addEventListener("click", async () => {
+      const paragraphs = element => Array.from(element.children).map(child => child.textContent).join("\n");
+      const diagnosticText = Array.from(details.children).map(paragraphs).join("\n");
+      const text = ["Agent Monitor 恢复诊断", state ? "当前状态读取于 " + state.observed_at : "当前状态未核实；以下可能含上次显示的历史记录", paragraphs(guidance), paragraphs(context), notice.textContent, diagnosticText].join("\n\n");
+      // Copy only the already-displayed projection, never fetch raw account data.
+      report.value = text;
+      report.hidden = true;
+      try {
+        if (!window.navigator?.clipboard?.writeText) throw new Error("clipboard unavailable");
+        await window.navigator.clipboard.writeText(text);
+        copyNotice.textContent = "诊断信息已复制，可交给执行机器的维护者。内容含机器与账号标识，分享前请核对接收者。";
+      } catch (_) {
+        report.hidden = false;
+        report.focus(); report.select();
+        copyNotice.textContent = "浏览器未允许自动复制；已选中下方诊断信息，请手动复制给执行机器的维护者。内容含机器与账号标识。";
+      }
+    });
     probe.addEventListener("click", async () => {
       if (busy || probe.disabled || !state) return;
       const request = {machine: state.machine, account_id: state.account.account_id, account_label: state.account.account_label, pause_id: state.pause.id};

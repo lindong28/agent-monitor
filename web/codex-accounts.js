@@ -250,13 +250,21 @@ export function init({ autoLoad = true } = {}) {
   function renderPause() {
     if (current()) renderAccountPause(upstreamPause, window.AgentMonitor.codexPauseTarget?.(upstreamPause?.id), pauseControls);
   }
-  pauseControls.pauseRecovery?.addEventListener("click", () => {
-    let panel = pauseControls.pausePanel.querySelector(".quota-recovery-panel");
+  const recoveryHistory = root.querySelector("#codex-recovery-history");
+  const recoveryBody = root.querySelector("#codex-recovery-body");
+  function openRecovery() {
+    if (!recoveryBody) return;
+    let panel = recoveryBody.querySelector(".quota-recovery-panel");
     if (!panel) {
       panel = window.AgentMonitor.createRecoveryPanel?.("self");
-      if (panel) pauseControls.pausePanel.appendChild(panel);
+      if (panel) recoveryBody.appendChild(panel);
     }
+    if (recoveryHistory) recoveryHistory.open = true;
     panel?.scrollIntoView({block: "nearest"});
+  }
+  pauseControls.pauseRecovery?.addEventListener("click", openRecovery);
+  recoveryHistory?.addEventListener("toggle", () => {
+    if (recoveryHistory.open && recoveryBody && !recoveryBody.querySelector(".quota-recovery-panel")) openRecovery();
   });
   document.addEventListener("agent-monitor:recovery-state", load);
   document.addEventListener("agent-monitor:quota-rendered", renderPause);
@@ -520,7 +528,7 @@ export function renderAccountBatch(state, controls) {
     const eligible = accounts.filter((account) => account.eligible !== false);
     const count = eligible.filter(account => selectedIds?.has(account.id)).length;
     const selectionCount = root.querySelector("#codex-selection-count");
-    if (selectionCount) selectionCount.textContent = `已选 ${count} / ${eligible.length} 个账号`;
+    if (selectionCount) selectionCount.textContent = `已选 ${count} / ${eligible.length} 个可纳入账号；实际发送前另查登录与限制`;
     batchStart.hidden = Boolean(batch);
     batchStart.textContent = `给所选 ${count} 个账号发送`;
     batchStart.disabled = submittingBatch || busy || !count || Boolean(upstreamPause);
@@ -543,7 +551,7 @@ export function renderAccountBatch(state, controls) {
       batchHelp.replaceChildren(
         element("p", "账号来自当前及历史登录记录，无需手动添加。"),
         element("p", "按邮箱顺序逐个完成账号操作，前一个结束并清理后才处理下一个。缺登录态的账号跳过，请单独登录后再发起操作。"),
-        element("p", upstreamPause ? "本机 Codex 请求已暂停；请从按钮旁的恢复入口核对原始失败并批准一次配额探测。" : "仅刷新配额不会发送消息。发送会实际使用额度，不保证固定或重置窗口；异常会停止后续账号。")
+        element("p", upstreamPause ? "本机 Codex 请求已暂停；请从按钮旁的恢复入口查看原因、当前可做的操作与检查后的接续。检查配额需要单独确认。" : "仅刷新配额不会发送消息。发送会实际使用额度，不保证固定或重置窗口；异常会停止后续账号。")
       );
       return;
     }
@@ -582,7 +590,7 @@ export function renderAccountBatch(state, controls) {
         : "继续发送：本轮没有可以继续发送的账号。",
       "刷新：刷新页面或仅查询配额不会重发消息。发送前查询失败或服务端明确拒绝额度使用时，本次不发送。",
       ...(statuses.unknown || statuses.failed ? ["结果未知或发送失败的账号可能已消耗额度，系统不会自动重试。"] : []),
-      ...(upstreamPause ? ["本机 Codex 请求已暂停，机器配额读取也受此保护。请从按钮旁的恢复入口核对并批准一次配额探测；恢复不会自动发送消息。"] : []),
+      ...(upstreamPause ? ["本机 Codex 请求已暂停，机器配额读取也受此保护。请从按钮旁的恢复入口查看当前可做的操作；检查配额需要单独确认，恢复不会自动发送消息。"] : []),
       `再次发送：选择账号后，点击「${batchNext.textContent}」。这会实际使用额度，不保证固定或重置窗口；暂停中的账号仍不会发送。`,
     ];
     batchHelp.replaceChildren(...help.map(text => element("p", text)));
