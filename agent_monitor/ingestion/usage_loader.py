@@ -175,7 +175,7 @@ class UsageLoader:
 
     def enrich_entries(self, entries, read_only=False, diagnostic=False, source_errors=()):
         try:
-            from pricing_fetcher import with_calculated_cost, get_pricing
+            from pricing_fetcher import with_calculated_cost, get_pricing, PreparedPricing
         except ImportError:
             return LoadedEntries(
                 sorted(entries, key=lambda entry: entry.timestamp),
@@ -183,7 +183,7 @@ class UsageLoader:
                 scan_complete=not source_errors,
             )
 
-        pricing = get_pricing(persist=not read_only)
+        pricing = PreparedPricing(get_pricing(persist=not read_only))
         project_paths = sorted({entry.project for entry in entries if self.looks_like_path(entry.project)})
         projects = {}
         pending = []

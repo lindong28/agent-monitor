@@ -53,6 +53,38 @@ class PricingTable(dict):
         self.sources = sources or {}
 
 
+class PreparedPricing(PricingTable):
+    """One collection's fixed price table and reusable arithmetic inputs.
+
+    Keep the original catalog for model admission, service context and source
+    metadata. Only the input to the shared price function is narrowed: it reads
+    the six rate families below, including their threshold-suffixed variants.
+    No calculated amounts are cached, and a new collection gets a new instance.
+    """
+
+    def __init__(self, pricing):
+        super().__init__(pricing, getattr(pricing, "sources", {}))
+        self.model_keys = {}
+        self._price_rates = {}
+
+    def resolve_model_key(self, model):
+        if model not in self.model_keys:
+            self.model_keys[model] = resolve_model_key(model, self)
+        return self.model_keys[model]
+
+    def price_rates(self, rates):
+        key = id(rates)
+        if key not in self._price_rates:
+            families = (token_cost.INPUT_RATE, token_cost.OUTPUT_RATE,
+                        token_cost.CACHE_READ_RATE, token_cost.CACHE_WRITE_RATE,
+                        token_cost.CACHE_WRITE_1H_RATE, token_cost.REASONING_RATE)
+            self._price_rates[key] = {
+                name: value for name, value in rates.items()
+                if isinstance(name, str) and name.startswith(families)
+            }
+        return self._price_rates[key]
+
+
 def _provenance(basis, sources=(), verified_at=None, reason=None):
     return {"basis": basis, "sources": list(dict.fromkeys(sources)),
             "verified_at": verified_at,
@@ -92,7 +124,8 @@ def _cost_and_provenance(entry, pricing):
            for key, value in context.items()):
         return None, _provenance("unpriced", reason="unsupported_service_context")
     table = pricing if pricing is not None else get_pricing()
-    model_key = resolve_model_key(entry.model, table)
+    model_key = (table.resolve_model_key(entry.model) if isinstance(table, PreparedPricing)
+                 else resolve_model_key(entry.model, table))
     if model_key is None:
         _log_unknown(entry.model)
         return None, _provenance("unpriced", reason="unknown_model")
@@ -123,7 +156,7 @@ def _cost_and_provenance(entry, pricing):
             cache_read_tokens=entry.cache_read_tokens,
             cache_creation_tokens=entry.cache_creation_tokens,
             cache_creation_1h_tokens=entry.cache_creation_1h_tokens,
-        ), rates,
+        ), table.price_rates(rates) if isinstance(table, PreparedPricing) else rates,
     )
     if priced is None:
         return None, _provenance("unpriced", sources, verified_at, "missing_rates")
