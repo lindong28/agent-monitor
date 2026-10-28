@@ -202,6 +202,13 @@
                   <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
                   <button id="codex-egress-preview" type="button" class="btn">查看出口 IP 与地区</button>
                 </div>
+                <p id="codex-batch-blocked" class="quota-scope" role="status" hidden></p>
+                <div id="codex-upstream-pause" class="quota-scope" hidden>
+                  <p><strong id="codex-pause-summary"></strong></p>
+                  <p id="codex-pause-detail"></p>
+                  <button id="codex-pause-recovery" type="button" class="btn">查看暂停原因与恢复</button>
+                  <p>先核对原始失败，再明确批准一次配额探测；保存有效读数后才解除本机暂停。恢复不会自动发送消息，仍需重新点击发送。</p>
+                </div>
                 <details class="note-disclosure">
                   <summary>如何授权、继续发送或开始新一轮</summary>
                   <div id="codex-batch-help" class="quota-scope"></div>

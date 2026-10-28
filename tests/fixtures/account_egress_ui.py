@@ -22,16 +22,42 @@ def main():
     accounts = [dict(id=str(i), email=f'fixture{i}@example.test', account_id=f'workspace-{i}',
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
     state = dict(mode='mixed', delay=0, starts=[], previews=0, paused=False,
-                 pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0)
+                 pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
+                 pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False)
+    def pause():
+        return dict(id='fixture-pause', at=1793004570, failure=dict(detail='Synthetic RPC failure'))
+    def quota():
+        target = dict(machine='fixture-hub', account_id='workspace-0', account_label='fixture0@example.test',
+                      reason='本机已暂停该服务的自动请求', query_state='paused', pause=pause())
+        if state['probe_used']:
+            target['pause']['probe_attempt'] = dict(id='used')
+        if state['pause_record'] == 'stale':
+            target['pause']['id'] = 'old-pause'
+        if state['pause_record'] == 'incomplete':
+            target.pop('account_id')
+        other = dict(machine='fixture-other', account_id='other', account_label='other@example.test',
+                     reason='本机已暂停该服务的自动请求', query_state='paused', pause=dict(id='other-pause'))
+        failures = [other, target] if state['paused'] else []
+        if state['pause_record'] == 'duplicate' and state['paused']:
+            failures.append(dict(target))
+        return dict(codex=dict(accounts=[], refresh_errors=failures), claude=dict(accounts=[]))
     source = (ROOT / 'web/index.html').read_text()
     panel = source.split('<details id="codex-account-actions"', 1)[1].split('</section>', 1)[0]
     html = ('<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
             '<link rel="stylesheet" href="/web/styles.css"><body><main><h1>出口确认隔离夹具</h1>'
-            '<details id="codex-account-actions" open' + panel + '''</main><script>
+            '<details id="codex-account-actions" open' + panel + '''
+            <section><h2>配额记录</h2><table id="quota-accounts"></table></section></main><script>
             window.AgentMonitor={pageScope:()=>()=>true,ensureTimezone:async()=>{},
               formatDate:x=>new Date(x).toLocaleString(),onPageCleanup:()=>{},pageInterval:()=>{},
               latestCodexQuotaReading:()=>null};
-            </script><script type="module">import {init} from '/web/codex-accounts.js';init();</script>''')
+            </script><script src="/web/quota.js"></script><script type="module">
+            import {init} from '/web/codex-accounts.js';
+            const quota=window.AgentMonitorModules.quota({platform:{window,document,fetch:(...args)=>fetch(...args)},
+              qs:s=>document.querySelector(s),fmtAbs:String,formatDate:String,updateSyncOverviewLink:()=>{}});
+            Object.assign(window.AgentMonitor,quota);
+            init();
+            fetch('/fixture/quota').then(r=>r.json()).then(q=>quota.renderQuotaAccounts(q));
+            </script>''')
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -48,14 +74,17 @@ def main():
         def do_GET(self):
             if self.path == '/':
                 self.send(html.encode(), 'text/html; charset=utf-8')
-            elif self.path in ('/web/styles.css', '/web/codex-accounts.js', '/web/account-egress.js'):
+            elif self.path in ('/web/styles.css', '/web/codex-accounts.js', '/web/account-egress.js', '/web/quota.js'):
                 body = (ROOT / self.path.lstrip('/')).read_bytes()
                 if self.path.endswith('/codex-accounts.js'):
                     body = body.replace(b'127.0.0.1:39002', f'127.0.0.1:{pair.server_port}'.encode())
                 self.send(body, 'text/css' if self.path.endswith('.css') else 'text/javascript')
             elif self.path == '/api/codex-accounts':
-                self.send(dict(accounts=accounts, batch=dict(id='fixture-old', items=[], created_at='2026-10-23T01:00:00Z'),
-                               upstream_pause=dict(id='fixture-pause') if state['paused'] else None))
+                visible = [dict(a, restrictions={'unknown': True} if state['restricted'] and a['id'] == '0' else {}) for a in accounts]
+                self.send(dict(accounts=visible, batch=dict(id='fixture-old', items=[], created_at='2026-10-23T01:00:00Z'),
+                               upstream_pause=pause() if state['paused'] else None))
+            elif self.path == '/fixture/quota':
+                self.send(quota())
             elif self.path == '/fixture/stats':
                 self.send(state)
             else:
@@ -97,10 +126,23 @@ def main():
                 state['starts'].append(payload)
                 self.send({})
             elif self.path == '/fixture/config':
-                for key in ('mode', 'delay', 'paused', 'pair_mode', 'status_mode'):
+                for key in ('mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted'):
                     if key in payload:
                         state[key] = payload[key]
                 self.send(state)
+            elif self.path == '/api/quota-recovery':
+                state['recoveries'].append(payload)
+                if state['recovery_mode'] == 'unknown':
+                    self.send(b'not json', 'text/plain')
+                elif state['recovery_mode'] == 'failure':
+                    self.send(dict(ok=False, message='Synthetic recovery failure'), status=409)
+                else:
+                    state['paused'] = False
+                    self.send(dict(ok=True, message='Synthetic recovery success'))
+            elif self.path == '/api/codex-accounts/resume':
+                state['resumes'].append(payload)
+                state['restricted'] = False
+                self.send({})
             elif self.path == '/fixture/stop':
                 self.send({})
                 threading.Thread(target=http.shutdown, daemon=True).start()

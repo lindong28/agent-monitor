@@ -238,6 +238,30 @@
     });
     renderQuotaSignedOut(rateLimits);
     updateSyncOverviewLink();
+    document.dispatchEvent?.(new Event("agent-monitor:quota-rendered"));
+  }
+
+  function codexPauseTarget(pauseId) {
+    if (!pauseId || pauseId === "unreadable") return null;
+    const matches = (renderedQuotaRateLimits?.codex?.refresh_errors || [])
+      .filter((failure) => failure.pause?.id === pauseId);
+    if (matches.length !== 1) return null;
+    const target = matches[0];
+    return target.machine && target.account_id && target.account_label ? target : null;
+  }
+
+  function showCodexPauseRecovery(pauseId) {
+    if (!codexPauseTarget(pauseId)) return false;
+    const entries = Array.from(document.querySelectorAll("[data-codex-pause-id]"))
+      .filter((entry) => entry.dataset.codexPauseId === pauseId);
+    if (entries.length !== 1) return false;
+    const entry = entries[0];
+    for (let parent = entry.parentElement; parent; parent = parent.parentElement) {
+      if (parent.tagName === "DETAILS") parent.open = true;
+    }
+    entry.scrollIntoView({block: "center"});
+    entry.focus({preventScroll: true});
+    return true;
   }
 
   function quotaFailureKind(reason, queryState) {
@@ -269,15 +293,21 @@
     summary.textContent = `${provider.label} 采集详情（${status}）`;
     details.appendChild(summary);
     failures.forEach((failure) => {
+      const entry = document.createElement("div");
+      if (provider.key === "codex" && failure.pause?.id) {
+        entry.dataset.codexPauseId = failure.pause.id;
+        entry.tabIndex = -1;
+      }
+      details.appendChild(entry);
       const note = document.createElement("p");
       note.textContent = `${failure.machine}：${failure.reason}`;
-      details.appendChild(note);
+      entry.appendChild(note);
       const pause = failure.pause;
       if (provider.key === "codex" && pause?.id && pause.id !== "unreadable"
           && failure.account_id && failure.account_label) {
         const context = document.createElement("p");
         context.textContent = `账号：${failure.account_label}；暂停时间：${pause.at ? new Date(pause.at * 1000).toLocaleString() : "未记录"}。${failure.failure?.detail || "旧记录可能缺少上游原始原因。"}`;
-        details.appendChild(context);
+        entry.appendChild(context);
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = pause.probe_attempt ? "本次暂停的探测机会已使用" : "核对并探测一次";
@@ -300,7 +330,7 @@
             button.textContent = "结果未确认";
           }
         });
-        details.appendChild(button);
+        entry.appendChild(button);
       }
     });
     cell.appendChild(details);
@@ -1173,5 +1203,5 @@
     renderedQuotaRateLimits = null;
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
-  return { quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
+  return { codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
 });

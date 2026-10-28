@@ -45,6 +45,13 @@ export function init({ autoLoad = true } = {}) {
   const batchStatus = root.querySelector("#codex-batch-status");
   const batchHelp = root.querySelector("#codex-batch-help");
   const egressPreview = root.querySelector("#codex-egress-preview");
+  const blockedReason = root.querySelector("#codex-batch-blocked");
+  const pauseControls = {
+    pausePanel: root.querySelector("#codex-upstream-pause"),
+    pauseSummary: root.querySelector("#codex-pause-summary"),
+    pauseDetail: root.querySelector("#codex-pause-detail"),
+    pauseRecovery: root.querySelector("#codex-pause-recovery"),
+  };
   let timer;
   let loading = false;
   let reloadPending = false;
@@ -207,17 +214,17 @@ export function init({ autoLoad = true } = {}) {
   }
 
   async function perform(action, id, button) {
-    if (action === "resume" && !window.confirm("我已核对原始失败、账号状态及服务端要求，确认现在解除本地暂停。\n\n这不证明上游已恢复；不会自动登录、查询或发送。该账号的额度限制仍保留，同机 Codex 通道暂停将解除。")) return;
+    if (action === "resume" && !window.confirm("我已核对此账号的原始失败、账号状态及服务端要求，确认解除此账号的本地限制。\n\n这不证明上游已恢复；不会自动登录、查询或发送。额度限制和本机 Codex 通道暂停仍保留。")) return;
     if (action === "release-rate-limit" && !window.confirm("仅解除此账号在本页的限流暂停，不会发送消息或查询配额。\n\n这不证明服务端限流已解除；请按服务端指引等待后再尝试。认证和额度限制仍会保留。")) return;
     button.disabled = true;
     notice.textContent = action === "forget-login" ? "正在清除本页保存的登录态…" : "正在提交操作…";
     try {
       const account = accounts.find(value => value.id === id);
-      await request(action, { id, ...(action === "resume" ? {operation_id: account?.operation?.id, pause_id: upstreamPause?.id} : {}) });
+      await request(action, { id, ...(action === "resume" ? {operation_id: account?.operation?.id} : {}) });
       if (!current()) return;
       notice.textContent = action === "cancel" ? "正在取消；已发出的消息无法撤回。" : "";
       await load();
-      if (current() && action === "resume") notice.textContent = "本地暂停已解除，未发出上游请求。原始失败记录保留；后续操作需重新点击。";
+      if (current() && action === "resume") notice.textContent = "此账号的本地限制已解除，未发出上游请求。本机通道暂停和原始失败记录保留；后续操作需重新点击。";
     } catch (error) {
       if (current() && error.name !== "AbortError") notice.textContent = error.message;
     } finally {
@@ -236,8 +243,20 @@ export function init({ autoLoad = true } = {}) {
 
   function renderBatch() {
     renderAccountBatch({ accounts, batch, selectedIds, unavailable, busy: actions.busy, upstreamPause },
-      { root, batchStart, batchNext, batchRetry, batchStatus, batchHelp, egressPreview, deviceConnect });
+      { root, batchStart, batchNext, batchRetry, batchStatus, batchHelp, egressPreview, deviceConnect, blockedReason });
+    renderPause();
   }
+
+  function renderPause() {
+    if (current()) renderAccountPause(upstreamPause, window.AgentMonitor.codexPauseTarget?.(upstreamPause?.id), pauseControls);
+  }
+  pauseControls.pauseRecovery?.addEventListener("click", () => {
+    if (!window.AgentMonitor.showCodexPauseRecovery?.(upstreamPause?.id)) {
+      renderPause();
+      notice.textContent = "未能定位此暂停的恢复记录；请刷新页面重新读取，暂停仍保留。";
+    }
+  });
+  document.addEventListener("agent-monitor:quota-rendered", renderPause);
 
   batchStart.addEventListener("click", () => actions.performBatch("batch-start"));
   batchNext.addEventListener("click", () => actions.performBatch("batch-start"));
@@ -372,7 +391,7 @@ export function init({ autoLoad = true } = {}) {
         login.disabled ||= Boolean(upstreamPause || restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit);
         controls.append(login);
       }
-      if (upstreamPause || restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("核对后解除本地暂停", "resume", account));
+      if (restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("核对后解除此账号限制", "resume", account));
       if (account.last_failure && account.last_failure.id !== op?.id) details.append(element("p", `保留的原始失败：${account.last_failure.detail}`, "quota-scope"));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials || restrictions.authentication) {
@@ -397,6 +416,7 @@ export function init({ autoLoad = true } = {}) {
     clearTimeout(timer);
     controller.abort();
     document.removeEventListener("visibilitychange", visibility);
+    document.removeEventListener("agent-monitor:quota-rendered", renderPause);
   });
   if (autoLoad) {
     load();
@@ -471,9 +491,26 @@ export function operationReading(account) {
   return window.AgentMonitor.latestCodexQuotaReading?.({operation: account.operation}) || account.operation?.after;
 }
 
+export function renderAccountPause(pause, target, controls) {
+  const { pausePanel, pauseSummary, pauseDetail, pauseRecovery } = controls;
+  if (!pausePanel) return;
+  pausePanel.hidden = !pause;
+  if (!pause) return;
+  const matched = target?.pause?.id === pause.id && target.machine && target.account_id && target.account_label;
+  pauseSummary.textContent = `${matched ? target.machine : "服务端本机"} 的 Codex 通道已暂停，阻止本页所有账号发送、登录和查询配额。`;
+  const time = pause.at ? timestamp(pause.at, true) : "未记录";
+  const reason = pause.failure?.detail || (matched && target.failure?.detail) || "未记录原始失败原因，不能判断上游是否恢复。";
+  pauseDetail.textContent = `暂停时间：${time}。原始失败：${reason}`;
+  if (matched) pauseDetail.textContent += ` 恢复查询账号：${target.account_label}。`;
+  else pauseDetail.textContent += pause.id === "unreadable"
+    ? " 暂停状态无法读取，请在服务端修复状态文件；不能直接解除。"
+    : " 尚未匹配到此暂停的完整机器与账号记录；请刷新页面重新读取。暂停仍保留，不会猜测恢复目标。";
+  pauseRecovery.disabled = !matched || pause.id === "unreadable";
+}
+
 export function renderAccountBatch(state, controls) {
   const { accounts, batch, selectedIds, unavailable, busy: submittingBatch, upstreamPause } = state;
-  const { root, batchStart, batchNext, batchRetry, batchStatus, batchHelp, egressPreview, deviceConnect } = controls;
+  const { root, batchStart, batchNext, batchRetry, batchStatus, batchHelp, egressPreview, deviceConnect, blockedReason } = controls;
     const busy = accounts.some((account) => account.busy);
     const eligible = accounts.filter((account) => account.eligible !== false);
     const count = eligible.filter(account => selectedIds?.has(account.id)).length;
@@ -485,15 +522,23 @@ export function renderAccountBatch(state, controls) {
     batchNext.hidden = !batch;
     batchNext.textContent = `开始新一轮 · 所选 ${count} 个账号`;
     batchNext.disabled = submittingBatch || busy || !count || Boolean(upstreamPause);
+    if (blockedReason) {
+      blockedReason.textContent = upstreamPause ? "发送已暂停：请先查看下方暂停原因与恢复入口。"
+        : submittingBatch ? "正在连接、确认或提交本次操作，请等待完成。"
+        : busy ? "有账号操作正在进行；完成或取消后才能开始新一轮。"
+        : !count ? "请至少选择一个账号。" : "";
+      blockedReason.hidden = !blockedReason.textContent;
+    }
     if (egressPreview) egressPreview.disabled = submittingBatch;
     if (deviceConnect) deviceConnect.disabled = submittingBatch;
     batchRetry.hidden = true;
     if (!batch) {
       batchStatus.textContent = eligible.length ? `${eligible.length} 个可操作账号；发送前会检查登录状态。` : "尚未发现可发送的 Codex 登录账号。";
+      if (upstreamPause) batchStatus.textContent += " · 本机 Codex 通道已暂停，暂不能发送";
       batchHelp.replaceChildren(
         element("p", "账号来自当前及历史登录记录，无需手动添加。"),
         element("p", "按邮箱顺序逐个完成账号操作，前一个结束并清理后才处理下一个。缺登录态的账号跳过，请单独登录后再发起操作。"),
-        element("p", upstreamPause ? "本机 Codex 请求已暂停；请核对原始失败后明确解除本地暂停。" : "仅刷新配额不会发送消息。发送会实际使用额度，不保证固定或重置窗口；异常会停止后续账号。")
+        element("p", upstreamPause ? "本机 Codex 请求已暂停；请从按钮旁的恢复入口核对原始失败并批准一次配额探测。" : "仅刷新配额不会发送消息。发送会实际使用额度，不保证固定或重置窗口；异常会停止后续账号。")
       );
       return;
     }
@@ -519,6 +564,7 @@ export function renderAccountBatch(state, controls) {
       if (statuses[key]) parts.push(`${label} ${statuses[key]}`);
     }
     parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`);
+    if (upstreamPause) parts.push("本机 Codex 通道已暂停，暂不能发送");
     batchStatus.textContent = parts.join(" · ");
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch || busy || Boolean(upstreamPause);
@@ -531,7 +577,7 @@ export function renderAccountBatch(state, controls) {
         : "继续发送：本轮没有可以继续发送的账号。",
       "刷新：刷新页面或仅查询配额不会重发消息。发送前查询失败或服务端明确拒绝额度使用时，本次不发送。",
       ...(statuses.unknown || statuses.failed ? ["结果未知或发送失败的账号可能已消耗额度，系统不会自动重试。"] : []),
-      ...(upstreamPause ? ["本机 Codex 请求已暂停，机器配额读取也受此保护。请核对原始失败与服务端要求后明确解除；解除不会自动发出请求。"] : []),
+      ...(upstreamPause ? ["本机 Codex 请求已暂停，机器配额读取也受此保护。请从按钮旁的恢复入口核对并批准一次配额探测；恢复不会自动发送消息。"] : []),
       `再次发送：选择账号后，点击「${batchNext.textContent}」。这会实际使用额度，不保证固定或重置窗口；暂停中的账号仍不会发送。`,
     ];
     batchHelp.replaceChildren(...help.map(text => element("p", text)));

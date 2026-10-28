@@ -161,12 +161,77 @@ try {
   await click('#codex-device-cancel',"document.querySelector('#codex-device-cancel').hidden");
   assert.deepEqual([(await stats()).previews,(await stats()).starts.length],[2,1]);
   console.log('PASS: pairing failure and cancellation do not preview or send another batch.');
+  const recovery='#codex-pause-recovery', record='[data-codex-pause-id="fixture-pause"]';
+  const paused=`document.querySelector('${primary}').disabled && !document.querySelector('#codex-upstream-pause').hidden`;
+  const focused=`document.activeElement?.dataset.codexPauseId === 'fixture-pause'`;
+  await configure({paused:true});
+  await bt('open',url);
+  await until('pause explanation and quota record',()=>read(`${paused} && !document.querySelector('${recovery}').disabled`));
+  assert.match(await read("document.querySelector('#codex-batch-status').textContent"),/暂停/);
+  assert.match(await read("document.querySelector('#codex-pause-detail').textContent"),/Synthetic RPC failure/);
+  assert.equal(await read("[...document.querySelectorAll('#codex-account-list button')].filter(b=>b.textContent.includes('解除')).length"),0);
+  await click(recovery,focused);
+  assert.equal(await read(`document.querySelector('${record}').closest('details').open`),true);
+  assert.equal(await read(`(() => {const r=document.querySelector('${record}').getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight})()`),true);
+  assert.equal((await stats()).recoveries.length,0,'navigation makes no recovery request');
+  assert.equal((await stats()).starts.length,1,'navigation never sends a batch');
+  for(const pause_record of ['stale','incomplete','duplicate']) {
+    await configure({pause_record});
+    await bt('open',url);
+    await until('unmatched pause explanation',()=>read(`${paused} && document.querySelector('#codex-pause-detail').textContent.includes('未匹配')`));
+    assert.equal(await read(`document.querySelector('${recovery}').disabled`),true);
+  }
+  await configure({pause_record:'matched',probe_used:true});
+  await bt('open',url);
+  await until('used probe record',()=>read(`!!document.querySelector('${record} button') && !document.querySelector('${recovery}').disabled`));
+  await click(recovery,focused);
+  assert.equal(await read(`document.querySelector('${record} button').disabled`),true);
+  console.log('PASS: exact pause navigation issues zero requests; stale/incomplete/ambiguous records stay blocked; used probe stays disabled.');
+  // Browser dialogs remain native: verify the exact target before accepting.
+  async function confirmControl(selector, accept=true) {
+    await bt('scrollintoview',selector);
+    await bt('click',selector);
+    const status=await bt('dialog','status');
+    assert.ok(JSON.stringify(status).includes('fixture'),'confirmation names the synthetic target');
+    await bt('dialog',accept?'accept':'dismiss');
+  }
+  await configure({probe_used:false,restricted:true});
+  await bt('open',url);
+  await until('restricted account',()=>read("[...document.querySelectorAll('#codex-account-list button')].some(b=>b.textContent==='核对后解除此账号限制')"));
+  // Resume's confirmation describes scope, rather than echoing account identity.
+  const resume='#codex-account-list > :first-child .codex-account-footer > .codex-account-controls > button:last-child';
+  assert.equal(await read(`document.querySelector('${resume}').textContent`),'核对后解除此账号限制');
+  await bt('scrollintoview',resume); await bt('click',resume);
+  assert.ok(JSON.stringify(await bt('dialog','status')).includes('暂停仍保留'));
+  await bt('dialog','accept');
+  await until('account restriction cleared',async()=>(await stats()).resumes.length===1);
+  assert.equal('pause_id' in (await stats()).resumes[0],false);
+  assert.equal((await stats()).paused,true);
+  for(const recovery_mode of ['failure','unknown','success']) {
+    await configure({recovery_mode});
+    await bt('open',url);
+    await until('recoverable pause',()=>read(`${paused} && !document.querySelector('${recovery}').disabled`));
+    await click(recovery,focused);
+    const before=(await stats()).recoveries.length;
+    await confirmControl(`${record} button`,false);
+    assert.equal((await stats()).recoveries.length,before,'cancel does not query');
+    await confirmControl(`${record} button`);
+    await until('recovery receipt',async()=>(await stats()).recoveries.length===before+1);
+    assert.deepEqual((await stats()).recoveries.at(-1),{machine:'fixture-hub',account_id:'workspace-0',account_label:'fixture0@example.test',pause_id:'fixture-pause'});
+    if(recovery_mode==='success') await until('unpaused reload',()=>read(ready));
+    else {
+      await until('retained pause after recovery error',()=>read(`document.querySelector('${record} button').textContent.includes('${recovery_mode==='unknown'?'结果未确认':'未恢复'}')`));
+      assert.equal(await read(paused),true);
+    }
+    assert.equal((await stats()).starts.length,1,'recovery never automatically sends');
+  }
+  console.log('PASS: account resume omits shared pause ID; cancel queries zero times; failed/unknown probes retain pause; success enables explicit sending without replay.');
 } catch(error) {
   failure=error;
   if (browserAttempted && fs.existsSync(pidFile)) {
     try {
-      const observed=await read(`({url:location.href,hidden:document.hidden,dialog:document.querySelector('dialog')?.textContent,buttons:[...document.querySelectorAll('dialog button')].map(e=>({text:e.textContent,disabled:e.disabled,rect:e.getBoundingClientRect().toJSON()}))})`);
-      console.error('Fixture failure evidence: '+JSON.stringify({counts:((s)=>({pairs:s.pair_requests,status:s.status_requests,previews:s.previews,starts:s.starts.length}))(await stats()),page:observed}));
+      const observed=await read(`({url:location.href,hidden:document.hidden,pause:document.querySelector('[data-codex-pause-id="fixture-pause"]')?.textContent,dialog:document.querySelector('dialog')?.textContent,buttons:[...document.querySelectorAll('dialog button')].map(e=>({text:e.textContent,disabled:e.disabled,rect:e.getBoundingClientRect().toJSON()}))})`);
+      console.error('Fixture failure evidence: '+JSON.stringify({counts:((s)=>({pairs:s.pair_requests,status:s.status_requests,previews:s.previews,starts:s.starts.length,recoveries:s.recoveries.length,resumes:s.resumes.length}))(await stats()),page:observed}));
     } catch { console.error('Fixture page failure evidence unavailable; original error retained.'); }
   }
 }
