@@ -10,9 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import quota_sync
-import server
-from machine_config import Machine
+from agent_monitor.quota import quota_sync
+from agent_monitor import http_server as server
+from agent_monitor.snapshots.machine_config import Machine
 
 
 class IndependentQuotaTests(unittest.TestCase):
@@ -184,7 +184,7 @@ class IndependentQuotaTests(unittest.TestCase):
             entered.set()
             release.wait(2)
             raise RuntimeError("terminated")
-        with mock.patch.object(quota_sync, "run_queries", side_effect=run), \
+        with mock.patch.object(quota_sync, "run_queries", side_effect=run),\
                 mock.patch.object(quota_sync.sync_process, "shutdown", side_effect=release.set):
             manager.request([self.machine])
             self.assertTrue(entered.wait(1))
@@ -217,9 +217,9 @@ class IndependentQuotaTests(unittest.TestCase):
             release.wait(2)
             complete("mini", self.payload(), None)
         try:
-            with mock.patch.object(server.COLLECTION, "quota_refresh", manager), \
-                    mock.patch.object(server.hub, "enabled", return_value=True), \
-                    mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(machines=[self.machine])), \
+            with mock.patch.object(server.COLLECTION, "quota_refresh", manager),\
+                    mock.patch.object(server.hub, "enabled", return_value=True),\
+                    mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(machines=[self.machine])),\
                     mock.patch.object(quota_sync, "run_queries", side_effect=run):
                 server.COLLECTION._state["running"] = True
                 receipt = server.refresh_endpoint({"ack": ["1"]})

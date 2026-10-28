@@ -39,7 +39,7 @@ class ResolveRouteTests(unittest.TestCase):
 class EgressSessionTests(unittest.TestCase):
     def test_all_routes_use_product_bridge_and_ignore_ambient_bypass(self):
         endpoint = "http://agent-monitor:fixture-capability@127.0.0.1:45678"
-        with mock.patch.object(cli.network_policy, "endpoint", return_value=endpoint), \
+        with mock.patch.object(cli.network_policy, "endpoint", return_value=endpoint),\
                 mock.patch.dict(os.environ, {"HTTP_PROXY": "http://127.0.0.1:1", "NO_PROXY": "*"}):
             for old in ({"source": "published", "address": ""}, {"source": "invalid"}, None):
                 session = cli._egress_session(old)
@@ -47,7 +47,7 @@ class EgressSessionTests(unittest.TestCase):
                 self.assertEqual(session.proxies, {"http": endpoint, "https": endpoint})
 
     def test_ca_bundle_survives_product_policy(self):
-        with mock.patch.object(cli.network_policy, "endpoint", return_value="http://agent-monitor:fixture@127.0.0.1:45678"), \
+        with mock.patch.object(cli.network_policy, "endpoint", return_value="http://agent-monitor:fixture@127.0.0.1:45678"),\
                 mock.patch.dict(os.environ, {"REQUESTS_CA_BUNDLE": "/fixture/ca.pem"}):
             self.assertEqual(cli._egress_session().verify, "/fixture/ca.pem")
 
@@ -113,12 +113,12 @@ class OneRouteQerRoundTests(unittest.TestCase):
             fake_session(route)
             return [""]
 
-        with mock.patch.object(cli, "resolve_route", side_effect=fake_resolve), \
-                mock.patch.object(cli, "_egress_session", side_effect=fake_session), \
-                mock.patch.object(cli, "get_public_info", side_effect=fake_public), \
-                mock.patch.object(cli, "get_ip_risk", side_effect=fake_risk), \
-                mock.patch.object(cli, "get_stopforumspam", side_effect=fake_spam), \
-                mock.patch.object(cli, "get_dns_servers", return_value=[]), \
+        with mock.patch.object(cli, "resolve_route", side_effect=fake_resolve),\
+                mock.patch.object(cli, "_egress_session", side_effect=fake_session),\
+                mock.patch.object(cli, "get_public_info", side_effect=fake_public),\
+                mock.patch.object(cli, "get_ip_risk", side_effect=fake_risk),\
+                mock.patch.object(cli, "get_stopforumspam", side_effect=fake_spam),\
+                mock.patch.object(cli, "get_dns_servers", return_value=[]),\
                 mock.patch.object(cli, "get_ipv6", return_value=None):
             out = cli.collect_all()
 
@@ -155,11 +155,11 @@ class OneRouteQerRoundTests(unittest.TestCase):
             "hosting": False,
             "timezone": "Asia/Singapore",
         }
-        with mock.patch.object(cli, "resolve_route", return_value=route), \
-                mock.patch.object(cli, "get_public_info", return_value=public), \
-                mock.patch.object(cli, "get_ip_risk", side_effect=fake_risk), \
-                mock.patch.object(cli, "get_stopforumspam", side_effect=fake_spam), \
-                mock.patch.object(cli, "get_dns_servers", return_value=[]), \
+        with mock.patch.object(cli, "resolve_route", return_value=route),\
+                mock.patch.object(cli, "get_public_info", return_value=public),\
+                mock.patch.object(cli, "get_ip_risk", side_effect=fake_risk),\
+                mock.patch.object(cli, "get_stopforumspam", side_effect=fake_spam),\
+                mock.patch.object(cli, "get_dns_servers", return_value=[]),\
                 mock.patch.object(cli, "get_ipv6", return_value=None):
             out = cli.collect_all()
 
@@ -182,10 +182,10 @@ class OneRouteQerRoundTests(unittest.TestCase):
             "hosting": False,
             "timezone": "Asia/Singapore",
         }
-        with mock.patch.object(cli, "resolve_route", return_value=route), \
-                mock.patch.object(cli, "get_public_info", return_value=public), \
-                mock.patch.object(cli, "get_dns_servers", return_value=[]), \
-                mock.patch.object(cli, "get_ipv6", return_value=None), \
+        with mock.patch.object(cli, "resolve_route", return_value=route),\
+                mock.patch.object(cli, "get_public_info", return_value=public),\
+                mock.patch.object(cli, "get_dns_servers", return_value=[]),\
+                mock.patch.object(cli, "get_ipv6", return_value=None),\
                 mock.patch.object(
                     cli.concurrent.futures,
                     "ThreadPoolExecutor",
@@ -207,9 +207,9 @@ class OneRouteQerRoundTests(unittest.TestCase):
         """
         route = {"address": "http://127.0.0.1:59520", "source": "published",
                  "reason": "", "path": "/somewhere/else/current-proxy"}
-        with mock.patch.object(cli, "resolve_route", return_value=route), \
-                mock.patch.object(cli, "get_public_info", return_value={"status": "fail", "message": "x"}), \
-                mock.patch.object(cli, "get_dns_servers", return_value=[]), \
+        with mock.patch.object(cli, "resolve_route", return_value=route),\
+                mock.patch.object(cli, "get_public_info", return_value={"status": "fail", "message": "x"}),\
+                mock.patch.object(cli, "get_dns_servers", return_value=[]),\
                 mock.patch.object(cli, "get_ipv6", return_value=None):
             out = cli.collect_all()
         self.assertEqual(out["proxy_effective"]["path"], "/somewhere/else/current-proxy")
@@ -217,9 +217,9 @@ class OneRouteQerRoundTests(unittest.TestCase):
     def test_snapshot_carries_reason_when_route_unusable(self):
         bad = {"address": "", "source": "invalid", "reason": "内容不是可用的代理地址：'gcp'",
                "path": "/tmp/current-proxy"}
-        with mock.patch.object(cli, "resolve_route", return_value=bad), \
-                mock.patch.object(cli, "get_public_info", return_value={"status": "fail", "message": "boom"}), \
-                mock.patch.object(cli, "get_dns_servers", return_value=[]), \
+        with mock.patch.object(cli, "resolve_route", return_value=bad),\
+                mock.patch.object(cli, "get_public_info", return_value={"status": "fail", "message": "boom"}),\
+                mock.patch.object(cli, "get_dns_servers", return_value=[]),\
                 mock.patch.object(cli, "get_ipv6", return_value=None):
             out = cli.collect_all()
         self.assertEqual(out["proxy_effective"], bad)

@@ -1,0 +1,11 @@
+# Domain packages and public entrypoints
+
+Status: accepted, 2026-10-28. Supersedes only the root-placement decision in [complete internal domain placement](20261028-c7f1-root-domain-boundaries.md); its ownership, state, accounting and provider constraints remain in force.
+
+Internal subsystem ownership does not require a root-level module. Group runtime, snapshots, accounting, accounts, network and quota implementations under agent_monitor. Keep the existing ingestion, views and contracts boundaries. Extract substantive Python handlers from the agent-monitor shell command into agent_monitor/cli; the shell retains interpreter/environment selection and dispatch.
+
+Keep actual public shell commands and thin deploy.py, runtime_rebuild.py and upstream_controls.py adapters, including recovery with an external Python interpreter when the managed environment is broken. Keep project_paths.py as the checkout bootstrap and token_cost.py at its cross-project contract path with identical bytes. Configuration resources and standard project metadata remain at the root. Existing parsers, ip_check, proxy_runtime and web owners stay in their current packages.
+
+A documentation-only map leaves the observed scattered implementations in place. A flat internal package does not expose their domains. A new src layout or installed distribution introduces an unrelated installation change. Blanket compatibility shims for undocumented internal imports would retain competing discovery paths; migrate those consumers instead. The user approved implementing this narrower root-retention policy, and an independent decision review approved the proposal after restoring the two documented recovery/control adapters.
+
+Preserve public command arguments, output, exits and confirmation ordering; snapshots, accounting, identities, state symlinks and locks; provider calls, egress and retry policy; and the PreparedPricing collection optimization. Move source fingerprints and subprocess consumers with their implementations. Recognize both the old owned service command line and its new module form during upgrades, while rejecting unrelated processes. This decision does not claim that implementation, isolated installation, CI or deployed acceptance has passed.

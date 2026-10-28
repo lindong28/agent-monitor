@@ -18,8 +18,8 @@ class IngestionInstanceTests(unittest.TestCase):
         self.stores = [ProjectIdentityStore(self.root / name / "identity.db")
                        for name in ("first", "second")]
         for patch in (
-            mock.patch("pricing_fetcher.get_pricing", return_value={}),
-            mock.patch("pricing_fetcher.with_calculated_cost", side_effect=lambda entry, **_: entry),
+            mock.patch("agent_monitor.accounting.pricing_fetcher.get_pricing", return_value={}),
+            mock.patch("agent_monitor.accounting.pricing_fetcher.with_calculated_cost", side_effect=lambda entry, **_: entry),
         ):
             patch.start()
             self.addCleanup(patch.stop)

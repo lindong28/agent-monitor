@@ -1,4 +1,4 @@
-from agent_monitor import quota_view, quota_service
+from agent_monitor.quota import quota_view; from agent_monitor.quota import quota_service
 import contextlib
 import fcntl
 import json
@@ -13,10 +13,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import exporter
-import hub
-import rollup
-import sync
+from agent_monitor.snapshots import exporter
+from agent_monitor.runtime import hub
+from agent_monitor.accounting import rollup
+from agent_monitor.snapshots import sync
 from parsers import RateLimits, accounts
 
 
@@ -60,7 +60,7 @@ class GuiQuotaTests(unittest.TestCase):
             statistics_started.set()
             release.wait(3)
             return {}
-        with mock.patch.object(rollup, "run", side_effect=statistics), \
+        with mock.patch.object(rollup, "run", side_effect=statistics),\
                 mock.patch.object(quota_service, "rate_limits", return_value=self.limits):
             collector = threading.Thread(target=hub.collect)
             collector.start()
@@ -230,7 +230,7 @@ class GuiQuotaTests(unittest.TestCase):
     def test_gui_failure_retains_matching_account_only_without_new_timestamp(self):
         (self.state / "quota_snapshot.json").write_text(json.dumps(self.limits))
         for account in (accounts.Account("a"), accounts.Account("b"), None):
-            with self.subTest(account=account), mock.patch.object(hub, "request_quota_refresh", side_effect=hub.QuotaRequestError("GUI unavailable")), \
+            with self.subTest(account=account), mock.patch.object(hub, "request_quota_refresh", side_effect=hub.QuotaRequestError("GUI unavailable")),\
                     mock.patch.object(quota_service.accounts, "claude_account", return_value=account):
                 result = exporter._gui_rate_limits()
             self.assertEqual(result["codex"]["updated_at"], self.limits["codex"]["updated_at"])
@@ -260,12 +260,15 @@ class GuiQuotaTests(unittest.TestCase):
                                             "/tmp/agent-monitor-export.ABC12345/bundle", *shlex.split(expected)])
 
     def test_cli_forwards_gui_and_cached_quota_flags(self):
+        source = Path(__file__).resolve().parents[1]
+        shutil.copytree(source / "agent_monitor", self.root / "agent_monitor", ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copy2(source / "project_paths.py", self.root / "project_paths.py")
         cli = self.root / "agent-monitor"
         shutil.copyfile(Path(__file__).resolve().parents[1] / "agent-monitor", cli)
         python = self.root / ".venv/bin/python"
         python.parent.mkdir(parents=True)
         python.symlink_to(sys.executable)
-        (self.root / "exporter.py").write_text("class ExportError(Exception): pass\ndef export_bundle(**kwargs): return kwargs\n")
+        (self.root / "agent_monitor/snapshots/exporter.py").write_text("class ExportError(Exception): pass\ndef export_bundle(**kwargs): return kwargs\n")
         for flags, gui, refresh in (([], False, True), (["--gui-quota"], True, True),
                                      (["--gui-quota", "--cached-quota"], True, False)):
             with self.subTest(flags=flags):
@@ -275,11 +278,11 @@ class GuiQuotaTests(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout), {"output_path": "fixture", "gui_quota": gui, "quota_refresh": refresh})
 
     def test_gui_failure_is_visible_through_existing_provider_error_projection(self):
-        import server
+        from agent_monitor import http_server as server
         with mock.patch.object(hub, "request_quota_refresh", side_effect=hub.QuotaRequestError("GUI unavailable")):
             blocks = exporter._gui_rate_limits()
         admission = SimpleNamespace(admitted=[SimpleNamespace(host="fixture", meta={"rate_limits": blocks})])
-        with mock.patch.object(quota_view, "self_machine_name", return_value="another"), \
+        with mock.patch.object(quota_view, "self_machine_name", return_value="another"),\
                 mock.patch.object(quota_view, "quota_unavailable_reason", return_value="No reading"):
             projected = server.QUOTA_VIEW.live_from_admission(admission)
         for provider in ("claude", "codex"):

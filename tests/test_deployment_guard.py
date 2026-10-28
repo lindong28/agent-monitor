@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest import mock
 
-import deployment_guard as guard
+from agent_monitor.runtime import deployment_guard as guard
 
 SOURCE = Path(__file__).resolve().parents[1]
 
@@ -22,11 +22,13 @@ class DeploymentGuardTests(unittest.TestCase):
         self.home = Path(temporary.name).resolve()
         self.root = self.home / 'checkout'
         self.root.mkdir()
-        shutil.copy2(SOURCE / 'deployment_guard.py', self.root / 'deployment_guard.py')
+        shutil.copytree(SOURCE / "agent_monitor", self.root / "agent_monitor", ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copy2(SOURCE / "project_paths.py", self.root / "project_paths.py")
+        shutil.copy2(SOURCE / 'agent_monitor/runtime/deployment_guard.py', self.root / 'agent_monitor/runtime/deployment_guard.py')
         (self.root / 'source.txt').write_text('original\n')
         self.env = dict(os.environ, HOME=str(self.home), CLAUDE_CONFIG_DIR=str(self.home / '.claude'),
                         CODEX_HOME=str(self.home / '.codex'), PYTHONDONTWRITEBYTECODE='1',
-                        TEST_PYTHON=sys.executable)
+                        TEST_PYTHON=sys.executable, PYTHONPATH=str(self.root))
         for name in (guard.LOCK_ENV, guard.SOURCE_ENV):
             self.env.pop(name, None)
 
@@ -34,13 +36,13 @@ class DeploymentGuardTests(unittest.TestCase):
         (self.root / 'install.sh').write_text(
             '#!/usr/bin/env bash\nset -euo pipefail\n'
             'ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
-            'exec "$TEST_PYTHON" "$ROOT_DIR/deployment_guard.py" install "$ROOT_DIR" -- "$@"\n'
+            'exec "$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard install "$ROOT_DIR" -- "$@"\n'
             '# AGENT_MONITOR_INSTALL_BODY\nset -euo pipefail\n'
             'ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"\n' + body)
         (self.root / 'install.sh').chmod(0o755)
 
     def run_guard(self, action, *args, env=None):
-        return subprocess.run([sys.executable, str(self.root / 'deployment_guard.py'), action,
+        return subprocess.run([sys.executable, '-m', 'agent_monitor.runtime.deployment_guard', action,
                                str(self.root), *args], cwd=self.home, env=env or self.env,
                               capture_output=True, text=True, timeout=10)
 
@@ -64,7 +66,7 @@ class DeploymentGuardTests(unittest.TestCase):
         return process
 
     def test_repeated_install_preserves_arguments_and_root(self):
-        self.installer('"$TEST_PYTHON" "$ROOT_DIR/deployment_guard.py" check "$ROOT_DIR"\n'
+        self.installer('"$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard check "$ROOT_DIR"\n'
                        'printf "%s\\n" "$ROOT_DIR" "$@" > state/installed\n')
         for _ in range(2):
             result = self.install('--no-services', 'argument with spaces')
@@ -123,7 +125,7 @@ class DeploymentGuardTests(unittest.TestCase):
 
     def test_source_change_stops_before_service_checkpoint(self):
         self.installer('printf changed > source.txt\n'
-                       '"$TEST_PYTHON" "$ROOT_DIR/deployment_guard.py" check "$ROOT_DIR"\n'
+                       '"$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard check "$ROOT_DIR"\n'
                        'touch state/service-changed\n')
         result = self.install()
         self.assertNotEqual(result.returncode, 0)
@@ -145,7 +147,7 @@ class DeploymentGuardTests(unittest.TestCase):
         self.assertIn('Source changed', result.stderr)
 
     def test_source_environment_cannot_replace_install_baseline(self):
-        self.installer('"$TEST_PYTHON" "$ROOT_DIR/deployment_guard.py" check "$ROOT_DIR"\n')
+        self.installer('"$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard check "$ROOT_DIR"\n')
         result = self.install(env=dict(self.env, **{guard.SOURCE_ENV: '999999'}))
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -160,20 +162,20 @@ class DeploymentGuardTests(unittest.TestCase):
     def test_held_requires_actual_inherited_lock_and_supports_reentry(self):
         self.assertNotEqual(self.run_guard('held').returncode, 0)
         self.assertFalse((self.root / 'state').exists())
-        self.installer('"$TEST_PYTHON" "$ROOT_DIR/deployment_guard.py" held "$ROOT_DIR"\n'
-                       '"$TEST_PYTHON" "$ROOT_DIR/deployment_guard.py" run "$ROOT_DIR" -- '
-                       '"$TEST_PYTHON" "$ROOT_DIR/deployment_guard.py" held "$ROOT_DIR"\n')
+        self.installer('"$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard held "$ROOT_DIR"\n'
+                       '"$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard run "$ROOT_DIR" -- '
+                       '"$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard held "$ROOT_DIR"\n')
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_missing_checkpoint_and_wrong_root_fail_closed(self):
         self.assertNotEqual(self.run_guard('check').returncode, 0)
-        wrong = subprocess.run([sys.executable, str(self.root / 'deployment_guard.py'),
+        wrong = subprocess.run([sys.executable, str(self.root / 'agent_monitor/runtime/deployment_guard.py'),
                                 'install', str(self.home)], env=self.env, capture_output=True, timeout=5)
         self.assertNotEqual(wrong.returncode, 0)
 
     def test_long_lived_child_can_detach_without_holding_lock(self):
-        code = ('import os,time; import deployment_guard as g; pid=os.fork(); '
+        code = ('import os,time; from agent_monitor.runtime import deployment_guard as g; pid=os.fork(); '
                 '\nif pid == 0:\n g.detach_guard(); os.close(1); os.close(2); '
                 'time.sleep(1); os._exit(0)\n')
         result = self.run_guard('run', '--', sys.executable, '-c', code)
@@ -184,7 +186,7 @@ class DeploymentGuardTests(unittest.TestCase):
         child = mock.Mock(pid=12345)
         timeout = subprocess.TimeoutExpired('fixture', .3)
         child.wait.side_effect = [timeout, 0, 0]
-        with mock.patch.object(guard.subprocess, 'Popen', return_value=child), \
+        with mock.patch.object(guard.subprocess, 'Popen', return_value=child),\
                 mock.patch.object(guard.os, 'killpg', side_effect=[
                     None, PermissionError(), PermissionError(), ProcessLookupError(),
                 ]) as killpg, mock.patch.object(guard.time, 'sleep'):
@@ -199,7 +201,7 @@ class DeploymentGuardTests(unittest.TestCase):
     def test_persistent_group_permission_error_does_not_confirm_termination(self):
         child = mock.Mock(pid=12345)
         child.wait.side_effect = [subprocess.TimeoutExpired('fixture', .3), 0, 0]
-        with mock.patch.object(guard.subprocess, 'Popen', return_value=child), \
+        with mock.patch.object(guard.subprocess, 'Popen', return_value=child),\
                 mock.patch.object(guard.os, 'killpg', side_effect=[
                     None, PermissionError(), PermissionError(),
                 ]), mock.patch.object(guard.time, 'monotonic', side_effect=[0, 6]):

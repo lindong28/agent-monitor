@@ -9,12 +9,12 @@ from types import SimpleNamespace
 from unittest import mock
 from urllib.parse import urlsplit
 
-import exporter
-import network_policy
-import quota_recovery
-import quota_refresh
+from agent_monitor.snapshots import exporter
+from agent_monitor.network import network_policy
+from agent_monitor.quota import quota_recovery
+from agent_monitor.quota import quota_refresh
 from parsers import RateLimits, accounts
-from upstream_controls import Controls
+from agent_monitor.accounts.upstream_controls import Controls
 
 
 class RecoveryNetworkTests(unittest.TestCase):
@@ -23,14 +23,14 @@ class RecoveryNetworkTests(unittest.TestCase):
         account = accounts.Account("fixture-account", "fixture@example.test")
         reading = RateLimits(5, 4102444800, 20, 4102444800, updated_at="2026-10-26T00:00:00Z")
         for mode in ("success", "upstream_failure", "unavailable"):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp, \
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp,\
                     mock.patch.dict(os.environ, {"HOME": tmp, "AGENT_MONITOR_PROXY_INTERNAL": route,
-                        "HTTPS_PROXY": "http://127.0.0.1:49999", "NO_PROXY": "*"}, clear=True), \
-                    mock.patch.object(exporter, "ROOT", Path(tmp)), \
-                    mock.patch.object(quota_refresh, "ROOT", Path(tmp)), \
-                    mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
-                    mock.patch("exporter.exporter_version", return_value="a" * 40), \
-                    mock.patch("generation.self_certified_host_identity", return_value="fixture-host"):
+                        "HTTPS_PROXY": "http://127.0.0.1:49999", "NO_PROXY": "*"}, clear=True),\
+                    mock.patch.object(exporter, "ROOT", Path(tmp)),\
+                    mock.patch.object(quota_refresh, "ROOT", Path(tmp)),\
+                    mock.patch("agent_monitor.quota.quota_service.accounts.codex_account", return_value=account),\
+                    mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="a" * 40),\
+                    mock.patch("agent_monitor.snapshots.generation.self_certified_host_identity", return_value="fixture-host"):
                 controls = Controls(Path(tmp) / "state/upstream_controls")
                 lease = controls.acquire("codex")
                 lease.pause("fixture")
@@ -48,8 +48,8 @@ class RecoveryNetworkTests(unittest.TestCase):
                              "events": [{"target": "https://upstream.example.test",
                                          "route": "PROXY 127.0.0.1:12345", "result": "connected"}]}
                 normal_env = network_policy.child_environment(os.environ)
-                with mock.patch("quota_refresh.subprocess.Popen", return_value=child) as spawn, \
-                        mock.patch("network_policy.observations", return_value=facts) as observations:
+                with mock.patch("agent_monitor.quota.quota_refresh.subprocess.Popen", return_value=child) as spawn,\
+                        mock.patch("agent_monitor.network.network_policy.observations", return_value=facts) as observations:
                     receipt = quota_recovery.local_recovery(request)
                 self.assertEqual(receipt["ok"], mode != "upstream_failure")
                 self.assertEqual(receipt["network"], facts)
@@ -67,10 +67,10 @@ class RecoveryNetworkTests(unittest.TestCase):
                 self.assertEqual("pause" in controls.read("codex"), mode == "upstream_failure")
 
     def test_missing_runtime_does_not_start_reader_or_consume_probe(self):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)), \
-                mock.patch("exporter.exporter_version", return_value="a" * 40), \
-                mock.patch("network_policy.endpoint", side_effect=network_policy.NetworkPolicyError("runtime_missing")), \
-                mock.patch("agent_monitor.quota_service.recover_codex_quota") as reader:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)),\
+                mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="a" * 40),\
+                mock.patch("agent_monitor.network.network_policy.endpoint", side_effect=network_policy.NetworkPolicyError("runtime_missing")),\
+                mock.patch("agent_monitor.quota.quota_service.recover_codex_quota") as reader:
             receipt = quota_recovery.local_recovery(dict(machine="fixture", account_id="fixture",
                 account_label="fixture@example.test", pause_id="a" * 32))
             reader.assert_not_called()

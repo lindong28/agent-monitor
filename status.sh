@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+cd "$ROOT"
 SERVICE="${1:-all}"
 
 usage() {
@@ -25,7 +27,7 @@ status_rollup_daemon() {
   local python
   python="$ROOT/.venv/bin/python"
   [ -x "$python" ] || python="$(command -v python3)"
-  "$python" "$ROOT/rollup_service.py" status
+  "$python" -m agent_monitor.runtime.rollup_service status
 }
 
 if [ "$#" -gt 1 ]; then

@@ -1,5 +1,5 @@
 """Known metadata reaches real HTTP actions without manual additions or provider access."""
-from agent_monitor import account_memory
+from agent_monitor.quota import account_memory
 import contextlib
 import http.client
 import json
@@ -13,9 +13,9 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-import codex_accounts as ca
-import client_network
-import server
+from agent_monitor.accounts import codex_accounts as ca
+from agent_monitor.network import client_network
+from agent_monitor import http_server as server
 from tests.test_codex_accounts import seed_auth
 
 

@@ -9,8 +9,8 @@ import sqlite3
 from contextlib import closing
 from unittest import mock
 
-import generation
-import statistics_snapshot
+from agent_monitor.snapshots import generation
+from agent_monitor.snapshots import statistics_snapshot
 from tests import test_generation_gc as generation_fixtures
 
 

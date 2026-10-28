@@ -1,4 +1,4 @@
-from agent_monitor import account_memory, quota_view
+from agent_monitor.quota import account_memory; from agent_monitor.quota import quota_view
 from component_fixtures import reset_collection
 import contextlib
 import hashlib
@@ -18,11 +18,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import generation
-import rollup
-import server
-import sync
-from machine_config import Machine, machine_config_fingerprint
+from agent_monitor.snapshots import generation
+from agent_monitor.accounting import rollup
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import sync
+from agent_monitor.snapshots.machine_config import Machine; from agent_monitor.snapshots.machine_config import machine_config_fingerprint
 
 
 class AccountMemoryTests(unittest.TestCase):
@@ -407,10 +407,10 @@ class AccountMemoryTests(unittest.TestCase):
             return {machine.name: sync.SyncResult(generation=current)}
 
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             side_effect=admission_snapshot,
-        ), mock.patch("server.sync.sync_all", side_effect=sync_all), mock.patch(
-            "server.rollup.query_pivot", return_value={"columns": [], "rows": []}
+        ), mock.patch("agent_monitor.http_server.sync.sync_all", side_effect=sync_all), mock.patch(
+            "agent_monitor.http_server.rollup.query_pivot", return_value={"columns": [], "rows": []}
         ):
             server.pivot_endpoint({"force": ["1"]})
             self.wait_for_sync()
@@ -632,7 +632,7 @@ class AccountMemoryTests(unittest.TestCase):
         before = self.memory_path.read_bytes()
 
         with mock.patch(
-            "server.ACCOUNT_MEMORY._write", side_effect=OSError("disk full")
+            "agent_monitor.http_server.ACCOUNT_MEMORY._write", side_effect=OSError("disk full")
         ):
             status, payload = self.post_remove(self.admission())
 
@@ -678,7 +678,7 @@ class AccountMemoryTests(unittest.TestCase):
                     ),
                 }
                 second_name = "remove" if first_name == "overview" else "overview"
-                with mock.patch("server.ACCOUNT_MEMORY._lock", lock):
+                with mock.patch("agent_monitor.http_server.ACCOUNT_MEMORY._lock", lock):
                     first = threading.Thread(
                         target=run,
                         args=(first_name, actions[first_name]),
@@ -741,7 +741,7 @@ class AccountMemoryTests(unittest.TestCase):
             except BaseException as exc:
                 errors.append(exc)
 
-        with mock.patch("server.ACCOUNT_MEMORY.upsert", side_effect=delayed_upsert):
+        with mock.patch("agent_monitor.http_server.ACCOUNT_MEMORY.upsert", side_effect=delayed_upsert):
             overview_thread = threading.Thread(target=load_stale_overview)
             overview_thread.start()
             self.assertTrue(candidate_derived.wait(1))
@@ -802,10 +802,10 @@ class AccountMemoryTests(unittest.TestCase):
                 errors.append(exc)
 
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             side_effect=lambda: contextlib.nullcontext(stale_sync),
         ), mock.patch(
-            "server.QUOTA_VIEW.remember", side_effect=delayed_remember
+            "agent_monitor.http_server.QUOTA_VIEW.remember", side_effect=delayed_remember
         ):
             sync_thread = threading.Thread(target=remember_stale_sync)
             sync_thread.start()
@@ -883,16 +883,16 @@ class AccountMemoryTests(unittest.TestCase):
                 if entrypoint == "overview":
                     patches = (
                         mock.patch(
-                            "server.COLLECTION.snapshot",
+                            "agent_monitor.http_server.COLLECTION.snapshot",
                             return_value={"completed_at": None},
                         ),
-                        mock.patch("server.COLLECTION.request", return_value=False),
+                        mock.patch("agent_monitor.http_server.COLLECTION.request", return_value=False),
                         mock.patch(
-                            "server.generation.generation_admission_snapshot",
+                            "agent_monitor.http_server.generation.generation_admission_snapshot",
                             side_effect=lambda: contextlib.nullcontext(post_delete),
                         ),
                         mock.patch(
-                            "server.rollup.use_admitted_generations",
+                            "agent_monitor.http_server.rollup.use_admitted_generations",
                             side_effect=lambda _admitted: contextlib.nullcontext(),
                         ),
                         mock.patch(
@@ -904,7 +904,7 @@ class AccountMemoryTests(unittest.TestCase):
                 else:
                     patches = (
                         mock.patch(
-                            "server.generation.generation_admission_snapshot",
+                            "agent_monitor.http_server.generation.generation_admission_snapshot",
                             side_effect=delayed_sync_snapshot,
                         ),
                     )
@@ -1002,7 +1002,7 @@ class AccountMemoryTests(unittest.TestCase):
             request.add_header("Content-Type", content_type)
         try:
             with mock.patch(
-                "server.generation.generation_admission_snapshot",
+                "agent_monitor.http_server.generation.generation_admission_snapshot",
                 side_effect=lambda: contextlib.nullcontext(admission),
             ):
                 try:

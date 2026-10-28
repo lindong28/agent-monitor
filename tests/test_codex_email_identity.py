@@ -1,12 +1,12 @@
 """Different Codex emails sharing a workspace must retain separate readings."""
-from agent_monitor import quota_service
+from agent_monitor.quota import quota_service
 
 import json
 import unittest
 from unittest import mock
 
-import exporter
-import server
+from agent_monitor.snapshots import exporter
+from agent_monitor import http_server as server
 from parsers import RateLimits, accounts
 import test_account_memory as fixtures
 
@@ -77,12 +77,12 @@ class CodexEmailIdentityTests(unittest.TestCase):
                     cache.write_text(json.dumps({"codex": old}))
                     email = "first@example.com" if same_email else "second@example.com"
                     reading = RateLimits(20, 100, 21, 200, updated_at="2026-09-24T06:01:00Z")
-                    with mock.patch.object(exporter, "ROOT", self.memory_path.parent.parent), \
-                         mock.patch("agent_monitor.hub_config.enabled", return_value=True), \
-                         mock.patch.object(quota_service.accounts, "codex_account", return_value=accounts.Account("shared-workspace", email)), \
-                         mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
-                         mock.patch.object(quota_service.codex, "load_rate_limits", return_value=reading), \
-                         mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=None), \
+                    with mock.patch.object(exporter, "ROOT", self.memory_path.parent.parent),\
+                         mock.patch("agent_monitor.hub_config.enabled", return_value=True),\
+                         mock.patch.object(quota_service.accounts, "codex_account", return_value=accounts.Account("shared-workspace", email)),\
+                         mock.patch.object(quota_service.accounts, "claude_account", return_value=None),\
+                         mock.patch.object(quota_service.codex, "load_rate_limits", return_value=reading),\
+                         mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=None),\
                          mock.patch.object(quota_service.quota_refresh, "load_rate_limits", return_value=reading):
                         result = exporter._rate_limits(refresh=refresh)
                     block = json.loads(cache.read_text())["codex"] if refresh else result["codex"]

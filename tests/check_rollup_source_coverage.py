@@ -10,17 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from agent_monitor.ingestion import load_all_entries  # noqa: E402
-from rollup import (  # noqa: E402
-    BUCKET_FIELDS,
-    DEFAULT_DB_PATH,
-    DEFAULT_WINDOW_DAYS,
-    PROTECTED_FIELDS,
-    RollupBucketTimezoneMigrationRequired,
-    _bucket_date,
-    _bucket_entries,
-    _read_connection,
-    rollup_lock,
-)
+from agent_monitor.accounting.rollup import BUCKET_FIELDS; from agent_monitor.accounting.rollup import DEFAULT_DB_PATH; from agent_monitor.accounting.rollup import DEFAULT_WINDOW_DAYS; from agent_monitor.accounting.rollup import PROTECTED_FIELDS; from agent_monitor.accounting.rollup import RollupBucketTimezoneMigrationRequired; from agent_monitor.accounting.rollup import _bucket_date; from agent_monitor.accounting.rollup import _bucket_entries; from agent_monitor.accounting.rollup import _read_connection; from agent_monitor.accounting.rollup import rollup_lock
 
 
 def check_coverage(

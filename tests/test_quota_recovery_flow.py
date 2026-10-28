@@ -10,13 +10,13 @@ from pathlib import Path
 from unittest import mock
 from types import SimpleNamespace
 
-import diagnostics
-import exporter
-import quota_refresh
-import quota_recovery
-import quota_sync
-import hub
-import server
+from agent_monitor import diagnostics
+from agent_monitor.snapshots import exporter
+from agent_monitor.quota import quota_refresh
+from agent_monitor.quota import quota_recovery
+from agent_monitor.quota import quota_sync
+from agent_monitor.runtime import hub
+from agent_monitor import http_server as server
 from parsers import RateLimits
 from parsers import accounts, codex
 
@@ -34,7 +34,7 @@ class EvidenceTests(unittest.TestCase):
                     self.assertNotIn(secret, json.dumps(facts))
 
     def test_gui_timeout_cleanup_cannot_drop_captured_exclusions(self):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(hub, "ROOT", Path(tmp)), \
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(hub, "ROOT", Path(tmp)),\
                 mock.patch.object(hub.hub_config, "configuration", return_value={"quota_interval_seconds": 3600}):
             state = Path(tmp) / "state"
             state.mkdir()
@@ -53,23 +53,23 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual(kwargs["blocked_accounts"], exclusions)
                 done.set()
                 return {"codex": {}, "claude": {}}
-            with mock.patch.object(hub, "_pending_quota_request", side_effect=capture_then_delete), \
-                    mock.patch("agent_monitor.quota_service.rate_limits", side_effect=query) as read, \
-                    mock.patch("rollup.run", side_effect=lambda: done.wait(2)):
+            with mock.patch.object(hub, "_pending_quota_request", side_effect=capture_then_delete),\
+                    mock.patch("agent_monitor.quota.quota_service.rate_limits", side_effect=query) as read,\
+                    mock.patch("agent_monitor.accounting.rollup.run", side_effect=lambda: done.wait(2)):
                 hub.collect()
             read.assert_called_once()
             receipt = json.loads((state / "quota-refresh-receipt-v2.json").read_text())
             self.assertEqual(receipt["blocked_accounts"], exclusions)
 
     def test_passive_pause_without_reading_still_exposes_recovery_target(self):
-        from upstream_controls import Controls
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)), \
-                mock.patch("agent_monitor.hub_config.enabled", return_value=False), \
-                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=accounts.Account("a", "a@example.test")), \
-                mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
-                mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
-                mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
-                mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits") as query:
+        from agent_monitor.accounts.upstream_controls import Controls
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)),\
+                mock.patch("agent_monitor.hub_config.enabled", return_value=False),\
+                mock.patch("agent_monitor.quota.quota_service.accounts.codex_account", return_value=accounts.Account("a", "a@example.test")),\
+                mock.patch("agent_monitor.quota.quota_service.accounts.claude_account", return_value=None),\
+                mock.patch("agent_monitor.quota.quota_service.codex.load_rate_limits", return_value=None),\
+                mock.patch("agent_monitor.quota.quota_service.claude_status.load_rate_limits", return_value=None),\
+                mock.patch("agent_monitor.quota.quota_service.quota_refresh.load_rate_limits") as query:
             controls = Controls(Path(tmp) / "state/upstream_controls")
             lease = controls.acquire("codex")
             lease.pause("fixture")
@@ -81,11 +81,11 @@ class EvidenceTests(unittest.TestCase):
             query.assert_not_called()
 
     def test_recovery_preflight_binds_id_as_well_as_label_and_rejects_stale_window(self):
-        from upstream_controls import Controls
+        from agent_monitor.accounts.upstream_controls import Controls
         account = accounts.Account("a", "fixture@example.test")
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)), \
-                mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
-                mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", return_value=RateLimits(5, 1, None, None)) as query:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(exporter, "ROOT", Path(tmp)),\
+                mock.patch("agent_monitor.quota.quota_service.accounts.codex_account", return_value=account),\
+                mock.patch("agent_monitor.quota.quota_service.quota_refresh.load_rate_limits", return_value=RateLimits(5, 1, None, None)) as query:
             controls = Controls(Path(tmp) / "state/upstream_controls")
             lease = controls.acquire("codex")
             lease.pause("fixture")
@@ -103,10 +103,10 @@ class EvidenceTests(unittest.TestCase):
         machines = [{"name": n, "ssh_host": n, "self": False} for n in ("one", "two")]
         output = io.StringIO()
         # The remote may have called the provider before this timeout.
-        with mock.patch("quota_sync.sys.stdin", io.StringIO(json.dumps(machines))), \
-                mock.patch("quota_sync.sys.stdout", output), \
-                mock.patch("quota_sync.sync_process.watch_parent"), \
-                mock.patch("quota_sync.subprocess.run", side_effect=subprocess.TimeoutExpired("fixture", 1)) as remote:
+        with mock.patch("agent_monitor.quota.quota_sync.sys.stdin", io.StringIO(json.dumps(machines))),\
+                mock.patch("agent_monitor.quota.quota_sync.sys.stdout", output),\
+                mock.patch("agent_monitor.quota.quota_sync.sync_process.watch_parent"),\
+                mock.patch("agent_monitor.quota.quota_sync.subprocess.run", side_effect=subprocess.TimeoutExpired("fixture", 1)) as remote:
             quota_sync._worker()
         self.assertEqual(remote.call_count, 1)
         rows = [json.loads(line) for line in output.getvalue().splitlines()]
@@ -125,7 +125,7 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual(blocked, expected)
 
     def test_restricted_gui_request_requires_matching_acknowledgement(self):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(hub, "ROOT", Path(tmp)), \
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(hub, "ROOT", Path(tmp)),\
                 mock.patch.object(hub, "QUOTA_POLL_INTERVAL", .001):
             state = Path(tmp) / "state"
             exclusions = {"codex": ["a" * 64]}
@@ -160,12 +160,12 @@ class EvidenceTests(unittest.TestCase):
             a = accounts.Account("fixture", "one@example.test")
             b = accounts.Account("other", "two@example.test")
             blocked = {"codex": [quota_refresh.account_fingerprint("codex", a)]}
-            with mock.patch.object(exporter, "ROOT", Path(tmp)), mock.patch("agent_monitor.hub_config.enabled", return_value=False), \
-                 mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=a), \
-                 mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=b), \
-                 mock.patch("agent_monitor.quota_service.codex.load_rate_limits", return_value=None), \
-                 mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
-                 mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=quota_refresh.NotSignedIn("fixture")) as query:
+            with mock.patch.object(exporter, "ROOT", Path(tmp)), mock.patch("agent_monitor.hub_config.enabled", return_value=False),\
+                 mock.patch("agent_monitor.quota.quota_service.accounts.codex_account", return_value=a),\
+                 mock.patch("agent_monitor.quota.quota_service.accounts.claude_account", return_value=b),\
+                 mock.patch("agent_monitor.quota.quota_service.codex.load_rate_limits", return_value=None),\
+                 mock.patch("agent_monitor.quota.quota_service.claude_status.load_rate_limits", return_value=None),\
+                 mock.patch("agent_monitor.quota.quota_service.quota_refresh.load_rate_limits", side_effect=quota_refresh.NotSignedIn("fixture")) as query:
                 result = exporter._rate_limits(refresh=True, blocked_accounts=blocked)
             self.assertEqual([c.args[0] for c in query.call_args_list], ["claude"])
             self.assertEqual(result["codex"]["query_state"], "blocked")
@@ -183,10 +183,10 @@ class RecoveryHttpTests(unittest.TestCase):
             admitted.__enter__.return_value = SimpleNamespace(admitted=[current])
             network = {"policy": "chromium-system", "coverage": "recent_connections_only", "events": []}
             receipt = {"ok": True, "block": {**block, "refresh_error": None}, "source_host_identity": "host-fixture", "exporter_commit": "a" * 40, "network": network}
-            with mock.patch.object(server, "QUOTA_REFRESH", manager), \
-                    mock.patch("server.sync.load_machine_config", return_value=SimpleNamespace(by_name={"fixture": machine})), \
-                    mock.patch("server.generation.generation_admission_snapshot", return_value=admitted), \
-                    mock.patch("quota_recovery.run", return_value=receipt) as run:
+            with mock.patch.object(server, "QUOTA_REFRESH", manager),\
+                    mock.patch("agent_monitor.http_server.sync.load_machine_config", return_value=SimpleNamespace(by_name={"fixture": machine})),\
+                    mock.patch("agent_monitor.http_server.generation.generation_admission_snapshot", return_value=admitted),\
+                    mock.patch("agent_monitor.quota.quota_recovery.run", return_value=receipt) as run:
                 request_finished = threading.Event()
 
                 class Handler(server.Handler):
@@ -234,12 +234,12 @@ class RecoveryHttpTests(unittest.TestCase):
                     self.assertIsNone(stored["machines"]["fixture"]["payload"]["rate_limits"]["codex"]["refresh_error"])
                     self.assertFalse(manager.recovering)
                     revision = manager.revision
-                    with mock.patch("quota_sync.write_message", side_effect=OSError("fixture disk failure")):
+                    with mock.patch("agent_monitor.quota.quota_sync.write_message", side_effect=OSError("fixture disk failure")):
                         self.assertEqual(post(), 500)
                     self.assertFalse(manager.recovering)
                     self.assertEqual(manager.revision, revision)
                     self.assertEqual(json.loads(manager.path.read_text()), stored)
-                    with mock.patch("quota_recovery.run", return_value={**receipt, "source_host_identity": "wrong-host"}):
+                    with mock.patch("agent_monitor.quota.quota_recovery.run", return_value={**receipt, "source_host_identity": "wrong-host"}):
                         self.assertEqual(post(), 500)
                     self.assertFalse(manager.recovering)
                     self.assertEqual(manager.revision, revision)

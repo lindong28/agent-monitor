@@ -175,7 +175,7 @@ class UsageLoader:
 
     def enrich_entries(self, entries, read_only=False, diagnostic=False, source_errors=()):
         try:
-            from pricing_fetcher import with_calculated_cost, get_pricing, PreparedPricing
+            from agent_monitor.accounting.pricing_fetcher import with_calculated_cost; from agent_monitor.accounting.pricing_fetcher import get_pricing; from agent_monitor.accounting.pricing_fetcher import PreparedPricing
         except ImportError:
             return LoadedEntries(
                 sorted(entries, key=lambda entry: entry.timestamp),

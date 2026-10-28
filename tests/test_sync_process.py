@@ -8,8 +8,8 @@ import sys
 import unittest
 from unittest import mock
 
-import server
-import sync_process
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import sync_process
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +28,7 @@ class SyncProcessTests(unittest.TestCase):
     def test_real_worker_progress_and_results_keep_generation_leases_in_child(self):
         body = '''
 from types import SimpleNamespace
-import sync, sync_process
+from agent_monitor.snapshots import sync; from agent_monitor.snapshots import sync_process
 def collect(**kwargs):
     first = sync.SyncResult(generation=SimpleNamespace(close=lambda: None))
     last = sync.SyncResult(error="source unavailable")
@@ -40,7 +40,7 @@ sync.sync_all = collect
 sync_process._worker()
 '''
         events = []
-        with mock.patch("sync_process.subprocess.Popen", side_effect=lambda *a, **k: self.launch_fixture(body, *a, **k)):
+        with mock.patch("agent_monitor.snapshots.sync_process.subprocess.Popen", side_effect=lambda *a, **k: self.launch_fixture(body, *a, **k)):
             results = sync_process.sync_all(
                 on_statistics=lambda name, result: events.append(("statistics", name, result)),
                 on_complete=lambda name, result: events.append(("complete", name, result)))
@@ -60,7 +60,7 @@ sync_process._worker()
                 body = "import json\nsys.stdin.readline()\n"
                 body += "\n".join("print(%r,flush=True)" % json.dumps(item) for item in output)
                 body += "\nsys.exit(%d)\n" % code
-                with mock.patch("sync_process.subprocess.Popen", side_effect=lambda *a, **k: self.launch_fixture(body, *a, **k)):
+                with mock.patch("agent_monitor.snapshots.sync_process.subprocess.Popen", side_effect=lambda *a, **k: self.launch_fixture(body, *a, **k)):
                     with self.assertRaises((ValueError, RuntimeError)):
                         sync_process.sync_all()
                 self.assertFalse(sync_process._active)
@@ -70,7 +70,7 @@ sync_process._worker()
         # Use a normal sleeping worker here; the supervisor test below exercises
         # explicit shutdown for the GIL-holding case.
         body = '''
-import sync, sync_process, time
+from agent_monitor.snapshots import sync; from agent_monitor.snapshots import sync_process; import time
 def collect(**kwargs):
     print('ready', file=sys.stderr, flush=True)
     time.sleep(30)
@@ -124,9 +124,9 @@ sync_process._worker()
             kwargs['on_complete']('fast', ok)
             kwargs['on_complete']('slow', fail)
             return {'fast':ok, 'slow':fail}
-        with mock.patch('server.hub.enabled', return_value=True), \
-             mock.patch('agent_monitor.collection.sync_process.sync_all', side_effect=collect), \
-             mock.patch('server.COLLECTION.remember_accounts') as remember:
+        with mock.patch('agent_monitor.http_server.hub.enabled', return_value=True),\
+             mock.patch('agent_monitor.collection.sync_process.sync_all', side_effect=collect),\
+             mock.patch('agent_monitor.http_server.COLLECTION.remember_accounts') as remember:
             server.COLLECTION.run_round(('fast', 'slow'))
         remember.assert_called_once_with()
         self.assertEqual(server.COLLECTION._state['refresh_completed'], 1)
@@ -137,18 +137,18 @@ sync_process._worker()
 
     def test_reexec_waits_for_sync_shutdown(self):
         events = []
-        with mock.patch('server.threading.Timer') as timer, \
-             mock.patch('server.codex_accounts.manager.close', side_effect=lambda: events.append('accounts')), \
-             mock.patch('agent_monitor.collection.sync_process.shutdown', side_effect=lambda: events.append('shutdown')), \
-             mock.patch('server.os.execv', side_effect=lambda *args: events.append('exec')):
+        with mock.patch('agent_monitor.http_server.threading.Timer') as timer,\
+             mock.patch('agent_monitor.http_server.codex_accounts.manager.close', side_effect=lambda: events.append('accounts')),\
+             mock.patch('agent_monitor.collection.sync_process.shutdown', side_effect=lambda: events.append('shutdown')),\
+             mock.patch('agent_monitor.http_server.os.execv', side_effect=lambda *args: events.append('exec')):
             server._schedule_reexec(mock.MagicMock())
             timer.call_args.args[1]()
         self.assertEqual(events, ['accounts', 'shutdown', 'exec'])
 
     def test_reexec_does_not_discard_unfinished_account_cleanup(self):
-        with mock.patch('server.threading.Timer') as timer, \
-             mock.patch('server.codex_accounts.manager.close', side_effect=RuntimeError('not reaped')), \
-             mock.patch('server.os.execv') as execute:
+        with mock.patch('agent_monitor.http_server.threading.Timer') as timer,\
+             mock.patch('agent_monitor.http_server.codex_accounts.manager.close', side_effect=RuntimeError('not reaped')),\
+             mock.patch('agent_monitor.http_server.os.execv') as execute:
             server._schedule_reexec(mock.MagicMock())
             with self.assertRaises(RuntimeError):
                 timer.call_args.args[1]()

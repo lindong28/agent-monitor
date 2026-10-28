@@ -4,12 +4,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+cd "$ROOT"
 SERVICE="${1:-all}"
 
 PYTHON="${AGENT_MONITOR_PYTHON:-$ROOT/.venv/bin/python}"
 [ -x "$PYTHON" ] || PYTHON="$(command -v python3)"
-if ! "$PYTHON" "$ROOT/deployment_guard.py" held "$ROOT"; then
-  exec "$PYTHON" "$ROOT/deployment_guard.py" run "$ROOT" -- bash "$ROOT/uninstall.sh" "$@"
+if ! "$PYTHON" -m agent_monitor.runtime.deployment_guard held "$ROOT"; then
+  exec "$PYTHON" -m agent_monitor.runtime.deployment_guard run "$ROOT" -- bash "$ROOT/uninstall.sh" "$@"
 fi
 
 usage() {
@@ -25,9 +27,9 @@ uninstall_web() {
     command -v python3
   )"
   if command -v launchctl >/dev/null 2>&1; then
-    "$python" "$ROOT/hub.py" uninstall-web || return $?
+    "$python" -m agent_monitor.runtime.hub uninstall-web || return $?
   fi
-  if [ "$("$python" "$ROOT/hub.py" role)" = client ]; then
+  if [ "$("$python" -m agent_monitor.runtime.hub role)" = client ]; then
     "$ROOT/agent-monitor" local stop || return $?
   else
     "$ROOT/agent-monitor" stop || return $?
@@ -48,7 +50,7 @@ uninstall_rollup_daemon() {
   local python
   python="$ROOT/.venv/bin/python"
   [ -x "$python" ] || python="$(command -v python3)"
-  "$python" "$ROOT/rollup_service.py" uninstall
+  "$python" -m agent_monitor.runtime.rollup_service uninstall
 }
 
 uninstall_connector() {

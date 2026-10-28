@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import service_runtime
+from agent_monitor.runtime import service_runtime
 
 
 class ServiceSignatureTests(unittest.TestCase):

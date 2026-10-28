@@ -35,7 +35,7 @@ class LocalConfigTests(unittest.TestCase):
 
     def test_default_and_local_overrides_reach_real_consumers(self):
         source = '''
-import inspect, json, machine_config, hub, generation, sync
+import inspect; import json; from agent_monitor.snapshots import machine_config; from agent_monitor.runtime import hub; from agent_monitor.snapshots import generation; from agent_monitor.snapshots import sync
 import agent_monitor.views.query_view as query_view
 path = machine_config.DEFAULT_CONFIG_PATH
 assert generation.DEFAULT_CONFIG_PATH == sync.DEFAULT_CONFIG_PATH == path
@@ -57,12 +57,12 @@ print(json.dumps([path.name, machine_config.load_machine_config().self_machine.n
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), ["machines.local.json", "mine", "hub.local.json", "mine"])
         # Explicit paths must not be redirected to the local overrides.
-        result = self.run_source("import machine_config,hub; assert machine_config.load_machine_config('machines.json').self_machine.name == 'local'; assert hub.configuration('hub.json')['hub'] == 'local'")
+        result = self.run_source("from agent_monitor.snapshots import machine_config; from agent_monitor.runtime import hub; assert machine_config.load_machine_config('machines.json').self_machine.name == 'local'; assert hub.configuration('hub.json')['hub'] == 'local'")
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_invalid_local_file_does_not_fall_back(self):
-        for name, statement in (("machines", "import machine_config; machine_config.load_machine_config()"),
-                                ("hub", "import hub; hub.configuration()")):
+        for name, statement in (("machines", "from agent_monitor.snapshots import machine_config; machine_config.load_machine_config()"),
+                                ("hub", "from agent_monitor.runtime import hub; hub.configuration()")):
             local = self.root / (name + ".local.json")
             for kind in ("malformed", "broken_symlink"):
                 with self.subTest(config=name, kind=kind):
@@ -80,8 +80,8 @@ print(json.dumps([path.name, machine_config.load_machine_config().self_machine.n
         local.write_text(json.dumps({"machines": [
             {"name": "mine", "ssh_host": "localhost", "self": True},
             {"name": "remote", "ssh_host": "remote.example", "self": False}], "retired_names": []}))
-        result = self.run_source("import generation; generation.retire_machines(['remote'])")
+        result = self.run_source("from agent_monitor.snapshots import generation; generation.retire_machines(['remote'])")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.root / "machines.json").read_bytes(), default)
-        result = self.run_source("import machine_config; c=machine_config.load_machine_config(); assert set(c.by_name)=={'mine'}; assert c.retired_names=={'remote'}")
+        result = self.run_source("from agent_monitor.snapshots import machine_config; c=machine_config.load_machine_config(); assert set(c.by_name)=={'mine'}; assert c.retired_names=={'remote'}")
         self.assertEqual(result.returncode, 0, result.stderr)

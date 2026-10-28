@@ -256,10 +256,10 @@ class AggregatorTests(unittest.TestCase):
             ("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "project_identity_write"),
             ("agent_monitor/ingestion/project_identity.py", "recover_reviewed", "reviewed_identity_preview_read_only"),
             ("agent_monitor/ingestion/project_identity.py", "_store_project_identity", "project_identity_write"),
-            ("exporter.py", "_vacuum_into_locked", "locked_read_only_vacuum_snapshot"),
-            ("generation.py", "snapshot_stats", "immutable_generation_validation"),
-            ("rollup.py", "adopt_bucket_timezone", "explicit_legacy_adoption_write"),
-            ("rollup.py", "_connect", "rollup_write_chokepoint"),
+            ("agent_monitor/snapshots/exporter.py", "_vacuum_into_locked", "locked_read_only_vacuum_snapshot"),
+            ("agent_monitor/snapshots/generation.py", "snapshot_stats", "immutable_generation_validation"),
+            ("agent_monitor/accounting/rollup.py", "adopt_bucket_timezone", "explicit_legacy_adoption_write"),
+            ("agent_monitor/accounting/rollup.py", "_connect", "rollup_write_chokepoint"),
             # _read_connection still owns the marker contract and the choice of
             # read mode; it delegates only the opening itself, so this is the
             # same chokepoint rather than a second way in.
@@ -267,10 +267,10 @@ class AggregatorTests(unittest.TestCase):
             ("agent_monitor/storage.py", "_private_read_copy", "locked_source_private_copy_recovery"),
             ("agent_monitor/ingestion/usage_archive.py", "read", "retained_usage_read_only"),
             ("agent_monitor/ingestion/usage_archive.py", "collect", "retained_usage_transaction_write"),
-            ("statistics_snapshot.py", "write_snapshot", "unpublished_statistics_write"),
-            ("statistics_snapshot.py", "read_snapshot", "admitted_statistics_read_only"),
-            ("statistics_snapshot.py", "read_metadata", "admitted_statistics_metadata_read_only"),
-            ("statistics_snapshot.py", "_admitted_connection", "admitted_statistics_read_only"),
+            ("agent_monitor/snapshots/statistics_snapshot.py", "write_snapshot", "unpublished_statistics_write"),
+            ("agent_monitor/snapshots/statistics_snapshot.py", "read_snapshot", "admitted_statistics_read_only"),
+            ("agent_monitor/snapshots/statistics_snapshot.py", "read_metadata", "admitted_statistics_metadata_read_only"),
+            ("agent_monitor/snapshots/statistics_snapshot.py", "_admitted_connection", "admitted_statistics_read_only"),
         ]
         dispositions = {
             (file_name, function_name): disposition
@@ -318,11 +318,11 @@ class AggregatorTests(unittest.TestCase):
             ("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "recovery_prechecked_attach"),
             ("agent_monitor/ingestion/project_identity.py", "_begin_identity_recovery", "recovery_prechecked_attach"),
             ("agent_monitor/ingestion/project_identity.py", "_derive_pin_candidate", "recovery_prechecked_attach"),
-            ("generation.py", "snapshot_stats", "immutable_generation_validation"),
-            ("generation.py", "snapshot_stats", "immutable_generation_validation"),
-            ("generation.py", "snapshot_stats", "immutable_generation_validation"),
-            ("generation.py", "snapshot_stats", "immutable_generation_validation"),
-            ("generation.py", "snapshot_stats", "immutable_generation_validation"),
+            ("agent_monitor/snapshots/generation.py", "snapshot_stats", "immutable_generation_validation"),
+            ("agent_monitor/snapshots/generation.py", "snapshot_stats", "immutable_generation_validation"),
+            ("agent_monitor/snapshots/generation.py", "snapshot_stats", "immutable_generation_validation"),
+            ("agent_monitor/snapshots/generation.py", "snapshot_stats", "immutable_generation_validation"),
+            ("agent_monitor/snapshots/generation.py", "snapshot_stats", "immutable_generation_validation"),
             (
                 "tests/check_rollup_source_coverage.py",
                 "_read_rows",
@@ -361,7 +361,7 @@ class AggregatorTests(unittest.TestCase):
         }
         explicitly_excluded = {
             "agent_monitor/storage.py": "shared read chokepoint and bucket timezone checks",
-            "rollup.py": (
+            "agent_monitor/accounting/rollup.py": (
                 "daily_rollup helpers receive chokepoint connections except the named explicit adoption transaction"
             ),
         }
@@ -672,7 +672,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "rollup.py", "rollup_identity.py"):
+            for name in ("agent-monitor",):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
@@ -765,7 +765,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "rollup.py", "rollup_identity.py"):
+            for name in ("agent-monitor",):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
@@ -838,7 +838,7 @@ class AggregatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cli_root = Path(tmp) / "agent-monitor"
             cli_root.mkdir()
-            for name in ("agent-monitor", "rollup.py", "rollup_identity.py"):
+            for name in ("agent-monitor",):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")

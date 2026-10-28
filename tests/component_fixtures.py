@@ -1,5 +1,5 @@
 """Isolated component instances for HTTP composition tests."""
-import server
+from agent_monitor import http_server as server
 from agent_monitor.collection import CollectionCoordinator
 
 

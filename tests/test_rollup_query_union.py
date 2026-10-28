@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-import rollup
+from agent_monitor.accounting import rollup
 from parsers import UsageEntry
 from tests import check_rollup_source_coverage
 
@@ -26,7 +26,7 @@ class RollupQueryUnionTests(unittest.TestCase):
                 rollup.AdmittedGeneration("node-c", second),
             )
 
-            with mock.patch("rollup.admitted_generations", return_value=generations):
+            with mock.patch("agent_monitor.accounting.rollup.admitted_generations", return_value=generations):
                 rows = rollup._daily_rows(None, None)
 
             self.assertEqual(len(rows), 3)
@@ -48,7 +48,7 @@ class RollupQueryUnionTests(unittest.TestCase):
                 rollup.AdmittedGeneration("node-a", linux),
             )
 
-            with mock.patch("rollup.admitted_generations", return_value=generations):
+            with mock.patch("agent_monitor.accounting.rollup.admitted_generations", return_value=generations):
                 rows = rollup._daily_rows(None, None)
                 pivot = rollup.query_pivot("project", "none", "input")
                 options = rollup.filter_options()
@@ -62,7 +62,7 @@ class RollupQueryUnionTests(unittest.TestCase):
             # the label; a consumer left on the raw path silently filters to
             # nothing.
             self.assertEqual(options["project"], ["~/research/x"])
-            with mock.patch("rollup.admitted_generations", return_value=generations):
+            with mock.patch("agent_monitor.accounting.rollup.admitted_generations", return_value=generations):
                 filtered = rollup.query_pivot(
                     "machine", "none", "input", projects={"~/research/x"}
                 )
@@ -86,7 +86,7 @@ class RollupQueryUnionTests(unittest.TestCase):
                 rollup.AdmittedGeneration("node-c", second),
             )
 
-            with mock.patch("rollup.admitted_generations", return_value=generations):
+            with mock.patch("agent_monitor.accounting.rollup.admitted_generations", return_value=generations):
                 combined = rollup.query_pivot("machine", "none", "input")
                 only_node_c = rollup.query_pivot(
                     "day", "none", "input", machines={"node-c"}
@@ -117,7 +117,7 @@ class RollupQueryUnionTests(unittest.TestCase):
             )
 
             with mock.patch(
-                "rollup.admitted_generations",
+                "agent_monitor.accounting.rollup.admitted_generations",
                 return_value=(rollup.AdmittedGeneration("node-b", db_path),),
             ):
                 actual = rollup.query_pivot("day", "agent", "input")
@@ -136,7 +136,7 @@ class RollupQueryUnionTests(unittest.TestCase):
             )
 
             with mock.patch(
-                "rollup.admitted_generations",
+                "agent_monitor.accounting.rollup.admitted_generations",
                 side_effect=AssertionError("explicit db_path must stay isolated"),
             ):
                 result = rollup.query_pivot(
@@ -167,7 +167,7 @@ class RollupQueryUnionTests(unittest.TestCase):
                 rollup.AdmittedGeneration("node-b", db_path),
             )
             with mock.patch(
-                "rollup.admitted_generations",
+                "agent_monitor.accounting.rollup.admitted_generations",
                 side_effect=[
                     generations,
                     AssertionError("filter options must not admit a second snapshot"),
@@ -386,8 +386,8 @@ class RollupQueryUnionTests(unittest.TestCase):
             self.assertFalse(rollup.needs_run(db_path=db_path))
 
     def test_default_date_metadata_readers_use_only_admitted_generations(self):
-        with mock.patch("rollup.admitted_generations", return_value=()), mock.patch(
-            "rollup._read_connection",
+        with mock.patch("agent_monitor.accounting.rollup.admitted_generations", return_value=()), mock.patch(
+            "agent_monitor.accounting.rollup._read_connection",
             side_effect=AssertionError("excluded databases must not be opened"),
         ):
             self.assertIsNone(rollup.earliest_rollup_date())
@@ -404,7 +404,7 @@ class RollupQueryUnionTests(unittest.TestCase):
             Path(str(db_path) + ".lock").touch(mode=0o600)
             loader = mock.Mock(side_effect=AssertionError("loader must not run"))
 
-            result = rollup._check_rollup(
+            result = rollup.check_rollup(
                 db_path,
                 loader,
                 now=lambda: datetime(2026, 6, 14, 12, 0, tzinfo=timezone.utc),

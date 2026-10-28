@@ -11,7 +11,7 @@ import time
 import unittest
 from pathlib import Path
 
-import sync
+from agent_monitor.snapshots import sync
 
 
 class RemoteLifetimeTests(unittest.TestCase):
@@ -120,7 +120,7 @@ class RemoteLifetimeTests(unittest.TestCase):
                 "time.sleep(30)\n"
             )
             reader.chmod(0o700)
-            launcher = Path(sync.__file__).parent / "agent-monitor"
+            launcher = Path(__file__).resolve().parents[1] / "agent-monitor"
             parent = subprocess.Popen(
                 [sys.executable, "-B", "-c", sync._REMOTE_EXPORT_SCRIPT, str(directory), "5", str(launcher), "export", "--out", str(directory / "bundle")],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,

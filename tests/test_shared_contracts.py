@@ -29,14 +29,14 @@ class SharedContractTests(unittest.TestCase):
 import importlib, sys
 class ForbiddenImplementation:
     def find_spec(self, fullname, *args):
-        if fullname in {"rollup", "agent_monitor.aggregations", "server"}:
+        if fullname in {"agent_monitor.accounting.rollup", "agent_monitor.aggregations", "agent_monitor.http_server"}:
             raise AssertionError("implementation dependency: " + fullname)
 sys.meta_path.insert(0, ForbiddenImplementation())
 import agent_monitor.contracts.usage, agent_monitor.contracts.rollup
-import generation
+from agent_monitor.snapshots import generation
 # Positive control: the guard actually rejects an implementation import.
 try:
-    importlib.import_module("rollup")
+    importlib.import_module("agent_monitor.accounting.rollup")
 except AssertionError:
     pass
 else:

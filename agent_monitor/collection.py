@@ -4,12 +4,12 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-import diagnostics
-import generation
+from agent_monitor import diagnostics
+from agent_monitor.snapshots import generation
 from agent_monitor import hub_config as hub
 import agent_monitor.views.query_view as query_view
-import sync
-import sync_process
+from agent_monitor.snapshots import sync
+from agent_monitor.snapshots import sync_process
 
 logger = logging.getLogger("agent-monitor")
 SYNC_DUE_AFTER_SECONDS = 600
@@ -573,7 +573,7 @@ class CollectionCoordinator:
             )
         declared = len(admission.config.machines)
         if hub.enabled():
-            import statistics_snapshot
+            from agent_monitor.snapshots import statistics_snapshot
             details = {current.host: statistics_snapshot.read_metadata(current.db_path) for current in admission.admitted}
             for row in machine_rows:
                 detail = details.get(row["name"], {"state": "not_collected"})

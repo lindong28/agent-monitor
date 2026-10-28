@@ -2,7 +2,7 @@
 import unittest
 from unittest import mock
 
-import server
+from agent_monitor import http_server as server
 
 
 class BrowserDnsTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class BrowserDnsTests(unittest.TestCase):
                     http.server_close()
 
     def test_known_hosts_do_not_resolve_dns(self):
-        with mock.patch.object(server.socket, "gethostname", return_value="monitor.example"), \
+        with mock.patch.object(server.socket, "gethostname", return_value="monitor.example"),\
                 mock.patch.object(server.socket, "getfqdn", side_effect=AssertionError("DNS used")):
             for host in ("127.0.0.1:39001", "[::1]:39001", "localhost:39001", "monitor:39001", "monitor.example:39001"):
                 with self.subTest(host=host):
@@ -32,7 +32,7 @@ class BrowserDnsTests(unittest.TestCase):
                     self.assertFalse(self.check(host, Origin="https://attacker.example"))
 
     def test_fqdn_aliases_and_foreign_hosts_keep_existing_admission(self):
-        with mock.patch.object(server.socket, "gethostname", return_value="monitor"), \
+        with mock.patch.object(server.socket, "gethostname", return_value="monitor"),\
                 mock.patch.object(server.socket, "getfqdn", return_value="alias.example"):
             for host, accepted in (("alias.example:39001", True), ("alias:39001", True), ("attacker.example", False)):
                 with self.subTest(host=host):

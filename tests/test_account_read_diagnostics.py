@@ -5,8 +5,8 @@ import threading
 import unittest
 from unittest import mock
 
-import codex_accounts as ca
-import server
+from agent_monitor.accounts import codex_accounts as ca
+from agent_monitor import http_server as server
 from tests import test_codex_accounts as actions
 
 

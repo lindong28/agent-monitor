@@ -9,7 +9,7 @@ from unittest import mock
 
 import parsers
 from parsers import claude
-import pricing_fetcher as pricing
+from agent_monitor.accounting import pricing_fetcher as pricing
 from agent_monitor.ingestion.usage_archive import UsageArchive
 
 

@@ -68,8 +68,8 @@ def run_case(path, rows, repeat):
     # Called only after isolated HOME is installed, before any project import.
     from agent_monitor.ingestion import ProjectIdentityStore, UsageLoader
     from parsers import codex
-    import exporter
-    import statistics_snapshot
+    from agent_monitor.snapshots import exporter
+    from agent_monitor.snapshots import statistics_snapshot
 
     sessions = path / "sessions"
     sessions.mkdir()
@@ -100,7 +100,7 @@ def run_case(path, rows, repeat):
             mock.patch.object(loader, "usage_paths", side_effect=lambda **kw: sorted(sessions.glob("*.jsonl"))),
             mock.patch.object(codex, "SESSIONS_DIR", str(sessions)),
             mock.patch.object(codex, "STATE_DB", str(metadata)),
-            mock.patch("pricing_fetcher.get_pricing", return_value=PRICES),
+            mock.patch("agent_monitor.accounting.pricing_fetcher.get_pricing", return_value=PRICES),
             # Synthetic manifest identity; report actual source hashes separately.
             mock.patch.object(exporter, "exporter_version", return_value="a" * 40),
             mock.patch.object(exporter, "_rate_limits", side_effect=AssertionError("quota access")),

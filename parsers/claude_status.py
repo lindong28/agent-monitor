@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-import quota_applicability
+from agent_monitor.quota import quota_applicability
 from pathlib import Path
 from typing import Optional
 

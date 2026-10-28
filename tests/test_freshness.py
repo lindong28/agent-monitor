@@ -16,23 +16,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class SourceSignatureTests(unittest.TestCase):
     def test_signature_is_deterministic_and_matches_boot(self):
-        import server
+        from agent_monitor import http_server as server
 
         self.assertTrue(server.BOOT_SIGNATURE)
         self.assertEqual(server._source_signature(), server._source_signature())
         self.assertEqual(server._source_signature(), server.BOOT_SIGNATURE)
 
     def test_source_files_are_python_modules_only(self):
-        import server
+        from agent_monitor import http_server as server
 
         files = source_inventory.python_sources(ROOT)
-        self.assertIn(ROOT / "server.py", files)
+        self.assertIn(ROOT / "agent_monitor/http_server.py", files)
         self.assertTrue(files)
         self.assertTrue(all(path.suffix == ".py" for path in files))
         self.assertFalse(any("tests" in path.parts for path in files))
 
     def test_signature_changes_when_file_set_changes(self):
-        import server
+        from agent_monitor import http_server as server
 
         full = server._source_signature()
         original = source_inventory.python_sources
@@ -43,7 +43,7 @@ class SourceSignatureTests(unittest.TestCase):
 
 class RestartCompileTests(unittest.TestCase):
     def test_compile_check_accepts_valid_source_and_reports_syntax_error(self):
-        import server
+        from agent_monitor import http_server as server
 
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(server, "ROOT", Path(directory)):
             source = Path(directory) / "entry.py"
@@ -58,7 +58,7 @@ class RestartCompileTests(unittest.TestCase):
 class HealthStaleTests(unittest.TestCase):
 
     def test_health_reports_signature_and_not_stale_at_boot(self):
-        import server
+        from agent_monitor import http_server as server
 
         payload = server.health({"asset_watch": ["1"]})
         self.assertTrue(payload["ok"])
@@ -67,12 +67,12 @@ class HealthStaleTests(unittest.TestCase):
         self.assertFalse(payload["stale"])
 
     def test_health_marks_legacy_asset_watchers_stale(self):
-        import server
+        from agent_monitor import http_server as server
 
         self.assertTrue(server.health({})["stale"])
 
     def test_health_reports_stale_when_boot_signature_diverges(self):
-        import server
+        from agent_monitor import http_server as server
 
         original = server.BOOT_SIGNATURE
         try:
@@ -90,23 +90,23 @@ class FreshnessWiringTests(unittest.TestCase):
             sandbox = Path(tmp)
             launcher_root = sandbox / "agent-monitor"
             launcher_root.mkdir()
-            launcher = launcher_root / "agent-monitor"
-            shutil.copy2(ROOT / "agent-monitor", launcher)
-            shutil.copy2(ROOT / "hub.py", launcher_root / "hub.py")
-            shutil.copy2(ROOT / "deployment_guard.py", launcher_root / "deployment_guard.py")
-            shutil.copy2(ROOT / "service_runtime.py", launcher_root / "service_runtime.py")
-            shutil.copy2(ROOT / "project_paths.py", launcher_root / "project_paths.py")
             shutil.copytree(ROOT / "agent_monitor", launcher_root / "agent_monitor",
                             ignore=shutil.ignore_patterns("__pycache__"))
+            launcher = launcher_root / "agent-monitor"
+            shutil.copy2(ROOT / "agent-monitor", launcher)
+            shutil.copy2(ROOT / "agent_monitor/runtime/hub.py", launcher_root / "agent_monitor/runtime/hub.py")
+            shutil.copy2(ROOT / "agent_monitor/runtime/deployment_guard.py", launcher_root / "agent_monitor/runtime/deployment_guard.py")
+            shutil.copy2(ROOT / "agent_monitor/runtime/service_runtime.py", launcher_root / "agent_monitor/runtime/service_runtime.py")
+            shutil.copy2(ROOT / "project_paths.py", launcher_root / "project_paths.py")
             shutil.copy2(ROOT / "hub.json", launcher_root / "hub.json")
-            shutil.copy2(ROOT / "process_identity.py", launcher_root / "process_identity.py")
+            shutil.copy2(ROOT / "agent_monitor/runtime/process_identity.py", launcher_root / "agent_monitor/runtime/process_identity.py")
 
             state = launcher_root / "state"
             state.mkdir()
             if running:
                 (state / "pid").write_text(str(os.getpid()), encoding="utf-8")
                 (state / "port").write_text("39123", encoding="utf-8")
-                import process_identity
+                from agent_monitor.runtime import process_identity
                 process_identity.record(state, launcher_root, os.getpid())
 
             fake_bin = sandbox / "bin"
@@ -247,7 +247,7 @@ exit 1
         self.assertIn("web_signature", js)
 
     def test_static_responses_disable_browser_cache(self):
-        import server
+        from agent_monitor import http_server as server
 
         headers = {}
         handler = SimpleNamespace(
@@ -278,7 +278,7 @@ exit 1
         install.sh. Judging containment on the resolved target sent every asset
         behind that link to 404 — the production reading was three blank charts
         with no message — so containment is judged on the request path."""
-        import server
+        from agent_monitor import http_server as server
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "deployment"
@@ -297,7 +297,7 @@ exit 1
         self.assertEqual(state["body"].getvalue(), b"window.Chart = 1;")
 
     def test_static_rejects_traversal_out_of_the_web_directory(self):
-        import server
+        from agent_monitor import http_server as server
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "deployment"
@@ -326,7 +326,7 @@ exit 1
         self.assertIn("compile_ok", script)
 
     def test_server_exposes_post_restart_endpoint(self):
-        src = (ROOT / "server.py").read_text()
+        src = (ROOT / "agent_monitor/http_server.py").read_text()
 
         self.assertIn("def do_POST", src)
         self.assertIn("/api/restart", src)

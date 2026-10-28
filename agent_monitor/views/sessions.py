@@ -3,10 +3,10 @@ from collections import defaultdict
 from datetime import datetime
 from dataclasses import replace
 
-import generation
+from agent_monitor.snapshots import generation
 from agent_monitor import hub_config as hub
-import statistics_snapshot
-import sync
+from agent_monitor.snapshots import statistics_snapshot
+from agent_monitor.snapshots import sync
 from agent_monitor.views.session_cache import SessionCache
 from agent_monitor.views.conversation_cache import ConversationCache
 from agent_monitor.contracts.session import SessionIndex

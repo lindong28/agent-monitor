@@ -11,16 +11,17 @@ from types import SimpleNamespace
 import subprocess
 import sys
 
-import diagnostics
-import server
-import quota_sync
+from agent_monitor import diagnostics
+from agent_monitor import http_server as server
+from agent_monitor.quota import quota_sync
 
 
 class DiagnosticsTests(unittest.TestCase):
     def test_extracted_component_frames_remain_visible_without_external_paths(self):
         for relative, expected in (("agent_monitor/collection.py", "collection.py"),
-                                   ("agent_monitor/quota_service.py", "quota_service.py"),
-                                   ("server.py", "server.py"),
+                                   ("agent_monitor/quota/quota_service.py", "quota_service.py"),
+                                   ("agent_monitor/http_server.py", "http_server.py"),
+                                   ("agent_monitor/accounts/codex_accounts.py", "codex_accounts.py"),
                                    ("untrusted/collection.py", None)):
             with self.subTest(source=relative):
                 try:
@@ -29,6 +30,11 @@ class DiagnosticsTests(unittest.TestCase):
                     facts = diagnostics.failure_details(exc)
                 files = [frame["file"] for frame in facts.get("frames", [])]
                 self.assertEqual(files, [] if expected is None else [expected])
+
+    def test_legacy_failure_frames_still_survive_persistence_readback(self):
+        legacy = {"frames": [{"file": "server.py", "line": 30},
+                             {"file": "quota_refresh.py", "line": 20}]}
+        self.assertEqual(diagnostics.safe_failure(json.loads(json.dumps(legacy))), legacy)
 
     def test_quota_worker_reports_machine_and_provider_failures(self):
         for failure in (None, "machine", "provider"):
@@ -48,7 +54,7 @@ class DiagnosticsTests(unittest.TestCase):
                         yield child
                 complete = mock.Mock()
                 machine = SimpleNamespace(name="fixture", as_config_dict=lambda: {})
-                with mock.patch.object(diagnostics, "monitor", monitor), mock.patch("quota_sync.sync_process.supervised_worker", worker):
+                with mock.patch.object(diagnostics, "monitor", monitor), mock.patch("agent_monitor.quota.quota_sync.sync_process.supervised_worker", worker):
                     quota_sync.run_queries([machine], complete)
                 complete.assert_called_once_with("fixture", message["payload"], message["error"])
                 self.assertEqual(monitor.snapshot()["counts_since_start"]["failed"], int(failure is not None))
@@ -59,9 +65,9 @@ class DiagnosticsTests(unittest.TestCase):
                 monitor = diagnostics.Monitor()
                 monitor.start(Path(tmp), interval=.01)
                 try:
-                    with mock.patch.object(diagnostics, "monitor", monitor), mock.patch.object(server.threading, "Timer") as timer, \
-                         mock.patch.object(server.codex_accounts.manager, "close", side_effect=RuntimeError("cleanup") if failure == "cleanup" else None), \
-                         mock.patch.object(server.QUOTA_REFRESH, "shutdown"), mock.patch.object(server.COLLECTION, "query_view", None), \
+                    with mock.patch.object(diagnostics, "monitor", monitor), mock.patch.object(server.threading, "Timer") as timer,\
+                         mock.patch.object(server.codex_accounts.manager, "close", side_effect=RuntimeError("cleanup") if failure == "cleanup" else None),\
+                         mock.patch.object(server.QUOTA_REFRESH, "shutdown"), mock.patch.object(server.COLLECTION, "query_view", None),\
                          mock.patch.object(server.os, "execv", side_effect=OSError("exec") if failure == "exec" else None) as execute:
                         guard = server.deployment_guard.deployment_lock(Path(tmp), inherit=False)
                         guard.__enter__()
@@ -104,7 +110,7 @@ class DiagnosticsTests(unittest.TestCase):
         def sources(age, error=None):
             monitor.set_sources({"fixture": {"generated_at": "2026-01-02T00:00:00Z",
                                              "observed_at": age}}, interval=60, stale_seconds=3600, error=error)
-        with mock.patch("diagnostics.time.time", return_value=diagnostics.timestamp("2026-01-02T00:00:00Z")):
+        with mock.patch("agent_monitor.diagnostics.time.time", return_value=diagnostics.timestamp("2026-01-02T00:00:00Z")):
             sources("2026-01-01T00:00:00Z")
             monitor.tick()
             row = monitor.snapshot()["sources"][0]

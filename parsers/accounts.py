@@ -20,7 +20,7 @@ import binascii
 import json
 import os
 
-import claude_oauth
+from agent_monitor.accounts import claude_oauth
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional

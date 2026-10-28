@@ -9,10 +9,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import quota_refresh
-import quota_sync
-import upstream_controls
-from machine_config import Machine
+from agent_monitor.quota import quota_refresh
+from agent_monitor.quota import quota_sync
+from agent_monitor.accounts import upstream_controls
+from agent_monitor.snapshots.machine_config import Machine
 from parsers import RateLimits
 from parsers.accounts import Account
 
@@ -91,7 +91,7 @@ class QuotaAdmissionTests(unittest.TestCase):
     def test_cleanup_failure_retains_active_marker(self):
         child = SimpleNamespace(returncode=None, pid=123,
                                 communicate=mock.Mock(side_effect=OSError("cleanup failed")))
-        with mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child), \
+        with mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child),\
                 mock.patch.object(quota_refresh.os, "killpg"):
             with self.assertRaises(OSError):
                 quota_refresh.load_rate_limits("codex", self.account)
@@ -120,9 +120,9 @@ class SerialQuotaRoundTests(unittest.TestCase):
                 argv = shlex.split(command[-1])
                 self.assertEqual(json.loads(argv[argv.index("--quota-exclusions") + 1]), {"codex": ["*"]})
             return SimpleNamespace(stdout=json.dumps(self.payload(failure and len(calls) == 2)))
-        with mock.patch.object(quota_sync.sys, "stdin", inputs), \
-                mock.patch.object(quota_sync.sys, "stdout", output), \
-                mock.patch.object(quota_sync.sync_process, "watch_parent"), \
+        with mock.patch.object(quota_sync.sys, "stdin", inputs),\
+                mock.patch.object(quota_sync.sys, "stdout", output),\
+                mock.patch.object(quota_sync.sync_process, "watch_parent"),\
                 mock.patch.object(quota_sync.subprocess, "run", side_effect=query):
             quota_sync._worker()
         return calls, [json.loads(line) for line in output.getvalue().splitlines()]

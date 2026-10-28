@@ -15,7 +15,7 @@ class NoGateway:
         if fullname.split('.')[0] in {'llm_gateway', 'llm_attempts', 'gateway_dependency'}:
             raise AssertionError('Gateway dependency used')
 sys.meta_path.insert(0, NoGateway())
-import server, exporter, statistics_snapshot
+from agent_monitor import http_server as server; from agent_monitor.snapshots import exporter; from agent_monitor.snapshots import statistics_snapshot
 from pathlib import Path
 from unittest.mock import patch
 assert not any('/llm-call' in path for path in server.ROUTES)

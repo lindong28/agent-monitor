@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from agent_monitor.ingestion import IDENTITY_STORE, project_identity
-import rollup
+from agent_monitor.accounting import rollup
 from agent_monitor import storage
 from parsers import UsageEntry
 

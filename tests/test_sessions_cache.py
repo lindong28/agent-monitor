@@ -1,4 +1,4 @@
-import statistics_snapshot
+from agent_monitor.snapshots import statistics_snapshot
 import tempfile
 import unittest
 import json
@@ -12,15 +12,15 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agent_monitor.contracts.usage import LoadedEntries
-import exporter
-import generation
-from machine_config import Machine
+from agent_monitor.snapshots import exporter
+from agent_monitor.snapshots import generation
+from agent_monitor.snapshots.machine_config import Machine
 from parsers import UsageEntry
 from agent_monitor.views.session_cache import SessionCache
 from agent_monitor.views.conversation_cache import ConversationCache
 from agent_monitor.contracts.session import codex_metadata
-import server
-import sync
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import sync
 
 
 NOW = datetime(2026, 10, 19, 7, tzinfo=timezone.utc)
@@ -73,7 +73,7 @@ class SessionsCacheTests(unittest.TestCase):
         return current
 
     def assert_uncached_equal(self, query, actual):
-        with mock.patch.object(self.view, "session_cache", SessionCache(max_entries=0)), \
+        with mock.patch.object(self.view, "session_cache", SessionCache(max_entries=0)),\
              mock.patch.object(self.view.conversation_cache, "read", return_value=None):
             self.assertEqual(actual, self.view.list(query))
 
@@ -279,7 +279,7 @@ class SessionsCacheTests(unittest.TestCase):
 
     def test_conversation_retention_limits_do_not_truncate_results(self):
         for cache in (ConversationCache(max_entries=1), ConversationCache(max_bytes=1)):
-            with mock.patch.object(self.view, "conversation_cache", cache), \
+            with mock.patch.object(self.view, "conversation_cache", cache),\
                  mock.patch.object(self.view, "session_cache", SessionCache(max_entries=0)):
                 first = self.view.list(self.query)
                 self.assertEqual(first, self.view.list(self.query))

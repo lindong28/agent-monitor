@@ -7,7 +7,7 @@ import unittest
 
 from agent_monitor import source_inventory
 import project_paths
-import service_runtime
+from agent_monitor.runtime import service_runtime
 
 
 class SourceInventoryTests(unittest.TestCase):

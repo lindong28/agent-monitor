@@ -7,12 +7,12 @@ import unittest
 from unittest import mock
 from datetime import datetime, timedelta, timezone
 
-from agent_monitor import quota_service
-import quota_applicability as qa
-import quota_refresh
-import server
-from agent_monitor.account_memory import account_memory_entry
-import upstream_controls
+from agent_monitor.quota import quota_service
+from agent_monitor.quota import quota_applicability as qa
+from agent_monitor.quota import quota_refresh
+from agent_monitor import http_server as server
+from agent_monitor.quota.account_memory import account_memory_entry
+from agent_monitor.accounts import upstream_controls
 from parsers import RateLimits
 from parsers.accounts import Account
 
@@ -110,10 +110,10 @@ class QuotaApplicabilityTests(unittest.TestCase):
 
     def test_export_does_not_query_confirmed_account(self):
         self.store.confirm("claude", self.account.account_id, self.confirmed)
-        with mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account), \
-                mock.patch.object(quota_service.accounts, "codex_account", return_value=None), \
-                mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=RateLimits(7, 1, 8, 2)), \
-                mock.patch.object(quota_service.codex, "load_rate_limits", return_value=None), \
+        with mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account),\
+                mock.patch.object(quota_service.accounts, "codex_account", return_value=None),\
+                mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=RateLimits(7, 1, 8, 2)),\
+                mock.patch.object(quota_service.codex, "load_rate_limits", return_value=None),\
                 mock.patch.object(quota_service.quota_refresh, "load_rate_limits", side_effect=quota_refresh.NotSignedIn("fixture")) as query:
             value = quota_service.rate_limits(refresh=True)["claude"]
         self.assertEqual(value["subscription_confirmation"]["state"], "no_subscription")
@@ -188,18 +188,18 @@ class QuotaApplicabilityTests(unittest.TestCase):
             return RateLimits(7, (now + timedelta(hours=2)).timestamp() if kind == "valid" else 1,
                               8, (now + timedelta(days=2)).timestamp() if kind == "valid" else 2,
                               updated_at=now.isoformat(), quota_observation={"source": "active_query", "observed_at": now.isoformat()})
-        with mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account), \
+        with mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account),\
                 mock.patch.object(quota_service.quota_refresh, "load_rate_limits", side_effect=lambda *a, **k: result("expired")):
             with self.assertRaises(quota_refresh.RefreshError):
                 quota_service.recover_claude_quota(self.account.account_id, self.account.label, pause_id)
         self.assertEqual(controls.read("claude")["pause"]["id"], pause_id)
         self.assertTrue(qa.unavailable(self.store.get("claude", self.account.account_id)))
-        with mock.patch.object(quota_service.accounts, "claude_account", side_effect=[self.account, Account("other")]), \
+        with mock.patch.object(quota_service.accounts, "claude_account", side_effect=[self.account, Account("other")]),\
                 mock.patch.object(quota_service.quota_refresh, "load_rate_limits", side_effect=lambda *a, **k: result("valid")):
             with self.assertRaises(quota_refresh.RefreshError):
                 quota_service.recover_claude_quota(self.account.account_id, self.account.label, pause_id)
         self.assertEqual(controls.read("claude")["pause"]["id"], pause_id)
-        with mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account), \
+        with mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account),\
                 mock.patch.object(quota_service.quota_refresh, "load_rate_limits", side_effect=lambda *a, **k: result("valid")) as query:
             block = quota_service.recover_claude_quota(self.account.account_id, self.account.label, pause_id)
         self.assertEqual(query.call_count, 1)
@@ -224,15 +224,15 @@ class QuotaApplicabilityTests(unittest.TestCase):
                 lease = controls.acquire("claude")
                 lease.pause("quotaRefreshFailed")
                 lease.close()
-            with self.subTest(paused=paused), \
-                    mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"), \
+            with self.subTest(paused=paused),\
+                    mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"),\
                     mock.patch.object(quota_refresh.subprocess, "Popen", side_effect=OSError("fixture child")) as spawn:
                 with self.assertRaises((OSError, quota_refresh.RefreshError)):
                     quota_refresh.load_rate_limits("claude", self.account, recovery_account_id=self.account.account_id)
                 self.assertEqual(spawn.call_count, 0 if paused else 1)
 
     def test_new_passive_claude_reading_keeps_403_and_withholds_current_values(self):
-        import hub
+        from agent_monitor.runtime import hub
         from types import SimpleNamespace
         older = (self.now - timedelta(minutes=30)).isoformat()
         cached = {"account_id": self.account.account_id, "account_label": self.account.label,
@@ -243,10 +243,10 @@ class QuotaApplicabilityTests(unittest.TestCase):
         quota_service.save_cache(self.root / "state/quota_snapshot.json", {"claude": cached})
         passive = RateLimits(80, cached["five_hour_resets_at"], 80, cached["seven_day_resets_at"],
                              updated_at=self.now.isoformat(), quota_observation={"source": "claude_statusline", "observed_at": self.now.isoformat()})
-        with mock.patch.object(hub.hub_config, "enabled", return_value=True), \
-                mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account), \
-                mock.patch.object(quota_service.accounts, "codex_account", return_value=None), \
-                mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=passive), \
+        with mock.patch.object(hub.hub_config, "enabled", return_value=True),\
+                mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account),\
+                mock.patch.object(quota_service.accounts, "codex_account", return_value=None),\
+                mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=passive),\
                 mock.patch.object(quota_service.codex, "load_rate_limits", return_value=None):
             result = quota_service.rate_limits(False, use_cache=True)
         self.assertEqual(result["claude"]["refresh_failure"]["http_status"], 403)
@@ -260,7 +260,7 @@ class QuotaApplicabilityTests(unittest.TestCase):
         self.assertEqual(entry["last_observation"]["seven_day_used_pct"], 80)
 
     def test_codex_newer_event_outranks_older_active_cache_and_memory(self):
-        import hub
+        from agent_monitor.runtime import hub
         from types import SimpleNamespace
         old = self.entry()
         new = self.entry(updated_at=(self.now + timedelta(minutes=1)).isoformat(), quota_observation=None, seven_day_used_pct=80)
@@ -292,8 +292,8 @@ class QuotaApplicabilityTests(unittest.TestCase):
             now = datetime.now(timezone.utc).isoformat()
             return RateLimits(7, self.entry()["five_hour_resets_at"], 8, self.entry()["seven_day_resets_at"],
                               updated_at=now, quota_observation={"source": "active_query", "observed_at": now})
-        with mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account), \
-                mock.patch.object(quota_service.quota_refresh, "load_rate_limits", side_effect=result), \
+        with mock.patch.object(quota_service.accounts, "claude_account", return_value=self.account),\
+                mock.patch.object(quota_service.quota_refresh, "load_rate_limits", side_effect=result),\
                 mock.patch.object(upstream_controls.Controls, "resume") as resume:
             quota_service.recover_claude_quota(self.account.account_id, self.account.label, None)
         resume.assert_not_called()

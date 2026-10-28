@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, usage_loader
-import rollup
+from agent_monitor.accounting import rollup
 from parsers import UsageEntry
 
 
@@ -1068,9 +1068,9 @@ class RollupTests(unittest.TestCase):
             ), mock.patch.dict(
                 usage_loader.os.environ, {"AGENT_MONITOR_EXTRA_JSONL": ""}, clear=False
             ), mock.patch(
-                "pricing_fetcher.get_pricing", return_value={}
+                "agent_monitor.accounting.pricing_fetcher.get_pricing", return_value={}
             ), mock.patch(
-                "pricing_fetcher.calculate_cost", return_value=1.0
+                "agent_monitor.accounting.pricing_fetcher.calculate_cost", return_value=1.0
             ):
                 RollupTests.reset_loader_process_state()
                 yield

@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import rollup_service as service
+from agent_monitor.runtime import rollup_service as service
 
 SOURCE = Path(__file__).resolve().parents[1]
 
@@ -237,7 +237,7 @@ else: sys.exit(9)
 
     def test_shell_entrypoints_propagate_unknown_status(self):
         shutil.copytree(SOURCE / "agent_monitor", self.root / "agent_monitor", ignore=shutil.ignore_patterns("__pycache__"))
-        for name in ("project_paths.py", "status.sh", "uninstall.sh", "rollup_service.py", "service_runtime.py", "deployment_guard.py"):
+        for name in ("project_paths.py", "status.sh", "uninstall.sh", "agent_monitor/runtime/rollup_service.py", "agent_monitor/runtime/service_runtime.py", "agent_monitor/runtime/deployment_guard.py"):
             shutil.copy2(SOURCE / name, self.root / name)
         with patch.dict(os.environ, PRINT_RC="7"):
             for name in ("status.sh", "uninstall.sh"):

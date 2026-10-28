@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import requests
-import account_egress as egress
+from agent_monitor.network import account_egress as egress
 
 
 class EgressTests(unittest.TestCase):
@@ -72,7 +72,7 @@ class EgressTests(unittest.TestCase):
             else:
                 result['retry_after_seconds'] = 120
             return result
-        with mock.patch.object(egress.network_policy, 'child_environment', return_value={}), \
+        with mock.patch.object(egress.network_policy, 'child_environment', return_value={}),\
                 mock.patch.object(egress, '_run_probe', side_effect=probe):
             with ThreadPoolExecutor(max_workers=2) as pool:
                 reports = list(pool.map(lambda _: egress.preview(), range(2)))

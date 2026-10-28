@@ -48,8 +48,8 @@ def measure(generation, operation):
         digest_bytes += Path(path).stat().st_size
         return digest(path)
 
-    with mock.patch.object(generation, "_file_digest", side_effect=counted_digest) as hashes, \
-            mock.patch.object(generation, "_validate_generation", wraps=generation._validate_generation) as validations, \
+    with mock.patch.object(generation, "_file_digest", side_effect=counted_digest) as hashes,\
+            mock.patch.object(generation, "_validate_generation", wraps=generation._validate_generation) as validations,\
             mock.patch.object(generation, "generation_admission_snapshot",
                               wraps=generation.generation_admission_snapshot) as admissions:
         started = time.perf_counter()
@@ -81,10 +81,10 @@ def make_snapshot(path, rows, padding_mib, tokens, rollup):
 
 
 def run_case(path, rows, padding_mib, repeat):
-    import generation
+    from agent_monitor.snapshots import generation
     import agent_monitor.views.query_view as query_view
-    import rollup
-    from machine_config import Machine, machine_config_fingerprint
+    from agent_monitor.accounting import rollup
+    from agent_monitor.snapshots.machine_config import Machine; from agent_monitor.snapshots.machine_config import machine_config_fingerprint
 
     path.mkdir()
     root, config = path / "generations", path / "machines.json"

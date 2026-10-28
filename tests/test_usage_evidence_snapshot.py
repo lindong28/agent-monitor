@@ -11,7 +11,7 @@ import tempfile
 import unittest
 
 from parsers import UsageEntry
-import statistics_snapshot as snapshots
+from agent_monitor.snapshots import statistics_snapshot as snapshots
 
 
 class UsageEvidenceSnapshotTests(unittest.TestCase):
@@ -98,7 +98,7 @@ class UsageEvidenceSnapshotTests(unittest.TestCase):
                                          "cost_provenance": provenance})
 
     def test_api_preserves_evidence_including_legacy_unknown(self):
-        import server
+        from agent_monitor import http_server as server
         for basis, value in (("recorded", 2), ("nominal", 1), ("unpriced", None), (None, 0)):
             provenance = None if basis is None else {
                 "basis": basis, "sources": [], "verified_at": None,

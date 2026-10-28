@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from agent_monitor.contracts.calendar import BUCKET_TIMEZONE
 from agent_monitor.aggregations import extract_metric
-from pricing_fetcher import is_estimated_pricing_model
+from agent_monitor.accounting.pricing_fetcher import is_estimated_pricing_model
 from agent_monitor.contracts.project import canonical_project
 
 def summary(entries):

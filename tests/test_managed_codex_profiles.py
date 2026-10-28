@@ -1,4 +1,4 @@
-from agent_monitor import quota_service
+from agent_monitor.quota import quota_service
 import contextlib
 import json
 import os
@@ -12,10 +12,10 @@ from unittest import mock
 
 from agent_monitor.contracts.usage import LoadedEntries
 from agent_monitor.ingestion import ProjectIdentityStore, UsageLoader
-import exporter
+from agent_monitor.snapshots import exporter
 from parsers import codex, codex_profiles
-import server
-import statistics_snapshot
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import statistics_snapshot
 from agent_monitor.contracts.session import SessionIndex, merge_metadata
 from agent_monitor.ingestion.usage_archive import UsageArchive
 
@@ -73,7 +73,7 @@ class ManagedCodexTests(unittest.TestCase):
         self.assertEqual(snapshot["version"], 5)
         loaded = LoadedEntries(snapshot["usage_entries"], session_metadata=snapshot["session_metadata"])
         views = server.create_views(usage_source=self.loader)
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch.object(self.loader, "load_all_entries", return_value=loaded):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch.object(self.loader, "load_all_entries", return_value=loaded):
             rows = {r["session_id"]: r for r in server.sessions_endpoint({"range": ["all"]}, views=views)}
             self.assertIsNone(rows["default"]["account"])
             self.assertEqual({sid: r["title"] for sid, r in rows.items()}, {n: "Task " + n + "-model" for n in ("default", "alpha", "beta")})
@@ -85,22 +85,22 @@ class ManagedCodexTests(unittest.TestCase):
     def test_passive_quota_reaches_existing_accounts_consumer(self):
         for name, used in (("alpha", 21), ("beta", 82)):
             self.session(self.profile(name), name, 10, used)
-        with mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no active queries")):
+        with mock.patch("agent_monitor.quota.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no active queries")):
             blocks = quota_service.managed_codex_rate_limits()
         current = SimpleNamespace(host="fixture", meta={"rate_limits": {"codex": {"signed_out": True, "managed_accounts": blocks}}})
         admission = SimpleNamespace(admitted=[current])
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("agent_monitor.quota_view.self_machine_name", return_value="fixture"):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch("agent_monitor.quota.quota_view.self_machine_name", return_value="fixture"):
             rows = server.QUOTA_VIEW.live_from_admission(admission)["codex"]["accounts"]
         self.assertEqual({r["account_label"]: r["five_hour_used_pct"] for r in rows}, {"alpha@example.test": 21, "beta@example.test": 82})
         self.assertEqual({r["account_profile"] for r in rows}, {"alpha", "beta"})
 
     def test_exporter_includes_profiles_without_refreshing_them(self):
         self.session(self.profile("alpha"), "alpha", 10, 21)
-        with mock.patch("agent_monitor.hub_config.enabled", return_value=False), mock.patch.object(exporter, "ROOT", self.root), \
-             mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=None), \
-             mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
-             mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
-             mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no active queries")):
+        with mock.patch("agent_monitor.hub_config.enabled", return_value=False), mock.patch.object(exporter, "ROOT", self.root),\
+             mock.patch("agent_monitor.quota.quota_service.accounts.codex_account", return_value=None),\
+             mock.patch("agent_monitor.quota.quota_service.accounts.claude_account", return_value=None),\
+             mock.patch("agent_monitor.quota.quota_service.claude_status.load_rate_limits", return_value=None),\
+             mock.patch("agent_monitor.quota.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no active queries")):
             limits = exporter._rate_limits(refresh=False)
         self.assertEqual(set(limits), {"claude", "codex"})
         self.assertEqual(limits["codex"]["managed_accounts"][0]["five_hour_pct"], 21)
@@ -116,8 +116,8 @@ class ManagedCodexTests(unittest.TestCase):
                 admission = SimpleNamespace(admitted=[SimpleNamespace(host=host, meta={"rate_limits": {
                     "codex": {**older, "managed_accounts": [newer]}}}) for host in hosts])
                 before = json.dumps([current.meta for current in admission.admitted])
-                with mock.patch("server.hub.enabled", return_value=False), \
-                     mock.patch("agent_monitor.quota_view.self_machine_name", return_value="first"):
+                with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False),\
+                     mock.patch("agent_monitor.quota.quota_view.self_machine_name", return_value="first"):
                     rows = server.QUOTA_VIEW.live_from_admission(admission)["codex"]["accounts"]
                 self.assertEqual(len(rows), 1)
                 self.assertEqual(rows[0]["machines"], list(hosts))

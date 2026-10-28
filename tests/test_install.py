@@ -21,15 +21,17 @@ class RollupInstallerTests(unittest.TestCase):
         self.repo = self.home / "repo"
         self.component = self.repo / "agent-monitor"
         self.component.mkdir(parents=True)
+        shutil.copytree(ROOT / "agent_monitor", self.component / "agent_monitor",
+                        ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(ROOT / "install.sh", self.component / "install.sh")
         installer = self.component / "install.sh"
         installer.write_text(installer.read_text().replace(
             "0e2326c6868072bec1592760c6729043caeea2960a2b46cee6a2192aac6abff0",
             hashlib.sha256(b"fixture").hexdigest()))
-        shutil.copy2(ROOT / "rollup_service.py", self.component / "rollup_service.py")
-        shutil.copy2(ROOT / "deployment_guard.py", self.component / "deployment_guard.py")
+        shutil.copy2(ROOT / "agent_monitor/runtime/rollup_service.py", self.component / "agent_monitor/runtime/rollup_service.py")
+        shutil.copy2(ROOT / "agent_monitor/runtime/deployment_guard.py", self.component / "agent_monitor/runtime/deployment_guard.py")
         shutil.copy2(ROOT / "status.sh", self.component / "status.sh")
-        for name in ('local_web.py', 'process_identity.py'):
+        for name in ('agent_monitor/runtime/local_web.py', 'agent_monitor/runtime/process_identity.py'):
             shutil.copy2(ROOT / name, self.component / name)
         (self.component / "lib").mkdir()
         shutil.copy2(ROOT / "lib/install-output.sh", self.component / "lib/install-output.sh")
@@ -56,12 +58,10 @@ class RollupInstallerTests(unittest.TestCase):
         (self.component / "proxy_runtime").mkdir()
         (self.component / "proxy_runtime/install.py").write_text("print('present')\n")
         shutil.copy2(ROOT / "requirements.txt", self.component / "requirements.txt")
-        shutil.copy2(ROOT / "hub.py", self.component / "hub.py")
-        shutil.copy2(ROOT / "service_runtime.py", self.component / "service_runtime.py")
+        shutil.copy2(ROOT / "agent_monitor/runtime/hub.py", self.component / "agent_monitor/runtime/hub.py")
+        shutil.copy2(ROOT / "agent_monitor/runtime/service_runtime.py", self.component / "agent_monitor/runtime/service_runtime.py")
         shutil.copy2(ROOT / "project_paths.py", self.component / "project_paths.py")
-        shutil.copytree(ROOT / "agent_monitor", self.component / "agent_monitor",
-                        ignore=shutil.ignore_patterns("__pycache__"))
-        (self.component / "connector_service.py").write_text("import pathlib\npathlib.Path.home().joinpath('connector-actions').write_text('converge')\n")
+        (self.component / "agent_monitor/runtime/connector_service.py").write_text("import pathlib\npathlib.Path.home().joinpath('connector-actions').write_text('converge')\n")
         # Fixtures must not depend on the operator's deployment configuration.
         (self.component / "hub.json").write_text(json.dumps({
             "schema_version": 1, "hub": "node-d", "url": "http://node-d:39001",

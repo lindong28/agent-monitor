@@ -7,10 +7,10 @@ import threading
 import unittest
 from unittest import mock
 
-import codex_accounts
-import server
-import diagnostics
-import client_network
+from agent_monitor.accounts import codex_accounts
+from agent_monitor import http_server as server
+from agent_monitor import diagnostics
+from agent_monitor.network import client_network
 
 
 class AccountHttpTests(unittest.TestCase):
@@ -68,8 +68,8 @@ class AccountHttpTests(unittest.TestCase):
         self.assertEqual(self.request("/start", {"id": "../../outside"})[0], 400)
 
     def test_egress_preview_admission_never_discovers_or_runs_accounts(self):
-        with mock.patch.object(server.account_egress, 'preview', return_value={'targets': []}) as preview, \
-                mock.patch.object(self.manager, 'discover') as discover, \
+        with mock.patch.object(server.account_egress, 'preview', return_value={'targets': []}) as preview,\
+                mock.patch.object(self.manager, 'discover') as discover,\
                 mock.patch.object(self.manager, 'start') as start:
             self.assertEqual(self.request('/egress-preview', {}, {'Origin': 'https://other.example'})[0], 403)
             preview.assert_not_called()
@@ -91,7 +91,7 @@ class AccountHttpTests(unittest.TestCase):
             monitor = diagnostics.Monitor()
             monitor.path = Path(directory)
             self.addCleanup(monitor.close)
-            with mock.patch.object(diagnostics, "monitor", monitor), \
+            with mock.patch.object(diagnostics, "monitor", monitor),\
                     mock.patch.object(self.manager, "discover", side_effect=PermissionError(13, "secret-fixture")):
                 with self.assertLogs("diagnostics", level="ERROR"):
                     status, body = self.request()
@@ -102,7 +102,7 @@ class AccountHttpTests(unittest.TestCase):
             event = next(json.loads(line) for line in events.splitlines()
                          if json.loads(line).get("failure_id") == failure_id)
             self.assertEqual(event["failure"]["errno"], 13)
-            self.assertIn("server.py", str(event["failure"]["frames"]))
+            self.assertIn("http_server.py", str(event["failure"]["frames"]))
             self.assertNotIn("secret-fixture", events + json.dumps(body))
             self.assertEqual(self.request()[0], 200)
 

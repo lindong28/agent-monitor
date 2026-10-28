@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 
 import agent_monitor.asset_delivery as asset_delivery
-import server
+from agent_monitor import http_server as server
 
 
 class DeliveryTests(unittest.TestCase):

@@ -5,12 +5,12 @@ import unittest
 from unittest import mock
 
 from agent_monitor.contracts.usage import LoadedEntries
-import exporter
-from agent_monitor import quota_service
-import quota_applicability
+from agent_monitor.snapshots import exporter
+from agent_monitor.quota import quota_service
+from agent_monitor.quota import quota_applicability
 from parsers import codex, codex_profiles
-import server
-import statistics_snapshot
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import statistics_snapshot
 from tests import test_managed_codex_profiles as fixtures
 from agent_monitor.ingestion.usage_archive import UsageArchive
 
@@ -46,7 +46,7 @@ class SessionLinkTests(unittest.TestCase):
         snapshot = statistics_snapshot.write_snapshot(self.root / "snapshot.sqlite3", after)
         loaded = LoadedEntries(snapshot["usage_entries"], session_metadata=snapshot["session_metadata"])
         views = server.create_views(usage_source=self.loader)
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch.object(self.loader, "load_all_entries", return_value=loaded):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch.object(self.loader, "load_all_entries", return_value=loaded):
             self.assertIsNone(server.sessions_endpoint({"range": ["all"]}, views=views)[0]["account"])
             self.assertIsNone(server.session_detail(SID, query={"range": ["all"]}, views=views)["meta"]["account"])
 
@@ -102,8 +102,8 @@ class SessionLinkTests(unittest.TestCase):
         self.session(self.profile("alpha"), SID, 10, 21)
         self.session(self.profile("beta"), OTHER, 20, 82, archived=True)
         self.link(("alpha",))
-        with mock.patch("parsers.codex_profiles.session_links", wraps=codex_profiles.session_links) as read, \
-             mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no provider")):
+        with mock.patch("parsers.codex_profiles.session_links", wraps=codex_profiles.session_links) as read,\
+             mock.patch("agent_monitor.quota.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no provider")):
             blocks = quota_service.managed_codex_rate_limits()
         self.assertEqual(read.call_count, 1)
         self.assertEqual([b["five_hour_pct"] for b in blocks], [21, 82])
@@ -132,12 +132,12 @@ class SessionLinkTests(unittest.TestCase):
         account = quota_service.accounts.Account("workspace", "default@example.test", None)
         cache = {"codex": {"account_id": account.account_id, "account_label": account.label,
                           "five_hour_pct": 82, "updated_at": "2099-01-01T00:00:00Z"}}
-        with mock.patch("agent_monitor.hub_config.enabled", return_value=True), mock.patch.object(exporter, "ROOT", self.root), \
-             mock.patch("agent_monitor.quota_service.read_cache", return_value=cache), \
-             mock.patch("agent_monitor.quota_service.accounts.codex_account", return_value=account), \
-             mock.patch("agent_monitor.quota_service.accounts.claude_account", return_value=None), \
-             mock.patch("agent_monitor.quota_service.claude_status.load_rate_limits", return_value=None), \
-             mock.patch("agent_monitor.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no provider")):
+        with mock.patch("agent_monitor.hub_config.enabled", return_value=True), mock.patch.object(exporter, "ROOT", self.root),\
+             mock.patch("agent_monitor.quota.quota_service.read_cache", return_value=cache),\
+             mock.patch("agent_monitor.quota.quota_service.accounts.codex_account", return_value=account),\
+             mock.patch("agent_monitor.quota.quota_service.accounts.claude_account", return_value=None),\
+             mock.patch("agent_monitor.quota.quota_service.claude_status.load_rate_limits", return_value=None),\
+             mock.patch("agent_monitor.quota.quota_service.quota_refresh.load_rate_limits", side_effect=AssertionError("no provider")):
             block = exporter._rate_limits(refresh=False)["codex"]
         self.assertTrue(block is None or block.get("five_hour_pct") is None)
 
@@ -154,13 +154,13 @@ class SessionLinkTests(unittest.TestCase):
         self.link().write_text("invalid")
         active = {"account_id": "workspace", "account_label": "alpha@example.test", "five_hour_pct": 42,
                   "quota_observation": {"source": "active_query", "observed_at": "2026-10-01T00:00:00Z"}}
-        with mock.patch("hub.request_quota_refresh", return_value={"codex": active}):
+        with mock.patch("agent_monitor.runtime.hub.request_quota_refresh", return_value={"codex": active}):
             result = exporter._gui_rate_limits()["codex"]
         for key, value in active.items():
             self.assertEqual(result[key], value)
         self.assertNotIn("refresh_error", result)
         passive = dict(active, quota_observation={"source": "codex_session", "session_id": SID})
-        with mock.patch("hub.request_quota_refresh", return_value={"codex": passive}):
+        with mock.patch("agent_monitor.runtime.hub.request_quota_refresh", return_value={"codex": passive}):
             result = exporter._gui_rate_limits()["codex"]
         self.assertIsNone(result["five_hour_pct"])
         self.assertEqual(result["account_id"], passive["account_id"])

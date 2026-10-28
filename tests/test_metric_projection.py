@@ -2,8 +2,8 @@
 import unittest
 from unittest.mock import patch
 
-import rollup
-import server
+from agent_monitor.accounting import rollup
+from agent_monitor import http_server as server
 
 
 def row(cost, *, agent="codex", model="model-a", day="2026-10-14"):

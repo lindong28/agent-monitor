@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 from ip_check.http_response import require_success as _require_success
 
 import requests
-import network_policy
+from agent_monitor.network import network_policy
 
 try:
     from zoneinfo import ZoneInfo as _ZI

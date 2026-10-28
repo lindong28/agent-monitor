@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from parsers import UsageEntry
-from pricing_fetcher import calculate_cost, get_pricing, resolve_model_key
+from agent_monitor.accounting.pricing_fetcher import calculate_cost; from agent_monitor.accounting.pricing_fetcher import get_pricing; from agent_monitor.accounting.pricing_fetcher import resolve_model_key
 
 
 class CostTests(unittest.TestCase):
@@ -100,7 +100,7 @@ class CostTests(unittest.TestCase):
             )
             fallback.write_text(json.dumps(fallback_pricing), encoding="utf-8")
 
-            with mock.patch("pricing_fetcher.FALLBACK_PATH", fallback):
+            with mock.patch("agent_monitor.accounting.pricing_fetcher.FALLBACK_PATH", fallback):
                 pricing = get_pricing(cache_path=cache, fetcher=None, now=lambda: now + 60)
 
             self.assertEqual(pricing["cached-only"]["input_cost_per_token"], 9)

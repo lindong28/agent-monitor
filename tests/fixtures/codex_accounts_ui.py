@@ -22,8 +22,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="codex-controls-ui-") as temporary:
         os.environ["HOME"] = temporary
         os.environ["CODEX_HOME"] = temporary + "/codex"
-        import codex_accounts as ca
-        import server
+        from agent_monitor.accounts import codex_accounts as ca
+        from agent_monitor import http_server as server
         real_popen = subprocess.Popen
         starts = []
         scenarios = {}
@@ -34,7 +34,7 @@ def main():
                 kwargs["env"].update(FAKE_EMAIL=record["email"], FAKE_ACCOUNT=record["account_id"],
                                      FAKE_SCENARIO=scenarios.get(record["email"], "quota_allowed"))
                 return real_popen([sys.executable, str(ROOT / "tests/fixtures/codex_account_server.py")], **kwargs)
-            with mock.patch.object(ca.subprocess, "Popen", side_effect=spawn), \
+            with mock.patch.object(ca.subprocess, "Popen", side_effect=spawn),\
                     mock.patch.object(ca.shutil, "which", return_value=sys.executable):
                 starts.append(time.monotonic())
                 return ca.Rpc(directory, cancelled)

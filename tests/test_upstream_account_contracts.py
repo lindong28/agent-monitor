@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-import claude_oauth
-import codex_accounts
+from agent_monitor.accounts import claude_oauth
+from agent_monitor.accounts import codex_accounts
 from parsers import accounts, codex
 from tests.test_account_identity import id_token
 

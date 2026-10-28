@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-import quota_refresh as qr
+from agent_monitor.quota import quota_refresh as qr
 
 root = Path(os.environ["LIFETIME_TEST_ROOT"])
 if os.environ["LIFETIME_TEST_MODE"] == "delayed_start":

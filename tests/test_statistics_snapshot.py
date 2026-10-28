@@ -9,17 +9,17 @@ from pathlib import Path
 from unittest import mock
 
 from agent_monitor.contracts.usage import LoadedEntries
-import exporter
+from agent_monitor.snapshots import exporter
 from parsers import UsageEntry
-import statistics_snapshot as snapshots
+from agent_monitor.snapshots import statistics_snapshot as snapshots
 NOW = datetime(2026, 8, 31, 12, 0, tzinfo=timezone.utc)
 
 
 class StatisticsSnapshotTests(unittest.TestCase):
     def test_publication_retains_current_when_source_archive_is_reset(self):
-        import generation
-        import sync
-        from machine_config import Machine
+        from agent_monitor.snapshots import generation
+        from agent_monitor.snapshots import sync
+        from agent_monitor.snapshots.machine_config import Machine
         machine = Machine("node-b", "node-b", False)
         root = self.root / "generations"
         manifests = []
@@ -73,9 +73,9 @@ class StatisticsSnapshotTests(unittest.TestCase):
         return path
 
     def imported(self, entries):
-        import generation
-        import sync
-        from machine_config import Machine
+        from agent_monitor.snapshots import generation
+        from agent_monitor.snapshots import sync
+        from agent_monitor.snapshots.machine_config import Machine
         bundle = self.root / "admitted-bundle"
         with mock.patch.object(exporter, "exporter_version", return_value="a" * 40):
             manifest = exporter.export_bundle(self.root / "admitted-rollup.db", bundle,
@@ -159,11 +159,11 @@ class StatisticsSnapshotTests(unittest.TestCase):
             self.assertEqual(result, entries[1:3])
             self.assertEqual(decode.call_count, 2)
             self.assertEqual(result.session_metadata, metadata)
-        import server
+        from agent_monitor import http_server as server
         from types import SimpleNamespace
         views = server.create_views()
-        with mock.patch("server.hub.enabled", return_value=True), mock.patch(
-                "server.generation.generation_admission_snapshot") as admission:
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=True), mock.patch(
+                "agent_monitor.http_server.generation.generation_admission_snapshot") as admission:
             admission.return_value.__enter__.return_value = SimpleNamespace(admitted=[current])
             query = {"range": ["custom"], "start": ["2026-09-02"], "end": ["2026-09-02"], "session_agent": ["codex"]}
             detail = server.session_detail("nested", "node-b", query, views=views)
@@ -201,7 +201,7 @@ class StatisticsSnapshotTests(unittest.TestCase):
             snapshots.read_admitted_usage(current)
 
     def test_admission_rejects_tampering_even_in_unselected_domain(self):
-        import generation
+        from agent_monitor.snapshots import generation
         current = self.imported(self.usage())
         root = self.root / "generations"
         current.close()

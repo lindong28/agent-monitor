@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 
-SOURCE = Path(__file__).resolve().parents[1] / "deploy.py"
+SOURCE = Path(__file__).resolve().parents[1]
 
 
 class ProductionDeploymentTests(unittest.TestCase):
@@ -31,14 +31,14 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.run_git(self.repo, "init", "-b", "main")
         self.run_git(self.repo, "config", "user.name", "Deployment Test")
         self.run_git(self.repo, "config", "user.email", "test@example.invalid")
-        shutil.copy2(SOURCE, self.repo / "deploy.py")
-        shutil.copy2(SOURCE.with_name('project_paths.py'), self.repo / 'project_paths.py')
-        shutil.copy2(SOURCE.with_name('deployment_guard.py'), self.repo / 'deployment_guard.py')
+        shutil.copytree(SOURCE / "agent_monitor", self.repo / "agent_monitor", ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copy2(SOURCE / "project_paths.py", self.repo / "project_paths.py")
+        shutil.copy2(SOURCE / "deploy.py", self.repo / "deploy.py")
         (self.repo / ".gitignore").write_text("installed\n")
         (self.repo / "install.sh").write_text('#!/bin/sh\n# AGENT_MONITOR_INSTALL_BODY\nprintf "%s\\n" "$@" > installed\nexit "${TEST_INSTALL_EXIT:-0}"\n')
         (self.repo / "install.sh").chmod(0o755)
         (self.repo / "source.txt").write_text("published\n")
-        self.run_git(self.repo, "add", "deploy.py", "project_paths.py", "deployment_guard.py", "install.sh", ".gitignore", "source.txt")
+        self.run_git(self.repo, "add", "deploy.py", "project_paths.py", "agent_monitor", "install.sh", ".gitignore", "source.txt")
         self.run_git(self.repo, "commit", "-m", "fixture")
         self.run_git(self.repo, "remote", "add", "origin", str(self.remote))
         self.run_git(self.repo, "push", "origin", "main")
@@ -65,7 +65,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn(self.head, result.stdout)
 
     def test_source_edit_after_successful_preflight_is_not_the_baseline(self):
-        code = '''import deploy, deployment_guard
+        code = '''from agent_monitor.runtime import deploy; from agent_monitor.runtime import deployment_guard
 def admission():
     head = deploy.preflight(None)
     (deploy.ROOT / 'source.txt').write_text('changed after admission')
@@ -109,7 +109,7 @@ deployment_guard.run_install(deploy.ROOT, [], preflight=admission)
 
     def test_source_edit_during_install_blocks_following_checkpoint(self):
         self.publish_installer('printf changed > source.txt\n'
-                               '"' + sys.executable + '" deployment_guard.py check "$PWD"\n'
+                               '"' + sys.executable + '" agent_monitor/runtime/deployment_guard.py check "$PWD"\n'
                                'touch installed\n')
         result = self.deploy('--expect', self.head)
         self.assertNotEqual(result.returncode, 0)

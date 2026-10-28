@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, project_identity, usage_loader
-import rollup
+from agent_monitor.accounting import rollup
 from parsers import UsageEntry
 from agent_monitor.ingestion.usage_archive import UsageArchive
 
@@ -36,8 +36,8 @@ class UsageArchiveTests(unittest.TestCase):
             mock.patch.object(USAGE_LOADER, "usage_paths", side_effect=lambda **kwargs: list(self.sessions.glob("*.jsonl"))),
             mock.patch.object(usage_loader.codex, "SESSIONS_DIR", str(self.sessions)),
             mock.patch.object(usage_loader.codex, "STATE_DB", str(self.metadata)),
-            mock.patch("pricing_fetcher.get_pricing", return_value={}),
-            mock.patch("pricing_fetcher.calculate_cost", return_value=1.0),
+            mock.patch("agent_monitor.accounting.pricing_fetcher.get_pricing", return_value={}),
+            mock.patch("agent_monitor.accounting.pricing_fetcher.calculate_cost", return_value=1.0),
         ):
             self.stack.enter_context(patch)
 
@@ -89,7 +89,7 @@ root = Path(sys.argv[1])
 IDENTITY_STORE.path = root / 'project_identity.db'
 usage_loader.codex.SESSIONS_DIR = str(root / 'sessions')
 usage_loader.codex.STATE_DB = str(root / 'missing.sqlite3')
-with mock.patch.object(USAGE_LOADER, 'usage_paths', side_effect=lambda **kwargs: list((root / 'sessions').glob('*.jsonl'))), mock.patch('pricing_fetcher.get_pricing', return_value={}), mock.patch('pricing_fetcher.calculate_cost', return_value=1.0):
+with mock.patch.object(USAGE_LOADER, 'usage_paths', side_effect=lambda **kwargs: list((root / 'sessions').glob('*.jsonl'))), mock.patch('agent_monitor.accounting.pricing_fetcher.get_pricing', return_value={}), mock.patch('agent_monitor.accounting.pricing_fetcher.calculate_cost', return_value=1.0):
     entries = USAGE_LOADER.load_all_entries()
 print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), entries.history_authoritative_from]))
 """
@@ -490,7 +490,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
             self.assertEqual(self.rows("daily_rollup"), [("2026-02-10", "old-model", 170)])
             session("one", 100, "new-model")
             session("two", 70, "new-model")
-            check = rollup._check_rollup(self.db, lambda: self.load(diagnostic=True), now=lambda: self.now)
+            check = rollup.check_rollup(self.db, lambda: self.load(diagnostic=True), now=lambda: self.now)
             self.assertEqual(check["would_write"]["count"], 1)
             self.run_rollup()
             self.assertEqual(self.rows("daily_rollup"), [("2026-02-10", "new-model", 170)])
@@ -511,10 +511,10 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
             resolved_project="new-resolved", pin_candidate="new-pin")
         entry = UsageEntry(datetime(2026, 2, 10, tzinfo=timezone.utc), "s", "m", "r", "model", 100, 0, 0, 0, None, source, "codex")
         for diagnostic in (False, True):
-            with self.subTest(diagnostic=diagnostic), \
-                 mock.patch.object(IDENTITY_STORE, "list_blockers", return_value=[persisted]), \
-                 mock.patch.object(IDENTITY_STORE, "resolve", side_effect=current), \
-                 mock.patch.object(IDENTITY_STORE, "record_blocker", return_value=USAGE_LOADER.unpersisted_blocker_dict(current)), \
+            with self.subTest(diagnostic=diagnostic),\
+                 mock.patch.object(IDENTITY_STORE, "list_blockers", return_value=[persisted]),\
+                 mock.patch.object(IDENTITY_STORE, "resolve", side_effect=current),\
+                 mock.patch.object(IDENTITY_STORE, "record_blocker", return_value=USAGE_LOADER.unpersisted_blocker_dict(current)),\
                  mock.patch.object(IDENTITY_STORE, "stored_projects", wraps=IDENTITY_STORE.stored_projects) as stored:
                 loaded = USAGE_LOADER.enrich_entries([entry], read_only=diagnostic, diagnostic=diagnostic)
                 self.assertEqual(loaded.history_authoritative_projects, {"healthy"})
@@ -538,7 +538,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
             loaded = USAGE_LOADER.enrich_entries(raw)
         loaded.history_authoritative_from = "2026-01-03"
         self.assertEqual(loaded.history_authoritative_projects, {"healthy"})
-        checked = rollup._check_rollup(self.db, lambda: loaded, now=lambda: self.now)
+        checked = rollup.check_rollup(self.db, lambda: loaded, now=lambda: self.now)
         self.assertEqual([row["key"][2] for row in checked["would_write"]["items"]], ["healthy"])
         rollup.run(db_path=self.db, entries_loader=lambda: loaded, now=lambda: self.now)
         with contextlib.closing(sqlite3.connect(self.db)) as conn:
@@ -580,7 +580,7 @@ print(json.dumps([sum(entry.input_tokens for entry in entries), len(entries), en
         self.session(tokens=100)
         self.run_rollup()
         self.session(tokens=70)
-        result = rollup._check_rollup(self.db, lambda: self.load(diagnostic=True), now=lambda: self.now)
+        result = rollup.check_rollup(self.db, lambda: self.load(diagnostic=True), now=lambda: self.now)
         self.assertEqual(result["would_skip"]["count"], 0)
         self.assertEqual(result["usage_would_write"]["count"], 1)
         self.run_rollup()

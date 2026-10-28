@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import server
+from agent_monitor import http_server as server
 from parsers import RateLimits, UsageEntry
 
 
@@ -24,7 +24,7 @@ def setUpModule():
     global _ACCOUNT_MEMORY_TEMP, _ACCOUNT_MEMORY_PATCHER
     _ACCOUNT_MEMORY_TEMP = tempfile.TemporaryDirectory()
     memory_path = Path(_ACCOUNT_MEMORY_TEMP.name) / "agent_monitor.account_memory.json"
-    _ACCOUNT_MEMORY_PATCHER = mock.patch("server.ACCOUNT_MEMORY.path", memory_path)
+    _ACCOUNT_MEMORY_PATCHER = mock.patch("agent_monitor.http_server.ACCOUNT_MEMORY.path", memory_path)
     _ACCOUNT_MEMORY_PATCHER.start()
 
 
@@ -37,11 +37,11 @@ class OverviewApiShapeTests(unittest.TestCase):
     def setUp(self):
         server.ACCOUNT_MEMORY.path.unlink(missing_ok=True)
         self.real_rate_limits = server.QUOTA_VIEW.rate_limits
-        self.sync_trigger_patcher = mock.patch("server.COLLECTION.request")
+        self.sync_trigger_patcher = mock.patch("agent_monitor.http_server.COLLECTION.request")
         self.sync_trigger = self.sync_trigger_patcher.start()
         self.addCleanup(self.sync_trigger_patcher.stop)
         self.sync_status_patcher = mock.patch(
-            "server.COLLECTION.status",
+            "agent_monitor.http_server.COLLECTION.status",
             return_value={
                 "coverage": {"admitted": 0, "declared": 0},
                 "all_machines": [],
@@ -53,7 +53,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         self.sync_status_patcher.start()
         self.addCleanup(self.sync_status_patcher.stop)
         self.rate_limits_patcher = mock.patch(
-            "server.QUOTA_VIEW.rate_limits",
+            "agent_monitor.http_server.QUOTA_VIEW.rate_limits",
             return_value={
                 "claude": {"accounts": [], "unavailable_reason": None},
                 "codex": {"accounts": [], "unavailable_reason": None},
@@ -67,7 +67,7 @@ class OverviewApiShapeTests(unittest.TestCase):
             config=SimpleNamespace(machines=()),
         )
         self.admission_patcher = mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(empty_admission),
         )
         self.admission_patcher.start()
@@ -158,7 +158,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ):
             entry = self.real_rate_limits()["codex"]["accounts"][0]
@@ -196,7 +196,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ):
             entry = self.real_rate_limits()["codex"]["accounts"][0]
@@ -231,7 +231,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ):
             entry = self.real_rate_limits()["codex"]["accounts"][0]
@@ -268,8 +268,8 @@ class OverviewApiShapeTests(unittest.TestCase):
     def test_pivot_endpoint_uses_rollup_not_live_entries(self):
         expected = {"columns": ["value"], "rows": [{"x": "2026-06", "values": {"value": 1.0}}]}
         with (
-            mock.patch("server.ingestion.load_all_entries", side_effect=AssertionError("pivot should not use live entries")),
-            mock.patch("server.rollup.query_pivot", return_value=expected) as query_pivot,
+            mock.patch("agent_monitor.http_server.ingestion.load_all_entries", side_effect=AssertionError("pivot should not use live entries")),
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", return_value=expected) as query_pivot,
         ):
             payload = server.pivot_endpoint({"range": ["2y"], "x": ["month"], "group": ["project"], "metric": ["cost"]})
 
@@ -294,8 +294,8 @@ class OverviewApiShapeTests(unittest.TestCase):
         )
 
         with (
-            mock.patch("server.ingestion.load_all_entries", return_value=[entry]) as load_all_entries,
-            mock.patch("server.rollup.query_pivot", side_effect=AssertionError("sessions must stay live")),
+            mock.patch("agent_monitor.http_server.ingestion.load_all_entries", return_value=[entry]) as load_all_entries,
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", side_effect=AssertionError("sessions must stay live")),
         ):
             payload = server.create_views().sessions.list({"range": ["all"]})
 
@@ -347,10 +347,10 @@ class OverviewApiShapeTests(unittest.TestCase):
     def test_overview_today_and_week_kpis_use_rollup_not_live_entries(self):
         with (
             mock.patch(
-                "server.ingestion.load_all_entries",
+                "agent_monitor.http_server.ingestion.load_all_entries",
                 side_effect=AssertionError("overview must not use live entries"),
             ),
-            mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}) as query_pivot,
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", return_value={"columns": [], "rows": []}) as query_pivot,
         ):
             payload = server.create_views().overview.read({})
 
@@ -363,7 +363,7 @@ class OverviewApiShapeTests(unittest.TestCase):
     def test_overview_week_includes_monday_window_metadata(self):
         before = datetime.now().astimezone()
         with (
-            mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
         ):
             payload = server.create_views().overview.read({})
         after = datetime.now().astimezone()
@@ -375,7 +375,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         self.assertLessEqual(end, after)
 
     def test_overview_force_query_routes_to_background_sync(self):
-        with mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}):
+        with mock.patch("agent_monitor.http_server.rollup.query_pivot", return_value={"columns": [], "rows": []}):
             server.create_views().overview.read({"force": ["1"]})
 
         self.sync_trigger.assert_called_once_with({"force": ["1"]})
@@ -383,7 +383,7 @@ class OverviewApiShapeTests(unittest.TestCase):
     def test_pivot_endpoint_routes_sync_before_query(self):
         expected = {"columns": ["value"], "rows": []}
         with (
-            mock.patch("server.rollup.query_pivot", return_value=expected) as query_pivot,
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", return_value=expected) as query_pivot,
         ):
             payload = server.pivot_endpoint({"range": ["30d"]})
 
@@ -398,7 +398,7 @@ class OverviewApiShapeTests(unittest.TestCase):
             "model": ["gpt-5"],
         }
         with (
-            mock.patch("server.rollup.filter_options", return_value=expected) as filter_options,
+            mock.patch("agent_monitor.http_server.rollup.filter_options", return_value=expected) as filter_options,
         ):
             payload = server.pivot_filters_endpoint({"range": ["2y"]})
 
@@ -409,7 +409,7 @@ class OverviewApiShapeTests(unittest.TestCase):
     def test_background_sync_spawns_daemon_thread(self):
         self.sync_trigger_patcher.stop()
         reset_collection()
-        with mock.patch("server.threading.Thread") as thread:
+        with mock.patch("agent_monitor.http_server.threading.Thread") as thread:
             created = thread.return_value
             server.COLLECTION.request({"force": ["1"]})
 
@@ -420,8 +420,8 @@ class OverviewApiShapeTests(unittest.TestCase):
 
     def test_overview_history_gap_is_not_a_viewer_local_claim(self):
         with (
-            mock.patch("server.rollup.history_gap", side_effect=AssertionError("must not read local history gap")),
-            mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
+            mock.patch("agent_monitor.http_server.rollup.history_gap", side_effect=AssertionError("must not read local history gap")),
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
         ):
             payload = server.create_views().overview.read({})
 
@@ -479,7 +479,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         now = datetime(2026, 6, 13, 17, 30, tzinfo=timezone(timedelta(hours=-7)))
         query_window = server.rollup.range_window("7d", now)
 
-        with mock.patch("server.rollup.earliest_rollup_date", return_value="2026-06-08"):
+        with mock.patch("agent_monitor.http_server.rollup.earliest_rollup_date", return_value="2026-06-08"):
             coverage = server.create_views().overview.coverage(query_window)
 
         self.assertEqual(coverage["range_start"], "2026-06-08")
@@ -499,7 +499,7 @@ class OverviewApiShapeTests(unittest.TestCase):
             "rows": [{"x": "2026-06-01", "values": {"claude-code": 1.0, "codex": 2.0}}],
         }
         with (
-            mock.patch("server.rollup.query_pivot", return_value=expected) as query_pivot,
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", return_value=expected) as query_pivot,
         ):
             payload = server.create_views().overview.read({"range": ["1y"]})
 
@@ -512,8 +512,8 @@ class OverviewApiShapeTests(unittest.TestCase):
 
     def test_overview_includes_rollup_coverage_for_long_ranges(self):
         with (
-            mock.patch("server.rollup.earliest_rollup_date", return_value="2026-04-21"),
-            mock.patch("server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
+            mock.patch("agent_monitor.http_server.rollup.earliest_rollup_date", return_value="2026-04-21"),
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", return_value={"columns": [], "rows": []}),
         ):
             long_payload = server.create_views().overview.read({"range": ["2y"]})
             short_payload = server.create_views().overview.read({"range": ["7d"]})
@@ -550,7 +550,7 @@ class OverviewApiShapeTests(unittest.TestCase):
             admitted=(SimpleNamespace(host="node-b", meta={"rate_limits": blocks}),),
         )
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ):
             return {"rate_limits": self.real_rate_limits()}
@@ -604,7 +604,7 @@ class SignedOutMachinesAreNotFailuresTests(unittest.TestCase):
         )
         sync_status = {"machines": [], "syncing": False}
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ):
             return server.QUOTA_VIEW.live_from_admission(admission, sync_status)

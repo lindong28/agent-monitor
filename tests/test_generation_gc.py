@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-import generation
-import rollup
+from agent_monitor.snapshots import generation
+from agent_monitor.accounting import rollup
 
 
 class GenerationGCTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class GenerationGCTests(unittest.TestCase):
             second_db = self.make_db(tmp_path / "second.db", 20)
             disk_usage = type("Usage", (), {"free": 0})()
 
-            with mock.patch("generation.shutil.disk_usage", return_value=disk_usage):
+            with mock.patch("agent_monitor.snapshots.generation.shutil.disk_usage", return_value=disk_usage):
                 with self.assertRaises(generation.GenerationError):
                     generation.publish_generation(
                         "node-b",
@@ -195,7 +195,7 @@ class GenerationGCTests(unittest.TestCase):
             )
             script = """
 import sys
-import generation
+from agent_monitor.snapshots import generation
 current = generation.read_current_generation('node-b', root=sys.argv[1])
 print('ready', flush=True)
 sys.stdin.readline()
@@ -322,7 +322,7 @@ current.close()
     def crash_publish(self, root, snapshot, meta, phase):
         script = """
 import json, os, sys
-import generation
+from agent_monitor.snapshots import generation
 root, snapshot, meta_path, phase = sys.argv[1:]
 meta = json.loads(open(meta_path, encoding='utf-8').read())
 def crash(observed):

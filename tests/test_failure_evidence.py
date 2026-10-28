@@ -9,14 +9,14 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-import diagnostics
-import exporter
-from agent_monitor import quota_service
-import hub
-import quota_refresh
-import server
-import sync
-import upstream_controls
+from agent_monitor import diagnostics
+from agent_monitor.snapshots import exporter
+from agent_monitor.quota import quota_service
+from agent_monitor.runtime import hub
+from agent_monitor.quota import quota_refresh
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import sync
+from agent_monitor.accounts import upstream_controls
 from parsers.accounts import Account
 from parsers import RateLimits
 
@@ -38,7 +38,7 @@ class FailureEvidenceTests(unittest.TestCase):
                 "rpc_code": -32000, "http_status": 401, "body": "fixture-secret-token"}}
             child = SimpleNamespace(returncode=1, pid=0,
                                     communicate=mock.Mock(return_value=(json.dumps(payload), "")))
-            with mock.patch.object(quota_refresh, "ROOT", root), \
+            with mock.patch.object(quota_refresh, "ROOT", root),\
                     mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child) as spawn:
                 with self.assertRaises(quota_refresh.RefreshError):
                     quota_refresh.load_rate_limits("codex", Account("synthetic"))
@@ -78,9 +78,9 @@ class FailureEvidenceTests(unittest.TestCase):
                 if value.get("pause"):
                     raise OSError(28, "fixture-secret-token")
                 return save(controls, provider, value)
-            with mock.patch.object(quota_refresh, "ROOT", root), \
-                    mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child), \
-                    mock.patch.object(upstream_controls.Controls, "_save", fail_pause), \
+            with mock.patch.object(quota_refresh, "ROOT", root),\
+                    mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child),\
+                    mock.patch.object(upstream_controls.Controls, "_save", fail_pause),\
                     self.assertLogs("diagnostics", level="ERROR") as logs:
                 with self.assertRaises(quota_refresh.RefreshError) as caught:
                     quota_refresh.load_rate_limits("codex", Account("synthetic"))
@@ -101,13 +101,13 @@ class FailureEvidenceTests(unittest.TestCase):
         for number in (13, 24):
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                with mock.patch.object(quota_refresh, "ROOT", root), \
-                        mock.patch.object(exporter, "ROOT", root), \
-                        mock.patch.object(hub.hub_config, "enabled", return_value=True), \
-                        mock.patch.object(quota_service.accounts, "codex_account", return_value=Account("synthetic")), \
-                        mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
-                        mock.patch.object(quota_service.codex, "load_rate_limits", return_value=RateLimits(1, None, 2, None)), \
-                        mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=None), \
+                with mock.patch.object(quota_refresh, "ROOT", root),\
+                        mock.patch.object(exporter, "ROOT", root),\
+                        mock.patch.object(hub.hub_config, "enabled", return_value=True),\
+                        mock.patch.object(quota_service.accounts, "codex_account", return_value=Account("synthetic")),\
+                        mock.patch.object(quota_service.accounts, "claude_account", return_value=None),\
+                        mock.patch.object(quota_service.codex, "load_rate_limits", return_value=RateLimits(1, None, 2, None)),\
+                        mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=None),\
                         mock.patch.object(quota_refresh.subprocess, "Popen", side_effect=OSError(number, "secret-fixture")):
                     result = exporter._rate_limits(refresh=True)
                 message = result["codex"]["refresh_error"]

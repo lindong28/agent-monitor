@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-import rollup
+from agent_monitor.accounting import rollup
 from parsers import UsageEntry
 
 
@@ -349,13 +349,24 @@ class RollupAdoptionTests(unittest.TestCase):
         self.assertIn("cost attribution remains unverified", help_text)
 
     def test_issue006_adoption_report_text_claims_no_more_than_it_can_back(self):
-        """Checks the report strings in the CLI source, not a rendered run.
+        """The rendered report must distinguish unverified growth from stale data."""
+        import io
+        import sys
+        from contextlib import redirect_stdout
+        from agent_monitor.cli import rollup_adopt_timezone
 
-        The earlier wording told the user post-cutoff records were stale source
-        data the next rollup would pick up. Neither half holds: such records can
-        already be in the database, and a rollup skips a date that is already
-        present but outside its recompute window."""
-        source = (Path(__file__).parents[1] / "agent-monitor").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "rollup.db"
+            self.seed_unmarked(db_path)
+            entries = [self.entry(datetime(2026, 7, 4, 12, tzinfo=timezone.utc), 10)]
+            arguments = ["adopt-timezone", "--db", str(db_path), "--known-utc-offset", "+08:00",
+                         "--raw-log-start", "codex=2026-07-04", "--authorize-pre-log-assumption"]
+            output = io.StringIO()
+            with mock.patch.object(rollup, "DEFAULT_DB_PATH", db_path), \
+                    mock.patch.object(rollup, "load_all_entries", return_value=entries), \
+                    mock.patch.object(sys, "argv", arguments), redirect_stdout(output):
+                rollup_adopt_timezone.main()
+            source = output.getvalue()
 
         self.assertNotIn("expected stale source data", source)
         self.assertNotIn("the next normal rollup will process it", source)

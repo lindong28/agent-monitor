@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import rollup
+from agent_monitor.accounting import rollup
 from agent_monitor import storage
 
 

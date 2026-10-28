@@ -36,8 +36,8 @@ def worker(config_path):
     """Replace only resolver and pair port; execute the actual foreground entry."""
     config = json.loads(Path(config_path).read_text())
     Path(config_path).with_name(f"worker-{os.getpid()}.pid").write_text(str(os.getpid()))
-    import client_connector
-    import network_policy
+    from agent_monitor.network import client_connector
+    from agent_monitor.network import network_policy
     assert config['server'].startswith('http://127.0.0.1:')
     original_connector = client_connector.Connector
 
@@ -68,12 +68,12 @@ def worker(config_path):
         def __init__(self, *args, **kwargs):
             kwargs['pair_port'] = 0
             super().__init__(*args, **kwargs)
-            from connector_service import atomic_json
+            from agent_monitor.runtime.connector_service import atomic_json
             atomic_json(config['ready'], {'pid': os.getpid(), 'port': self.pair_server.server_port})
 
     network_policy._Runtime = Runtime
     client_connector.Connector = Connector
-    sys.argv = ['client_connector.py', '--server', config['server'], '--state-file', config['state']]
+    sys.argv = ['agent_monitor/network/client_connector.py', '--server', config['server'], '--state-file', config['state']]
     return client_connector.main()
 
 
@@ -90,9 +90,9 @@ def accept(*, fail_after_ready=False):
         raise RuntimeError('Node is required for the controlled bridge')
     root = Path(tempfile.mkdtemp(prefix='monitor-launchd-'))
     os.environ['HOME'] = str(root)
-    import client_network
-    import client_connector
-    import connector_service
+    from agent_monitor.network import client_network
+    from agent_monitor.network import client_connector
+    from agent_monitor.runtime import connector_service
     label = 'com.agent-monitor.acceptance.' + uuid.uuid4().hex
     target = f'gui/{os.getuid()}/{label}'
     plist = root / 'fixture.plist'

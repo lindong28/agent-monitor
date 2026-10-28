@@ -14,8 +14,8 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import codex_accounts
-import network_policy
+from agent_monitor.accounts import codex_accounts
+from agent_monitor.network import network_policy
 
 
 class IsolatedAccountRoutingTests(unittest.TestCase):
@@ -113,7 +113,7 @@ class RuntimeConsumerTests(unittest.TestCase):
 
     def test_missing_engine_does_not_send_direct(self):
         network_policy.close()
-        with mock.patch.dict(os.environ, {}, clear=True), \
+        with mock.patch.dict(os.environ, {}, clear=True),\
                 mock.patch.object(network_policy, "executable", return_value=Path("/missing/fixture/electron")):
             with self.assertRaises(network_policy.NetworkPolicyError) as caught:
                 network_policy.session()

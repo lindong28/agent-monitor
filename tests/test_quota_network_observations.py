@@ -9,8 +9,8 @@ from unittest import mock
 
 from ip_check import cli
 from parsers import claude_status
-import network_report
-import quota_refresh
+from agent_monitor.network import network_report
+from agent_monitor.quota import quota_refresh
 import test_ip_check_json as network_fixtures
 import test_quota_refresh as quota_fixtures
 

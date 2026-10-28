@@ -3,7 +3,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-import network_report
+from agent_monitor.network import network_report
 
 
 def snapshot(**overrides):
@@ -360,7 +360,7 @@ class CollectTests(unittest.TestCase):
         report = network_report.NetworkReport(
             runner=mock.Mock(return_value=mock.Mock(returncode=0, stdout='{"verdict":"low"}')),
             child_environment=lambda env: {}, hostname=lambda: "fixture")
-        with mock.patch.object(network_report, "_live_server_port", return_value=None), \
+        with mock.patch.object(network_report, "_live_server_port", return_value=None),\
                 mock.patch.object(network_report, "LOCAL_REPORT", report):
             network_report.collect(force=False)
             network_report.collect(force=True)

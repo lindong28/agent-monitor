@@ -7,11 +7,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
-import generation
+from agent_monitor.snapshots import generation
 import agent_monitor.views.query_view as query_view
-import rollup
-import server
-from machine_config import Machine, machine_config_fingerprint
+from agent_monitor.accounting import rollup
+from agent_monitor import http_server as server
+from agent_monitor.snapshots.machine_config import Machine; from agent_monitor.snapshots.machine_config import machine_config_fingerprint
 from tests.test_generation_gc import GenerationGCTests
 
 
@@ -39,10 +39,10 @@ class QueryViewTests(unittest.TestCase):
         for index in (1, 2):
             current = self.publish(index)
             self.view.refresh()
-            with mock.patch.object(server.COLLECTION, "query_view", self.view), mock.patch.object(server.COLLECTION, "request"), \
-                    mock.patch.object(server.hub, "enabled", return_value=False), \
-                    mock.patch.object(server.QUOTA_VIEW, "rate_limits", return_value={}), \
-                    mock.patch.object(generation, "_validate_generation", side_effect=AssertionError("HTTP did validation")), \
+            with mock.patch.object(server.COLLECTION, "query_view", self.view), mock.patch.object(server.COLLECTION, "request"),\
+                    mock.patch.object(server.hub, "enabled", return_value=False),\
+                    mock.patch.object(server.QUOTA_VIEW, "rate_limits", return_value={}),\
+                    mock.patch.object(generation, "_validate_generation", side_effect=AssertionError("HTTP did validation")),\
                     mock.patch.object(generation, "generation_admission_snapshot", side_effect=AssertionError("HTTP did admission")):
                 for repeat in (1, 2):
                     with self.subTest(generation=index, repeat=repeat):

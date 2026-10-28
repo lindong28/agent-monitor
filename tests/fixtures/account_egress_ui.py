@@ -11,8 +11,8 @@ import argparse
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-import client_network
-from client_connector import Connector
+from agent_monitor.network import client_network
+from agent_monitor.network.client_connector import Connector
 
 
 def main():

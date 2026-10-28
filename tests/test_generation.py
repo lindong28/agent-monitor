@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-import generation
-import rollup
-from machine_config import MachineConfigError, load_machine_config
+from agent_monitor.snapshots import generation
+from agent_monitor.accounting import rollup
+from agent_monitor.snapshots.machine_config import MachineConfigError; from agent_monitor.snapshots.machine_config import load_machine_config
 
 
 class GenerationTests(unittest.TestCase):
@@ -53,7 +53,7 @@ class GenerationTests(unittest.TestCase):
                 snapshot, "host-a", generated_at="2026-08-04T12:01:00Z"
             )
 
-            with mock.patch("generation._write_json", side_effect=OSError("component failed")):
+            with mock.patch("agent_monitor.snapshots.generation._write_json", side_effect=OSError("component failed")):
                 with self.assertRaisesRegex(OSError, "component failed"):
                     generation.publish_generation(
                         "node-b", snapshot, broken_meta, root=root
@@ -148,7 +148,7 @@ class GenerationTests(unittest.TestCase):
                 current.write_text(second.meta["generation_id"] + "\n", encoding="utf-8")
                 return resolved
 
-            with mock.patch("generation._read_pointer", side_effect=switch_after_resolve) as read_pointer:
+            with mock.patch("agent_monitor.snapshots.generation._read_pointer", side_effect=switch_after_resolve) as read_pointer:
                 observed = generation.read_current_generation("node-b", root=root)
 
             read_pointer.assert_called_once()
@@ -234,9 +234,9 @@ class GenerationTests(unittest.TestCase):
                 events.append(("pointer", Path(path).name))
                 return original_atomic_write_text(path, value)
 
-            with mock.patch("generation._fsync_file", side_effect=fsync_file), mock.patch(
-                "generation._fsync_directory", side_effect=fsync_directory
-            ), mock.patch("generation._atomic_write_text", side_effect=atomic_write_text):
+            with mock.patch("agent_monitor.snapshots.generation._fsync_file", side_effect=fsync_file), mock.patch(
+                "agent_monitor.snapshots.generation._fsync_directory", side_effect=fsync_directory
+            ), mock.patch("agent_monitor.snapshots.generation._atomic_write_text", side_effect=atomic_write_text):
                 generation.publish_generation(
                     "node-b", snapshot, self.make_meta(snapshot, "host-a"), root=root
                 )

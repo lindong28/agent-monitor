@@ -13,10 +13,10 @@ import threading
 import time
 import unittest
 from unittest import mock
-import server
-import sync_process
-import process_identity
-import network_report
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import sync_process
+from agent_monitor.runtime import process_identity
+from agent_monitor.network import network_report
 ROOT = Path(__file__).resolve().parents[1]
 
 class HttpMutationTests(unittest.TestCase):
@@ -64,7 +64,7 @@ class HttpMutationTests(unittest.TestCase):
             refresh.assert_called_once_with({'ack':['1']})
 
     def test_network_cli_forced_post_and_cached_get_use_actual_http_boundary(self):
-        with mock.patch.object(network_report,'_live_server_port',return_value=self.http.server_port), \
+        with mock.patch.object(network_report,'_live_server_port',return_value=self.http.server_port),\
              mock.patch.dict(self.http.routes, {'/api/network': mock.Mock(
                  side_effect=lambda query: {'fixture': 'fresh' if query.get('force') == ['1'] else 'cached'})}):
             route = self.http.routes['/api/network']
@@ -106,9 +106,11 @@ class ProcessGroupTests(unittest.TestCase):
     def test_live_identity_survives_missing_or_dead_pid_alias(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('agent-monitor','process_identity.py','deployment_guard.py'):
+            shutil.copytree(ROOT/'agent_monitor',root/'agent_monitor',ignore=shutil.ignore_patterns('__pycache__'))
+            shutil.copy2(ROOT/'project_paths.py',root/'project_paths.py')
+            for name in ('agent-monitor','agent_monitor/runtime/process_identity.py','agent_monitor/runtime/deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
-            (root/'hub.py').write_text('print("standalone")\n')
+            (root/'agent_monitor/runtime/hub.py').write_text('print("standalone")\n')
             state=root/'state';state.mkdir()
             (state/'port').write_text('39123')
             child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(20)'])
@@ -159,22 +161,24 @@ class ProcessGroupTests(unittest.TestCase):
     def test_hub_main_registers_its_own_instance_for_cli_status(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('agent-monitor','process_identity.py','deployment_guard.py'):
+            shutil.copytree(ROOT/'agent_monitor',root/'agent_monitor',ignore=shutil.ignore_patterns('__pycache__'))
+            shutil.copy2(ROOT/'project_paths.py',root/'project_paths.py')
+            for name in ('agent-monitor','agent_monitor/runtime/process_identity.py','agent_monitor/runtime/deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
-            (root/'hub.py').write_text('print("standalone")\n')
-            with mock.patch.object(server,'ROOT',root), \
-                 mock.patch.object(server.COLLECTION,'capture_startup_config'), \
-                 mock.patch.object(server.hub,'enabled',return_value=False), \
-                 mock.patch.object(server.hub,'is_hub',return_value=True), \
-                 mock.patch.object(server.hub,'interval',return_value=10), \
-                 mock.patch.object(server.COLLECTION,'request'), \
-                 mock.patch.object(server.COLLECTION,'query_view',None), \
-                 mock.patch.object(server.diagnostics.monitor,'start'), \
-                 mock.patch.object(server.diagnostics.monitor,'close'), \
-                 mock.patch.object(server.codex_accounts.manager,'close'), \
-                 mock.patch.object(server.QUOTA_REFRESH,'shutdown'), \
-                 mock.patch.object(server.signal,'signal'), \
-                 mock.patch.object(server.ThreadingHTTPServer,'serve_forever'), \
+            (root/'agent_monitor/runtime/hub.py').write_text('print("standalone")\n')
+            with mock.patch.object(server,'ROOT',root),\
+                 mock.patch.object(server.COLLECTION,'capture_startup_config'),\
+                 mock.patch.object(server.hub,'enabled',return_value=False),\
+                 mock.patch.object(server.hub,'is_hub',return_value=True),\
+                 mock.patch.object(server.hub,'interval',return_value=10),\
+                 mock.patch.object(server.COLLECTION,'request'),\
+                 mock.patch.object(server.COLLECTION,'query_view',None),\
+                 mock.patch.object(server.diagnostics.monitor,'start'),\
+                 mock.patch.object(server.diagnostics.monitor,'close'),\
+                 mock.patch.object(server.codex_accounts.manager,'close'),\
+                 mock.patch.object(server.QUOTA_REFRESH,'shutdown'),\
+                 mock.patch.object(server.signal,'signal'),\
+                 mock.patch.object(server.ThreadingHTTPServer,'serve_forever'),\
                  mock.patch.object(sys,'argv',['server','--host','127.0.0.1','--port','0']):
                 server.main()
             self.assertTrue((root/'state/pid-identity.json').exists())
@@ -188,10 +192,12 @@ class ProcessGroupTests(unittest.TestCase):
     def test_real_cli_start_records_the_instance_and_stop_releases_it(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('agent-monitor','process_identity.py','deployment_guard.py'):
+            shutil.copytree(ROOT/'agent_monitor',root/'agent_monitor',ignore=shutil.ignore_patterns('__pycache__'))
+            shutil.copy2(ROOT/'project_paths.py',root/'project_paths.py')
+            for name in ('agent-monitor','agent_monitor/runtime/process_identity.py','agent_monitor/runtime/deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
-            (root/'hub.py').write_text('print("standalone")\n')
-            (root/'server.py').write_text('''import argparse,json,threading
+            (root/'agent_monitor/runtime/hub.py').write_text('print("standalone")\n')
+            (root/'agent_monitor/http_server.py').write_text('''import argparse,json,threading
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from socketserver import TCPServer
 class FixtureServer(ThreadingHTTPServer):
@@ -211,7 +217,7 @@ s.serve_forever()
                              AGENT_MONITOR_BIND='127.0.0.1',AGENT_MONITOR_PORT=str(port))
             try:
                 for role, prefix in (('standalone', []), ('client', ['local'])):
-                    (root/'hub.py').write_text('print(' + repr(role) + ')\n')
+                    (root/'agent_monitor/runtime/hub.py').write_text('print(' + repr(role) + ')\n')
                     started=subprocess.run([str(root/'agent-monitor'), *prefix, 'start'],env=environment,capture_output=True,text=True,timeout=8)
                     self.assertEqual(started.returncode,0,started.stderr)
                     owned=process_identity.read_owned(root/'state',root)
@@ -305,9 +311,11 @@ s.serve_forever()
     def test_cli_unknown_pid_does_not_signal_unrelated_process(self):
         with tempfile.TemporaryDirectory() as directory:
             base=Path(directory)
+            shutil.copytree(ROOT/'agent_monitor',base/'agent_monitor',ignore=shutil.ignore_patterns('__pycache__'))
+            shutil.copy2(ROOT/'project_paths.py',base/'project_paths.py')
             (base/'cli.sh').write_text((ROOT/'agent-monitor').read_text().split('\ncase "${1:-}" in\n',1)[0])
-            (base/'hub.py').write_text('print("standalone")\n')
-            if (ROOT/'process_identity.py').exists(): (base/'process_identity.py').write_bytes((ROOT/'process_identity.py').read_bytes())
+            (base/'agent_monitor/runtime/hub.py').write_text('print("standalone")\n')
+            if (ROOT/'agent_monitor/runtime/process_identity.py').exists(): (base/'agent_monitor/runtime/process_identity.py').write_bytes((ROOT/'agent_monitor/runtime/process_identity.py').read_bytes())
             (base/'state').mkdir()
             sleeper=subprocess.Popen([sys.executable,'-c','import time;time.sleep(20)'])
             try:

@@ -9,8 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import server
-import sync
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import sync
 
 
 class ProgressiveFreshnessTests(unittest.TestCase):
@@ -90,7 +90,7 @@ function status(quota, gen, syncing) {return {instance_id: "one", syncing,
 
     def test_hub_interval_is_start_to_start_even_after_a_slow_or_failed_round(self):
         server.COLLECTION._state.update(started_at="2026-09-28T00:00:00Z", completed_at="2026-09-28T00:01:10Z")
-        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.hub.interval", return_value=120):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=True), mock.patch("agent_monitor.http_server.hub.interval", return_value=120):
             for seconds, expected in ((119, False), (120, True), (180, True)):
                 now = datetime.fromtimestamp(1790553600 + seconds, timezone.utc)
                 self.assertEqual(server.COLLECTION.automatic_due(now), expected)
@@ -108,7 +108,7 @@ function status(quota, gen, syncing) {return {instance_id: "one", syncing,
         def completed(name, result):
             if name == "fast":
                 fast_reported.set()
-        with mock.patch("sync.load_machine_config", return_value=SimpleNamespace(machines=machines)), mock.patch("sync.sync_machine", side_effect=collect):
+        with mock.patch("agent_monitor.snapshots.sync.load_machine_config", return_value=SimpleNamespace(machines=machines)), mock.patch("agent_monitor.snapshots.sync.sync_machine", side_effect=collect):
             thread = threading.Thread(target=lambda: sync.sync_all(on_complete=completed))
             thread.start()
             try:
@@ -141,7 +141,7 @@ function status(quota, gen, syncing) {return {instance_id: "one", syncing,
             self.assertEqual(server.COLLECTION._state["phase"], "quota")
             self.assertEqual(server.COLLECTION._state["refresh_completed"], 0)
             return {"fast": result, "slow": failed}
-        with mock.patch("agent_monitor.collection.sync_process.sync_all", side_effect=collect), mock.patch("server.COLLECTION.remember_accounts"), mock.patch("server.hub.enabled", return_value=True):
+        with mock.patch("agent_monitor.collection.sync_process.sync_all", side_effect=collect), mock.patch("agent_monitor.http_server.COLLECTION.remember_accounts"), mock.patch("agent_monitor.http_server.hub.enabled", return_value=True):
             server.COLLECTION.run_round(("fast", "slow"))
         self.assertEqual(events, [False])
         self.assertEqual(server.COLLECTION._state["refresh_completed"], 1)

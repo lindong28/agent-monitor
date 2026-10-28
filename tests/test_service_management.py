@@ -13,12 +13,12 @@ import tempfile
 import unittest
 from unittest import mock
 
-import deployment_guard
-import local_web
-import process_identity
-import runtime_rebuild
-import service_manager
-import service_runtime
+from agent_monitor.runtime import deployment_guard
+from agent_monitor.runtime import local_web
+from agent_monitor.runtime import process_identity
+from agent_monitor.runtime import runtime_rebuild
+from agent_monitor.runtime import service_manager
+from agent_monitor.runtime import service_runtime
 
 SOURCE = Path(__file__).resolve().parents[1]
 
@@ -35,18 +35,18 @@ class IsolatedCheckout(unittest.TestCase):
         (self.root / '.venv/bin').mkdir(parents=True)
         (self.root / '.venv/bin/python').symlink_to(sys.executable)
         shutil.copytree(SOURCE / 'agent_monitor', self.root / 'agent_monitor', ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ('project_paths.py', 'agent-monitor', 'deployment_guard.py', 'process_identity.py', 'service_runtime.py', 'local_web.py'):
+        for name in ('project_paths.py', 'agent-monitor', 'agent_monitor/runtime/deployment_guard.py', 'agent_monitor/runtime/process_identity.py', 'agent_monitor/runtime/service_runtime.py', 'agent_monitor/runtime/local_web.py'):
             shutil.copy2(SOURCE / name, self.root / name)
-        (self.root / 'hub.py').write_text("def is_hub(): return False\ndef enabled(): return False\nif __name__ == '__main__': print('standalone')\n")
-        (self.root / 'server.py').write_text('''import argparse, json
+        (self.root / 'agent_monitor/runtime/hub.py').write_text("def is_hub(): return False\ndef enabled(): return False\nif __name__ == '__main__': print('standalone')\n")
+        (self.root / 'agent_monitor/http_server.py').write_text('''import argparse, json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import TCPServer
 class FixtureServer(HTTPServer):
     server_bind = TCPServer.server_bind  # The fixture does not need reverse DNS.
 from pathlib import Path
-import service_runtime
+from agent_monitor.runtime import service_runtime
 p = argparse.ArgumentParser(); p.add_argument('--host'); p.add_argument('--port', type=int); a = p.parse_args()
-r = Path(__file__).resolve().parent
+r = Path(__file__).resolve().parents[1]
 identity = {'source_root': str(r), 'deployment_signature': service_runtime.signature(r)}
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -121,7 +121,7 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
         self.assertEqual(check.returncode, 0)
 
     def test_unknown_process_is_not_stopped(self):
-        with mock.patch('local_web.process_identity.read_owned', side_effect=process_identity.IdentityUnknown('foreign')):
+        with mock.patch('agent_monitor.runtime.local_web.process_identity.read_owned', side_effect=process_identity.IdentityUnknown('foreign')):
             with self.assertRaises(process_identity.IdentityUnknown):
                 local_web.converge(self.root)
 
@@ -129,8 +129,8 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
         (self.root / 'install.sh').write_text('#!/bin/bash\n' + deployment_guard.BODY_MARKER +
             ('exit 7\n' if fail else '"$AGENT_MONITOR_PYTHON" -m venv --without-pip .venv\n'))
         (self.root / 'install.sh').chmod(0o755)
-        self.stack.enter_context(mock.patch('runtime_rebuild.deploy.preflight', return_value='a' * 40))
-        self.stack.enter_context(mock.patch('runtime_rebuild.capture_jobs', return_value=[]))
+        self.stack.enter_context(mock.patch('agent_monitor.runtime.runtime_rebuild.deploy.preflight', return_value='a' * 40))
+        self.stack.enter_context(mock.patch('agent_monitor.runtime.runtime_rebuild.capture_jobs', return_value=[]))
 
     def test_real_environment_rebuild_restores_only_running_local_web_and_state_inodes(self):
         self.install_fixture()
@@ -164,7 +164,7 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
 
     def test_partial_restore_attempts_all_original_components(self):
         manifest = {'jobs': [{'label': 'first'}, {'label': 'second'}], 'local_web': {'port': 1}}
-        with mock.patch('runtime_rebuild.start_job', side_effect=[ValueError('failure'), None]) as start, mock.patch('runtime_rebuild.local_web.restore') as restore:
+        with mock.patch('agent_monitor.runtime.runtime_rebuild.start_job', side_effect=[ValueError('failure'), None]) as start, mock.patch('agent_monitor.runtime.runtime_rebuild.local_web.restore') as restore:
             with self.assertRaisesRegex(ValueError, 'first'):
                 runtime_rebuild.restore_components(manifest)
             self.assertEqual(start.call_count, 2)
@@ -182,7 +182,7 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
             restore(manifest)
             if count == 1:
                 raise ValueError('injected post-start readiness failure')
-        with mock.patch('runtime_rebuild.restore_components', side_effect=replacement):
+        with mock.patch('agent_monitor.runtime.runtime_rebuild.restore_components', side_effect=replacement):
             with self.assertRaisesRegex(ValueError, 'original runtime/services restored'):
                 runtime_rebuild.rebuild(Path(sys.executable))
         self.assertEqual(count, 2)
@@ -215,19 +215,19 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
 
     def test_status_reports_local_web_on_client_and_continues_after_failure(self):
         output = io.StringIO()
-        with mock.patch('agent_monitor.hub_config.is_hub', return_value=False), mock.patch('agent_monitor.hub_config.enabled', return_value=True), mock.patch('agent_monitor.hub_config.configuration', return_value={'url': 'http://central:39001'}), mock.patch('service_manager.run', side_effect=[1, 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'), mock.patch('service_manager.local_status', return_value=1) as local, redirect_stdout(output):
+        with mock.patch('agent_monitor.hub_config.is_hub', return_value=False), mock.patch('agent_monitor.hub_config.enabled', return_value=True), mock.patch('agent_monitor.hub_config.configuration', return_value={'url': 'http://central:39001'}), mock.patch('agent_monitor.runtime.service_manager.run', side_effect=[1, 0]) as run, mock.patch('agent_monitor.runtime.service_manager.sys.platform', 'darwin'), mock.patch('agent_monitor.runtime.service_manager.local_status', return_value=1) as local, redirect_stdout(output):
             self.assertEqual(service_manager.status(), 1)
         local.assert_called_once()
         self.assertEqual(run.call_count, 2)
         self.assertIn('http://central:39001 (availability not checked)', output.getvalue())
 
     def test_status_continues_after_collector_timeout(self):
-        with mock.patch('agent_monitor.hub_config.is_hub', return_value=False), mock.patch('agent_monitor.hub_config.enabled', return_value=False), mock.patch('service_manager.run', side_effect=[subprocess.TimeoutExpired('collector', 1), 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'):
+        with mock.patch('agent_monitor.hub_config.is_hub', return_value=False), mock.patch('agent_monitor.hub_config.enabled', return_value=False), mock.patch('agent_monitor.runtime.service_manager.run', side_effect=[subprocess.TimeoutExpired('collector', 1), 0]) as run, mock.patch('agent_monitor.runtime.service_manager.sys.platform', 'darwin'):
             self.assertEqual(service_manager.status(), 1)
             self.assertEqual(run.call_count, 2)
 
     def test_status_continues_after_hub_timeout(self):
-        with mock.patch('agent_monitor.hub_config.is_hub', return_value=True), mock.patch('service_manager.run', side_effect=[subprocess.TimeoutExpired('hub', 1), 0, 0]) as run, mock.patch('service_manager.sys.platform', 'darwin'):
+        with mock.patch('agent_monitor.hub_config.is_hub', return_value=True), mock.patch('agent_monitor.runtime.service_manager.run', side_effect=[subprocess.TimeoutExpired('hub', 1), 0, 0]) as run, mock.patch('agent_monitor.runtime.service_manager.sys.platform', 'darwin'):
             self.assertEqual(service_manager.status(), 1)
             self.assertEqual(run.call_count, 3)
 
@@ -247,14 +247,14 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
         job = {'label': 'fixture', 'definition': {'ProgramArguments': ['/owned/python', '/owned/hub.py', 'serve']}}
         for program in ('/owned/python', '/foreign/python'):
             result = subprocess.CompletedProcess([], 0, f'program = {program}\narguments = {{\n/owned/python\n/owned/hub.py\nserve\n}}\n')
-            with mock.patch('runtime_rebuild.launch', return_value=result):
+            with mock.patch('agent_monitor.runtime.runtime_rebuild.launch', return_value=result):
                 if program == '/owned/python':
                     self.assertIsNotNone(runtime_rebuild.loaded(job))
                 else:
                     with self.assertRaisesRegex(ValueError, 'ownership'):
                         runtime_rebuild.loaded(job)
         job['definition']['Program'] = '/foreign/python'
-        with mock.patch('runtime_rebuild.launch', return_value=result):
+        with mock.patch('agent_monitor.runtime.runtime_rebuild.launch', return_value=result):
             with self.assertRaisesRegex(ValueError, 'ownership'):
                 runtime_rebuild.loaded(job)
 

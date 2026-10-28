@@ -6,12 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from machine_config import (
-    MachineConfigError,
-    admit_machine,
-    load_machine_config,
-    machine_config_fingerprint,
-)
+from agent_monitor.snapshots.machine_config import MachineConfigError; from agent_monitor.snapshots.machine_config import admit_machine; from agent_monitor.snapshots.machine_config import load_machine_config; from agent_monitor.snapshots.machine_config import machine_config_fingerprint
 
 
 class MachineConfigTests(unittest.TestCase):
@@ -271,7 +266,7 @@ class MachineConfigTests(unittest.TestCase):
     @staticmethod
     def admission_in_fresh_process(path, fingerprint):
         code = (
-            "from machine_config import admit_machine, load_machine_config; "
+            "from agent_monitor.snapshots.machine_config import admit_machine; from agent_monitor.snapshots.machine_config import load_machine_config; "
             "import sys; "
             "config = load_machine_config(sys.argv[1]); "
             "print('admitted' if admit_machine(config, 'node-b', sys.argv[2]) else 'excluded')"

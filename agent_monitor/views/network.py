@@ -7,8 +7,8 @@ import subprocess
 import threading
 import time
 
-import diagnostics
-import network_policy
+from agent_monitor import diagnostics
+from agent_monitor.network import network_policy
 
 
 class NetworkReport:

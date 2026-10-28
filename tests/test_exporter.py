@@ -11,13 +11,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-import rollup
+from agent_monitor.accounting import rollup
+from agent_monitor.snapshots import generation
 
 
 class ExporterTests(unittest.TestCase):
     def test_gui_quota_route_uses_receipt_outside_rollup_lock_and_preserves_other_routes(self):
-        import exporter
-        import hub
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.runtime import hub
 
         receipt = {"claude": {"updated_at": "2026-09-09T00:00:00Z", "refresh_error": None},
                    "codex": {"updated_at": "2026-09-08T00:00:00Z", "refresh_error": "provider failed"}}
@@ -38,9 +39,9 @@ class ExporterTests(unittest.TestCase):
                     self.assertFalse(worker.is_alive())
                     self.assertEqual(obtained, [True])
                     return receipt
-                with mock.patch.object(exporter, "exporter_version", return_value="a" * 40), \
-                        mock.patch.object(hub.hub_config, "enabled", return_value=enabled), \
-                        mock.patch.object(hub, "request_quota_refresh", side_effect=query) as gui_query, \
+                with mock.patch.object(exporter, "exporter_version", return_value="a" * 40),\
+                        mock.patch.object(hub.hub_config, "enabled", return_value=enabled),\
+                        mock.patch.object(hub, "request_quota_refresh", side_effect=query) as gui_query,\
                         mock.patch.object(exporter, "_rate_limits", return_value={}) as direct:
                     manifest = exporter.export_bundle(source, Path(tmp) / "bundle", gui_quota=gui,
                                                       quota_refresh=quota, refresh=refresh, rate_limits=supplied,
@@ -57,7 +58,7 @@ class ExporterTests(unittest.TestCase):
                         direct.assert_not_called()
 
     def test_export_manifest_rejects_unsupported_schema_version(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with self.assertRaisesRegex(
             exporter.ExportError,
@@ -69,12 +70,12 @@ class ExporterTests(unittest.TestCase):
             )
 
     def test_export_manifest_rejects_usage_row_before_authority_floor(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = self.make_db(Path(tmp) / "rollup.db", 10)
             bundle = Path(tmp) / "bundle"
-            with mock.patch("exporter.exporter_version", return_value="a" * 40):
+            with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="a" * 40):
                 manifest = exporter.export_bundle(
                     source,
                     bundle,
@@ -94,13 +95,13 @@ class ExporterTests(unittest.TestCase):
             manifest["manifest_digest"] = exporter.manifest_digest(manifest)
 
             with self.assertRaisesRegex(
-                __import__("generation").GenerationValidationError,
+                generation.GenerationValidationError,
                 "precedes usage_rollup_authoritative_from",
             ):
                 exporter.validate_export_manifest(manifest, snapshot)
 
     def test_iv5_vacuum_into_includes_rows_present_only_in_uncheckpointed_wal(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "rollup.db"
@@ -142,7 +143,7 @@ class ExporterTests(unittest.TestCase):
                 )
 
     def test_a2_export_leaf_hard_fails_without_the_target_database_lock(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = self.make_db(Path(tmp) / "rollup.db", 10)
@@ -158,7 +159,7 @@ class ExporterTests(unittest.TestCase):
             self.assertFalse((Path(tmp) / "wrong-lock.db").exists())
 
     def test_a2_export_serializes_against_a_writer_holding_the_same_lock(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = self.make_db(Path(tmp) / "rollup.db", 10)
@@ -176,7 +177,7 @@ class ExporterTests(unittest.TestCase):
             def export():
                 try:
                     with mock.patch(
-                        "exporter.exporter_version", return_value="a" * 40
+                        "agent_monitor.snapshots.exporter.exporter_version", return_value="a" * 40
                     ):
                         exporter.export_bundle(
                             source,
@@ -208,7 +209,7 @@ class ExporterTests(unittest.TestCase):
             self.assertTrue((bundle / "snapshot.db").is_file())
 
     def test_iv6_export_performs_only_the_authorized_normal_rollup_refresh(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = self.make_db(Path(tmp) / "rollup.db", 10, day="2020-01-02")
@@ -219,7 +220,7 @@ class ExporterTests(unittest.TestCase):
 
             rollup.run(db_path=control, entries_loader=lambda: [], now=fixed_now)
 
-            with mock.patch("exporter.exporter_version", return_value="b" * 40):
+            with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="b" * 40):
                 exporter.export_bundle(
                     source,
                     bundle,
@@ -244,7 +245,7 @@ class ExporterTests(unittest.TestCase):
                 )
 
     def test_export_space_preflight_leaves_no_bundle_or_staging(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -253,8 +254,8 @@ class ExporterTests(unittest.TestCase):
             disk_usage = type("Usage", (), {"free": 0})()
 
             with mock.patch(
-                "exporter.exporter_version", return_value="e" * 40
-            ), mock.patch("exporter.shutil.disk_usage", return_value=disk_usage):
+                "agent_monitor.snapshots.exporter.exporter_version", return_value="e" * 40
+            ), mock.patch("agent_monitor.snapshots.exporter.shutil.disk_usage", return_value=disk_usage):
                 with self.assertRaises(exporter.ExportSpaceError):
                     exporter.export_bundle(
                         source,
@@ -269,12 +270,12 @@ class ExporterTests(unittest.TestCase):
             self.assertEqual(list(tmp_path.glob(".bundle.staging-*")), [])
 
     def test_export_manifest_binds_the_exact_snapshot_bytes_and_claims_no_row_lineage(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = self.make_db(Path(tmp) / "rollup.db", 10)
             bundle = Path(tmp) / "bundle"
-            with mock.patch("exporter.exporter_version", return_value="c" * 40):
+            with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="c" * 40):
                 manifest = exporter.export_bundle(
                     source,
                     bundle,
@@ -305,12 +306,12 @@ class ExporterTests(unittest.TestCase):
             self.assertEqual(manifest["aliases"], [])
 
     def test_manifest_digest_rejects_metadata_tampering_even_when_snapshot_is_unchanged(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = self.make_db(Path(tmp) / "rollup.db", 10)
             bundle = Path(tmp) / "bundle"
-            with mock.patch("exporter.exporter_version", return_value="7" * 40):
+            with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="7" * 40):
                 manifest = exporter.export_bundle(
                     source,
                     bundle,
@@ -325,12 +326,12 @@ class ExporterTests(unittest.TestCase):
                 exporter.validate_export_manifest(manifest, bundle / "snapshot.db")
 
     def test_v2_manifest_rejects_semantic_tampering_after_digest_is_recomputed(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = self.make_db(Path(tmp) / "rollup.db", 10)
             bundle = Path(tmp) / "bundle"
-            with mock.patch("exporter.exporter_version", return_value="8" * 40):
+            with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="8" * 40):
                 manifest = exporter.export_bundle(
                     source,
                     bundle,
@@ -357,27 +358,27 @@ class ExporterTests(unittest.TestCase):
                         )
 
     def test_exporter_version_rejects_dirty_runtime_authority_paths(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         responses = [
             subprocess.CompletedProcess([], 0, "a" * 40 + "\n", ""),
             subprocess.CompletedProcess([], 0, " M agent-monitor/exporter.py\n", ""),
         ]
-        with mock.patch("exporter.subprocess.run", side_effect=responses):
+        with mock.patch("agent_monitor.snapshots.exporter.subprocess.run", side_effect=responses):
             with self.assertRaisesRegex(exporter.ExportError, "differs from HEAD"):
                 exporter.exporter_version()
 
     def test_dirty_version_refusal_precedes_rollup_mutation_and_output_creation(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             source = self.make_db(Path(tmp) / "rollup.db", 10)
             bundle = Path(tmp) / "bundle"
             with mock.patch(
-                "exporter.exporter_version",
+                "agent_monitor.snapshots.exporter.exporter_version",
                 side_effect=exporter.ExportError("runtime authority differs from HEAD"),
             ), mock.patch(
-                "exporter.rollup.run", side_effect=AssertionError("rollup called")
+                "agent_monitor.snapshots.exporter.rollup.run", side_effect=AssertionError("rollup called")
             ):
                 with self.assertRaisesRegex(exporter.ExportError, "differs from HEAD"):
                     exporter.export_bundle(
@@ -392,16 +393,16 @@ class ExporterTests(unittest.TestCase):
             self.assertFalse(bundle.exists())
 
     def test_version_probe_is_rollup_free_when_runtime_authority_is_clean(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         responses = [
             subprocess.CompletedProcess([], 0, "a" * 40 + "\n", ""),
             subprocess.CompletedProcess([], 0, "", ""),
         ]
         with mock.patch(
-            "exporter.subprocess.run", side_effect=responses
+            "agent_monitor.snapshots.exporter.subprocess.run", side_effect=responses
         ) as git_run, mock.patch(
-            "exporter.rollup.run", side_effect=AssertionError("rollup called")
+            "agent_monitor.snapshots.exporter.rollup.run", side_effect=AssertionError("rollup called")
         ):
             version = exporter.exporter_version()
         self.assertEqual(version, "a" * 40)
@@ -419,7 +420,7 @@ class ExporterTests(unittest.TestCase):
         self.assertNotIn("machines.json", status_command)
 
     def test_actual_git_allows_dirty_machine_config_but_rejects_dirty_source(self):
-        import exporter
+        from agent_monitor.snapshots import exporter
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -427,26 +428,28 @@ class ExporterTests(unittest.TestCase):
                 return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
             git("init", "-q")
             (root / "machines.json").write_text('{}\n')
-            (root / "exporter.py").write_text('# source\n')
-            (root / "claude_oauth.py").write_text('# read-only credentials\n')
+            (root / "agent_monitor/snapshots").mkdir(parents=True)
+            (root / "agent_monitor/accounts").mkdir(parents=True)
+            (root / "agent_monitor/snapshots/exporter.py").write_text('# source\n')
+            (root / "agent_monitor/accounts/claude_oauth.py").write_text('# read-only credentials\n')
             (root / 'proxy_runtime').mkdir()
             (root / 'proxy_runtime/bridge.cjs').write_text('// transport\n')
-            git("add", "machines.json", "exporter.py", "claude_oauth.py")
+            git("add", "machines.json", "agent_monitor/snapshots/exporter.py", "agent_monitor/accounts/claude_oauth.py")
             git('add', 'proxy_runtime/bridge.cjs')
             git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture")
             commit = git("rev-parse", "HEAD")
             (root / "machines.json").write_text('# disabled remote\n{}\n')
-            with mock.patch("exporter.ROOT", root):
+            with mock.patch("agent_monitor.snapshots.exporter.ROOT", root):
                 self.assertEqual(exporter.exporter_version(), commit)
                 (root / 'proxy_runtime/bridge.cjs').write_text('// modified transport\n')
                 with self.assertRaisesRegex(exporter.ExportError, 'differs from HEAD'):
                     exporter.exporter_version()
                 (root / 'proxy_runtime/bridge.cjs').write_text('// transport\n')
-                (root / "claude_oauth.py").write_text('# modified credentials reader\n')
+                (root / "agent_monitor/accounts/claude_oauth.py").write_text('# modified credentials reader\n')
                 with self.assertRaisesRegex(exporter.ExportError, "differs from HEAD"):
                     exporter.exporter_version()
-                (root / "claude_oauth.py").write_text('# read-only credentials\n')
-                (root / "exporter.py").write_text('# modified source\n')
+                (root / "agent_monitor/accounts/claude_oauth.py").write_text('# read-only credentials\n')
+                (root / "agent_monitor/snapshots/exporter.py").write_text('# modified source\n')
                 with self.assertRaisesRegex(exporter.ExportError, "differs from HEAD"):
                     exporter.exporter_version()
 

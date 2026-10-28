@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-import exporter
-import generation
-import rollup
+from agent_monitor.snapshots import exporter
+from agent_monitor.snapshots import generation
+from agent_monitor.accounting import rollup
 from agent_monitor.contracts.usage import LoadedEntries
 from parsers import UsageEntry
 from parsers import codex
@@ -16,14 +16,15 @@ from parsers import codex
 
 class TokenAccuracyTests(unittest.TestCase):
     def test_rollup_cli_reports_total_usage_separately_from_project_blockers(self):
-        launcher = Path(__file__).resolve().parents[1].joinpath("agent-monitor").read_text(
-            encoding="utf-8"
-        )
+        from agent_monitor.cli import machine_accept, rollup_check, rollup_run
+
+        launcher = "\n".join(Path(module.__file__).read_text(encoding="utf-8")
+                             for module in (rollup_check, rollup_run))
 
         self.assertIn("usage_would_skip", launcher)
         self.assertIn("agent/model totals still include this usage", launcher)
         self.assertIn("then rerun 'agent-monitor rollup --check'", launcher)
-        self.assertIn("full-history totals basis", launcher)
+        self.assertIn("full-history totals basis", Path(machine_accept.__file__).read_text(encoding="utf-8"))
         self.assertNotIn("but new usage was not written", launcher)
 
     def test_codex_uses_event_deltas_event_time_and_does_not_add_reasoning_twice(self):
@@ -220,7 +221,7 @@ class TokenAccuracyTests(unittest.TestCase):
                 entries_loader=lambda: loaded,
                 now=lambda: datetime(2026, 8, 30, 12, tzinfo=timezone.utc),
             )
-            check = rollup._check_rollup(
+            check = rollup.check_rollup(
                 db_path,
                 entries_loader=lambda: loaded,
                 now=lambda: datetime(2026, 8, 30, 12, tzinfo=timezone.utc),
@@ -509,7 +510,7 @@ class TokenAccuracyTests(unittest.TestCase):
                 entries_loader=lambda: first,
                 now=lambda: now,
             )
-            result = rollup._check_rollup(
+            result = rollup.check_rollup(
                 db_path,
                 entries_loader=lambda: smaller,
                 now=lambda: now,
@@ -538,7 +539,7 @@ class TokenAccuracyTests(unittest.TestCase):
             with rollup.rollup_lock(db_path):
                 pass
 
-            result = rollup._check_rollup(db_path, list)
+            result = rollup.check_rollup(db_path, list)
 
         self.assertEqual(result["status"], "indeterminate")
         self.assertEqual(result["db_state"], "usage_schema_invalid")
@@ -561,7 +562,7 @@ class TokenAccuracyTests(unittest.TestCase):
                 conn.commit()
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
-            result = rollup._check_rollup(db_path, list)
+            result = rollup.check_rollup(db_path, list)
 
         self.assertEqual(result["status"], "indeterminate")
         self.assertEqual(result["db_state"], "usage_schema_invalid")
@@ -588,7 +589,7 @@ class TokenAccuracyTests(unittest.TestCase):
                 conn.commit()
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
-            result = rollup._check_rollup(db_path, list)
+            result = rollup.check_rollup(db_path, list)
 
         self.assertEqual(result["status"], "indeterminate")
         self.assertEqual(result["db_state"], "usage_schema_invalid")
@@ -614,7 +615,7 @@ class TokenAccuracyTests(unittest.TestCase):
                 conn.commit()
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
-            result = rollup._check_rollup(db_path, list)
+            result = rollup.check_rollup(db_path, list)
 
         self.assertEqual(result["status"], "indeterminate")
         self.assertEqual(result["db_state"], "usage_schema_invalid")
@@ -639,7 +640,7 @@ class TokenAccuracyTests(unittest.TestCase):
                 conn.commit()
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
-            result = rollup._check_rollup(db_path, list)
+            result = rollup.check_rollup(db_path, list)
 
         self.assertEqual(result["status"], "indeterminate")
         self.assertEqual(result["db_state"], "usage_schema_invalid")

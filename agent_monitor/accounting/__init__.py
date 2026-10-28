@@ -1,0 +1,1 @@
+"""Accounting implementation owners."""

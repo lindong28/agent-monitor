@@ -1,4 +1,4 @@
-"""`claude_oauth.py` must find the OAuth token on every supported platform.
+"""`agent_monitor/accounts/claude_oauth.py` must find the OAuth token on every supported platform.
 
 Claude Code keeps the same credential blob in two different places: a file on
 Linux, the login keychain on macOS. A reader that knows only one of them works
@@ -22,7 +22,7 @@ import urllib.error
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-USAGE_SCRIPT = REPO_ROOT / "claude_oauth.py"
+USAGE_SCRIPT = REPO_ROOT / "agent_monitor/accounts/claude_oauth.py"
 
 
 def load_module():

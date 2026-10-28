@@ -15,13 +15,13 @@ import tempfile
 import unittest
 from unittest import mock
 
-import account_egress
-import client_connector
-import client_network
-import network_policy
-import server
-import codex_accounts
-import service_runtime
+from agent_monitor.network import account_egress
+from agent_monitor.network import client_connector
+from agent_monitor.network import client_network
+from agent_monitor.network import network_policy
+from agent_monitor import http_server as server
+from agent_monitor.accounts import codex_accounts
+from agent_monitor.runtime import service_runtime
 
 
 class NetworkTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class NetworkTests(unittest.TestCase):
         response = client.getresponse()
         self.assertEqual(response.status, 200)
         value = json.loads(response.read())
-        self.assertEqual(value['source_root'], str(Path(client_connector.__file__).resolve().parent))
+        self.assertEqual(value['source_root'], str(Path(__file__).resolve().parents[1]))
         expected = service_runtime.configured_signature(client_connector.BOOT_DEPLOYMENT_SIGNATURE,
                                                         [connector.server, str(connector.state_file)])
         self.assertEqual(value['deployment_signature'], expected)

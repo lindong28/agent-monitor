@@ -12,7 +12,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import codex_accounts as ca
+from agent_monitor.accounts import codex_accounts as ca
 
 
 def seed_auth(manager, account):
@@ -73,7 +73,7 @@ class AccountActionsTests(unittest.TestCase):
         self.assertEqual(self.spawned, [])
 
     def test_device_loss_before_rpc_stops_batch_without_provider_pause(self):
-        import client_network
+        from agent_monitor.network import client_network
         route = client_network.Route('fixture device')
         self.addCleanup(route.close)
         accounts = [self.account(email=f'{i}@example.com', account_id=f'workspace-{i}') for i in range(2)]
@@ -107,7 +107,7 @@ class AccountActionsTests(unittest.TestCase):
         # The peer deliberately never reads stdin and ignores TERM. No provider
         # or real credentials are involved; the watchdog finally reaps it.
         def factory(directory, cancelled):
-            with mock.patch.object(ca.shutil, "which", return_value=sys.executable), \
+            with mock.patch.object(ca.shutil, "which", return_value=sys.executable),\
                  mock.patch.object(ca.subprocess, "Popen", side_effect=lambda *a, **kw: real_popen(
                      [sys.executable, "-c", "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready',flush=True); time.sleep(30)"], **kw)):
                 rpc = ca.Rpc(directory, cancelled)
@@ -217,7 +217,7 @@ class AccountActionsTests(unittest.TestCase):
                 directory = self.manager.directory(account["id"])
                 self.scenario = scenario
                 selected = ca.MESSAGES[index * 99]
-                with mock.patch.object(ca.secrets, "choice", return_value=selected) as choose, \
+                with mock.patch.object(ca.secrets, "choice", return_value=selected) as choose,\
                      mock.patch.object(ca.Rpc, "request", observe):
                     self.manager.start(account["id"])
                     result = self.wait(account["id"])

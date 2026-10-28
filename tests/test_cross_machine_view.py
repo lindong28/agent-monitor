@@ -16,12 +16,12 @@ from types import SimpleNamespace
 from unittest import mock
 from contextlib import closing
 
-import generation
-import exporter
-import rollup
-import server
-import sync
-from machine_config import Machine, MachineConfig, machine_config_fingerprint
+from agent_monitor.snapshots import generation
+from agent_monitor.snapshots import exporter
+from agent_monitor.accounting import rollup
+from agent_monitor import http_server as server
+from agent_monitor.snapshots import sync
+from agent_monitor.snapshots.machine_config import Machine; from agent_monitor.snapshots.machine_config import MachineConfig; from agent_monitor.snapshots.machine_config import machine_config_fingerprint
 from parsers import UsageEntry
 
 
@@ -33,7 +33,7 @@ def setUpModule():
     global _ACCOUNT_MEMORY_TEMP, _ACCOUNT_MEMORY_PATCHER
     _ACCOUNT_MEMORY_TEMP = tempfile.TemporaryDirectory()
     memory_path = Path(_ACCOUNT_MEMORY_TEMP.name) / "agent_monitor.account_memory.json"
-    _ACCOUNT_MEMORY_PATCHER = mock.patch("server.ACCOUNT_MEMORY.path", memory_path)
+    _ACCOUNT_MEMORY_PATCHER = mock.patch("agent_monitor.http_server.ACCOUNT_MEMORY.path", memory_path)
     _ACCOUNT_MEMORY_PATCHER.start()
 
 
@@ -93,20 +93,20 @@ class CrossMachineOverviewTests(unittest.TestCase):
         }
         with (
             mock.patch(
-                "server.ingestion.load_all_entries",
+                "agent_monitor.http_server.ingestion.load_all_entries",
                 side_effect=AssertionError("Overview must not read live entries"),
             ),
-            mock.patch("server.COLLECTION.request", return_value=False),
-            mock.patch("server.COLLECTION.status", return_value=sync_status),
+            mock.patch("agent_monitor.http_server.COLLECTION.request", return_value=False),
+            mock.patch("agent_monitor.http_server.COLLECTION.status", return_value=sync_status),
             mock.patch(
-                "server.QUOTA_VIEW.rate_limits",
+                "agent_monitor.http_server.QUOTA_VIEW.rate_limits",
                 return_value={
                     "claude": {"accounts": [], "unavailable_reason": None},
                     "codex": {"accounts": [], "unavailable_reason": None},
                 },
             ),
             mock.patch(
-                "server.generation.generation_admission_snapshot",
+                "agent_monitor.http_server.generation.generation_admission_snapshot",
                 return_value=contextlib.nullcontext(
                     SimpleNamespace(
                         admitted=(),
@@ -115,8 +115,8 @@ class CrossMachineOverviewTests(unittest.TestCase):
                     )
                 ),
             ),
-            mock.patch("server.rollup.query_pivot", side_effect=pivot),
-            mock.patch("server.rollup.earliest_rollup_date", return_value="2026-04-21"),
+            mock.patch("agent_monitor.http_server.rollup.query_pivot", side_effect=pivot),
+            mock.patch("agent_monitor.http_server.rollup.earliest_rollup_date", return_value="2026-04-21"),
         ):
             payload = server.create_views().overview.read({"range": ["30d"]})
 
@@ -169,7 +169,7 @@ class CrossMachineOverviewTests(unittest.TestCase):
         )
         admission = SimpleNamespace(admitted=admitted, records=())
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
             "parsers.claude_status.load_rate_limits",
@@ -417,9 +417,9 @@ class BackgroundSyncTests(unittest.TestCase):
             SimpleNamespace(machine=SimpleNamespace(name=name))
             for name in ("node-b", "node-c", "node-d", "node-a")
         ))
-        with mock.patch("server.sync.sync_all", side_effect=slow_sync_all), mock.patch(
-            "server.generation.generation_admission_snapshot", side_effect=lambda: contextlib.nullcontext(admission)
-        ), mock.patch("server.COLLECTION.remember_accounts"):
+        with mock.patch("agent_monitor.http_server.sync.sync_all", side_effect=slow_sync_all), mock.patch(
+            "agent_monitor.http_server.generation.generation_admission_snapshot", side_effect=lambda: contextlib.nullcontext(admission)
+        ), mock.patch("agent_monitor.http_server.COLLECTION.remember_accounts"):
             started = time.monotonic()
             server.COLLECTION.request({"force": ["1"]})
             server.COLLECTION.request({"force": ["1"]})
@@ -444,10 +444,10 @@ class BackgroundSyncTests(unittest.TestCase):
         machine, admission = self.single_admitted_machine()
         reset_collection()
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
-            "server.sync.sync_all",
+            "agent_monitor.http_server.sync.sync_all",
             return_value={machine.name: sync.SyncResult()},
         ):
             self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
@@ -462,10 +462,10 @@ class BackgroundSyncTests(unittest.TestCase):
         machine, admission = self.single_admitted_machine()
         reset_collection()
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
-            "server.sync.sync_all",
+            "agent_monitor.http_server.sync.sync_all",
             return_value={machine.name: None},
         ):
             self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
@@ -504,9 +504,9 @@ class BackgroundSyncTests(unittest.TestCase):
 
         reset_collection()
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
-        ), mock.patch("server.sync.sync_all", side_effect=sync_all):
+        ), mock.patch("agent_monitor.http_server.sync.sync_all", side_effect=sync_all):
             self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
             self.wait_for_terminal()
             failed = server.COLLECTION.status(admission=admission)
@@ -540,9 +540,9 @@ class BackgroundSyncTests(unittest.TestCase):
         reset_collection()
         with self.assertLogs("agent-monitor", level="ERROR") as logs:
             with mock.patch(
-                "server.generation.generation_admission_snapshot",
+                "agent_monitor.http_server.generation.generation_admission_snapshot",
                 return_value=contextlib.nullcontext(admission),
-            ), mock.patch("server.threading.Thread.start", side_effect=RuntimeError("no thread")):
+            ), mock.patch("agent_monitor.http_server.threading.Thread.start", side_effect=RuntimeError("no thread")):
                 self.assertFalse(server.COLLECTION.request({"force": ["1"]}))
 
         runtime = server.COLLECTION.snapshot()
@@ -574,10 +574,10 @@ class BackgroundSyncTests(unittest.TestCase):
         reset_collection()
         with self.assertLogs("agent-monitor", level="ERROR") as logs:
             with mock.patch(
-                "server.generation.generation_admission_snapshot",
+                "agent_monitor.http_server.generation.generation_admission_snapshot",
                 return_value=contextlib.nullcontext(admission),
             ), mock.patch(
-                "server.sync.sync_all",
+                "agent_monitor.http_server.sync.sync_all",
                 return_value={"node-b": sync.SyncResult(generation=current)},
             ):
                 self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
@@ -609,10 +609,10 @@ class BackgroundSyncTests(unittest.TestCase):
         )
         reset_collection()
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(starting),
         ), mock.patch(
-            "server.sync.sync_all",
+            "agent_monitor.http_server.sync.sync_all",
             return_value={
                 "node-b": sync.SyncResult(error="self export failed"),
                 "node-c": sync.SyncResult(error="ssh timeout"),
@@ -629,10 +629,10 @@ class BackgroundSyncTests(unittest.TestCase):
         self.assertEqual(status["coverage"], {"admitted": 0, "declared": 1})
 
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(final),
         ), mock.patch(
-            "server.sync.sync_all",
+            "agent_monitor.http_server.sync.sync_all",
             return_value={"node-b": sync.SyncResult(error="self still dirty")},
         ):
             self.assertTrue(server.COLLECTION.request({"force": ["1"]}))
@@ -746,17 +746,17 @@ class BackgroundSyncTests(unittest.TestCase):
 
         now = datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc)
         with mock.patch("agent_monitor.collection.aware_now", return_value=now), mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission(599.999)),
-        ), mock.patch("server.threading.Thread") as thread:
+        ), mock.patch("agent_monitor.http_server.threading.Thread") as thread:
             self.assertFalse(server.COLLECTION.request({}))
             thread.assert_not_called()
 
         reset_collection()
         with mock.patch("agent_monitor.collection.aware_now", return_value=now), mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission(600)),
-        ), mock.patch("server.threading.Thread") as thread:
+        ), mock.patch("agent_monitor.http_server.threading.Thread") as thread:
             self.assertTrue(server.COLLECTION.request({}))
             thread.assert_called_once()
             self.assertTrue(thread.call_args.kwargs["daemon"])
@@ -789,14 +789,14 @@ class BackgroundSyncTests(unittest.TestCase):
 
         reset_collection()
         with mock.patch(
-            "server.sync.sync_all",
+            "agent_monitor.http_server.sync.sync_all",
             return_value={
                 "node-b": sync.SyncResult(
                     error="exporter runtime authority differs from HEAD"
                 )
             },
         ), mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
             "agent_monitor.collection.utc_timestamp",
@@ -815,9 +815,9 @@ class BackgroundSyncTests(unittest.TestCase):
         )
 
         with mock.patch("agent_monitor.collection.aware_now", return_value=datetime(2026, 8, 4, 12, 9, 29, 999000, tzinfo=timezone.utc)), mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
-        ), mock.patch("server.threading.Thread") as thread:
+        ), mock.patch("agent_monitor.http_server.threading.Thread") as thread:
             self.assertFalse(server.COLLECTION.request({}))
             thread.assert_not_called()
 
@@ -830,9 +830,9 @@ class BackgroundSyncTests(unittest.TestCase):
         )
 
         with mock.patch("agent_monitor.collection.aware_now", return_value=datetime(2026, 8, 4, 12, 9, 30, tzinfo=timezone.utc)), mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
-        ), mock.patch("server.threading.Thread") as thread:
+        ), mock.patch("agent_monitor.http_server.threading.Thread") as thread:
             self.assertTrue(server.COLLECTION.request({}))
             thread.assert_called_once()
         reset_collection()
@@ -881,13 +881,13 @@ class BackgroundSyncTests(unittest.TestCase):
                 return json.load(response)
 
         try:
-            with mock.patch("server.sync.sync_all", side_effect=failing_sync_all), mock.patch(
-                "server.generation.generation_admission_snapshot",
+            with mock.patch("agent_monitor.http_server.sync.sync_all", side_effect=failing_sync_all), mock.patch(
+                "agent_monitor.http_server.generation.generation_admission_snapshot",
                 return_value=contextlib.nullcontext(admission),
             ), mock.patch(
-                "server.rollup.query_pivot",
+                "agent_monitor.http_server.rollup.query_pivot",
                 return_value={"columns": [], "rows": []},
-            ), mock.patch("server.rollup.earliest_rollup_date", return_value=None):
+            ), mock.patch("agent_monitor.http_server.rollup.earliest_rollup_date", return_value=None):
                 origin = "http://127.0.0.1:%d" % httpd.server_port
                 request = urllib.request.Request(origin + "/api/refresh", method="POST",
                     headers={"Origin": origin, "X-Agent-Monitor": "action"})
@@ -943,13 +943,13 @@ class BackgroundSyncTests(unittest.TestCase):
             records=(),
             config=SimpleNamespace(machines=()),
         )
-        with mock.patch("server.sync.sync_all", side_effect=slow_sync_all), mock.patch(
-            "server.generation.generation_admission_snapshot",
+        with mock.patch("agent_monitor.http_server.sync.sync_all", side_effect=slow_sync_all), mock.patch(
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
-            "server.rollup.query_pivot",
+            "agent_monitor.http_server.rollup.query_pivot",
             return_value={"columns": [], "rows": []},
-        ), mock.patch("server.rollup.earliest_rollup_date", return_value=None):
+        ), mock.patch("agent_monitor.http_server.rollup.earliest_rollup_date", return_value=None):
             started = time.monotonic()
             payload = server.create_views().overview.read({"force": ["1"]})
             elapsed = time.monotonic() - started
@@ -996,10 +996,10 @@ class AdmissionStatusTests(unittest.TestCase):
                 self.publish(root, machine, multiplier=index).close()
             admission_snapshot = generation.generation_admission_snapshot
             with mock.patch(
-                "server.generation.generation_admission_snapshot",
+                "agent_monitor.http_server.generation.generation_admission_snapshot",
                 side_effect=lambda: admission_snapshot(config_path=config_path, root=root),
             ) as load_admission, mock.patch(
-                "rollup.admitted_generations",
+                "agent_monitor.accounting.rollup.admitted_generations",
                 side_effect=AssertionError("overview queries must reuse the pinned admission set"),
             ):
                 payload = server.create_views().overview.read({"range": ["30d"], "sync": ["0"]})
@@ -1160,7 +1160,7 @@ class AdmissionStatusTests(unittest.TestCase):
                     options = rollup.filter_options()
                 admission_snapshot = generation.generation_admission_snapshot
                 with mock.patch(
-                    "server.generation.generation_admission_snapshot",
+                    "agent_monitor.http_server.generation.generation_admission_snapshot",
                     side_effect=lambda: admission_snapshot(
                         config_path=config_path,
                         root=root,
@@ -1344,7 +1344,7 @@ class AdmissionStatusTests(unittest.TestCase):
                 for current in currents
             )
 
-        with mock.patch("rollup.admitted_generations", side_effect=load):
+        with mock.patch("agent_monitor.accounting.rollup.admitted_generations", side_effect=load):
             yield
 
     @staticmethod
@@ -1398,13 +1398,13 @@ class AdmissionStatusTests(unittest.TestCase):
     def status(self, root, config_path, errors=None, running=False, now=None):
         admission_snapshot = generation.generation_admission_snapshot
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             side_effect=lambda: admission_snapshot(
                 config_path=config_path,
                 root=root,
             ),
         ), mock.patch(
-            "server.COLLECTION.snapshot",
+            "agent_monitor.http_server.COLLECTION.snapshot",
             return_value={
                 "syncing": running,
                 "terminal": not running,
@@ -1424,10 +1424,10 @@ class AdmissionStatusTests(unittest.TestCase):
     @staticmethod
     def status_from_admission(admission, *, running, errors, now):
         with mock.patch(
-            "server.generation.generation_admission_snapshot",
+            "agent_monitor.http_server.generation.generation_admission_snapshot",
             return_value=contextlib.nullcontext(admission),
         ), mock.patch(
-            "server.COLLECTION.snapshot",
+            "agent_monitor.http_server.COLLECTION.snapshot",
             return_value={
                 "syncing": running,
                 "terminal": not running,
@@ -2234,15 +2234,15 @@ class WriteSetTests(unittest.TestCase):
                 return {machine.name: sync.SyncResult(generation=current)}
 
             with mock.patch(
-                "server.generation.generation_admission_snapshot",
+                "agent_monitor.http_server.generation.generation_admission_snapshot",
                 side_effect=lambda: admission_snapshot(
                     config_path=config_path,
                     root=generations_root,
                 ),
-            ), mock.patch("server.sync.sync_all", side_effect=sync_self), mock.patch(
-                "exporter.exporter_version", return_value="a" * 40
+            ), mock.patch("agent_monitor.http_server.sync.sync_all", side_effect=sync_self), mock.patch(
+                "agent_monitor.snapshots.exporter.exporter_version", return_value="a" * 40
             ), mock.patch(
-                "generation.self_certified_host_identity", return_value=source_identity
+                "agent_monitor.snapshots.generation.self_certified_host_identity", return_value=source_identity
             ):
                 reset_collection()
                 server.create_views().overview.read({})
@@ -2258,7 +2258,7 @@ class WriteSetTests(unittest.TestCase):
             self.assert_write_subset(after_load, after_refresh, "state/")
             self.assertNotEqual(after_load, after_refresh)
             output_path = state_root / "export-bundle"
-            with mock.patch("exporter.exporter_version", return_value="a" * 40):
+            with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="a" * 40):
                 exporter.export_bundle(
                     db_path=db_path,
                     output_path=output_path,

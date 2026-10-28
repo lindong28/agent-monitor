@@ -8,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-import generation
-import rollup
+from agent_monitor.snapshots import generation
+from agent_monitor.accounting import rollup
 from agent_monitor import storage
 import test_generation as generation_fixtures
 
@@ -133,7 +133,7 @@ class StorageContractTests(unittest.TestCase):
                 clock[0] += timedelta(seconds=60)
                 return copyfile(*args, **kwargs)
 
-            with mock.patch("generation.shutil.copyfile", side_effect=delayed_copy):
+            with mock.patch("agent_monitor.snapshots.generation.shutil.copyfile", side_effect=delayed_copy):
                 result = generation.publish_generation("node-b", path, meta, root=Path(tmp) / "generations", now=lambda: clock[0])
             self.assertEqual(datetime.fromisoformat(result.meta["published_at"].replace("Z", "+00:00")), clock[0])
 

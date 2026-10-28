@@ -1,4 +1,4 @@
-import statistics_snapshot
+from agent_monitor.snapshots import statistics_snapshot
 from types import SimpleNamespace
 """Collection navigation and read-only projection use synthetic observations."""
 import io
@@ -9,7 +9,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
-import server
+from agent_monitor import http_server as server
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,10 +19,10 @@ class CollectionPageTests(unittest.TestCase):
         admitted = object()
         status = {"coverage": {"admitted": 1, "declared": 2}}
         readings = {"codex": {"accounts": [{"account_state": "unstamped", "five_hour_used_pct": 0}]}}
-        with mock.patch.object(server.COLLECTION, "admission", return_value=nullcontext(admitted)), \
-             mock.patch.object(server.COLLECTION, "status", return_value=status) as sync, \
-             mock.patch.object(server.QUOTA_VIEW, "live_from_admission", return_value=readings) as quota, \
-             mock.patch.object(server.COLLECTION, "request", side_effect=AssertionError("refresh")), \
+        with mock.patch.object(server.COLLECTION, "admission", return_value=nullcontext(admitted)),\
+             mock.patch.object(server.COLLECTION, "status", return_value=status) as sync,\
+             mock.patch.object(server.QUOTA_VIEW, "live_from_admission", return_value=readings) as quota,\
+             mock.patch.object(server.COLLECTION, "request", side_effect=AssertionError("refresh")),\
              mock.patch.object(server.rollup, "query_pivot", side_effect=AssertionError("cost query")):
             self.assertEqual(server.ROUTES["/api/collection"]({}), {"sync": status, "rate_limits": readings})
             sync.assert_called_once_with(admission=admitted)
@@ -44,15 +44,15 @@ class CollectionPageTests(unittest.TestCase):
         expected = {"groups": [{"machine": "m1", "agent": "claude-code", "model": "model",
                                "reason": "unrecorded", "entries": 2}]}
         hosts = [SimpleNamespace(host="m1", meta={}), SimpleNamespace(host="m2", meta={})]
-        with mock.patch.object(server.hub, "enabled", return_value=True), \
-             mock.patch.object(server.generation, "generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=hosts))), \
-             mock.patch.object(statistics_snapshot, "read_admitted_usage", return_value=entries) as read, \
+        with mock.patch.object(server.hub, "enabled", return_value=True),\
+             mock.patch.object(server.generation, "generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=hosts))),\
+             mock.patch.object(statistics_snapshot, "read_admitted_usage", return_value=entries) as read,\
              mock.patch.object(server.COLLECTION, "request", side_effect=AssertionError("refresh")):
             self.assertEqual(server.create_views().sessions.cost_diagnostics(query), expected)
             self.assertEqual(read.call_count, 1)
             self.assertEqual(read.call_args.kwargs["query"]["cost_status"], ["unknown"])
-        with mock.patch.object(server.hub, "enabled", return_value=False), \
-             mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(self_machine=SimpleNamespace(name="m1"))), \
+        with mock.patch.object(server.hub, "enabled", return_value=False),\
+             mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(self_machine=SimpleNamespace(name="m1"))),\
              mock.patch.object(server.ingestion, "load_all_entries", return_value=entries) as read:
             self.assertEqual(server.create_views().sessions.cost_diagnostics(query), expected)
             read.assert_called_once_with(read_only=True, diagnostic=True)

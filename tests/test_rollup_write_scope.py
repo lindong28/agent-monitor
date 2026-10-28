@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import rollup
+from agent_monitor.accounting import rollup
 from agent_monitor import storage
 
 

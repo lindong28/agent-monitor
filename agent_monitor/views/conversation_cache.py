@@ -4,10 +4,10 @@ from datetime import timezone
 import hashlib
 import json
 import threading
-import diagnostics
+from agent_monitor import diagnostics
 
 from agent_monitor.contracts.session import SessionIndex
-import statistics_snapshot
+from agent_monitor.snapshots import statistics_snapshot
 
 
 class ConversationCache:

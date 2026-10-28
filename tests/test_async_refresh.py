@@ -12,12 +12,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import exporter
-import generation
-import sync
-import server
+from agent_monitor.snapshots import exporter
+from agent_monitor.snapshots import generation
+from agent_monitor.snapshots import sync
+from agent_monitor import http_server as server
 import test_generation as fixtures
-from machine_config import Machine
+from agent_monitor.snapshots.machine_config import Machine
 
 
 class AsyncRefreshTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class AsyncRefreshTests(unittest.TestCase):
             root = Path(tmp)
             current = self.publish(root)
             generation._READ_VALIDATIONS.clear()
-            with mock.patch("generation._validate_generation", wraps=generation._validate_generation) as validate:
+            with mock.patch("agent_monitor.snapshots.generation._validate_generation", wraps=generation._validate_generation) as validate:
                 for _ in range(2):
                     generation.read_current_generation("node-b", root=root / "generations").close()
                 self.assertEqual(validate.call_count, 1)
@@ -72,10 +72,10 @@ class AsyncRefreshTests(unittest.TestCase):
 
     def test_quota_only_export_does_not_collect_statistics(self):
         limits = {p: {"signed_out": True} for p in ("claude", "codex")}
-        with mock.patch("exporter.exporter_version", return_value="a" * 40), \
-             mock.patch("exporter.generation.self_certified_host_identity", return_value="host-a"), \
-             mock.patch("exporter._rate_limits", return_value=limits), \
-             mock.patch("exporter.rollup.load_all_entries", side_effect=AssertionError("statistics scanned")):
+        with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="a" * 40),\
+             mock.patch("agent_monitor.snapshots.exporter.generation.self_certified_host_identity", return_value="host-a"),\
+             mock.patch("agent_monitor.snapshots.exporter._rate_limits", return_value=limits),\
+             mock.patch("agent_monitor.snapshots.exporter.rollup.load_all_entries", side_effect=AssertionError("statistics scanned")):
             self.assertEqual(exporter.export_quota()["rate_limits"], limits)
 
     def test_quota_publication_preserves_statistics_and_reports_wrong_source(self):
@@ -88,7 +88,7 @@ class AsyncRefreshTests(unittest.TestCase):
                 payload = {"schema_version": 1, "source_host_identity": "wrong" if wrong_source else current.meta["source_host_identity"],
                            "exporter_commit": "b" * 40, "rate_limits": limits}
                 machine = Machine("node-b", "node-b", True)
-                with mock.patch("sync.exporter.export_quota", return_value=payload):
+                with mock.patch("agent_monitor.snapshots.sync.exporter.export_quota", return_value=payload):
                     updated = sync.sync_quota(machine, current, root=root / "generations")
                 self.assertEqual(updated.db_path.read_bytes(), current.db_path.read_bytes())
                 self.assertEqual(updated.meta["generated_at"], current.meta["generated_at"])
@@ -111,9 +111,9 @@ class AsyncRefreshTests(unittest.TestCase):
             if machine.name == "fast":
                 quota_started.set()
             return current
-        with mock.patch("sync.load_machine_config", return_value=SimpleNamespace(machines=machines)), \
-             mock.patch("sync.sync_machine", side_effect=statistics) as collect, \
-             mock.patch("sync.sync_quota", side_effect=quota):
+        with mock.patch("agent_monitor.snapshots.sync.load_machine_config", return_value=SimpleNamespace(machines=machines)),\
+             mock.patch("agent_monitor.snapshots.sync.sync_machine", side_effect=statistics) as collect,\
+             mock.patch("agent_monitor.snapshots.sync.sync_quota", side_effect=quota):
             result = sync.sync_all(progressive=True)
         self.assertEqual(collect.call_count, 2)
         self.assertTrue(all(value.generation is not None for value in result.values()))
@@ -171,10 +171,10 @@ window.AgentMonitor.waitForSyncTerminal(base,{onProgress:async s=>progress.push(
             server.COLLECTION.request({"force": ["1"]})
             return server.COLLECTION.snapshot()
         try:
-            with mock.patch("server.generation.generation_admission_snapshot", side_effect=lambda: contextlib.nullcontext(admission)), \
-                 mock.patch("server.sync.load_machine_config", return_value=SimpleNamespace(machines=())), \
-                 mock.patch("server.threading.Thread"), \
-                 mock.patch("server.COLLECTION.status", side_effect=later_request):
+            with mock.patch("agent_monitor.http_server.generation.generation_admission_snapshot", side_effect=lambda: contextlib.nullcontext(admission)),\
+                 mock.patch("agent_monitor.http_server.sync.load_machine_config", return_value=SimpleNamespace(machines=())),\
+                 mock.patch("agent_monitor.http_server.threading.Thread"),\
+                 mock.patch("agent_monitor.http_server.COLLECTION.status", side_effect=later_request):
                 status = server.refresh_endpoint({})
             self.assertEqual(status["refresh_request"], 1)
             self.assertEqual(status["refresh_requested"], 2)
@@ -185,9 +185,9 @@ window.AgentMonitor.waitForSyncTerminal(base,{onProgress:async s=>progress.push(
     def test_ack_does_not_read_snapshots_or_wait_for_publication(self):
         reset_collection()
         try:
-            with mock.patch("server.generation.generation_admission_snapshot", side_effect=AssertionError("snapshot lock reached")), \
-                 mock.patch("server.sync.load_machine_config", return_value=SimpleNamespace(machines=())), \
-                 mock.patch("server.threading.Thread"):
+            with mock.patch("agent_monitor.http_server.generation.generation_admission_snapshot", side_effect=AssertionError("snapshot lock reached")),\
+                 mock.patch("agent_monitor.http_server.sync.load_machine_config", return_value=SimpleNamespace(machines=())),\
+                 mock.patch("agent_monitor.http_server.threading.Thread"):
                 status = server.refresh_endpoint({"ack": ["1"]})
             self.assertEqual(status["refresh_request"], 1)
             self.assertTrue(status["syncing"])
@@ -202,8 +202,8 @@ class CollectionComponentTests(unittest.TestCase):
         first = collection.CollectionCoordinator(manager, mock.Mock(), "first")
         second = collection.CollectionCoordinator(manager, mock.Mock(), "second")
         config = SimpleNamespace(machines=[Machine("fixture", "fixture", True)])
-        with mock.patch.object(collection.hub, "enabled", return_value=False), \
-                mock.patch.object(collection.sync, "load_machine_config", return_value=config), \
+        with mock.patch.object(collection.hub, "enabled", return_value=False),\
+                mock.patch.object(collection.sync, "load_machine_config", return_value=config),\
                 mock.patch.object(collection.threading, "Thread") as thread:
             self.assertTrue(first.request({"force": ["1"]}, request_receipt={}))
         thread.return_value.start.assert_called_once_with()
@@ -215,11 +215,11 @@ class CollectionComponentTests(unittest.TestCase):
     def test_query_view_and_scheduler_share_coordinator_lifetime(self):
         manager = mock.Mock()
         coordinator = collection.CollectionCoordinator(manager, mock.Mock(), "fixture")
-        with mock.patch.object(coordinator, "capture_startup_config") as capture, \
-                mock.patch.object(collection.hub, "enabled", return_value=True), \
-                mock.patch.object(collection.hub, "is_hub", return_value=True), \
-                mock.patch.object(collection.hub, "interval", return_value=120), \
-                mock.patch.object(collection.query_view, "QueryView") as view, \
+        with mock.patch.object(coordinator, "capture_startup_config") as capture,\
+                mock.patch.object(collection.hub, "enabled", return_value=True),\
+                mock.patch.object(collection.hub, "is_hub", return_value=True),\
+                mock.patch.object(collection.hub, "interval", return_value=120),\
+                mock.patch.object(collection.query_view, "QueryView") as view,\
                 mock.patch.object(collection.threading, "Thread") as thread:
             coordinator.start()
             thread.assert_not_called()

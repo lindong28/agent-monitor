@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 from parsers import UsageEntry
-import pricing_fetcher as pricing
+from agent_monitor.accounting import pricing_fetcher as pricing
 
 
 class PreparedPricingTests(unittest.TestCase):

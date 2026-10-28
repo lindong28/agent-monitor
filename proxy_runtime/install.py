@@ -112,7 +112,7 @@ if __name__ == "__main__":
                 raise SystemExit("system proxy runtime needs Linux libraries: " + ", ".join(sorted(set(missing))))
         # Real startup before service replacement: no account or target request.
         sys.path.insert(0, str(ROOT))
-        import network_policy
+        from agent_monitor.network import network_policy
         os.environ.pop(network_policy.INTERNAL, None)
         try:
             network_policy.endpoint()

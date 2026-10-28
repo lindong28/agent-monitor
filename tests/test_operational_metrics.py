@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import diagnostics
-import rollup
+from agent_monitor import diagnostics
+from agent_monitor.accounting import rollup
 
 
 class OperationalMetricsTests(unittest.TestCase):

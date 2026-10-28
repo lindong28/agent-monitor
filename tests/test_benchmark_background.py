@@ -35,7 +35,7 @@ class BackgroundBenchmarkTests(unittest.TestCase):
                     self.assertGreaterEqual(sample["total"][metric],
                                             sample["collection"][metric] + sample["export"][metric])
             self.assertGreater(case["process_peak_rss_bytes"], 0)
-        self.assertIn("statistics_snapshot.py", report["source"]["files"])
+        self.assertIn("agent_monitor/snapshots/statistics_snapshot.py", report["source"]["files"])
 
     def test_clock_separates_cpu_from_wait_and_preserves_return(self):
         _, idle = benchmark.measured(lambda: time.sleep(0.03))

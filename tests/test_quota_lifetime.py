@@ -6,20 +6,21 @@ import sys
 import tempfile
 import time
 import unittest
-import process_identity
+from agent_monitor.runtime import process_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 PARENT = r"""
 import os, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 os.environ['AGENT_MONITOR_PROXY_INTERNAL'] = 'http://agent-monitor:synthetic-test-capability@127.0.0.1:9'
-import quota_refresh as qr
+from agent_monitor.quota import quota_refresh as qr
 from parsers.accounts import Account
 qr.ROOT = qr.Path(os.environ['LIFETIME_TEST_ROOT'])
 qr.TIMEOUT = 1.5 if os.environ['LIFETIME_TEST_MODE'] in ('deadline', 'delayed_start') else 5
 real = subprocess.Popen
 def spawn(command, **kwargs):
-    command[1] = sys.argv[1] + '/tests/fixtures/quota_lifetime_reader.py'
+    module_index = command.index('agent_monitor.quota.quota_refresh')
+    command[1:module_index + 1] = [sys.argv[1] + '/tests/fixtures/quota_lifetime_reader.py']
     return real(command, **kwargs)
 qr.subprocess.Popen = spawn
 try:

@@ -8,10 +8,10 @@ import threading
 import time
 from contextlib import contextmanager
 
-import generation
-import diagnostics
+from agent_monitor.snapshots import generation
+from agent_monitor import diagnostics
 from agent_monitor import hub_config as hub
-import statistics_snapshot
+from agent_monitor.snapshots import statistics_snapshot
 
 
 logger = logging.getLogger(__name__)

@@ -17,8 +17,8 @@ from pathlib import Path
 from unittest import mock
 
 from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, project_identity, usage_loader
-import pricing_fetcher
-import rollup
+from agent_monitor.accounting import pricing_fetcher
+from agent_monitor.accounting import rollup
 from parsers import UsageEntry
 
 
@@ -37,7 +37,7 @@ class RollupCheckTests(unittest.TestCase):
             rollup.run(db_path=db_path, entries_loader=lambda: loaded(initial), now=lambda: now)
             current = loaded([replace(entry, input_tokens=70) for entry in initial], blocked=True)
             before = self.tree_snapshot(Path(tmp))
-            checked = rollup._check_rollup(db_path, lambda: current, now=lambda: now)
+            checked = rollup.check_rollup(db_path, lambda: current, now=lambda: now)
             self.assertEqual(self.tree_snapshot(Path(tmp)), before)
             self.assertEqual([row["key"][2] for row in checked["would_write"]["items"]], ["healthy", "healthy"])
             self.assertEqual({row["key"][2] for row in checked["would_skip"]["items"]}, {"blocked", "unknown"})
@@ -66,7 +66,7 @@ class RollupCheckTests(unittest.TestCase):
             ]
             rollup.run(db_path=db_path, entries_loader=lambda: initial, now=lambda: now)
 
-            result = rollup._check_rollup(
+            result = rollup.check_rollup(
                 db_path,
                 lambda: current,
                 now=lambda: now,
@@ -125,7 +125,7 @@ class RollupCheckTests(unittest.TestCase):
             now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
             missing_before = self.tree_snapshot(root)
 
-            missing_result = rollup._check_rollup(missing, list, now=lambda: now)
+            missing_result = rollup.check_rollup(missing, list, now=lambda: now)
 
             self.assertEqual(self.tree_snapshot(root), missing_before)
             self.assertEqual(missing_result["db_span"], {"start": None, "end": None, "rows": 0})
@@ -137,7 +137,7 @@ class RollupCheckTests(unittest.TestCase):
             rollup.run(db_path=db_path, entries_loader=lambda: entries, now=lambda: now)
             before = self.tree_snapshot(root)
 
-            result = rollup._check_rollup(db_path, lambda: entries, now=lambda: now)
+            result = rollup.check_rollup(db_path, lambda: entries, now=lambda: now)
 
             self.assertEqual(self.tree_snapshot(root), before)
             self.assertEqual(result["status"], "safe")
@@ -153,7 +153,7 @@ class RollupCheckTests(unittest.TestCase):
                 db_path.write_bytes(b"not a sqlite database")
                 before = self.tree_snapshot(root)
 
-                result = rollup._check_rollup(db_path, list, now=lambda: now)
+                result = rollup.check_rollup(db_path, list, now=lambda: now)
 
                 self.assertEqual(self.tree_snapshot(root), before)
                 self.assertEqual(result["status"], "indeterminate")
@@ -169,7 +169,7 @@ class RollupCheckTests(unittest.TestCase):
                 def fail_loader():
                     raise PermissionError("source is unreadable")
 
-                result = rollup._check_rollup(db_path, fail_loader, now=lambda: now)
+                result = rollup.check_rollup(db_path, fail_loader, now=lambda: now)
 
                 self.assertEqual(self.tree_snapshot(root), before)
                 self.assertEqual(result["status"], "indeterminate")
@@ -192,7 +192,7 @@ class RollupCheckTests(unittest.TestCase):
                     self.assertTrue(Path(str(db_path) + "-wal").exists())
                     before = self.tree_snapshot(root)
 
-                    result = rollup._check_rollup(db_path, lambda: current, now=lambda: now)
+                    result = rollup.check_rollup(db_path, lambda: current, now=lambda: now)
 
                     self.assertEqual(self.tree_snapshot(root), before)
                     self.assertEqual(result["status"], "safe")
@@ -211,7 +211,7 @@ class RollupCheckTests(unittest.TestCase):
             db_path.with_suffix(".db.lock").touch()
             before = self.tree_snapshot(root)
 
-            result = rollup._check_rollup(
+            result = rollup.check_rollup(
                 db_path,
                 list,
                 now=lambda: datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc),
@@ -233,7 +233,7 @@ class RollupCheckTests(unittest.TestCase):
             checker_done = threading.Event()
 
             def run_checker_waiting_for_writer():
-                rollup._check_rollup(
+                rollup.check_rollup(
                     db_path,
                     lambda: loader_entered.set() or entries,
                     now=lambda: now,
@@ -262,7 +262,7 @@ class RollupCheckTests(unittest.TestCase):
 
             def run_holding_checker():
                 try:
-                    rollup._check_rollup(
+                    rollup.check_rollup(
                         db_path,
                         load_while_holding_check_lock,
                         now=lambda: now,
@@ -317,7 +317,7 @@ class RollupCheckTests(unittest.TestCase):
                 )
                 identity_before = self.db_snapshot(identity_db)
 
-                result = rollup._check_rollup(
+                result = rollup.check_rollup(
                     db_path,
                     lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
@@ -380,7 +380,7 @@ class RollupCheckTests(unittest.TestCase):
                 )
                 identity_before = self.tree_snapshot(state)
 
-                result = rollup._check_rollup(
+                result = rollup.check_rollup(
                     db_path,
                     lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
@@ -418,7 +418,7 @@ class RollupCheckTests(unittest.TestCase):
                 rollup.run(db_path=db_path, entries_loader=lambda: historical, now=lambda: now)
                 before = self.tree_snapshot(root)
 
-                result = rollup._check_rollup(
+                result = rollup.check_rollup(
                     db_path,
                     lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
@@ -466,7 +466,7 @@ class RollupCheckTests(unittest.TestCase):
                 rollup.run(db_path=db_path, entries_loader=lambda: historical, now=lambda: now)
                 before = self.tree_snapshot(root)
 
-                result = rollup._check_rollup(
+                result = rollup.check_rollup(
                     db_path,
                     lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
@@ -511,7 +511,7 @@ class RollupCheckTests(unittest.TestCase):
                 rollup.run(db_path=db_path, entries_loader=list, now=lambda: now)
                 before = self.tree_snapshot(root)
 
-                result = rollup._check_rollup(
+                result = rollup.check_rollup(
                     db_path,
                     lambda: USAGE_LOADER.load_all_entries(read_only=True, diagnostic=True),
                     now=lambda: now,
@@ -663,8 +663,6 @@ class RollupCheckTests(unittest.TestCase):
             for name in (
                 "agent-monitor",
                 "pricing.json",
-                "pricing_fetcher.py",
-                "rollup.py",
             ):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
@@ -952,9 +950,9 @@ class RollupCheckTests(unittest.TestCase):
             ), mock.patch.dict(
                 usage_loader.os.environ, {"AGENT_MONITOR_EXTRA_JSONL": ""}, clear=False
             ), mock.patch(
-                "pricing_fetcher.get_pricing", return_value={}
+                "agent_monitor.accounting.pricing_fetcher.get_pricing", return_value={}
             ) as get_pricing, mock.patch(
-                "pricing_fetcher.calculate_cost", return_value=1.0
+                "agent_monitor.accounting.pricing_fetcher.calculate_cost", return_value=1.0
             ):
                 USAGE_LOADER.cache = None
                 IDENTITY_STORE.project_cache = {}

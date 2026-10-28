@@ -11,9 +11,9 @@ from agent_monitor.contracts.usage import LoadedEntries
 from parsers import UsageEntry, codex
 from agent_monitor.contracts.session import SessionIndex, codex_metadata, merge_metadata
 from agent_monitor.ingestion.usage_archive import UsageArchive
-import server
+from agent_monitor import http_server as server
 from agent_monitor.contracts.project import canonical_project
-import statistics_snapshot
+from agent_monitor.snapshots import statistics_snapshot
 
 
 def identity(sid, parent=None, **kwargs):
@@ -60,7 +60,7 @@ class ConversationTests(unittest.TestCase):
 
     def test_filtered_child_resolves_parent_and_default_detail_matches(self):
         query = {"range": ["custom"], "start": ["2026-01-02"], "end": ["2026-01-02"], "model": ["B"]}
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=self.entries):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch("agent_monitor.http_server.ingestion.load_all_entries", return_value=self.entries):
             rows = server.create_views().sessions.list(query)
             self.assertEqual(len(rows), 1)
             row = rows[0]
@@ -75,7 +75,7 @@ class ConversationTests(unittest.TestCase):
             self.assertEqual(len(all_detail["meta"]["executions"]), 3)
 
     def test_latest_usage_and_unknown_zero_partial_cost(self):
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=self.entries):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch("agent_monitor.http_server.ingestion.load_all_entries", return_value=self.entries):
             rows = server.create_views().sessions.list({"range": ["all"]})
             self.assertEqual([r["session_id"] for r in rows], ["root", "independent"])
             self.assertEqual([r["cost_usd"] for r in rows], [3., 0.])
@@ -86,7 +86,7 @@ class ConversationTests(unittest.TestCase):
     def test_list_normalizes_each_distinct_project_once(self):
         entries = LoadedEntries([replace(self.base, message_id=str(i), project=project)
                                  for i, project in enumerate(["repo", "/Users/user/work"] * 20)])
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=entries), \
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch("agent_monitor.http_server.ingestion.load_all_entries", return_value=entries),\
                 mock.patch("agent_monitor.views.sessions.canonical_project", wraps=canonical_project) as canonical:
             result = server.create_views().sessions.list({"range": ["all"], "with_filters": ["1"]})
         self.assertEqual(canonical.call_count, 2)

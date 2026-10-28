@@ -10,9 +10,9 @@ from pathlib import Path
 from unittest import mock
 
 from ip_check import cli
-import pricing_fetcher
-import network_policy
-import server
+from agent_monitor.accounting import pricing_fetcher
+from agent_monitor.network import network_policy
+from agent_monitor import http_server as server
 from agent_monitor.views.network import NetworkReport
 
 
@@ -34,8 +34,8 @@ class PublicRequestControlsTests(unittest.TestCase):
 
     def test_certificate_failure_uses_fallback_without_an_unverified_retry(self):
         error = ssl.SSLCertVerificationError('fixture certificate rejected')
-        with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(pricing_fetcher.network_policy, 'opener', return_value=mock.Mock(open=mock.Mock(side_effect=error))) as request, \
+        with tempfile.TemporaryDirectory() as directory,\
+                mock.patch.object(pricing_fetcher.network_policy, 'opener', return_value=mock.Mock(open=mock.Mock(side_effect=error))) as request,\
                 mock.patch.object(pricing_fetcher, '_fallback_pricing', return_value={'fixture': {}}):
             result = pricing_fetcher.get_pricing(Path(directory) / 'cache.json', persist=False)
         self.assertIn('fixture', result)
@@ -110,7 +110,7 @@ class PublicRequestControlsTests(unittest.TestCase):
         for delay, expiry in ((180, 180), (5, 60), ('invalid', 60), (True, 60)):
             clock = [1000.0]
             response = subprocess.CompletedProcess([], 0, json.dumps({'retry_after_seconds': delay}), '')
-            with self.subTest(delay=delay), \
+            with self.subTest(delay=delay),\
                     mock.patch.object(subprocess, 'run', return_value=response) as request:
                 report = NetworkReport(runner=request, clock=lambda: clock[0])
                 report.report()
@@ -123,7 +123,7 @@ class PublicRequestControlsTests(unittest.TestCase):
 
     def test_process_failures_are_cached(self):
         for failure in (FileNotFoundError(), OSError(), subprocess.TimeoutExpired('fixture', 30)):
-            with self.subTest(failure=type(failure).__name__), \
+            with self.subTest(failure=type(failure).__name__),\
                     mock.patch.object(subprocess, 'run', side_effect=failure) as request:
                 report = NetworkReport(runner=request)
                 self.assertEqual(report.report()['verdict'], 'unknown')
@@ -133,7 +133,7 @@ class PublicRequestControlsTests(unittest.TestCase):
     def test_force_cannot_bypass_success_or_failure_cache(self):
         for response in (subprocess.CompletedProcess([], 0, '{"verdict":"low"}', ''),
                          subprocess.CompletedProcess([], 1, '', 'fixture failure')):
-            with self.subTest(returncode=response.returncode), \
+            with self.subTest(returncode=response.returncode),\
                     mock.patch.object(subprocess, 'run', return_value=response) as request:
                 report = NetworkReport(runner=request)
                 first = report.report()
@@ -150,7 +150,7 @@ class PublicRequestControlsTests(unittest.TestCase):
             self.assertTrue(release.wait(2))
             return subprocess.CompletedProcess([], 0, '{"verdict":"low"}', '')
 
-        with mock.patch.object(subprocess, 'run', side_effect=run) as request, \
+        with mock.patch.object(subprocess, 'run', side_effect=run) as request,\
                 concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             report = NetworkReport(runner=request)
             futures = [pool.submit(report.report) for _ in range(3)]

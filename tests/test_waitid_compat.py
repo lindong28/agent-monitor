@@ -8,7 +8,7 @@ import threading
 import unittest
 from unittest import mock
 
-import sync_process
+from agent_monitor.snapshots import sync_process
 
 
 class _WithoutWaitid:

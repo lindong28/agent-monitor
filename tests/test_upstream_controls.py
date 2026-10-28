@@ -8,7 +8,7 @@ import tempfile
 import threading
 import unittest
 
-from upstream_controls import Busy, Controls, Paused, main
+from agent_monitor.accounts.upstream_controls import Busy; from agent_monitor.accounts.upstream_controls import Controls; from agent_monitor.accounts.upstream_controls import Paused; from agent_monitor.accounts.upstream_controls import main
 
 
 def hold(root, ready, finish):
@@ -155,7 +155,7 @@ class UpstreamControlsTests(unittest.TestCase):
             self.controls.acquire("codex", probe_pause_id="unreadable")
 
     def test_pre_control_failed_operation_survives_new_round(self):
-        import codex_accounts as ca
+        from agent_monitor.accounts import codex_accounts as ca
         manager = ca.Manager(self.root / "profiles")
         self.addCleanup(manager.close)
         account = manager.add("legacy@example.test", "legacy-workspace")
@@ -175,7 +175,7 @@ class UpstreamControlsTests(unittest.TestCase):
             prepared[3].close()
 
     def test_cancel_before_turn_preserves_original_paused_operation(self):
-        import codex_accounts as ca
+        from agent_monitor.accounts import codex_accounts as ca
         class CancelPeer:
             def initialize(self):
                 raise ca.Cancelled("fixture cancelled during initialization")

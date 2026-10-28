@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from agent_monitor import quota_service
+from agent_monitor.quota import quota_service
 from parsers import RateLimits, accounts
 
 

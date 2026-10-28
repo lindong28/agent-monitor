@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from agent_monitor.ingestion import IDENTITY_STORE, project_identity
-import rollup
+from agent_monitor.accounting import rollup
 from agent_monitor import storage
 
 
@@ -167,7 +167,7 @@ class ReviewedIdentityTests(unittest.TestCase):
         src = Path(__file__).resolve().parents[1]
         cli = self.root / "cli"
         cli.mkdir()
-        for name in ("agent-monitor", "rollup_identity.py", "rollup.py"):
+        for name in ("agent-monitor",):
             shutil.copy2(src / name, cli / name)
         shutil.copytree(src / "parsers", cli / "parsers")
         shutil.copytree(src / "agent_monitor", cli / "agent_monitor")

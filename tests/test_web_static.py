@@ -1989,7 +1989,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
             self_machine=SimpleNamespace(name="fixture-machine")))
         view = SessionsView(mock.Mock(), source, machines=machines,
                             mode=SimpleNamespace(enabled=lambda: False), clock=lambda: now)
-        with mock.patch("rollup.query_pivot", side_effect=AssertionError("rollup is not the raw session source")):
+        with mock.patch("agent_monitor.accounting.rollup.query_pivot", side_effect=AssertionError("rollup is not the raw session source")):
             rows = view.list({"range": ["all"]})
         source.load_all_entries.assert_called_once_with()
         self.assertEqual(len(rows), 1)

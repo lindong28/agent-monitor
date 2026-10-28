@@ -14,8 +14,8 @@ faulthandler.dump_traceback_later(5)
 import os, signal, subprocess, sys, threading, time
 from pathlib import Path
 from unittest import mock
-import codex_accounts as ca
-import server
+from agent_monitor.accounts import codex_accounts as ca
+from agent_monitor import http_server as server
 
 root = Path(os.environ['HOME'])
 original_popen = subprocess.Popen

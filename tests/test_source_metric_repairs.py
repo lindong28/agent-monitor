@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from parsers import codex
-import pricing_fetcher
+from agent_monitor.accounting import pricing_fetcher
 import tests.test_cost as cost_tests
 from tests.test_codex_forks import event, usage
 from agent_monitor.ingestion.usage_archive import UsageArchive

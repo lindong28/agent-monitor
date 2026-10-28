@@ -10,8 +10,8 @@ from datetime import datetime
 from unittest import mock
 from urllib.parse import parse_qs
 
-import rollup
-import server
+from agent_monitor.accounting import rollup
+from agent_monitor import http_server as server
 
 
 class GroupedPivotTests(unittest.TestCase):
@@ -153,7 +153,7 @@ process.stdout.write(JSON.stringify(window.AgentMonitorPivot.rankingData({dimens
                                (day, agent, project, model, value * multiplier,
                                 (cost or 0) * multiplier, int(cost is not None)))
             self.generations.append(rollup.AdmittedGeneration(host, path))
-        patcher = mock.patch("rollup.admitted_generations", return_value=tuple(self.generations))
+        patcher = mock.patch("agent_monitor.accounting.rollup.admitted_generations", return_value=tuple(self.generations))
         patcher.start()
         self.addCleanup(patcher.stop)
 

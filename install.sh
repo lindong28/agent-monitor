@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${AGENT_MONITOR_PYTHON:-python3}" "$ROOT_DIR/deployment_guard.py" install "$ROOT_DIR" -- "$@"
+export PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+cd "$ROOT_DIR"
+exec "${AGENT_MONITOR_PYTHON:-python3}" -m agent_monitor.runtime.deployment_guard install "$ROOT_DIR" -- "$@"
 # AGENT_MONITOR_INSTALL_BODY
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -85,14 +87,14 @@ PY
 }
 
 install_rollup_daemon() {
-  "$VENV_PY" "$ROOT_DIR/deployment_guard.py" check "$ROOT_DIR"
+  "$VENV_PY" -m agent_monitor.runtime.deployment_guard check "$ROOT_DIR"
   if [ "$(uname -s)" != Darwin ]; then
     echo "→ agent-monitor rollup: skipped on $(uname -s) (requires macOS launchd)"
     emit_install_ledger service "agent-monitor rollup" skipped "Platform: macOS-only launchd schedule"
     return 0
   fi
   local rollup_state
-  if ! rollup_state="$("$VENV_PY" "$ROOT_DIR/rollup_service.py" install --command "$ROLLUP_COMMAND" --interval "$ROLLUP_INTERVAL_SECONDS")"; then
+  if ! rollup_state="$("$VENV_PY" -m agent_monitor.runtime.rollup_service install --command "$ROLLUP_COMMAND" --interval "$ROLLUP_INTERVAL_SECONDS")"; then
     emit_install_ledger service "agent-monitor rollup" failed "schedule convergence failed; see diagnostics"
     return 1
   fi
@@ -137,11 +139,11 @@ fi
 echo "agent-monitor system proxy runtime: $proxy_runtime_state (Chromium system resolver)"
 emit_install_ledger artifact "agent-monitor system proxy runtime" "$proxy_runtime_state" "Electron 45.0.0; system proxy resolver"
 if [ "$SERVICE" = hub ]; then
-  "$VENV_PY" "$ROOT_DIR/deployment_guard.py" check "$ROOT_DIR"
-  "$VENV_PY" "$ROOT_DIR/hub.py" configure "$2"
+  "$VENV_PY" -m agent_monitor.runtime.deployment_guard check "$ROOT_DIR"
+  "$VENV_PY" -m agent_monitor.runtime.hub configure "$2"
 fi
 if [ -f "$ROOT_DIR/state/hub-machine" ]; then
-  ROLLUP_INTERVAL_SECONDS="${AGENT_MONITOR_ROLLUP_INTERVAL_SECONDS:-$("$VENV_PY" "$ROOT_DIR/hub.py" interval)}"
+  ROLLUP_INTERVAL_SECONDS="${AGENT_MONITOR_ROLLUP_INTERVAL_SECONDS:-$("$VENV_PY" -m agent_monitor.runtime.hub interval)}"
   ROLLUP_COMMAND="collect"
 fi
 if [ "$SERVICE" = rollup-daemon ]; then
@@ -309,12 +311,12 @@ if [ "$NO_SERVICES" = 1 ]; then
 fi
 install_rollup_daemon
 if [ -f "$ROOT_DIR/state/hub-machine" ]; then
-  "$VENV_PY" "$ROOT_DIR/hub.py" install-web
+  "$VENV_PY" -m agent_monitor.runtime.hub install-web
 fi
 if [ "$(uname -s)" = Darwin ]; then
-  "$VENV_PY" "$ROOT_DIR/connector_service.py" converge
+  "$VENV_PY" -m agent_monitor.runtime.connector_service converge
 fi
-"$VENV_PY" "$ROOT_DIR/local_web.py"
+"$VENV_PY" -m agent_monitor.runtime.local_web
 
 # --- post-install network health hint ---
 # Run ip-check once and surface a remediation pointer ONLY when it finds a real

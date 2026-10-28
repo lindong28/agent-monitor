@@ -1,4 +1,4 @@
-import statistics_snapshot
+from agent_monitor.snapshots import statistics_snapshot
 from agent_monitor.views import time_ranges
 """Read-only UI contracts, with isolated synthetic records."""
 import dataclasses
@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from contextlib import nullcontext
 
-import rollup
+from agent_monitor.accounting import rollup
 from parsers import UsageEntry
 import json
 import subprocess
@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import server
+from agent_monitor import http_server as server
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -101,7 +101,7 @@ class ScopeTests(unittest.TestCase):
             handler.send_response = mock.Mock()
             handler.send_header = mock.Mock()
             handler.end_headers = mock.Mock()
-            with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.session_detail", return_value=payload):
+            with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch("agent_monitor.http_server.session_detail", return_value=payload):
                 handler._handle_request()
             headers = dict(call.args for call in handler.send_header.call_args_list)
             data = handler.wfile.getvalue()
@@ -120,7 +120,7 @@ class QueryTests(unittest.TestCase):
         records = [entry, dataclasses.replace(entry, model="B", message_id="m2", request_id="r2", cost_usd=2., input_tokens=20),
                    dataclasses.replace(entry, session_id="other", timestamp=datetime(2026, 1, 2, 16, tzinfo=timezone.utc), model="B")]
         query = {"range":["custom"], "start":["2026-01-02"], "end":["2026-01-02"], "model":["B"], "with_filters":["1"]}
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=records):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch("agent_monitor.http_server.ingestion.load_all_entries", return_value=records):
             result = server.create_views().sessions.list(query)
             self.assertEqual(result["filters"]["model"], ["A", "B"])
             self.assertEqual([(r["session_id"], r["cost_usd"], r["tokens"]) for r in result["sessions"]], [("s1", 2., 22)])
@@ -128,7 +128,7 @@ class QueryTests(unittest.TestCase):
             self.assertEqual(server.create_views().sessions.list({**query, "model":["missing"]})["sessions"], [])
             self.assertEqual(len(server.create_views().sessions.list({"range":["all"]})), 2)
         admission = SimpleNamespace(admitted=[SimpleNamespace(host="machine-a"), SimpleNamespace(host="machine-b")])
-        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("statistics_snapshot.read_admitted_usage", return_value=records):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=True), mock.patch("agent_monitor.http_server.COLLECTION.request"), mock.patch("agent_monitor.http_server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("agent_monitor.snapshots.statistics_snapshot.read_admitted_usage", return_value=records):
             result = server.create_views().sessions.list({**query, "machine":["machine-b"]})
             self.assertEqual([r["machine"] for r in result["sessions"]], ["machine-b"])
             self.assertEqual(result["filters"]["machine"], ["machine-a", "machine-b"])
@@ -141,14 +141,14 @@ class QueryTests(unittest.TestCase):
         records = [entry, dataclasses.replace(entry, message_id="b", request_id="b", cost_usd=0., input_tokens=20),
                    dataclasses.replace(entry, session_id="priced", message_id="c", request_id="c", cost_usd=3.)]
         query = {"range": ["custom"], "start": ["2026-01-02"], "end": ["2026-01-02"], "cost_status": ["unknown"], "with_filters": ["1"]}
-        with mock.patch("server.hub.enabled", return_value=False), mock.patch("server.ingestion.load_all_entries", return_value=records):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch("agent_monitor.http_server.ingestion.load_all_entries", return_value=records):
             result = server.create_views().sessions.list(query)
             self.assertEqual([(r["session_id"], r["tokens"], r["cost_usd"]) for r in result["sessions"]], [("mixed", 12, None)])
             self.assertEqual(len(server.create_views().sessions.detail("mixed")["entries"]), 2)
             self.assertEqual(len(server.create_views().sessions.list({**query, "cost_status": [""]})["sessions"]), 2)
             self.assertEqual(server.create_views().sessions.list({**query, "model": ["missing"]})["sessions"], [])
         current = SimpleNamespace(host="fixture")
-        with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=[current]))), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("statistics_snapshot.read_admitted_usage", return_value=records):
+        with mock.patch("agent_monitor.http_server.hub.enabled", return_value=True), mock.patch("agent_monitor.http_server.COLLECTION.request"), mock.patch("agent_monitor.http_server.generation.generation_admission_snapshot", return_value=nullcontext(SimpleNamespace(admitted=[current]))), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("agent_monitor.snapshots.statistics_snapshot.read_admitted_usage", return_value=records):
             self.assertEqual(server.create_views().sessions.list(query)["sessions"][0]["tokens"], 12)
             self.assertEqual(len(server.create_views().sessions.detail("mixed", "fixture")["entries"]), 2)
         with self.assertRaises(ValueError):
@@ -162,7 +162,7 @@ class QueryTests(unittest.TestCase):
         for aliases, canonical in [([], "~/no-remote-project"), ([proof], "~/no-remote-project")]:
             current = SimpleNamespace(host="machine-a", meta={"aliases": aliases})
             admission = SimpleNamespace(admitted=[current])
-            with mock.patch("server.hub.enabled", return_value=True), mock.patch("server.COLLECTION.request"), mock.patch("server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("statistics_snapshot.read_admitted_usage", return_value=[entry]) as read:
+            with mock.patch("agent_monitor.http_server.hub.enabled", return_value=True), mock.patch("agent_monitor.http_server.COLLECTION.request"), mock.patch("agent_monitor.http_server.generation.generation_admission_snapshot", return_value=nullcontext(admission)), mock.patch("agent_monitor.views.sessions.ConversationCache.read", return_value=None), mock.patch("agent_monitor.snapshots.statistics_snapshot.read_admitted_usage", return_value=[entry]) as read:
                 for selected in [raw, canonical, "missing"]:
                     result = server.create_views().sessions.list({"range":["all"], "project":[selected], "with_filters":["1"]})
                     self.assertEqual(len(result["sessions"]), 0 if selected == "missing" else 1)
@@ -174,14 +174,14 @@ class QueryTests(unittest.TestCase):
     def test_equal_complete_calendar_windows_and_unknown_delta(self):
         summary = {"known_cost_usd": 0., "entries":1, "unknown_cost_entries":0}
         now = datetime(2026, 1, 1, 20, tzinfo=timezone.utc) # Jan 2 in the bucket timezone
-        with mock.patch("server.rollup.period_summary", return_value=summary) as read:
+        with mock.patch("agent_monitor.http_server.rollup.period_summary", return_value=summary) as read:
             result = server.create_views().overview.period_comparison("7d", now)
             self.assertEqual([call.args[0] for call in read.call_args_list], [(date(2025,12,26),date(2026,1,1)), (date(2025,12,19),date(2025,12,25))])
             self.assertEqual(result["known_cost_delta_usd"], 0.)
             self.assertIsNone(result["coverage_complete"])
-        with mock.patch("server.rollup.period_summary", side_effect=[summary,{**summary,"known_cost_usd":None}]):
+        with mock.patch("agent_monitor.http_server.rollup.period_summary", side_effect=[summary,{**summary,"known_cost_usd":None}]):
             self.assertIsNone(server.create_views().overview.period_comparison("30d", now)["known_cost_delta_usd"])
-        with mock.patch("server.rollup.period_summary") as read:
+        with mock.patch("agent_monitor.http_server.rollup.period_summary") as read:
             self.assertFalse(server.create_views().overview.period_comparison("all", now)["available"])
             read.assert_not_called()
 
@@ -189,7 +189,7 @@ class QueryTests(unittest.TestCase):
         base = dict(entry_count=1, cost_known_count=1, cost_usd=0., input_tokens=10,output_tokens=2,cache_read_tokens=0,cache_creation_tokens=0,_totals_source="usage",_usage_schema=1)
         cases = [([],None,0), ([{**base,"cost_known_count":0}],None,1), ([base],0.,0), ([base,{**base,"cost_known_count":0}],0.,1), ([{**base,"cost_usd":3}],3.,0)]
         for rows, cost, unknown in cases:
-            with self.subTest(rows=rows), mock.patch("rollup._daily_rows", return_value=rows):
+            with self.subTest(rows=rows), mock.patch("agent_monitor.accounting.rollup._daily_rows", return_value=rows):
                 result = rollup.period_summary((date(2026,1,1),date(2026,1,2)))
                 self.assertEqual(result["known_cost_usd"],cost)
                 self.assertEqual(result["unknown_cost_entries"],unknown)

@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest import mock
 
-import codex_accounts as ca
+from agent_monitor.accounts import codex_accounts as ca
 from tests.test_codex_accounts import seed_auth
 
 ROOT = Path(__file__).resolve().parents[1]

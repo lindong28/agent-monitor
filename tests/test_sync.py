@@ -10,15 +10,15 @@ from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-import generation
-import rollup
-from machine_config import load_machine_config
+from agent_monitor.snapshots import generation
+from agent_monitor.accounting import rollup
+from agent_monitor.snapshots.machine_config import load_machine_config
 
 
 class SyncTests(unittest.TestCase):
     def test_installer_rejects_older_export_but_accepts_same_time(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -30,7 +30,7 @@ class SyncTests(unittest.TestCase):
                 source = base / (str(index) + ".db")
                 self.make_db(source, 10 + index)
                 bundle = base / str(index)
-                with mock.patch("exporter.exporter_version", return_value="a" * 40):
+                with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="a" * 40):
                     exporter.export_bundle(source, bundle, refresh=False, source_host_identity="host-v1:" + "4" * 64, generated_at=stamp, rate_limits={})
                 manifest = self.read_manifest(bundle)
                 if index < 2:
@@ -46,7 +46,7 @@ class SyncTests(unittest.TestCase):
                 current.close()
 
     def test_remote_reaper_handles_tmp_symlink_without_following_children(self):
-        import sync
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -80,22 +80,22 @@ class SyncTests(unittest.TestCase):
                     self.assertEqual((outside / "keep").read_text(), "kept")
 
     def test_sync_reloads_commentable_machine_list_each_round(self):
-        import sync
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "machines.json"
             active = '{"machines":[\n{"name":"local","ssh_host":"local","self":true},\n{"name":"remote","ssh_host":"remote","self":false},\n],"retired_names":[]}'
             for marker in ("#", "//", ""):
                 path.write_text(active.replace('\n{"name":"remote"', '\n' + marker + '{"name":"remote"'))
-                with mock.patch("sync.sync_machine", return_value=None) as pull:
+                with mock.patch("agent_monitor.snapshots.sync.sync_machine", return_value=None) as pull:
                     result = sync.sync_all(config_path=path, root=Path(tmp) / "generations")
                 expected = ["local"] if marker else ["local", "remote"]
                 self.assertEqual([call.args[0].name for call in pull.call_args_list], expected)
                 self.assertEqual(list(result), expected)
 
     def test_remote_sync_uses_bounded_noninteractive_ssh_and_cleans_remote_temp(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -161,7 +161,7 @@ class SyncTests(unittest.TestCase):
             installed.close()
 
     def test_remote_cleanup_has_an_independent_budget_after_the_main_deadline_fails(self):
-        import sync
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             machine = self.remote_machine(Path(tmp))
@@ -192,8 +192,8 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(cleanup[1]["timeout"], 10)
 
     def test_remote_sync_rejects_a_bundle_that_does_not_match_export_stdout(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -234,7 +234,7 @@ class SyncTests(unittest.TestCase):
             self.assertIsNone(generation.read_current_generation("node-b", root=root))
 
     def test_sync_all_keeps_other_machine_results_when_one_machine_times_out(self):
-        import sync
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -272,7 +272,7 @@ class SyncTests(unittest.TestCase):
         reason the exporter refused is on stderr. The production reading was a
         card saying "returned non-zero exit status 2" while the remote had
         printed "Export refused: ... dependency pin"."""
-        import sync
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -316,8 +316,8 @@ class SyncTests(unittest.TestCase):
             self.assertNotIn("Command '[", results["mute"].error)
 
     def test_transfer_digest_oracle_rejects_tampering_without_switching_current(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -356,8 +356,8 @@ class SyncTests(unittest.TestCase):
             )
 
     def test_install_export_bundle_preserves_export_identity_and_snapshot_digest(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -389,8 +389,8 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(installed.meta["aliases"], [])
 
     def test_hybrid_export_install_preserves_legacy_fallback_totals_authority(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -403,7 +403,7 @@ class SyncTests(unittest.TestCase):
                     """
                 )
             bundle = tmp_path / "bundle"
-            with mock.patch("exporter.exporter_version", return_value="c" * 40):
+            with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value="c" * 40):
                 manifest = exporter.export_bundle(
                     source,
                     bundle,
@@ -441,8 +441,8 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(installed.meta["metric_totals"]["input"], 49)
 
     def test_sender_manifest_is_bound_to_the_received_bundle_not_replaced_by_self_consistency(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -471,8 +471,8 @@ class SyncTests(unittest.TestCase):
             self.assertIsNone(generation.read_current_generation("node-b", root=root))
 
     def test_machine_slot_requires_explicit_tofu_acceptance_and_rejects_later_drift(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -531,8 +531,8 @@ class SyncTests(unittest.TestCase):
             )
 
     def test_candidate_manifest_identity_cannot_authorize_first_use(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -553,8 +553,8 @@ class SyncTests(unittest.TestCase):
             self.assertIsNone(generation.read_current_generation("remote", root=root))
 
     def test_sync_recovers_pending_publication_before_a_new_export_can_fail(self):
-        import exporter
-        import sync
+        from agent_monitor.snapshots import exporter
+        from agent_monitor.snapshots import sync
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -593,7 +593,7 @@ class SyncTests(unittest.TestCase):
             )
 
             with mock.patch(
-                "sync.exporter.export_bundle",
+                "agent_monitor.snapshots.sync.exporter.export_bundle",
                 side_effect=exporter.ExportError("new export failed"),
             ):
                 with self.assertRaisesRegex(exporter.ExportError, "new export failed"):
@@ -606,7 +606,7 @@ class SyncTests(unittest.TestCase):
     def make_bundle(exporter, bundle, input_tokens, commit, *, identity=None):
         source = bundle.with_suffix(".db")
         SyncTests.make_db(source, input_tokens)
-        with mock.patch("exporter.exporter_version", return_value=commit):
+        with mock.patch("agent_monitor.snapshots.exporter.exporter_version", return_value=commit):
             exporter.export_bundle(
                 source,
                 bundle,
