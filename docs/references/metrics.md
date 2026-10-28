@@ -10,6 +10,26 @@ Known costs are subtotals over priceable observations. Known zero is distinct fr
 
 Aggregate authority is independent of session retention: `daily_usage_rollup` owns usage keys, with legacy project-derived fallback only for absent keys; project queries use `daily_rollup`. An identity blocker may prevent project attribution while independent usage totals remain available. Existing archive keys need explicit correction/replay when parser behavior changes; a parser fix alone does not repair already retained records. Date boundaries use Asia/Shanghai.
 
+For nominal pricing, [pricing_fetcher.py](../../agent_monitor/accounting/pricing_fetcher.py) checks supported service-context values before applying rates. Its Claude Code path explicitly admits `inference_geo=not_available`; that sentinel does not name a region or authorize arbitrary future values. Unsupported context remains unpriced with `unsupported_service_context` provenance. Recorded costs follow the separate recorded-cost validation path.
+
+## Account attribution and quota plans
+
+[parsers/accounts.py](../../parsers/accounts.py) reads current local account metadata. In the default-home passive path, [quota_service.rate_limits](../../agent_monitor/quota/quota_service.py) pairs that metadata with a stored quota observation. The stamp does not prove which account produced an older observation after a sign-in change. Managed Codex homes instead supply their registry profile identity through `managed_codex_rate_limits`; their credential plan is unavailable. Cross-account session-link exclusions remain a separate safeguard described in [architecture](../public-architecture.md#usage-path). These quota identities must not be treated as retrospective usage or billing attribution.
+
+`quota_service.rate_limit_block` publishes two independent facts: `reading_plan` comes from `RateLimits.plan`, carried with the quota event, while `credential_plan` comes from the supplied account metadata. Their clocks can differ. An elapsed reset does not create a fresh observation: the Codex parser retains the stored percentage and plan. A mismatch does not establish which source is stale, and one available source is not evidence that two sources agree.
+
+[quota_view.plan_to_show](../../agent_monitor/quota/quota_view.py) derives the display value from the reading plan first, then the credential plan. It uses legacy `account_plan` only when both raw keys are absent; present-but-null keys do not permit that fallback. [web/quota.js](../../web/quota.js) reports disagreement only for a known account with two nonempty string sources. [Account memory](../../agent_monitor/quota/account_memory.py) persists the derived `account_plan`, not the raw pair; remembered rows expose both raw fields as null. Adding them to persisted records would require a separate schema change.
+
+Regression entrypoints are [test_account_identity.py](../../tests/test_account_identity.py), [test_codex_rate_limits.py](../../tests/test_codex_rate_limits.py), [test_overview_api_shape.py](../../tests/test_overview_api_shape.py) and [test_account_memory.py](../../tests/test_account_memory.py), using the [isolated development procedure](../../CONTRIBUTING.md#development-setup). They distinguish reading/credential disagreement, a missing source, legacy key absence and remembered observations with synthetic inputs; they do not verify a real provider account's current plan.
+
+Earlier source comments cited `ADR-024` and `20260822-586a`, whose records are not included in this repository. This section records the current implementation and its regression boundaries, not a verification of those historical approvals or a new waiver of account-attribution risk.
+
+## Account-read diagnostics
+
+[codex_accounts.py](../../agent_monitor/accounts/codex_accounts.py) maps a fixed set of `account/read` error messages with JSON-RPC code `-32603` to bounded diagnostic reasons. Unrecognized messages keep the generic reason and are not retained verbatim. The mapping explains a failed request; it does not decide admission, retry or recovery. [test_account_read_diagnostics.py](../../tests/test_account_read_diagnostics.py) covers this local mapping with synthetic responses.
+
+The implementation records Codex 0.162.1 commit `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d` as its source pin. That existing pin is not a fresh upstream verification here. The former `20261023-b72e` ADR pointer has no included record; it is not required to find or maintain this implementation boundary.
+
 ## Project identity
 
 Project aliases canonicalize stored paths consistently for pivot axes, filter values and filter matching. Equivalent-looking home-relative paths from different machines may share a row; this does not prove the directories contain the same work. Preserve the machine dimension so readers can separate them. Do not change canonicalization in one consumer without checking the others, or silently rewrite retained source identities. `tests/test_project_alias.py` covers the shared mapping.

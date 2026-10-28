@@ -52,7 +52,8 @@ class LoginRateLimited(ActionError):
 
 
 # Exact, data-free WorkspaceRoutingError strings from Codex 0.162.1,
-# 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d. See ADR 20261023-b72e.
+# 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d. See
+# docs/references/metrics.md#account-read-diagnostics.
 # These explain a failure; they never decide admission, retry or recovery.
 ACCOUNT_READ_ERRORS = {
     "failed to load workspace requirements": ("requirementsLoad", "无法加载工作区配置要求，请检查服务主机的 Codex 配置。"),

@@ -198,11 +198,11 @@ class StampingTests(unittest.TestCase):
 class PlanSourceTests(unittest.TestCase):
     """Two plans travel in a block, and they are two facts, not one twice.
 
-    `account_plan` is the one the row shows, and it comes from the same event as
-    the percentages beside it (same event, not same observation — a percentage
-    whose window has since reset is rewritten to zero); `credential_plan` is what the credential file says
-    now. Publishing both is what lets the page state that they disagree
-    instead of picking one and calling it the account's plan (ADR 20260822-586a).
+    `reading_plan` comes from the same stored event as the percentages;
+    `credential_plan` is what the supplied account metadata says now.
+    `account_plan` is derived for display. Publishing both sources lets the page state that they disagree
+    instead of picking one and calling it the account's plan. See
+    docs/references/metrics.md#account-attribution-and-quota-plans.
     """
 
     reading = RateLimits(1.0, 2, 3.0, 4, updated_at="2026-08-22T00:58:29Z", plan="pro")

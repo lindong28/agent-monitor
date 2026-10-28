@@ -117,7 +117,7 @@ def _cost_and_provenance(entry, pricing):
                "service_tier": {"standard"}}
     # Official Claude Code 2.1.296 applies a geo multiplier only for "us".
     # Recognize its observed sentinel without inventing an actual region or
-    # accepting arbitrary future values (see the cost diagnostics ADR).
+    # accepting arbitrary future values; see docs/references/metrics.md#usage-and-cost.
     if entry.agent_id == "claude-code":
         allowed["inference_geo"].add("not_available")
     if any(key not in allowed or not isinstance(value, str) or value not in allowed[key]

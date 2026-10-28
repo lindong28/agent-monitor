@@ -647,7 +647,7 @@
   // The page stays silent for it, as it does for agreement — but silence here
   // is the absence of a claim, not a claim of agreement, and the two states
   // remain distinguishable in the payload for anyone who needs them apart.
-  // See ADR 20260822-586a.
+  // See docs/references/metrics.md#account-attribution-and-quota-plans.
   function quotaPlanSourcesDisagree(account) {
     if (account.account_state !== "known") {
       return false;

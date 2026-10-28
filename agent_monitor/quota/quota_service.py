@@ -358,11 +358,13 @@ def quota_time(block, provider="claude"):
 
 
 def rate_limit_block(value, account=None):
-    """A quota reading, stamped with the account this machine is signed in as.
+    """A quota reading, stamped with the account supplied by its collector.
 
     The stamp is what lets the dashboard group readings by account instead of
-    picking whichever machine reported last. It is an assumption, not a proof —
-    see ADR-024 for the window it is wrong in and why that was accepted.
+    picking whichever machine reported last. A default-home passive stamp is
+    not proof of the reading's historical account. Managed-home collectors
+    supply their profile identity instead. See
+    docs/references/metrics.md#account-attribution-and-quota-plans.
 
     Two plans travel here, and they are two different facts, not one fact
     twice: `reading_plan` is the plan the quota reading itself reported, and
@@ -371,7 +373,8 @@ def rate_limit_block(value, account=None):
     credential file has not refreshed through, or a reading left behind by a
     previous sign-in — and the page says so rather than picking one and calling
     it the account's plan. Which of the two is the stale one is not knowable
-    from the pair, so nothing here claims it. See ADR 20260822-586a.
+    from the pair, so nothing here claims it. The same maintenance guide above
+    describes the two sources and compatibility behavior.
 
     Both are published raw, and separately, because the derived value alone
     cannot be undone: a machine whose reading carries no plan falls back to the

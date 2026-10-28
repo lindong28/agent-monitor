@@ -155,13 +155,10 @@ class CodexRateLimitsTests(unittest.TestCase):
 class ReadingPlanTests(unittest.TestCase):
     """The plan Codex states inside the same object as the percentages.
 
-    It matters because it is the only plan known to come from the same event
-    as them — same event, not same observation: once a window's reset time has
-    passed its percentage is rewritten to zero while this keeps what the event
-    reported.
-    The plan in `~/.codex/auth.json` is a separate fact on its own clock, and
-    pairing that one with these numbers is what put "Pro Lite" next to a quota
-    that had already reset to 0% under Pro — see ADR 20260822-586a.
+    It comes from the same stored event as the percentages; an elapsed reset
+    does not turn either into a fresh observation. The plan in
+    `~/.codex/auth.json` is a separate fact on its own clock. See
+    docs/references/metrics.md#account-attribution-and-quota-plans.
     """
 
     def load(self, rate_limits):

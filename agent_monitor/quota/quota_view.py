@@ -19,9 +19,9 @@ def remembered_rate_limit_entry(record):
         "account_label": record["account_label"],
         "account_plan": record["account_plan"],
         # Memory stores neither, and must not start: its record shape is
-        # validated by exact set equality, so one extra field would make the
-        # whole file unreadable and drop every remembered account (ADR
-        # 20260822-586a). Null is also the honest value — a remembered row
+        # validated against its allowed field set, which excludes this pair.
+        # See docs/references/metrics.md#account-attribution-and-quota-plans.
+        # Null is also the honest value — a remembered row
         # states a past observation, not what any machine is signed into now.
         "reading_plan": None,
         "credential_plan": None,
@@ -94,7 +94,7 @@ def account_entry(block, machines, self_machine=None, reading_from=None):
         # The two facts behind it, passed through unmerged so that having
         # fewer than two comparable sources stays tellable apart from two that
         # agree — the derived value alone cannot express the difference. An
-        # exporter that predates ADR 20260822-586a sends neither key, so such a
+        # exporter that predates the raw plan pair sends neither key, so such a
         # row has zero sources, not one; either way nothing is compared, and
         # that is not the same as comparing and finding them equal.
         "reading_plan": text(block.get("reading_plan")),

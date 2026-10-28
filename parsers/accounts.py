@@ -6,10 +6,10 @@ Codex rollout events carry no account field, and Claude's status file carries
 none either. The only account fact a machine can state about itself is the one
 in its credential file — who is signed in *right now*.
 
-ADR-024 records the consequence: the dashboard attributes a machine's latest
-reading to that machine's currently signed-in account, and the window right
-after a switch — where the newest reading still belongs to the previous
-account — is an accepted, waived risk. Read that ADR before tightening this.
+Default-home passive quota collection pairs a stored reading with the current
+account metadata. After an account switch, that stamp alone cannot prove which
+account produced the reading. See the current boundary and managed-home
+distinction in docs/references/metrics.md#account-attribution-and-quota-plans.
 
 No token, refresh token, or API key leaves this module; only the account id,
 the e-mail that identifies it to a human, and the plan tier.
