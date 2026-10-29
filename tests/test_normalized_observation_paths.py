@@ -2,8 +2,9 @@
 import json
 import os
 import sqlite3
-import tempfile
 import unittest
+
+from tests.artifacts import ArtifactTestCase
 from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -15,11 +16,11 @@ from agent_monitor.ingestion import usage_archive
 from agent_monitor.ingestion.usage_archive import UsageArchive, _encode
 
 
-class NormalizedObservationPathTests(unittest.TestCase):
+class NormalizedObservationPathTests(ArtifactTestCase):
     def setUp(self):
-        root = Path(os.environ.get("ARCHIVE_TEST_ROOT", Path.home() / "task-artifacts/agent-monitor/normalized-path-tests"))
-        root.mkdir(parents=True, exist_ok=True)
-        self.root = Path(tempfile.mkdtemp(prefix="path-case-", dir=root))
+        root = Path(os.environ.get("ARCHIVE_TEST_ROOT") or os.environ.get(
+            "AGENT_MONITOR_TEST_ARTIFACTS") or Path.home() / "task-artifacts/agent-monitor/normalized-path-tests")
+        self.root = self.artifact_directory(root=root, prefix="path-case-")
         self.archive = UsageArchive(self.root / "archive.sqlite3")
         self.sources, self.versions = {}, {}
         self.parser = mock.Mock(side_effect=lambda path: self.sources[path])

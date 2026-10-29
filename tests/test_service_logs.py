@@ -7,21 +7,20 @@ import shutil
 import socketserver
 import subprocess
 import sys
-import tempfile
 import time
 import unittest
+
+from tests.artifacts import ArtifactTestCase
 from unittest import mock
 
 from agent_monitor.runtime import service_logs as logs
 
 ROOT = Path(__file__).resolve().parents[1]
-ARTIFACTS = ROOT.parent / "log-test-data"
 
 
-class ServiceLogTests(unittest.TestCase):
+class ServiceLogTests(ArtifactTestCase):
     def setUp(self):
-        ARTIFACTS.mkdir(exist_ok=True)
-        self.root = Path(tempfile.mkdtemp(prefix="case-", dir=ARTIFACTS))
+        self.root = self.artifact_directory(prefix="service-logs-")
         (self.root / "state").mkdir()
         self.path = self.root / "state/server.log"
         self.path.write_bytes(b"")

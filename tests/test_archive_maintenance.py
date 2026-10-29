@@ -8,8 +8,9 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import unittest
+
+from tests.artifacts import ArtifactTestCase
 from unittest import mock
 
 from agent_monitor.cli import archive_maintenance as maintenance
@@ -20,11 +21,10 @@ from agent_monitor.storage import rollup_lock
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class ArchiveMaintenanceTests(unittest.TestCase):
+class ArchiveMaintenanceTests(ArtifactTestCase):
     def setUp(self):
         evidence = Path(os.environ.get("AGENT_MONITOR_TEST_ARTIFACTS", Path.home() / "task-artifacts" / "agent-monitor-tests"))
-        evidence.mkdir(parents=True, exist_ok=True)
-        self.root = Path(tempfile.mkdtemp(prefix="archive-maintenance-", dir=evidence))
+        self.root = self.artifact_directory(root=evidence, prefix="archive-maintenance-")
         self.archive = self.root / "usage_archive.sqlite3"
         self.rollup = self.root / "rollup.db"
         self.backup = self.root / "recovery.sqlite3"

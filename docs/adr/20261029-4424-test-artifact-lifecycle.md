@@ -1,0 +1,9 @@
+# Synthetic test workspace lifetime
+
+Date: 2026-10-29. This partially supersedes the test-fixture retention paragraph in [archive physical maintenance](20261028-4424-archive-maintenance.md). The production backup and compaction behavior is unchanged.
+
+Repeated successful tests previously left synthetic databases and rotated logs on disk. These workspaces have no continuing recovery or business-history purpose once the individual test and its cleanup finish successfully. The four affected test modules now use a shared `ArtifactTestCase`; it records newly created directories, observes unittest's public success callback and removes those directories only after execution returns normally. It checks directory identity before removal and does not follow child symlinks. A removal error makes the run unsuccessful and identifies any remaining path.
+
+Failed, skipped, interrupted or unclassified cases retain their evidence. An explicit keep flag also preserves successful cases. Persistent workspaces allow abrupt process termination to leave diagnostic data; no exit hook, age-based sweep or periodic cleaner is introduced. Test logs and reports belong outside the disposable case directories. The environment variables and normal test commands are documented in [CONTRIBUTING](../../CONTRIBUTING.md#local-task-evidence).
+
+Historical task materials and production recovery copies require a separate purpose and dependency review. A backup's record should identify the operation it can recover and the condition ending that recovery need. Keep both published and private hardlinks together until that condition is met; removing one name alone does not release its data. Completed experiment reports, source versions and scripts may support checking a result after large inputs are retired, but they do not preserve exact replay or database restoration. Do not claim those capabilities after deleting their inputs.

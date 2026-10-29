@@ -2,8 +2,9 @@
 import json
 import os
 import sqlite3
-import tempfile
 import unittest
+
+from tests.artifacts import ArtifactTestCase
 from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -15,11 +16,11 @@ from agent_monitor.ingestion.usage_archive import UsageArchive, _encode
 from agent_monitor.contracts.usage import UsageEntry
 
 
-class IncrementalArchiveTests(unittest.TestCase):
+class IncrementalArchiveTests(ArtifactTestCase):
     def setUp(self):
-        artifact_root = Path(os.environ.get("ARCHIVE_TEST_ROOT", Path.home() / "task-artifacts/agent-monitor/incremental-archive-tests"))
-        artifact_root.mkdir(parents=True, exist_ok=True)
-        self.root = Path(tempfile.mkdtemp(prefix="archive-case-", dir=artifact_root))
+        artifact_root = Path(os.environ.get("ARCHIVE_TEST_ROOT") or os.environ.get(
+            "AGENT_MONITOR_TEST_ARTIFACTS") or Path.home() / "task-artifacts/agent-monitor/incremental-archive-tests")
+        self.root = self.artifact_directory(root=artifact_root, prefix="archive-case-")
         self.archive = UsageArchive(self.root / "archive.sqlite3")
         self.values, self.versions, self.errors = {}, {}, []
         self.parser = mock.Mock(side_effect=lambda path: self.values[path])
