@@ -15,6 +15,7 @@ from project_paths import PROJECT_ROOT
 import threading
 import time
 import uuid
+from urllib.parse import unquote_plus
 
 
 # Only protocol facts and bounded, redacted upstream reasons cross this boundary.
@@ -41,17 +42,45 @@ _SOURCE_PATHS = {PROJECT_ROOT / relative for relative in (
 _SOURCE_FILES = {path.name for path in _SOURCE_PATHS} | {"server.py"}
 
 
+def _redact_url_credentials(match):
+    # URL userinfo and credential parameters can grant access even in a private UI.
+    raw = match.group()
+    value = raw.rstrip("),.;")
+    punctuation = raw[len(value):]
+    value = re.sub(r"(?i)^(https?://)[^/?#]*@", r"\1[redacted]@", value)
+
+    def parameter(item):
+        key = unquote_plus(item[2]).lower().replace("_", "").replace("-", "")
+        if key in {"password", "passwd", "accesstoken", "refreshtoken", "idtoken",
+                    "apikey", "clientsecret", "token", "secret", "signature", "sig",
+                    "authorization", "credential", "jwt", "session", "privatekey",
+                    "accesskey", "xamzsignature", "xamzcredential", "xamzsecuritytoken",
+                    "xgoogsignature", "xgoogcredential"}:
+            return item[1] + item[2] + "=[redacted]"
+        # A redirect or callback URL may be percent-encoded inside a normal
+        # parameter. Reuse the same credential rules, including userinfo. Retain only the
+        # outer parameter name; the nested value is no longer safe context.
+        nested = unquote_plus(item[3])
+        if re.sub(r"https?://[^\s\"'<>]+", _redact_url_credentials, nested, flags=re.I) != nested:
+            return item[1] + item[2] + "=[redacted nested credential URL]"
+        return item.group()
+
+    return re.sub(r"([?&#;])([^=?&#;]+)=([^&#;]*)", parameter, value) + punctuation
+
+
 def safe_upstream_detail(value):
-    """Redact credential syntax before retaining a bounded upstream reason."""
+    """Retain bounded context for trusted readers, removing credential syntax.
+
+    This is not a public-sharing projection or a guarantee for arbitrary text.
+    """
     if not isinstance(value, str):
         return None
     # Headers have scheme/value and multi-cookie syntax: discard their complete
     # value, rather than only the first space- or semicolon-delimited token.
     value = re.sub(r'''(?im)\b(?:proxy-authorization|authorization|set-cookie|cookie)["']?\s*[:=]\s*[^\r\n]*''', "[credential header redacted]", value)
-    value = re.sub(r"https?://[^\s\"<>]+", "[url redacted]", value)
+    value = re.sub(r"https?://[^\s\"'<>]+", _redact_url_credentials, value, flags=re.I)
     value = re.sub(r"(?i)\bBearer\s+[^\s,;\"}]+", "Bearer [redacted]", value)
-    value = re.sub(r'''(?ix)(["']?(?:password|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|token|secret)["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)''', r"\1[redacted]", value)
-    value = re.sub(r"[A-Za-z0-9_+/=-]{32,}", "[opaque value redacted]", value)
+    value = re.sub(r'''(?ix)(?<![\w-])(["']?(?:password|passwd|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|token|secret|credential|jwt|authorization|signature|private[_-]?key)["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}&\#)]+)''', r"\1[redacted]", value)
     return " ".join(value.split())[:512]
 
 

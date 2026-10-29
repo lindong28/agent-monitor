@@ -22,6 +22,52 @@ from parsers import accounts, codex
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_private_diagnostic_context_survives_storage_and_readback(self):
+        from agent_monitor.accounts.upstream_controls import Controls
+        for detail in (
+                'error sending request for url (https://chatgpt.com/backend-api/wham/usage)',
+                'https://example.test/check?workspace=ordinary-workspace&request_id=' + 'a' * 48,
+                'unfamiliar provider failure; correlation=' + 'b' * 48):
+            with self.subTest(detail=detail), tempfile.TemporaryDirectory() as tmp:
+                controls = Controls(Path(tmp))
+                lease = controls.acquire('codex')
+                lease.pause('fixture', failure={'stage': 'quota_read', 'detail': detail})
+                lease.close()
+                saved = Controls(Path(tmp)).read('codex')['pause']['failure']
+                self.assertEqual(saved['detail'], detail)
+                self.assertEqual(diagnostics.safe_failure(saved), saved)
+
+    def test_url_credentials_are_removed_without_losing_endpoint_context(self):
+        for url, secrets in (
+                ('https://fixture-user:fixture-pass@example.test/path?mode=quota', ['fixture-user', 'fixture-pass']),
+                ('https://example.test/path?access%5Ftoken=fixture-token&mode=quota', ['fixture-token']),
+                ('https://example.test/path?X-Amz-Signature=fixture-signature&mode=quota', ['fixture-signature']),
+                ('https://example.test/path#access_token=fixture-fragment&mode=quota', ['fixture-fragment'])):
+            with self.subTest(url=url):
+                detail = diagnostics.safe_upstream_detail('request failed (' + url + ')')
+                self.assertIn('example.test/path', detail)
+                self.assertIn('mode=quota', detail)
+                self.assertTrue(detail.endswith(')'))
+                for secret in secrets:
+                    self.assertNotIn(secret, detail)
+                self.assertEqual(diagnostics.safe_upstream_detail(detail), detail)
+
+    def test_credential_named_and_nested_url_parameters_are_removed(self):
+        for detail, secret in (
+                ('request failed (https://example.test/check?credential=SECRET_CRED)', 'SECRET_CRED'),
+                ('request failed (https://example.test/check?jwt=SECRET_JWT)', 'SECRET_JWT'),
+                ('https://example.test/cb?redirect=https%3A%2F%2Fupstream.test%2Fcb%3Fapi_key%3DFIXTURE_APIKEY', 'FIXTURE_APIKEY'),
+                ('https://example.test/cb?redirect=https%3A%2F%2Ffixture-user%3Afixture-pass%40upstream.test%2Fcb', 'fixture-pass'),
+                ('request failed (https://example.test/check?redirect=https%3A%2F%2Fupstream.test%2Fcb%3Faccess_token%3DSECRET_NESTED)', 'SECRET_NESTED')):
+            with self.subTest(detail=detail):
+                result = diagnostics.safe_upstream_detail(detail)
+                self.assertNotIn(secret, result)
+
+    def test_noncredential_parameter_names_keep_diagnostic_context(self):
+        detail = ('https://example.test/usage?max_tokens=8192&token_count=123'
+                  '&tokenizer=cl100k_base&credential_source=local&notsecret=ordinary')
+        self.assertEqual(diagnostics.safe_upstream_detail(detail), detail)
+
     def test_header_schemes_and_multi_cookie_values_never_survive_projection(self):
         for message, secrets in (("Authorization: Basic dXNlcjpwYXNz", ["dXNlcjpwYXNz"]),
                 ("Cookie: first=one; session=fixture-secret", ["one", "fixture-secret"]),

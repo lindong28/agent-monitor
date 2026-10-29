@@ -214,7 +214,7 @@ export function init({ autoLoad = true } = {}) {
   }
 
   async function perform(action, id, button) {
-    if (action === "resume" && !window.confirm("我已核对此账号的原始失败、账号状态及服务端要求，确认解除此账号的本地限制。\n\n这不证明上游已恢复；不会自动登录、查询或发送。额度限制和本机 Codex 通道暂停仍保留。")) return;
+    if (action === "resume" && !window.confirm("我已核对此账号已记录的失败信息、账号状态及服务端要求，确认解除此账号的本地限制。\n\n这不证明上游已恢复；不会自动登录、查询或发送。额度限制和本机 Codex 通道暂停仍保留。")) return;
     if (action === "release-rate-limit" && !window.confirm("仅解除此账号在本页的限流暂停，不会发送消息或查询配额。\n\n这不证明服务端限流已解除；请按服务端指引等待后再尝试。认证和额度限制仍会保留。")) return;
     button.disabled = true;
     notice.textContent = action === "forget-login" ? "正在清除本页保存的登录态…" : "正在提交操作…";
@@ -224,7 +224,7 @@ export function init({ autoLoad = true } = {}) {
       if (!current()) return;
       notice.textContent = action === "cancel" ? "正在取消；已发出的消息无法撤回。" : "";
       await load();
-      if (current() && action === "resume") notice.textContent = "此账号的本地限制已解除，未发出上游请求。本机通道暂停和原始失败记录保留；后续操作需重新点击。";
+      if (current() && action === "resume") notice.textContent = "此账号的本地限制已解除，未发出上游请求。本机通道暂停和已记录的失败信息保留；后续操作需重新点击。";
     } catch (error) {
       if (current() && error.name !== "AbortError") notice.textContent = error.message;
     } finally {
@@ -403,7 +403,7 @@ export function init({ autoLoad = true } = {}) {
         controls.append(login);
       }
       if (restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("核对后解除此账号限制", "resume", account));
-      if (account.last_failure && account.last_failure.id !== op?.id) details.append(element("p", `保留的原始失败：${account.last_failure.detail}`, "quota-scope"));
+      if (account.last_failure && account.last_failure.id !== op?.id) details.append(element("p", `保留的失败摘要：${account.last_failure.detail}`, "quota-scope"));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials || restrictions.authentication) {
         const maintenance = element("div", undefined, "codex-account-controls");
@@ -511,8 +511,11 @@ export function renderAccountPause(pause, target, controls) {
   const matched = target?.pause?.id === pause.id && target.machine && target.account_id && target.account_label;
   pauseSummary.textContent = `${matched ? target.machine : "服务端本机"} 的 Codex 通道已暂停，阻止本页所有账号发送、登录和查询配额。`;
   const time = pause.at ? timestamp(pause.at, true) : "未记录";
-  const reason = pause.failure?.detail || (matched && target.failure?.detail) || "未记录原始失败原因，不能判断上游是否恢复。";
-  pauseDetail.textContent = `暂停时间：${time}。原始失败：${reason}`;
+  const reason = pause.failure?.detail || (matched && target.failure?.detail) || "错误摘要未记录，原因未核实。";
+  pauseDetail.textContent = `暂停时间：${time}。已记录的错误摘要（凭据脱敏，最多 512 字符）：${reason}`;
+  if (["[url redacted]", "[opaque value redacted]"].some(marker => reason.includes(marker))) {
+    pauseDetail.textContent += " 摘要含有脱敏占位符，被隐藏的地址或标识无法还原；占位符本身不证明内容有风险，也不能确认是哪一版规则处理的。";
+  }
   if (matched) pauseDetail.textContent += ` 恢复查询账号：${target.account_label}。`;
   else pauseDetail.textContent += pause.id === "unreadable"
     ? " 暂停状态无法读取，请在服务端修复状态文件；不能直接解除。"

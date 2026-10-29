@@ -275,6 +275,13 @@
     return "error";
   }
 
+  function describeDiagnosticSummary(add, detail) {
+    add("错误摘要经过凭据脱敏、空白整理，最多保留 512 个字符；不是完整原始响应。");
+    if (["[url redacted]", "[opaque value redacted]"].some(marker => detail?.includes(marker))) {
+      add("这条摘要含有脱敏占位符，被隐藏的地址或标识无法从现有记录还原；占位符本身不证明地址有风险，也不能据此确认是哪一版规则处理的。新发生的失败会按当前规则记录，不会为补全缺失信息自动重试。");
+    }
+  }
+
   function recoveryDiagnostics(receipt, httpStatus) {
     const box = document.createElement("details");
     const summary = document.createElement("summary");
@@ -287,7 +294,8 @@
     if (receipt.request) add(`本次对象：${receipt.request.machine} · ${receipt.request.account_label} · 工作区 ${receipt.request.account_id}；原暂停 ${receipt.request.pause_id}`);
     if (httpStatus) add(`Monitor HTTP：${httpStatus}（本地接口结果，不是供应商 HTTP 状态）`);
     add(`停止阶段：${f.stage === "quota_read" ? "读取配额" : f.stage || "未记录"}；Codex RPC：${f.rpc_code ?? "未取得"}；上游 HTTP：${f.http_status ?? "未取得"}`);
-    if (f.detail) add(`原始原因：${f.detail}`);
+    if (f.detail) add(`已记录的错误摘要：${f.detail}`);
+    describeDiagnosticSummary(add, f.detail);
     if (f.returncode != null) add(`CLI 退出码：${f.returncode}`);
     if (receipt.record_error) add(receipt.record_error);
     const network = receipt.network;
@@ -361,7 +369,7 @@
         if (value.active) add("当前操作尚未结束", "先等待，再重新读取状态并查看账号操作结果。");
         return;
       }
-      add("为什么不能发送", "Monitor 的本机 Codex 通道处于保护暂停，因此本机通道的发送、登录和配额查询被阻止；这不表示所有账号都被供应商拒绝。触发暂停的原始记录见下方；具体失败原因以诊断证据为准，错误码本身不能确定根因。");
+      add("为什么不能发送", "Monitor 的本机 Codex 通道处于保护暂停，因此本机通道的发送、登录和配额查询被阻止；这不表示所有账号都被供应商拒绝。触发暂停的已记录摘要见下方；具体失败原因以诊断证据为准，错误码本身不能确定根因。");
       const reasons = [];
       if (value.active) reasons.push("当前操作尚未结束；先等待，再点击“重新读取状态”查看已有结果，不要重复提交。");
       if (value.pause.id === "unreadable") reasons.push("暂停记录无法读取；请让执行机器的维护者检查 Monitor 的状态记录与服务日志，修复后重新读取状态。");
@@ -385,7 +393,11 @@
       add(`账号来源：${({default:"默认 Codex 目录",managed:"托管账号 " + (a.profile || ""),configured:"服务配置指定目录"})[a.source] || "未知"}；凭据位置：${a.credential_path || "未取得"}。`);
       add("以上仅为本地身份记录，不证明上游认证有效。新增托管账号与此失败的因果关系未核实；不会自动切换账号。");
       add(value.pause ? "Monitor 保护暂停仍生效；不表示所有账号都被供应商拒绝。此前的批次结果仍保留。" : "当前没有本机 Codex 通道暂停；本次状态读取没有发出上游请求，也没有自动发送消息。");
-      if (value.pause) add(`当前暂停：${value.pause.id}；${value.pause.failure?.detail || "原始失败原因未记录"}`);
+      if (value.pause) {
+        add(`当前暂停：${value.pause.id}；已记录的错误摘要：${value.pause.failure?.detail || "未记录，原因未核实"}`);
+        describeDiagnosticSummary(add, value.pause.failure?.detail);
+      }
+      add("复制内容用于交给有权读取这些信息的维护者，包含账号、机器、路径和诊断地址；不适合直接公开发布，分享前请检查内容与接收者。凭据脱敏不等于已适合公开。");
       probe.disabled = busy || !value.pause || value.pause.id === "unreadable" || !!value.pause.probe_attempt || !!value.active || !a.account_id || !a.account_label;
       details.replaceChildren();
       if (value.last_recovery) details.appendChild(recoveryDiagnostics(value.last_recovery));
@@ -420,11 +432,11 @@
       try {
         if (!window.navigator?.clipboard?.writeText) throw new Error("clipboard unavailable");
         await window.navigator.clipboard.writeText(text);
-        copyNotice.textContent = "诊断信息已复制，可交给执行机器的维护者。内容含机器与账号标识，分享前请核对接收者。";
+        copyNotice.textContent = "诊断信息已复制。请仅交给有权读取这些信息的维护者，不要直接公开发布。";
       } catch (_) {
         report.hidden = false;
         report.focus(); report.select();
-        copyNotice.textContent = "浏览器未允许自动复制；已选中下方诊断信息，请手动复制给执行机器的维护者。内容含机器与账号标识。";
+        copyNotice.textContent = "浏览器未允许自动复制；已选中下方诊断信息，请手动复制。请仅交给有权读取这些信息的维护者，不要直接公开发布。";
       }
     });
     probe.addEventListener("click", async () => {

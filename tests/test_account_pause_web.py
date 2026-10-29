@@ -60,6 +60,7 @@ render(pause, target);
 assert.equal(controls.pausePanel.hidden, false);
 assert.match(controls.pauseSummary.textContent, /fixture-hub/);
 assert.match(controls.pauseDetail.textContent, /fixture connection failed/);
+assert.doesNotMatch(controls.pauseDetail.textContent, /原始失败/);
 assert.match(controls.pauseDetail.textContent, /2026-10-26/);
 assert.equal(controls.pauseRecovery.disabled, false);
 for (const wrong of [null, {...target, pause: {id: "old"}}, {...target, account_id: ""}]) {

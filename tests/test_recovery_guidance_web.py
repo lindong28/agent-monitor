@@ -62,6 +62,20 @@ async function render(changes={}, error=false) {
   assert(report && !report.hidden && report.selected,'clipboard-unavailable fallback is selectable');
   assert.match(report.value,/fixture-host/);
   assert.match(report.value,/-32603/);
+  assert.doesNotMatch(report.value,/原始原因|原始失败/);
+  assert.match(report.value,/512/);
+  assert.match(report.value,/公开/);
+  p=await render({pause:{...base.pause,failure:{detail:'request failed ([url redacted])'}}});
+  assert.match(p.textContent,/占位符|隐藏/);
+  assert.match(p.textContent,/无法.*还原|不能.*还原/);
+  assert.match(p.textContent,/不会.*重试|不.*重试/);
+  p=await render({pause:{...base.pause,failure:{detail:'current pause ([url redacted])'}},
+    last_recovery:{ok:false,failure:{detail:'different recovery record'}}});
+  assert.match(p.textContent,/无法.*还原|不能.*还原/);
+  await all(p).find(n=>n.tag==='button' && /复制诊断/.test(n.textContent)).click();
+  assert.match(all(p).find(n=>n.tag==='textarea').value,/无法.*还原|不能.*还原/);
+  p=await render({pause:{...base.pause,failure:{detail:'request failed (https://example.test/usage?workspace=ordinary)'}}});
+  assert.match(p.textContent,/https:\/\/example.test\/usage\?workspace=ordinary/);
   p=await render({},true);
   assert.match(p.textContent,/状态未核实/);
   assert.equal(all(p).find(n=>n.tag==='button' && /配额一次/.test(n.textContent)).disabled,true);
