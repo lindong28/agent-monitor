@@ -112,7 +112,7 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 
 ## 配置与更新
 
-新安装默认只有一台本地机器，Hub 模式关闭。若要自定义机器名或 SSH 目标，将 `examples/machines.json` 复制为 **`machines.local.json`**，然后编辑该文件。可选的 Hub 配置同样使用 **`hub.local.json`**。进程启动时，本地配置优先于对应的受版本控制的默认配置。本地配置无效时会明确报错，不会退回另一组机器配置。新增或删除本地配置文件后，请重启。
+新安装默认只有一台本地机器，Hub 模式关闭。根目录的 `machines.json`、`hub.json` 是随源码提供的默认配置，也是首次定制的模板；`examples/` 不再维护相同副本。在新克隆中，若要自定义机器名或 SSH 目标，将 `machines.json` 复制为 **`machines.local.json`** 后编辑；需要 Hub 时，将 `hub.json` 复制为 **`hub.local.json`** 后编辑。已有本地配置时直接编辑它，不重复复制或覆盖。进程启动时，本地配置优先于对应的受版本控制的默认配置。本地配置无效时会明确报错，不会退回另一组机器配置。新增或删除本地配置文件后，请重启。
 
 只有一台机器应设置 `self: true`。开始采集数据后，应保持机器名、SSH 身份和 `retired_names` 稳定。不要用示例覆盖已有配置。安装器会保留本地配置文件、已有 `state`（包括软链接）和持久锁。Git 会忽略本地配置及运行时数据。迁移和多机配置详见[配置与保留数据](docs/public-usage.md#configuration-and-retained-data)。
 
@@ -125,11 +125,13 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 | 任务 | 入口 |
 | --- | --- |
 | 查看或停止手动启动的仪表盘 | `./agent-monitor status` / `./agent-monitor stop` |
-| 查看项目管理的全部组件 | `./agent-monitor service status`（或 `./status.sh`） |
+| 查看项目管理的全部组件 | `./agent-monitor service status` |
 | 启用定时采集或 macOS Hub | [服务配置与组件操作](docs/public-usage.md#services-and-deployment) |
 | 汇总已配置的机器 | [多机配置](docs/public-usage.md#optional-multi-machine-collection) |
 | 使用可选的账号或浏览器设备操作 | [账号与连接器指南](docs/public-usage.md#optional-quota-and-account-actions) |
 | 移除项目管理的服务和 CLI 集成 | `./uninstall.sh`；保留源码、状态和锁。详见[组件归属与实例选择](docs/public-usage.md#services-and-deployment) |
+
+日常操作优先使用 `./agent-monitor`。根目录的 `install.sh`、`uninstall.sh` 负责安装与移除集成；`start.sh`、`stop.sh`、`status.sh` 保留兼容旧调用。`status.sh web|rollup-daemon|connector` 可单独检查一个组件，与不带参数的全组件检查不同。`deploy.py`、`runtime_rebuild.py`、`upstream_controls.py` 是部署、运行时恢复和服务商暂停控制的专用入口，按[对应操作指南](docs/public-usage.md#services-and-deployment)使用，不需要在这些文件中修改实现。
 
 `--no-services` 不改变服务。macOS 的普通安装会管理定时采集和已配置的 Hub，连接器需要主动启用。Linux 提供 CLI 和手动启动的仪表盘。Hub 客户端通常打开中心仪表盘；可以通过[本地实例选择方式](docs/public-usage.md#services-and-deployment)管理可选的本地实例。受管更新可能中断正在执行的操作：应先等账号操作结束，不要重发结果不确定的消息。组件重启、恢复和运行时替换的细节见上述指南。
 
@@ -156,7 +158,7 @@ parsers/                                Claude/Codex 日志与账号数据源读
 web/                                    仪表盘页面模块、导航、共享组件和样式
 proxy_runtime/                          系统代理解析辅助程序
 ip_check/                               网络诊断与归因
-examples/                               公开配置示例与虚构样本
+examples/                               虚构样本；首次定制模板使用根目录默认配置
 scripts/ / tests/                       显式验收、测量与回归测试
 docs/                                   使用、架构、运维与核算指南
 ```

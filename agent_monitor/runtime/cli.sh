@@ -42,6 +42,7 @@ usage() {
   echo "Archive maintenance: agent-monitor archive [stats|compact --backup NEW_PERSISTENT_PATH] [--archive PATH] [--rollup-db PATH] [--budget-seconds N] [--json]"
   echo "Service management: agent-monitor service {status|restart local-web|restart hub|restart collector|restart connector|deploy [--expect SHA]|rebuild-runtime --python /absolute/python}"
   echo "Local dashboard: agent-monitor local {start|stop|restart|status|open}"
+  echo "Compatibility: ./start.sh and ./stop.sh forward to start/stop; ./status.sh checks all components or one selector (web|rollup-daemon|connector)."
   echo "Quota pause status and approved recovery: agent-monitor quota-recover --help"
   echo "usage: agent-monitor {start|stop|restart|status|open|refresh|connect [install --server URL|status|stop|restart|--server URL]|network [--json] [--force]|session-quota SESSION_ID [--json]|export (--out PATH|--version)|machines (accept NAME [--yes]|retire NAME...)|rollup [--check [--json]|adopt-timezone|blockers|recover|recover-reviewed]}"
 }
@@ -140,7 +141,7 @@ status() {
   if [ "$role" = client ]; then
     hub_url="$("${PYTHON_MODULE[@]}" agent_monitor.runtime.hub url)"
     echo "Role: Hub client. Dashboard target: $hub_url (availability not checked)."
-    echo "Use open/refresh for the Hub; use local start/stop/restart/status/open for the optional local Web. Run ./status.sh for collector and connector observations."
+    echo "Use open/refresh for the Hub; use local start/stop/restart/status/open for the optional local Web. Run agent-monitor service status for collector and connector observations."
     return 0
   fi
   if is_running; then

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public command adapter; implementation lives in runtime_rebuild."""
+"""Recovery adapter; implementation lives in agent_monitor.runtime.runtime_rebuild."""
 from agent_monitor.runtime.runtime_rebuild import main
 
 

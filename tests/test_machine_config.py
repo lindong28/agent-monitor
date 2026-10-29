@@ -46,9 +46,12 @@ class MachineConfigTests(unittest.TestCase):
                     with self.assertRaises(MachineConfigError):
                         load_machine_config(path)
 
-    def test_example_config_declares_only_local_machine(self):
-        path = Path(__file__).resolve().parents[1] / "examples" / "machines.json"
-        config = load_machine_config(path)
+    def test_public_default_config_declares_only_local_machine(self):
+        source = Path(__file__).resolve().parents[1] / "machines.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "machines.json"
+            path.write_bytes(source.read_bytes())
+            config = load_machine_config(path)
 
         self.assertEqual([machine.name for machine in config.machines], ["local"])
         self.assertEqual(config.self_machine.ssh_host, "localhost")

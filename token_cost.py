@@ -1,10 +1,10 @@
-"""Token-priced cost arithmetic shared by llm-gateway and tt-web.
+"""Token-priced cost arithmetic shared by llm-gateway and agent-monitor.
 
 This file is DUPLICATED VERBATIM in two repositories that must not depend on
 each other:
 
     llm-gateway      src/llm_gateway/token_cost.py
-    ai-agent-config  tt-web/token_cost.py
+    agent-monitor   token_cost.py
 
 Keep the two copies byte-identical and bump SHARED_REVISION together; a diff
 between them is a defect, not a local customisation. The module deliberately
@@ -12,9 +12,9 @@ imports nothing outside the standard library so that either copy runs wherever
 its host runs.
 
 Price tables use the LiteLLM `model_prices_and_context_window.json` shape: a
-mapping of model key to a dict of per-token rates. Both repositories already
-obtain that table (llm-gateway through the pinned `litellm` package, tt-web by
-fetching and caching the same upstream JSON), so this module never fetches it.
+mapping of model key to a dict of per-token rates. Each host supplies the table;
+this module never fetches it. Keep documentation edits synchronized too;
+documentation-only changes do not change the arithmetic revision.
 
 Token conventions, stated once so callers normalise rather than guess:
 

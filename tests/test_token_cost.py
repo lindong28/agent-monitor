@@ -3,7 +3,7 @@
 This file is DUPLICATED VERBATIM alongside the module it tests:
 
     llm-gateway      tests/test_token_cost.py
-    ai-agent-config  tt-web/tests/test_token_cost.py
+    agent-monitor   tests/test_token_cost.py
 
 Keep both copies byte-identical. The import shim below is what lets one file
 serve two packagings; nothing else here may branch on the host repository.
@@ -14,7 +14,7 @@ import sys
 import unittest
 from pathlib import Path
 
-try:  # tt-web ships the module at the top level, beside its callers
+try:  # agent-monitor ships the module at the checkout root
     import token_cost
 except ImportError:  # llm-gateway ships it inside its package
     from llm_gateway import token_cost

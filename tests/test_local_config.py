@@ -24,7 +24,7 @@ class LocalConfigTests(unittest.TestCase):
             shutil.copytree(ROOT / name, self.root / name, ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(ROOT / "pricing.json", self.root / "pricing.json")
         for name in ("machines.json", "hub.json"):
-            shutil.copy2(ROOT / "examples" / name, self.root / name)
+            shutil.copy2(ROOT / name, self.root / name)
         self.env = dict(os.environ, HOME=str(self.root / "home"),
                         CLAUDE_CONFIG_DIR=str(self.root / "home/.claude"),
                         CODEX_HOME=str(self.root / "home/.codex"))

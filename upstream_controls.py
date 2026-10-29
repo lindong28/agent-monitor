@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public command adapter; implementation lives in upstream_controls."""
+"""Provider hold adapter; implementation lives in agent_monitor.accounts.upstream_controls."""
 from agent_monitor.accounts.upstream_controls import main
 
 
