@@ -514,7 +514,7 @@ export function renderAccountPause(pause, target, controls) {
   const reason = pause.failure?.detail || (matched && target.failure?.detail) || "错误摘要未记录，原因未核实。";
   pauseDetail.textContent = `暂停时间：${time}。已记录的错误摘要（凭据脱敏，最多 512 字符）：${reason}`;
   if (["[url redacted]", "[opaque value redacted]"].some(marker => reason.includes(marker))) {
-    pauseDetail.textContent += " 摘要含有脱敏占位符，被隐藏的地址或标识无法还原；占位符本身不证明内容有风险，也不能确认是哪一版规则处理的。";
+    pauseDetail.textContent += " 摘要含有脱敏占位符，仅凭这条摘要无法还原被隐藏的地址或标识；其他日志或历史记录是否保留原文，尚未核实。占位符本身不证明内容有风险，也不能确认是哪一版规则处理的。";
   }
   if (matched) pauseDetail.textContent += ` 恢复查询账号：${target.account_label}。`;
   else pauseDetail.textContent += pause.id === "unreadable"
