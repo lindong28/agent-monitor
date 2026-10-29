@@ -87,7 +87,7 @@ class FreshnessWiringTests(unittest.TestCase):
 
     def _run_launcher_open(self, overview_json, overview_exit=0, running=True):
         with tempfile.TemporaryDirectory() as tmp:
-            sandbox = Path(tmp)
+            sandbox = Path(tmp).resolve()
             launcher_root = sandbox / "agent-monitor"
             launcher_root.mkdir()
             shutil.copytree(ROOT / "agent_monitor", launcher_root / "agent_monitor",
@@ -100,6 +100,17 @@ class FreshnessWiringTests(unittest.TestCase):
             shutil.copy2(ROOT / "project_paths.py", launcher_root / "project_paths.py")
             shutil.copy2(ROOT / "hub.json", launcher_root / "hub.json")
             shutil.copy2(ROOT / "agent_monitor/runtime/process_identity.py", launcher_root / "agent_monitor/runtime/process_identity.py")
+
+            # This is a launcher-wiring test: curl and the opener below are
+            # synthetic. Do not fork a real server that outlives this fixture
+            # and races TemporaryDirectory cleanup while importing modules.
+            (launcher_root / "agent_monitor/cli/launch_web.py").write_text(
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                "Path(sys.argv[1], 'state', 'fixture-launch.json').write_text(json.dumps(sys.argv[1:]))\n"
+                "print(os.getpid())\n",
+                encoding="utf-8",
+            )
 
             state = launcher_root / "state"
             state.mkdir()
@@ -168,6 +179,10 @@ exit 1
             )
             curl_calls = curl_log.read_text(encoding="utf-8").splitlines()
             open_calls = open_log.read_text(encoding="utf-8").splitlines()
+            if not running:
+                import json
+                self.assertEqual(json.loads((state / "fixture-launch.json").read_text()),
+                                 [str(launcher_root), "0.0.0.0", "39123", str(state / "server.log")])
             return result, curl_calls, open_calls
 
     def test_open_requests_fresh_generation_without_using_external_proxy(self):
