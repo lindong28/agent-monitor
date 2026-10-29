@@ -417,7 +417,6 @@ class ExporterTests(unittest.TestCase):
             "agent-monitor",
             "install.sh",
             "requirements.txt",
-            ":(glob)lib/**",
         ):
             self.assertIn(pathspec, status_command)
         self.assertNotIn("machines.json", status_command)

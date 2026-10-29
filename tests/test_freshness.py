@@ -317,14 +317,6 @@ exit 1
 
         self.assertIn(".stale-banner", css)
 
-    def test_dispatcher_refreshes_when_stale(self):
-        script = (ROOT / "agent-monitor").read_text()
-
-        self.assertIn("refresh_if_stale", script)
-        self.assertIn("/api/health", script)
-        self.assertIn("asset_watch=1", script)
-        self.assertIn("compile_ok", script)
-
     def test_server_exposes_post_restart_endpoint(self):
         src = (ROOT / "agent_monitor/http_server.py").read_text()
 

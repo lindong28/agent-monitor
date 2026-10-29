@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from agent_monitor.snapshots import generation
-from agent_monitor.accounting import rollup
+from tests.fixtures.rollup_snapshot import make_generation_meta, make_rollup_snapshot
 
 
 class GenerationGCTests(unittest.TestCase):
@@ -19,11 +19,11 @@ class GenerationGCTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             root = tmp_path / "generations"
-            first_db = self.make_db(tmp_path / "first.db", 10)
+            first_db = make_rollup_snapshot(tmp_path / "first.db", 10)
             first = generation.publish_generation(
-                "node-b", first_db, self.make_meta(first_db, "2026-08-04T12:00:00Z"), root=root
+                "node-b", first_db, make_generation_meta(first_db, "2026-08-04T12:00:00Z"), root=root
             )
-            second_db = self.make_db(tmp_path / "second.db", 20)
+            second_db = make_rollup_snapshot(tmp_path / "second.db", 20)
             disk_usage = type("Usage", (), {"free": 0})()
 
             with mock.patch("agent_monitor.snapshots.generation.shutil.disk_usage", return_value=disk_usage):
@@ -31,7 +31,7 @@ class GenerationGCTests(unittest.TestCase):
                     generation.publish_generation(
                         "node-b",
                         second_db,
-                        self.make_meta(second_db, "2026-08-04T12:01:00Z"),
+                        make_generation_meta(second_db, "2026-08-04T12:01:00Z"),
                         root=root,
                     )
 
@@ -46,11 +46,11 @@ class GenerationGCTests(unittest.TestCase):
             root = tmp_path / "generations"
             published = []
             for index, tokens in enumerate((10, 20, 30, 40), start=1):
-                snapshot = self.make_db(tmp_path / ("%d.db" % index), tokens)
+                snapshot = make_rollup_snapshot(tmp_path / ("%d.db" % index), tokens)
                 current = generation.publish_generation(
                     "node-b",
                     snapshot,
-                    self.make_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
+                    make_generation_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
                     root=root,
                 )
                 published.append(current.meta["generation_id"])
@@ -64,7 +64,7 @@ class GenerationGCTests(unittest.TestCase):
             self.assertEqual(self.input_total(machine_dir / published[-1] / "snapshot.db"), 40)
             self.assertEqual(self.input_total(machine_dir / published[-2] / "snapshot.db"), 30)
 
-            failing = self.make_db(tmp_path / "failing.db", 50)
+            failing = make_rollup_snapshot(tmp_path / "failing.db", 50)
 
             def fail_before_switch(phase):
                 if phase == "before_current_switch":
@@ -74,7 +74,7 @@ class GenerationGCTests(unittest.TestCase):
                 generation.publish_generation(
                     "node-b",
                     failing,
-                    self.make_meta(failing, "2026-08-04T12:05:00Z"),
+                    make_generation_meta(failing, "2026-08-04T12:05:00Z"),
                     root=root,
                     phase_hook=fail_before_switch,
                 )
@@ -89,11 +89,11 @@ class GenerationGCTests(unittest.TestCase):
             root = tmp_path / "generations"
             retained = []
             for index, tokens in enumerate((10, 20), start=1):
-                snapshot = self.make_db(tmp_path / ("success-%d.db" % index), tokens)
+                snapshot = make_rollup_snapshot(tmp_path / ("success-%d.db" % index), tokens)
                 published = generation.publish_generation(
                     "node-b",
                     snapshot,
-                    self.make_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
+                    make_generation_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
                     root=root,
                 )
                 retained.append(published.meta["generation_id"])
@@ -104,12 +104,12 @@ class GenerationGCTests(unittest.TestCase):
 
             machine_dir = root / "node-b"
             for index, tokens in enumerate((30, 40, 50, 60), start=3):
-                snapshot = self.make_db(tmp_path / ("failure-%d.db" % index), tokens)
+                snapshot = make_rollup_snapshot(tmp_path / ("failure-%d.db" % index), tokens)
                 with self.assertRaises(generation.InjectedGenerationFailure):
                     generation.publish_generation(
                         "node-b",
                         snapshot,
-                        self.make_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
+                        make_generation_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
                         root=root,
                         phase_hook=fail_before_switch,
                     )
@@ -120,26 +120,26 @@ class GenerationGCTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             root = tmp_path / "generations"
-            first_db = self.make_db(tmp_path / "first.db", 10)
+            first_db = make_rollup_snapshot(tmp_path / "first.db", 10)
             first = generation.publish_generation(
-                "node-b", first_db, self.make_meta(first_db, "2026-08-04T12:00:00Z"), root=root
+                "node-b", first_db, make_generation_meta(first_db, "2026-08-04T12:00:00Z"), root=root
             )
             lease = generation.read_current_generation("node-b", root=root)
-            second_db = self.make_db(tmp_path / "second.db", 20)
+            second_db = make_rollup_snapshot(tmp_path / "second.db", 20)
             generation.publish_generation(
-                "node-b", second_db, self.make_meta(second_db, "2026-08-04T12:01:00Z"), root=root
+                "node-b", second_db, make_generation_meta(second_db, "2026-08-04T12:01:00Z"), root=root
             )
-            third_db = self.make_db(tmp_path / "third.db", 30)
+            third_db = make_rollup_snapshot(tmp_path / "third.db", 30)
             generation.publish_generation(
-                "node-b", third_db, self.make_meta(third_db, "2026-08-04T12:02:00Z"), root=root
+                "node-b", third_db, make_generation_meta(third_db, "2026-08-04T12:02:00Z"), root=root
             )
 
             self.assertTrue((root / "node-b" / first.meta["generation_id"]).is_dir())
             self.assertEqual(self.input_total(lease.db_path), 10)
             lease.close()
-            fourth_db = self.make_db(tmp_path / "fourth.db", 40)
+            fourth_db = make_rollup_snapshot(tmp_path / "fourth.db", 40)
             generation.publish_generation(
-                "node-b", fourth_db, self.make_meta(fourth_db, "2026-08-04T12:03:00Z"), root=root
+                "node-b", fourth_db, make_generation_meta(fourth_db, "2026-08-04T12:03:00Z"), root=root
             )
             self.assertFalse((root / "node-b" / first.meta["generation_id"]).exists())
 
@@ -147,8 +147,8 @@ class GenerationGCTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             root = tmp_path / "generations"
-            first_db = self.make_db(tmp_path / "first.db", 10)
-            first_meta = self.make_meta(first_db, "2026-08-04T12:00:00Z")
+            first_db = make_rollup_snapshot(tmp_path / "first.db", 10)
+            first_meta = make_generation_meta(first_db, "2026-08-04T12:00:00Z")
             first = generation.publish_generation(
                 "node-b", first_db, first_meta, root=root
             )
@@ -156,11 +156,11 @@ class GenerationGCTests(unittest.TestCase):
             try:
                 retained = []
                 for index, tokens in enumerate((20, 30), start=1):
-                    snapshot = self.make_db(tmp_path / ("next-%d.db" % index), tokens)
+                    snapshot = make_rollup_snapshot(tmp_path / ("next-%d.db" % index), tokens)
                     current = generation.publish_generation(
                         "node-b",
                         snapshot,
-                        self.make_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
+                        make_generation_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
                         root=root,
                     )
                     retained.append(current.meta["generation_id"])
@@ -189,9 +189,9 @@ class GenerationGCTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             root = tmp_path / "generations"
-            first_db = self.make_db(tmp_path / "first.db", 10)
+            first_db = make_rollup_snapshot(tmp_path / "first.db", 10)
             first = generation.publish_generation(
-                "node-b", first_db, self.make_meta(first_db, "2026-08-04T12:00:00Z"), root=root
+                "node-b", first_db, make_generation_meta(first_db, "2026-08-04T12:00:00Z"), root=root
             )
             script = """
 import sys
@@ -212,20 +212,20 @@ current.close()
             try:
                 self.assertEqual(reader.stdout.readline().strip(), "ready")
                 for index, tokens in enumerate((20, 30), start=1):
-                    snapshot = self.make_db(tmp_path / ("next-%d.db" % index), tokens)
+                    snapshot = make_rollup_snapshot(tmp_path / ("next-%d.db" % index), tokens)
                     generation.publish_generation(
                         "node-b",
                         snapshot,
-                        self.make_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
+                        make_generation_meta(snapshot, "2026-08-04T12:0%d:00Z" % index),
                         root=root,
                     )
                 self.assertTrue((root / "node-b" / first.meta["generation_id"]).is_dir())
                 reader.stdin.write("done\n")
                 reader.stdin.flush()
                 self.assertEqual(reader.wait(timeout=5), 0, reader.stderr.read())
-                fourth = self.make_db(tmp_path / "fourth.db", 40)
+                fourth = make_rollup_snapshot(tmp_path / "fourth.db", 40)
                 generation.publish_generation(
-                    "node-b", fourth, self.make_meta(fourth, "2026-08-04T12:03:00Z"), root=root
+                    "node-b", fourth, make_generation_meta(fourth, "2026-08-04T12:03:00Z"), root=root
                 )
                 self.assertFalse((root / "node-b" / first.meta["generation_id"]).exists())
             finally:
@@ -240,16 +240,16 @@ current.close()
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             root = tmp_path / "generations"
-            first_db = self.make_db(tmp_path / "first.db", 10)
+            first_db = make_rollup_snapshot(tmp_path / "first.db", 10)
             first = generation.publish_generation(
-                "node-b", first_db, self.make_meta(first_db, "2026-08-04T12:00:00Z"), root=root
+                "node-b", first_db, make_generation_meta(first_db, "2026-08-04T12:00:00Z"), root=root
             )
-            second_db = self.make_db(tmp_path / "second.db", 20)
-            self.crash_publish(root, second_db, self.make_meta(second_db, "2026-08-04T12:01:00Z"), "before_current_switch")
+            second_db = make_rollup_snapshot(tmp_path / "second.db", 20)
+            self.crash_publish(root, second_db, make_generation_meta(second_db, "2026-08-04T12:01:00Z"), "before_current_switch")
 
-            third_db = self.make_db(tmp_path / "third.db", 30)
+            third_db = make_rollup_snapshot(tmp_path / "third.db", 30)
             third = generation.publish_generation(
-                "node-b", third_db, self.make_meta(third_db, "2026-08-04T12:02:00Z"), root=root
+                "node-b", third_db, make_generation_meta(third_db, "2026-08-04T12:02:00Z"), root=root
             )
             current = generation.read_current_generation("node-b", root=root)
             try:
@@ -271,12 +271,12 @@ current.close()
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             root = tmp_path / "generations"
-            first_db = self.make_db(tmp_path / "first.db", 10)
+            first_db = make_rollup_snapshot(tmp_path / "first.db", 10)
             first = generation.publish_generation(
-                "node-b", first_db, self.make_meta(first_db, "2026-08-04T12:00:00Z"), root=root
+                "node-b", first_db, make_generation_meta(first_db, "2026-08-04T12:00:00Z"), root=root
             )
-            second_db = self.make_db(tmp_path / "second.db", 20)
-            second_meta = self.make_meta(second_db, "2026-08-04T12:01:00Z")
+            second_db = make_rollup_snapshot(tmp_path / "second.db", 20)
+            second_meta = make_generation_meta(second_db, "2026-08-04T12:01:00Z")
             self.crash_publish(root, second_db, second_meta, "before_current_switch")
 
             retried = generation.publish_generation(
@@ -300,17 +300,17 @@ current.close()
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             root = tmp_path / "generations"
-            first_db = self.make_db(tmp_path / "first.db", 10)
+            first_db = make_rollup_snapshot(tmp_path / "first.db", 10)
             first = generation.publish_generation(
-                "node-b", first_db, self.make_meta(first_db, "2026-08-04T12:00:00Z"), root=root
+                "node-b", first_db, make_generation_meta(first_db, "2026-08-04T12:00:00Z"), root=root
             )
-            second_db = self.make_db(tmp_path / "second.db", 20)
-            second_meta = self.make_meta(second_db, "2026-08-04T12:01:00Z")
+            second_db = make_rollup_snapshot(tmp_path / "second.db", 20)
+            second_meta = make_generation_meta(second_db, "2026-08-04T12:01:00Z")
             self.crash_publish(root, second_db, second_meta, "after_current_switch")
 
-            third_db = self.make_db(tmp_path / "third.db", 30)
+            third_db = make_rollup_snapshot(tmp_path / "third.db", 30)
             third = generation.publish_generation(
-                "node-b", third_db, self.make_meta(third_db, "2026-08-04T12:02:00Z"), root=root
+                "node-b", third_db, make_generation_meta(third_db, "2026-08-04T12:02:00Z"), root=root
             )
             machine_dir = root / "node-b"
             self.assertEqual((machine_dir / "current").read_text().strip(), third.meta["generation_id"])
@@ -339,38 +339,6 @@ generation.publish_generation('node-b', snapshot, meta, root=root, phase_hook=cr
             text=True,
         )
         self.assertEqual(result.returncode, 73, result.stderr)
-
-    @staticmethod
-    def make_db(path, input_tokens):
-        with closing(sqlite3.connect(path)) as conn, conn:
-            conn.executescript(rollup.SCHEMA)
-            conn.execute("DROP TABLE daily_usage_rollup")
-            conn.execute(
-                """
-                INSERT INTO daily_rollup (
-                  date, agent_id, project, model, input_tokens, output_tokens,
-                  cache_creation_tokens, cache_read_tokens, cost_usd,
-                  cost_known_count, entry_count, message_count
-                ) VALUES ('2026-08-04', 'codex', 'repo', 'gpt-5', ?, 2, 3, 4, 1.5, 1, 1, 1)
-                """,
-                (input_tokens,),
-            )
-            conn.execute(
-                "INSERT INTO rollup_meta (key, value) VALUES ('bucket_timezone', 'Asia/Shanghai')"
-            )
-        return path
-
-    @staticmethod
-    def make_meta(snapshot, generated_at):
-        return generation.build_generation_meta(
-            snapshot,
-            machine_config_fingerprint="f" * 64,
-            source_host_identity="host-v1:" + "5" * 64,
-            aliases=[],
-            rate_limits={},
-            exporter_commit="a" * 40,
-            generated_at=generated_at,
-        )
 
     @staticmethod
     def generation_ids(machine_dir):

@@ -28,7 +28,8 @@ function element(tag = 'div') {
     replaceChildren(...children) { this.children = []; children.forEach(child => this.appendChild(child)); },
     remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(child => child !== this); },
     before() {}, focus() {}, contains() { return false; }, closest() { return null; },
-    querySelector() { return null; }, querySelectorAll() { return []; },
+    querySelector(selector) { return this.children.find(child => '#' + child.id === selector) || null; },
+    querySelectorAll() { return []; },
     checkValidity() { return true; },
     getContext() { return {clearRect() {}}; },
     getBoundingClientRect() { return {height: 0}; },
@@ -65,8 +66,17 @@ function fixture() {
       node.value = match[2].match(/\bvalue="([^"]*)"/)?.[1] || '';
       node.href = match[2].match(/\bhref="([^"]*)"/)?.[1];
       node.hidden = /\bhidden\b/.test(match[2]);
+      for (const attr of match[2].matchAll(/data-([\w-]+)="([^"]*)"/g)) {
+        node.dataset[attr[1].replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = attr[2];
+      }
       node.parentElement = main;
       nodes.set('#' + node.id, node);
+    }
+    if (nodes.has('#pivot-chart')) {
+      const box = element();
+      box.className = 'chart-box';
+      box.appendChild(nodes.get('#pivot-chart'));
+      nodes.get('#pivot-chart').closest = selector => selector === '.chart-box' ? box : null;
     }
     if (nodes.has('#range')) nodes.get('#range').value = '30d';
     if (nodes.has('#sort')) nodes.get('#sort').value = 'time';
@@ -81,7 +91,8 @@ function fixture() {
     removeEventListener: (type, listener) => documentEvents.get(type)?.delete(listener),
     createElement: element, createTextNode: text => Object.assign(element('#text'), {textContent: text}),
     querySelector: selector => selector === 'main' ? active.main : active.nodes.get(selector) || null,
-    querySelectorAll: () => [],
+    querySelectorAll: selector => selector === '[data-filter-control]'
+      ? [...active.nodes.values()].filter(node => node.dataset.filterControl) : [],
   };
   const window = {
     location: new URL('http://fixture/'),
@@ -111,6 +122,110 @@ function fixture() {
   }
   active = page(fs.readFileSync(path.join(root, 'web/index.html'), 'utf8'));
   return {window, document, fetch, DOMParser, requests, errors, charts, intervals, windowEvents, documentEvents, payloads, overview};
+}
+
+// Read production outputs, never function bodies: the same tests tolerate local
+// names/control-flow refactors but reject changes in requests and rendered data.
+async function checkPivotBehavior(env, ui, enter) {
+  const filters = {
+    agent: 'codex', project: '/work/team/alpha & <demo>', model: 'model-a', machine: 'mac-one',
+  };
+  const alternatives = {agent: 'claude', project: '/work/other/beta', model: 'model-b', machine: 'mac-two'};
+  env.payloads['/api/pivot-filters'] = Object.fromEntries(
+    Object.keys(filters).map(name => [name, [filters[name], alternatives[name]]])
+  );
+  const request = () => env.requests.filter(url => url.pathname === '/api/pivot').at(-1);
+  const assertFilters = expected => {
+    for (const name of Object.keys(filters)) {
+      assert.equal(ui.qs(`#${name}-filter`).value, expected[name] || '', `${name}: selected control`);
+      assert.deepEqual(env.window.location.searchParams.getAll(name), expected[name] ? [expected[name]] : [], `${name}: URL`);
+      assert.deepEqual(request().searchParams.getAll(name), expected[name] ? [expected[name]] : [], `${name}: API`);
+    }
+  };
+  const initial = new URLSearchParams({range: 'custom', start: '2026-10-01', end: '2026-10-02', group_by: 'day,project', metric: 'total', ...filters});
+  await enter('/explore?' + initial);
+  assertFilters(filters);
+  for (const [name, value] of Object.entries({range: 'custom', start: '2026-10-01', end: '2026-10-02', group_by: 'day,project', metric: 'total'})) {
+    assert.equal(request().searchParams.get(name), value);
+  }
+  const selected = {...filters};
+  for (const name of Object.keys(filters)) {
+    ui.qs(`#${name}-filter`).value = alternatives[name];
+    selected[name] = alternatives[name];
+    const beforeChange = env.requests.length;
+    await ui.qs(`#${name}-filter`).listeners.change();
+    assert(env.requests.slice(beforeChange).some(url => url.pathname === '/api/pivot'));
+    assertFilters(selected);
+  }
+  for (const name of Object.keys(filters)) {
+    ui.qs(`#${name}-filter`).value = '';
+    delete selected[name];
+    await ui.qs(`#${name}-filter`).listeners.change();
+    assertFilters(selected);
+  }
+
+  const rows = [
+    {key: ['2026-10-01', filters.project], value: 12},
+    {key: ['2026-10-02', filters.project], value: 34},
+    {key: ['2026-10-01', alternatives.project], value: 7},
+  ];
+  env.payloads['/api/pivot'] = {dimensions: ['day', 'project'], rows};
+  await enter('/explore?group_by=day,project&metric=total');
+  const chart = env.window.ttWebCharts.pivot.config;
+  assert.deepEqual(chart.data.datasets.map(dataset => dataset.label), ['会话目录：team/alpha & <demo>', '会话目录：other/beta']);
+  assert.deepEqual(chart.data.datasets.map(dataset => dataset.fullLabel), [filters.project, alternatives.project].map(project => '会话目录：' + project));
+  const tooltip = chart.options.plugins.tooltip.callbacks;
+  assert.equal(tooltip.title([{dataIndex: 0}]), '2026-10-01');
+  assert(tooltip.label({dataset: chart.data.datasets[0], raw: 12, dataIndex: 0}).includes(filters.project));
+  // Exercise project labels on the horizontal/vertical axis as well as series.
+  const pivot = env.window.AgentMonitorPivot;
+  const projects = {dimensions: ['project'], rows: [
+    {key: [filters.project], value: 12}, {key: ['relative-name'], value: 3},
+  ]};
+  pivot.renderChart(pivot.chartData(projects, 'total'), 'project', 'total');
+  const projectChart = env.window.ttWebCharts.pivot.config;
+  assert.deepEqual(projectChart.data.labels, ['team/alpha & <demo>', 'relative-name']);
+  assert.equal(projectChart.options.plugins.tooltip.callbacks.title([{dataIndex: 0}]), filters.project);
+  assert.equal(projectChart.options.plugins.tooltip.callbacks.title([{dataIndex: 1}]), 'relative-name');
+
+  for (const [dimension, label] of [['day', '每日明细'], ['week', '每周明细'], ['month', '每月明细']]) {
+    env.payloads['/api/pivot'] = {dimensions: [dimension, 'project'], rows};
+    await enter(`/explore?group_by=${dimension},project&metric=total`);
+    const html = ui.qs('#group-ranking').innerHTML;
+    const details = [...html.matchAll(/<details\b[^>]*>([\s\S]*?)<\/details>/g)].map(match => match[1]);
+    assert.equal(details.length, 2, `${dimension}: one disclosure per group`);
+    assert(details[0].includes(`<summary>${label} · 2 期</summary>`));
+    assert(details[1].includes(`<summary>${label} · 1 期</summary>`));
+    const periods = [...details[0].matchAll(/<div class="ranking-period"><span>([^<]+)<\/span><span class="reading-amount">([^<]+)<\/span><\/div>/g)];
+    assert.deepEqual(periods.map(match => match.slice(1)), [['2026-10-01', '12'], ['2026-10-02', '34']]);
+    assert(html.includes('/work/team/alpha &amp; &lt;demo&gt;'), 'ranking must retain and escape the full project name');
+    assert.equal(ui.qs('#ranking-count').textContent, '2 个组合');
+  }
+  env.payloads['/api/pivot'] = projects;
+  await enter('/explore?group_by=project&metric=total');
+  assert(!ui.qs('#group-ranking').innerHTML.includes('<details'), 'no time dimension means no period disclosure');
+
+  // Refresh in place, so stale charts/data cannot hide behind a route teardown.
+  env.payloads['/api/pivot'] = {dimensions: ['day', 'project'], rows};
+  await enter('/explore?group_by=day,project&metric=total');
+  const previous = env.window.ttWebCharts.pivot;
+  env.payloads['/api/pivot'] = {dimensions: ['day', 'project'], rows: []};
+  await ui.qs('#metric').listeners.change();
+  assert.equal(previous.destroyed, 1);
+  assert.equal(env.window.ttWebCharts.pivot, undefined);
+  const canvas = ui.qs('#pivot-chart'), empty = canvas.closest('.chart-box').querySelector('#pivot-chart-empty');
+  assert.equal(canvas.hidden, true);
+  assert.equal(empty.hidden, false);
+  assert.equal(empty.textContent, '当前范围内无记录，请检查日期与筛选条件。');
+  assert.equal(ui.qs('#pivot-status').textContent, '当前日期与筛选范围内无记录');
+  assert.equal(ui.qs('#group-ranking').innerHTML, '<li class="empty-state">当前范围内无记录，请检查日期与筛选条件。</li>');
+  assert.equal(ui.qs('#ranking-count').textContent, '0 个组合');
+  env.payloads['/api/pivot'] = {dimensions: ['day', 'project'], rows};
+  await ui.qs('#metric').listeners.change();
+  assert.equal(canvas.hidden, false);
+  assert.equal(empty.hidden, true);
+  assert.equal(ui.qs('#ranking-count').textContent, '2 个组合');
+  console.log('pivot: 4 filters x 3 states; project labels on series/axis; 3 period dimensions + no-time; populated/empty/populated refresh');
 }
 
 async function run() {
@@ -168,6 +283,7 @@ async function run() {
     assert(env.requests.slice(begin).some(request => request.pathname === endpoint), `${url}: route did not call its API`);
     assert.equal(ui.qs(selector).textContent, reading, `${url}: route did not render`);
   }
+  await checkPivotBehavior(env, ui, enter);
   for (const url of ['/guide/sources', '/guide/collection', '/guide/setup', '/guide/questions']) {
     const begin = env.requests.length;
     await enter(url);

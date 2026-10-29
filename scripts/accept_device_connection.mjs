@@ -21,7 +21,9 @@ const tool = args['agent-browser'] || path.join(repo,'node_modules/.bin/agent-br
 assert.ok(path.isAbsolute(tool) && fs.existsSync(tool), 'Run npm ci first, or supply --agent-browser /absolute/path/to/agent-browser');
 assert.ok(args.browser && path.isAbsolute(args.browser) && fs.existsSync(args.browser), 'Supply --browser /absolute/path/to/Chrome (see CONTRIBUTING.md)');
 const python = args.python || path.join(repo,'.venv/bin/python');
-const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(),'monitor-accept-'));
+const evidence = process.env.AGENT_MONITOR_TEST_ARTIFACTS || path.join(os.homedir(),'task-artifacts','agent-monitor','device-acceptance');
+fs.mkdirSync(evidence,{recursive:true});
+const root = fs.mkdtempSync(path.join(evidence,'monitor-accept-'));
 // A fresh HOME alone does not override CLI/provider/profile environment variables.
 const env = {PATH:process.env.PATH || '/usr/bin:/bin', LANG:process.env.LANG || 'en_US.UTF-8',
   HOME:root, TMPDIR:root, XDG_CONFIG_HOME:path.join(root,'config'), XDG_CACHE_HOME:path.join(root,'cache'),

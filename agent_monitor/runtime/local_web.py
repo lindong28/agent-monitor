@@ -142,7 +142,7 @@ def run_cli(root, action, recipe=None):
                     env[name] = previous[name]
             os.environ.clear()
             os.environ.update(env)
-        result = deployment_guard._run([str(root / 'agent-monitor'), 'local', action], root, timeout=60)
+        result = deployment_guard._run(['bash', str(root / 'agent_monitor/runtime/cli.sh'), 'local', action], root, timeout=60)
         if result:
             raise ValueError(f'Local Web {action} failed; inspect state/server.log and service status.')
     finally:

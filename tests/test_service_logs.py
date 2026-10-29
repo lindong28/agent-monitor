@@ -131,6 +131,7 @@ os.execv(sys.executable,[sys.executable,'-c',"from agent_monitor.runtime import 
         runtime = self.root/"agent_monitor/runtime"
         runtime.mkdir(parents=True)
         shutil.copy2(ROOT/"agent_monitor/runtime/service_logs.py", runtime/"service_logs.py")
+        shutil.copy2(ROOT/"agent_monitor/runtime/cli.sh", runtime/"cli.sh")
         cli = self.root/"agent_monitor/cli"
         cli.mkdir()
         (cli/"rollup_run.py").write_text("import os;os.write(2,b'collector-output-'*8)\n")

@@ -126,9 +126,9 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
                 local_web.converge(self.root)
 
     def install_fixture(self, fail=False):
-        (self.root / 'install.sh').write_text('#!/bin/bash\n' + deployment_guard.BODY_MARKER +
+        (self.root / 'agent_monitor/runtime/install.sh').write_text('#!/bin/bash\n' + deployment_guard.BODY_MARKER +
             ('exit 7\n' if fail else '"$AGENT_MONITOR_PYTHON" -m venv --without-pip .venv\n'))
-        (self.root / 'install.sh').chmod(0o755)
+        shutil.copy2(SOURCE / 'install.sh', self.root / 'install.sh')
         self.stack.enter_context(mock.patch('agent_monitor.runtime.runtime_rebuild.deploy.preflight', return_value='a' * 40))
         self.stack.enter_context(mock.patch('agent_monitor.runtime.runtime_rebuild.capture_jobs', return_value=[]))
 
@@ -236,7 +236,7 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
         self.start()
         original = self.root / '.venv/original'
         original.write_text('old')
-        (self.root / 'install.sh').write_text('#!/bin/bash\n' + deployment_guard.BODY_MARKER +
+        (self.root / 'agent_monitor/runtime/install.sh').write_text('#!/bin/bash\n' + deployment_guard.BODY_MARKER +
             "mkdir -p .venv/bin\nprintf '#!/bin/sh\\nexit 42\\n' > .venv/bin/python\nchmod +x .venv/bin/python\nexit 7\n")
         with self.assertRaisesRegex(ValueError, 'original runtime/services restored'):
             runtime_rebuild.rebuild(Path(sys.executable))

@@ -1,4 +1,3 @@
-import http.client
 import json
 import tempfile
 import threading
@@ -12,7 +11,7 @@ import agent_monitor.views.query_view as query_view
 from agent_monitor.accounting import rollup
 from agent_monitor import http_server as server
 from agent_monitor.snapshots.machine_config import Machine; from agent_monitor.snapshots.machine_config import machine_config_fingerprint
-from tests.test_generation_gc import GenerationGCTests
+from tests.fixtures.rollup_snapshot import make_generation_meta, make_rollup_snapshot
 
 
 class QueryViewTests(unittest.TestCase):
@@ -28,11 +27,11 @@ class QueryViewTests(unittest.TestCase):
         self.addCleanup(self.view.close)
 
     def publish(self, index):
-        db = GenerationGCTests.make_db(self.path / ("source%d.db" % index), index * 10)
-        meta = generation.build_generation_meta(db,
+        db = make_rollup_snapshot(self.path / ("source%d.db" % index), index * 10)
+        meta = make_generation_meta(
+            db, "2026-08-04T12:%02d:00Z" % index,
             machine_config_fingerprint=machine_config_fingerprint(self.machine),
-            source_host_identity="host-v1:" + "5" * 64, aliases=[], rate_limits={},
-            exporter_commit="a" * 40, generated_at="2026-08-04T12:%02d:00Z" % index)
+        )
         return generation.publish_generation("node-b", db, meta, root=self.root)
 
     def test_http_queries_reuse_prepared_admission_and_existing_aggregates(self):
@@ -142,43 +141,3 @@ class QueryViewTests(unittest.TestCase):
             self.view.close()
             self.assertFalse(lease.closed)
         self.assertTrue(lease.closed)
-
-
-class PersistentHTTPTests(unittest.TestCase):
-    def test_keepalive_head_conditional_assets_errors_and_post_framing(self):
-        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        client = http.client.HTTPConnection(*httpd.server_address, timeout=3)
-        try:
-            client.request("GET", "/web/pivot.js")
-            response = client.getresponse()
-            body = response.read()
-            self.assertEqual(response.version, 11)
-            self.assertEqual(response.status, 200)
-            self.assertIn("app;dur=", response.getheader("Server-Timing"))
-            etag = response.getheader("ETag")
-            sock = client.sock
-            client.request("GET", "/web/pivot.js", headers={"If-None-Match": etag})
-            response = client.getresponse()
-            self.assertEqual(response.status, 304)
-            self.assertEqual(response.read(), b"")
-            self.assertIs(client.sock, sock)
-            client.request("HEAD", "/web/pivot.js")
-            response = client.getresponse()
-            self.assertEqual(response.getheader("Content-Length"), str(len(body)))
-            self.assertEqual(response.read(), b"")
-            client.request("GET", "/missing")
-            response = client.getresponse()
-            self.assertEqual(response.status, 404)
-            response.read()
-            client.request("POST", "/missing", body=b"unused-body")
-            response = client.getresponse()
-            self.assertEqual(response.getheader("Connection"), "close")
-            response.read()
-            self.assertIsNone(client.sock)
-        finally:
-            client.close()
-            httpd.shutdown()
-            httpd.server_close()
-            thread.join(3)

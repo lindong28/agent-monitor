@@ -35,7 +35,7 @@ for(const scenario of ['startup-and-cleanup-failure','json-error','sandbox-refus
   try {
     let result;
     try {await promisify(execFile)(process.execPath,[new URL('./accept_device_connection.mjs',import.meta.url).pathname,'--agent-browser',tool,'--browser',browser,'--python',python],
-      {timeout:8000,env:{...process.env,AGENT_BROWSER_CDP:'http://127.0.0.1:1',AGENT_BROWSER_PROVIDER:'injected',AGENT_BROWSER_PROFILE:root,AI_GATEWAY_API_KEY:'synthetic'}});}
+      {timeout:8000,env:{...process.env,AGENT_MONITOR_TEST_ARTIFACTS:path.join(root,'evidence'),AGENT_BROWSER_CDP:'http://127.0.0.1:1',AGENT_BROWSER_PROVIDER:'injected',AGENT_BROWSER_PROFILE:root,AI_GATEWAY_API_KEY:'synthetic'}});}
     catch(error){result=error;}
     observation=JSON.parse(fs.readFileSync(marker));
     assert.equal(result?.code,1,'must exit nonzero without hanging on the fixture');
@@ -44,7 +44,9 @@ for(const scenario of ['startup-and-cleanup-failure','json-error','sandbox-refus
     assert.match(result.stderr,scenario==='sandbox-refusal'?/Refusing sandbox-disabled/:/injected startup failure/);
     assert.equal(fs.existsSync(browserMarker),false,'unsafe browser must not launch');
     assert.throws(()=>process.kill(observation.pid,0),{code:'ESRCH'});
-    assert.equal(fs.existsSync(observation.home),false);
+    assert.equal(fs.existsSync(observation.home),true,'acceptance evidence must survive cleanup');
+    assert.equal(path.dirname(observation.home),path.join(root,'evidence'));
+    assert.ok(result.stdout.includes('Isolated evidence retained at '+observation.home));
   } finally {
     if(!observation&&fs.existsSync(marker))observation=JSON.parse(fs.readFileSync(marker));
     if(observation){try{process.kill(observation.pid,'SIGKILL');}catch{} fs.rmSync(observation.home,{recursive:true,force:true});}

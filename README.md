@@ -146,6 +146,8 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 ```text
 agent-monitor / install.sh / deploy.py   CLI、安装和部署入口
 project_paths.py / agent_monitor/        共享路径、源码清单与内部职责组件
+agent_monitor/runtime/                  安装、服务生命周期、部署与恢复实现
+agent_monitor/cli/                      CLI 子命令的 Python 处理器
 agent_monitor/contracts/                共享用量、额度类型与快照常量
 agent_monitor/ingestion/                数据加载、归档合并与项目身份恢复
 agent_monitor/views/                    概览、会话与网络查询及其缓存

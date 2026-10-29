@@ -36,7 +36,8 @@ class DeploymentGuardTests(unittest.TestCase):
         (self.root / 'install.sh').write_text(
             '#!/usr/bin/env bash\nset -euo pipefail\n'
             'ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
-            'exec "$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard install "$ROOT_DIR" -- "$@"\n'
+            'exec "$TEST_PYTHON" -m agent_monitor.runtime.deployment_guard install "$ROOT_DIR" -- "$@"\n')
+        (self.root / 'agent_monitor/runtime/install.sh').write_text(
             '# AGENT_MONITOR_INSTALL_BODY\nset -euo pipefail\n'
             'ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"\n' + body)
         (self.root / 'install.sh').chmod(0o755)
@@ -139,7 +140,7 @@ class DeploymentGuardTests(unittest.TestCase):
         self.assertIn('Earlier installation steps may remain', result.stderr)
 
     def test_installer_body_is_captured_before_execution(self):
-        self.installer('printf "exit 99\\n" > install.sh\n'
+        self.installer('printf "exit 99\\n" > agent_monitor/runtime/install.sh\n'
                        'touch state/original-body-finished\n')
         result = self.install()
         self.assertNotEqual(result.returncode, 0)

@@ -2018,19 +2018,6 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertNotIn("filter-summary", html)
         self.assertNotIn('data-filter-control="machine"', (ROOT / "web" / "index.html").read_text())
 
-    def test_pivot_js_wires_filter_controls_to_url_and_api(self):
-        js = (ROOT / "web" / "pivot.js").read_text()
-
-        self.assertIn('filterNames = ["agent", "project", "model", "machine"]', js)
-        self.assertIn("applyFilterQuery()", js)
-        self.assertIn("syncFilterQuery()", js)
-        self.assertIn("selectedFilters()", js)
-        self.assertIn('query.get(name)', js)
-        self.assertIn('url.searchParams.set(name, value)', js)
-        self.assertNotIn('query.getAll(name)', js)
-        self.assertNotIn('url.searchParams.append(name, value)', js)
-        self.assertIn("Object.assign({ group_by, metric, range", js)
-
     def test_g4_status_surface_and_refresh_terminal_polling_are_present(self):
         overview = (ROOT / "web" / "index.html").read_text()
         explore = (ROOT / "web" / "explore.html").read_text()
@@ -2070,29 +2057,12 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn("汇集已纳入机器的会话", sessions)
         self.assertIn('id="filter-machine"', sessions)
 
-    def test_pivot_js_shortens_project_labels_but_keeps_full_title(self):
-        js = (ROOT / "web" / "pivot.js").read_text()
-
-        self.assertIn("displayLabel(value, dim)", js)
-        self.assertIn("projectDisplayLabel(value)", js)
-        self.assertIn("fullLabel", js)
-        self.assertIn("escapeHtml(value)", js)
-
     def test_explore_explains_codex_cost_estimates(self):
         html = (ROOT / "web" / "explore.html").read_text()
 
         self.assertIn("Codex 按已识别模型估算", html)
         self.assertIn("用量按已采集日志统计；费用仅汇总可计价记录，非服务商账单", html)
         self.assertIn("GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算", html)
-
-    def test_pivot_js_renders_explicit_empty_states(self):
-        js = (ROOT / "web" / "pivot.js").read_text()
-
-        self.assertIn("hasNoPivotData(data)", js)
-        self.assertIn("renderEmptyChart()", js)
-        self.assertIn("renderRanking(data, metric)", js)
-        self.assertIn("当前范围内无记录，请检查日期与筛选条件。", js)
-        self.assertIn('class="empty-state"', js)
 
     def test_usage_event_labels_do_not_call_codex_events_messages(self):
         sessions = (ROOT / "web" / "sessions.html").read_text()
@@ -2105,11 +2075,9 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         self.assertIn("integer(entries.length)", app)
         self.assertNotIn("integer(row.messages)", app)
 
-    def test_pivot_ranking_preserves_period_details_without_a_table(self):
-        js = (ROOT / "web" / "pivot.js").read_text()
-
-        self.assertIn('class="ranking-periods"', js)
-        self.assertIn("row.periods.map", js)
+    def test_pivot_has_no_legacy_table(self):
+        # Behavioral period/filter/label/empty-state checks run through the
+        # public route entry in web_routes.cjs, invoked below.
         self.assertNotIn("pivot-table", (ROOT / "web" / "explore.html").read_text())
 
 

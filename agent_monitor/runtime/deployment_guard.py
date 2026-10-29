@@ -220,9 +220,9 @@ def run_install(root, installer_args, *, preflight=None):
             head = preflight()
             verify_source(root, baseline)
             print(f'{root.name} source verified: main = origin/main = {head}', flush=True)
-        source = (root / 'install.sh').read_text()
+        source = (root / 'agent_monitor/runtime/install.sh').read_text()
         if source.count(BODY_MARKER) != 1:
-            raise GuardError('Installer guard entry is missing or ambiguous; restore the intended install.sh before retrying.')
+            raise GuardError('Installer guard entry is missing or ambiguous; restore agent_monitor/runtime/install.sh before retrying.')
         body = source.split(BODY_MARKER, 1)[1]
         verify_source(root, baseline)
         writable, filename = tempfile.mkstemp(prefix='.deployment-source-', dir=root / 'state')

@@ -296,9 +296,6 @@ class GenerationTests(unittest.TestCase):
             with self.assertRaisesRegex(MachineConfigError, "persistently retired"):
                 generation.admitted_generations(config_path=config_path, root=root)
 
-            uninstall = (Path(__file__).parents[1] / "uninstall.sh").read_text(encoding="utf-8")
-            self.assertIn("source + state/ kept", uninstall)
-            self.assertNotIn('rm -rf "$ROOT/state"', uninstall)
 
     def test_issue003_multi_machine_retirement_is_one_marker_commit_before_config(self):
         with tempfile.TemporaryDirectory() as tmp:

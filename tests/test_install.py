@@ -24,7 +24,7 @@ class RollupInstallerTests(unittest.TestCase):
         shutil.copytree(ROOT / "agent_monitor", self.component / "agent_monitor",
                         ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(ROOT / "install.sh", self.component / "install.sh")
-        installer = self.component / "install.sh"
+        installer = self.component / "agent_monitor/runtime/install.sh"
         installer.write_text(installer.read_text().replace(
             "0e2326c6868072bec1592760c6729043caeea2960a2b46cee6a2192aac6abff0",
             hashlib.sha256(b"fixture").hexdigest()))
@@ -33,8 +33,6 @@ class RollupInstallerTests(unittest.TestCase):
         shutil.copy2(ROOT / "status.sh", self.component / "status.sh")
         for name in ('agent_monitor/runtime/local_web.py', 'agent_monitor/runtime/process_identity.py'):
             shutil.copy2(ROOT / name, self.component / name)
-        (self.component / "lib").mkdir()
-        shutil.copy2(ROOT / "lib/install-output.sh", self.component / "lib/install-output.sh")
         for name in ("agent-monitor", "ip-check"):
             (self.component / name).write_text("#!/bin/sh\nexit 0\n")
             (self.component / name).chmod(0o755)

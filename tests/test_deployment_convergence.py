@@ -144,15 +144,19 @@ class ShellLifecycleTests(unittest.TestCase):
     def test_web_uninstall_keeps_foreign_cli_links(self):
         # The lifecycle command is isolated; this test exercises link ownership.
         (self.root / 'agent_monitor/runtime/hub.py').write_text('')
-        (self.root / 'agent-monitor').write_text('#!/bin/sh\nexit 0\n')
+        (self.root / 'agent_monitor/runtime/cli.sh').write_text('#!/bin/sh\nexit 0\n')
         link_dir = self.home / '.local/bin'
         link_dir.mkdir(parents=True)
         (link_dir / 'agent-monitor').symlink_to('/foreign/agent-monitor')
         (link_dir / 'ip-check').symlink_to(self.root / 'ip-check')
+        retained = self.root / 'state/generations/node-b/retired.json'
+        retained.parent.mkdir(parents=True)
+        retained.write_text('retained fixture')
         result = self.run_script('uninstall.sh', 'web')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((link_dir / 'agent-monitor').is_symlink())
         self.assertFalse((link_dir / 'ip-check').is_symlink())
+        self.assertEqual(retained.read_text(), 'retained fixture')
 
     def test_client_management_requires_explicit_local_target(self):
         (self.root / 'agent_monitor/runtime/hub.py').write_text("import sys\nprint('client' if sys.argv[1] == 'role' else 'http://fixture:39001')\n")
@@ -248,7 +252,7 @@ class ShellLifecycleTests(unittest.TestCase):
 
     def test_web_uninstall_preserves_links_when_stop_fails(self):
         (self.root / 'agent_monitor/runtime/hub.py').write_text('')
-        (self.root / 'agent-monitor').write_text('#!/bin/sh\necho "identity unverified" >&2\nexit 2\n')
+        (self.root / 'agent_monitor/runtime/cli.sh').write_text('#!/bin/sh\necho "identity unverified" >&2\nexit 2\n')
         self.executable('launchctl', '#!/bin/sh\nexit 113\n')
         link_dir = self.home / '.local/bin'
         link_dir.mkdir(parents=True)
@@ -261,7 +265,7 @@ class ShellLifecycleTests(unittest.TestCase):
 
     def test_connector_status_queries_loaded_state_without_plist(self):
         self.executable('uname', '#!/bin/sh\necho Darwin\n')
-        (self.root / 'agent-monitor').write_text('#!/bin/sh\necho "loaded owner unverified" >&2\nexit 2\n')
+        (self.root / 'agent_monitor/runtime/cli.sh').write_text('#!/bin/sh\necho "loaded owner unverified" >&2\nexit 2\n')
         result = self.run_script('status.sh', 'connector')
         self.assertEqual(result.returncode, 2)
         self.assertIn('loaded owner unverified', result.stderr)

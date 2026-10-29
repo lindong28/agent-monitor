@@ -19,11 +19,11 @@ Public shell commands and the documented Python adapters remain at the checkout 
 | Quota acquisition, recovery, views and remembered accounts | `agent_monitor/quota/` | `tests/test_quota_refresh.py`, `tests/test_quota_recovery_flow.py`, `tests/test_account_memory.py` |
 | Optional account actions and provider pause controls | `agent_monitor/accounts/` | `tests/test_codex_accounts.py`, `tests/test_account_lifecycle.py`, `tests/test_upstream_controls.py` |
 | Network policy, connector and diagnostics | `agent_monitor/network/`, `agent_monitor/diagnostics.py`, `proxy_runtime/`, `ip_check/` | `tests/test_network_policy.py`, `tests/test_client_network.py`, `tests/test_device_connection.py` |
-| HTTP and dashboard | `agent_monitor/http_server.py`, `agent_monitor/asset_delivery.py`, `web/` | `tests/test_http_delivery.py`, `tests/test_web_static.py`; [browser acceptance](../CONTRIBUTING.md#explicit-browser-and-connector-acceptance) |
+| HTTP and dashboard | `agent_monitor/http_server.py`, `agent_monitor/asset_delivery.py`, `web/` | `tests/test_http_delivery.py`, `tests/test_web_static.py`, `tests/web_routes.cjs`; [browser acceptance](../CONTRIBUTING.md#explicit-browser-and-connector-acceptance) |
 
 `agent_monitor/http_server.py` composes HTTP handlers with application views, account memory, quota view and collection coordinator. Overview, session and network query logic lives in `agent_monitor/views/`; session/conversation caches and network result caching belong to those view instances. The coordinator owns scheduling state and query-view admission; account memory owns its lock, deletion epochs and JSON persistence. `quota_sync.Manager` owns recovery exclusion and receipt acceptance/persistence; the HTTP handler keeps that exclusion through response delivery. Shared `file_io` primitives do not merge the distinct account-memory and quota-message durability sequences. Internal components receive dependencies instead of importing `agent_monitor/http_server.py`. `web/app.js` composes shared UI and page modules; see the frontend boundaries below. The [backend cost map](#backend-performance-checks) identifies distinct runtime consumers. `examples/` holds synthetic inputs and public configuration; `scripts/` holds explicit acceptance/measurement tools; `tests/fixtures/` holds test inputs. See [development checks](../CONTRIBUTING.md#choose-a-validation-entry) before running optional tools.
 
-Changes to SQLite connection entry points also require the connection and daily-rollup/ATTACH census tests in `tests/test_aggregators.py`. Classify a new or moved entry by its actual read/write, locking and unpublished-staging boundary; retain the domain's runtime tests as evidence for those semantics.
+Changes to SQLite connection entry points also require the connection and daily-rollup/ATTACH census tests in `tests/test_storage_source_boundaries.py`. Classify a new or moved entry by its actual read/write, locking and unpublished-staging boundary; retain the domain's runtime tests as evidence for those semantics. The census uses the registered application source inventory plus its explicit diagnostic tools, excluding runtime and vendor trees. Query-view and generation-GC tests share a plain snapshot fixture in `tests/fixtures/rollup_snapshot.py`; HTTP transport tests belong to `tests/test_http_delivery.py`.
 
 ### Where new code belongs
 
@@ -42,11 +42,11 @@ When moving code, migrate real consumers, preserve existing public entrypoints a
 
 ### Why files remain at the root
 
-Root files need a public invocation, bootstrap, shared contract, configuration or conventional repository purpose. Internal callers import the domain implementation directly, including when a thin public Python adapter exists.
+Root files need a public invocation, bootstrap, shared contract, configuration or conventional repository purpose. Ordinary internal imports use the domain implementation directly. The service manager deliberately executes `deploy.py` and `runtime_rebuild.py` as separate processes: these thin adapters establish the checkout import root, and runtime rebuild must run under an external interpreter that survives replacement of `.venv`.
 
 | Root group | Reason to retain these paths |
 | --- | --- |
-| `agent-monitor`, `ip-check`, `install.sh`, `start.sh`, `status.sh`, `stop.sh`, `uninstall.sh` | Public installation and operator commands. Substantive Python command handlers live in `agent_monitor/cli/`. |
+| `agent-monitor`, `ip-check`, `install.sh`, `start.sh`, `status.sh`, `stop.sh`, `uninstall.sh` | Public installation and operator commands. Shell dispatch and lifecycle implementations live in `agent_monitor/runtime/`; Python command handlers live in `agent_monitor/cli/`. |
 | `deploy.py`, `runtime_rebuild.py`, `upstream_controls.py` | Thin adapters for documented public invocations, including recovery with an external Python when the managed runtime is broken. |
 | `project_paths.py` | Checkout bootstrap shared by package and script consumers. |
 | `token_cost.py` | Byte-identical cross-project arithmetic contract with an established path. |
@@ -54,6 +54,8 @@ Root files need a public invocation, bootstrap, shared contract, configuration o
 | README, license, contribution/security policy, manifests and tool configuration | Conventional repository discovery and tooling; these are not implementation modules. |
 
 `agent_monitor/contracts/` contains dependency-light usage, identity and calendar rules. Ingestion, views, collection and domain packages keep their existing state ownership; moving files does not merge locks or persistence protocols. Package initialization stays lightweight. `file_io.py` provides shared file synchronization primitives, while `quota/quota_messages.py` owns private quota JSON publication. Existing `parsers/`, `ip_check/`, `proxy_runtime/` and `web/` retain their responsibilities. See [the package entrypoint decision](adr/20261028-9e4b-package-entrypoints.md), which supersedes the earlier root-retention rule.
+
+The root shell commands preserve their public names and forward to the runtime owner. `runtime/local_web.py` and the runtime shell scripts call that owner directly; launchd recipes retain the public command for compatibility. `deployment_guard.py` captures the marked body of `runtime/install.sh` under the deployment lock and verifies the source before and after execution. The captured body keeps the public installer path as `$0`, so checkout-relative paths remain stable. `runtime/install_output.sh` only writes optional ledger records to the inherited descriptor; human warnings and command exits belong to the installer.
 
 ### Paths are part of runtime identity
 

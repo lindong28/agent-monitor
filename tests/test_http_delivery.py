@@ -135,5 +135,45 @@ class DeliveryTests(unittest.TestCase):
                 self.assertEqual(self.request(path)[0], 404 if requested else 200)
 
 
+class PersistentHTTPTests(unittest.TestCase):
+    def test_keepalive_head_conditional_assets_errors_and_post_framing(self):
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        client = http.client.HTTPConnection(*httpd.server_address, timeout=3)
+        try:
+            client.request("GET", "/web/pivot.js")
+            response = client.getresponse()
+            body = response.read()
+            self.assertEqual(response.version, 11)
+            self.assertEqual(response.status, 200)
+            self.assertIn("app;dur=", response.getheader("Server-Timing"))
+            etag = response.getheader("ETag")
+            sock = client.sock
+            client.request("GET", "/web/pivot.js", headers={"If-None-Match": etag})
+            response = client.getresponse()
+            self.assertEqual(response.status, 304)
+            self.assertEqual(response.read(), b"")
+            self.assertIs(client.sock, sock)
+            client.request("HEAD", "/web/pivot.js")
+            response = client.getresponse()
+            self.assertEqual(response.getheader("Content-Length"), str(len(body)))
+            self.assertEqual(response.read(), b"")
+            client.request("GET", "/missing")
+            response = client.getresponse()
+            self.assertEqual(response.status, 404)
+            response.read()
+            client.request("POST", "/missing", body=b"unused-body")
+            response = client.getresponse()
+            self.assertEqual(response.getheader("Connection"), "close")
+            response.read()
+            self.assertIsNone(client.sock)
+        finally:
+            client.close()
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(3)
+
+
 if __name__ == "__main__":
     unittest.main()

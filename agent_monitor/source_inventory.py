@@ -54,7 +54,6 @@ def authority_pathspecs():
         ":(glob)*.py",
         *(f":(glob){name}/**" for name in PACKAGE_ROOTS),
         "pricing.json", "agent-monitor", "install.sh", "requirements.txt",
-        ":(glob)lib/**",
     )
 
 

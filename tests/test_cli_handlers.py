@@ -2,6 +2,8 @@
 import contextlib
 import importlib
 import io
+import json
+import shutil
 import os
 from pathlib import Path
 import subprocess
@@ -30,6 +32,33 @@ class CLIHandlerTests(unittest.TestCase):
                                             capture_output=True, timeout=10)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertIn("usage: agent-monitor", result.stdout)
+
+    def test_public_launcher_preserves_symlinks_arguments_and_caller_directory(self):
+        source = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory).resolve()
+            root = base / "checkout with spaces"
+            runtime = root / "agent_monitor/runtime"
+            runtime.mkdir(parents=True)
+            cli = root / "agent_monitor/cli"
+            cli.mkdir()
+            (runtime / "service_logs.py").write_text("def initialize(root): pass\n")
+            (cli / "export.py").write_text(
+                "import json, os, sys; print(json.dumps([os.getcwd(), sys.argv[1:]]))\n")
+            shutil.copy2(source / "agent-monitor", root / "agent-monitor")
+            shutil.copy2(source / "agent_monitor/runtime/cli.sh", runtime / "cli.sh")
+            link = base / "linked-cli"
+            link.symlink_to("checkout with spaces/agent-monitor")
+            env = {"PATH": os.environ["PATH"], "HOME": directory,
+                   "AGENT_MONITOR_PYTHON": sys.executable, "PYTHONDONTWRITEBYTECODE": "1"}
+            for entry in (root / "agent-monitor", link):
+                with self.subTest(entry=entry.name):
+                    result = subprocess.run([str(entry), "export", "--out", "relative path"],
+                                            cwd=base, env=env, capture_output=True,
+                                            text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout),
+                                     [str(base), ["--out", "relative path"]])
 
     def test_import_does_not_dispatch_commands_or_parse_arguments(self):
         names = (

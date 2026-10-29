@@ -11,7 +11,7 @@ from unittest import mock
 
 from agent_monitor.snapshots import generation
 from agent_monitor.snapshots import statistics_snapshot
-from tests import test_generation_gc as generation_fixtures
+from tests.fixtures.rollup_snapshot import make_generation_meta, make_rollup_snapshot
 
 
 class SnapshotContentionTests(unittest.TestCase):
@@ -24,14 +24,14 @@ class SnapshotContentionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             root = path / "generations"
-            first = generation_fixtures.GenerationGCTests.make_db(path / "first.db", 10)
+            first = make_rollup_snapshot(path / "first.db", 10)
             old = generation.publish_generation("node-b", first,
-                generation_fixtures.GenerationGCTests.make_meta(first, "2026-08-04T12:00:00Z"), root=root)
-            second = generation_fixtures.GenerationGCTests.make_db(path / "second.db", 20)
+                make_generation_meta(first, "2026-08-04T12:00:00Z"), root=root)
+            second = make_rollup_snapshot(path / "second.db", 20)
             with closing(sqlite3.connect(second)) as conn, conn:
                 conn.execute("CREATE TABLE test_payload (data BLOB)")
                 conn.execute("INSERT INTO test_payload VALUES (zeroblob(?))", (padding_bytes,))
-            meta = generation_fixtures.GenerationGCTests.make_meta(second, "2026-08-04T12:01:00Z")
+            meta = make_generation_meta(second, "2026-08-04T12:01:00Z")
             entered, release = threading.Event(), threading.Event()
             copy = generation.shutil.copyfile
 
@@ -65,22 +65,22 @@ class SnapshotContentionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             root = path / "generations"
-            first = generation_fixtures.GenerationGCTests.make_db(path / "first.db", 10)
+            first = make_rollup_snapshot(path / "first.db", 10)
             old = generation.publish_generation("node-b", first,
-                generation_fixtures.GenerationGCTests.make_meta(first, "2026-08-04T12:00:00Z"), root=root)
+                make_generation_meta(first, "2026-08-04T12:00:00Z"), root=root)
             abandoned = root / "node-b" / ".preparing-abandoned"
             abandoned.mkdir()
             (abandoned / "snapshot.db").write_bytes(b"partial")
             generation.gc_generations("node-b", root=root)
             self.assertFalse(abandoned.exists())
-            second = generation_fixtures.GenerationGCTests.make_db(path / "second.db", 20)
+            second = make_rollup_snapshot(path / "second.db", 20)
             def mutate(previous, candidate):
                 with Path(candidate).open("ab") as handle:
                     handle.write(b"modified after validation")
             with mock.patch.object(statistics_snapshot, "ensure_retained", side_effect=mutate):
                 with self.assertRaisesRegex(generation.GenerationValidationError, "changed before publication"):
                     generation.publish_generation("node-b", second,
-                        generation_fixtures.GenerationGCTests.make_meta(second, "2026-08-04T12:01:00Z"), root=root)
+                        make_generation_meta(second, "2026-08-04T12:01:00Z"), root=root)
             current = generation.read_current_generation("node-b", root=root)
             self.assertEqual(current.meta["generation_id"], old.meta["generation_id"])
             current.close()
@@ -91,11 +91,11 @@ class SnapshotContentionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             root = path / "generations"
-            first = generation_fixtures.GenerationGCTests.make_db(path / "first.db", 10)
-            meta = generation_fixtures.GenerationGCTests.make_meta(first, "2026-08-04T12:00:00Z")
+            first = make_rollup_snapshot(path / "first.db", 10)
+            meta = make_generation_meta(first, "2026-08-04T12:00:00Z")
             old = generation.publish_generation("node-b", first, meta, root=root)
-            second = generation_fixtures.GenerationGCTests.make_db(path / "second.db", 20)
-            meta = generation_fixtures.GenerationGCTests.make_meta(second, "2026-08-04T12:01:00Z")
+            second = make_rollup_snapshot(path / "second.db", 20)
+            meta = make_generation_meta(second, "2026-08-04T12:01:00Z")
             entered, release = threading.Event(), threading.Event()
             check = statistics_snapshot.ensure_retained
 
@@ -125,9 +125,9 @@ class SnapshotContentionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             root = path / "generations"
-            snapshots = [generation_fixtures.GenerationGCTests.make_db(path / (str(i) + ".db"), i * 10)
+            snapshots = [make_rollup_snapshot(path / (str(i) + ".db"), i * 10)
                          for i in range(1, 4)]
-            metas = [generation_fixtures.GenerationGCTests.make_meta(p, "2026-08-04T12:0%d:00Z" % i)
+            metas = [make_generation_meta(p, "2026-08-04T12:0%d:00Z" % i)
                      for i, p in enumerate(snapshots)]
             generation.publish_generation("node-b", snapshots[0], metas[0], root=root)
             check = statistics_snapshot.ensure_retained
@@ -148,9 +148,9 @@ class SnapshotContentionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)
             root = path / "generations"
-            first = generation_fixtures.GenerationGCTests.make_db(path / "first.db", 10)
+            first = make_rollup_snapshot(path / "first.db", 10)
             old = generation.publish_generation("node-b", first,
-                generation_fixtures.GenerationGCTests.make_meta(first, "2026-08-04T12:00:00Z"), root=root)
+                make_generation_meta(first, "2026-08-04T12:00:00Z"), root=root)
             with generation._READ_VALIDATIONS_LOCK:
                 generation._READ_VALIDATIONS.clear()
             entered, release = threading.Event(), threading.Event()
@@ -169,9 +169,9 @@ class SnapshotContentionTests(unittest.TestCase):
                     try:
                         self.assertTrue(entered.wait(5))
                         for i in (1, 2):
-                            snapshot = generation_fixtures.GenerationGCTests.make_db(path / (str(i) + ".db"), 20 + i)
+                            snapshot = make_rollup_snapshot(path / (str(i) + ".db"), 20 + i)
                             generation.publish_generation("node-b", snapshot,
-                                generation_fixtures.GenerationGCTests.make_meta(snapshot, "2026-08-04T12:0%d:00Z" % i), root=root)
+                                make_generation_meta(snapshot, "2026-08-04T12:0%d:00Z" % i), root=root)
                         self.assertTrue(old.db_path.exists(), "GC removed the generation during validation")
                     finally:
                         release.set()
