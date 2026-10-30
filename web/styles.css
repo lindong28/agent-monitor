@@ -536,6 +536,8 @@ button:disabled {
 .quota-recovery-panel textarea { width: 100%; box-sizing: border-box; margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink); background: var(--surface); font: inherit; }
 .codex-account-card > .note-disclosure { min-width: 0; grid-column: 1 / -1; }
 details > .disclosure-body { margin-top: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-left: 2px solid var(--line); background: var(--surface-sunken); overflow-wrap: anywhere; }
+details > .supplementary-body { border: 1px solid var(--line); border-radius: var(--r-sm); }
+.supplementary-body > .quota-recovery-panel { padding: 0; border: 0; border-radius: 0; background: transparent; }
 .disclosure-body > :first-child { margin-top: 0; }
 .disclosure-body > :last-child { margin-bottom: 0; }
 .account-detail-section + .account-detail-section { margin-top: var(--sp-5); padding-top: var(--sp-5); border-top: 1px solid var(--line); }
