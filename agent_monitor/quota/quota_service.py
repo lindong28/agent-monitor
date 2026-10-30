@@ -33,7 +33,7 @@ def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=Non
             result["codex"] = {**rate_limit_block(RateLimits(None, None, None, None)),
                                **{key: previous[key] for key in ("account_id", "account_label", "credential_plan", "signed_out") if key in previous},
                                "account_plan": previous.get("credential_plan"),
-                               "query_state": "unknown", "refresh_error": "跨账号恢复后，旧日志额度归属无法核实。"}
+                               "query_state": "unknown", "refresh_error": "共享或跨账号会话历史的旧日志额度归属无法核实。"}
         if links.errors and ((result.get("codex") or {}).get("quota_observation") or {}).get("source") != "active_query":
             result["codex"] = dict(result.get("codex") or {}, query_state="unknown", refresh_error=links.errors[0]["error"])
         managed = managed_codex_rate_limits(links)
@@ -82,7 +82,7 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
         from agent_monitor.accounts.upstream_controls import Controls
         if provider == "codex" and rejected_codex_cache and block is None:
             block = rate_limit_block(RateLimits(None, None, None, None), account)
-            block.update(query_state="unknown", refresh_error="跨账号恢复后，旧日志额度归属无法核实。", signed_out=account is None)
+            block.update(query_state="unknown", refresh_error="共享或跨账号会话历史的旧日志额度归属无法核实。", signed_out=account is None)
         if provider == "codex" and links.errors and (not block or (block.get("quota_observation") or {}).get("source") != "active_query"):
             block = block or rate_limit_block(RateLimits(None, None, None, None), account)
             block["refresh_error"] = links.errors[0]["error"]
@@ -231,7 +231,8 @@ def managed_codex_rate_limits(session_links=None):
             continue
         account = accounts.Account(profile.account["account_id"], profile.account["email"], None)
         values = [codex.load_rate_limits(profile.home / child, profile.home / "state_5.sqlite", session_links=links)
-                  for child in ("sessions", "archived_sessions")]
+                  for child in ("sessions", "archived_sessions")
+                  if not codex_profiles.shared_source(profile.home / child)]
         value = max((v for v in values if v is not None), key=lambda v: v.updated_at, default=None)
         block = rate_limit_block(value or RateLimits(None, None, None, None), account)
         block.update(account_profile=profile.account["name"], signed_out=False, query_state="passive")

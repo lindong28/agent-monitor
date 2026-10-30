@@ -1,5 +1,7 @@
 from agent_monitor.quota import quota_service
 import contextlib
+import builtins
+import io
 import json
 import os
 from pathlib import Path
@@ -22,6 +24,7 @@ from agent_monitor.ingestion.usage_archive import UsageArchive
 
 class ManagedCodexTests(unittest.TestCase):
     def setUp(self):
+        real_home = Path.home()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -35,6 +38,21 @@ class ManagedCodexTests(unittest.TestCase):
                               ("parsers.claude._get_claude_dirs", None)):
             self.stack.enter_context(mock.patch(target, return_value=[]) if value is None else mock.patch(target, value))
         self.registry = self.root / ".local/share/codex-accounts"
+        protected = [(real_home / child).resolve() for child in (".codex", ".claude", ".local/share/codex-accounts")]
+
+        def guarded(original):
+            def call(path, *args, **kwargs):
+                if isinstance(path, (str, bytes, os.PathLike)):
+                    resolved = Path(os.fsdecode(path)).resolve()
+                    if any(resolved == root or root in resolved.parents for root in protected):
+                        raise AssertionError("test attempted real provider access")
+                return original(path, *args, **kwargs)
+            return call
+
+        for module, name in ((builtins, "open"), (io, "open"), (os, "scandir"), (os, "listdir"), (sqlite3, "connect")):
+            self.stack.enter_context(mock.patch.object(module, name, guarded(getattr(module, name))))
+        with self.assertRaisesRegex(AssertionError, "real provider access"):
+            open(real_home / ".codex" / "guard-positive-control")
 
     def profile(self, name, identity=True):
         home = self.registry / name
@@ -81,6 +99,76 @@ class ManagedCodexTests(unittest.TestCase):
                 self.assertEqual(rows[name]["account"]["email"], name + "@example.test")
                 detail = server.session_detail(name, query={"range": ["all"]}, views=views)
                 self.assertEqual(detail["meta"]["account"], rows[name]["account"])
+
+    def test_shared_roots_do_not_duplicate_usage_or_bind_passive_quota(self):
+        self.session(self.default, "shared", 7, 91)
+        self.session(self.default, "archived", 11, 92, archived=True)
+        for name in ("alpha", "beta"):
+            home = self.profile(name)
+            home.mkdir()
+            for child in ("sessions", "archived_sessions"):
+                (home / child).symlink_to(self.default / child)
+        self.session(self.profile("legacy"), "legacy", 13, 23)
+        sources = codex_profiles.sources()
+        self.assertEqual(len(sources), 4)
+        self.assertEqual(len({path.resolve() for path, _, _ in sources}), 4)
+        entries, errors = self.collect()
+        self.assertEqual(errors, [])
+        self.assertEqual(sum(e.input_tokens for e in entries), 31)
+        rows = {r["session_id"]: r for r in entries.session_metadata}
+        for sid in ("shared", "archived"):
+            self.assertIsNone(rows[sid]["account"])
+        self.assertEqual(rows["legacy"]["account"]["name"], "legacy")
+        blocks = {b["account_profile"]: b for b in quota_service.managed_codex_rate_limits()}
+        for name in ("alpha", "beta"):
+            self.assertIsNone(blocks[name]["five_hour_pct"])
+        self.assertEqual(blocks["legacy"]["five_hour_pct"], 23)
+
+    def test_default_quota_and_cache_do_not_attribute_shared_history(self):
+        sid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        self.session(self.default, sid, 7, 91)
+        account = quota_service.accounts.Account("default-id", "default@example.test", None)
+        with mock.patch.object(quota_service.accounts, "codex_account", return_value=account), \
+             mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
+             mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=None), \
+             mock.patch.object(quota_service.quota_refresh, "load_rate_limits", side_effect=AssertionError("no provider")):
+            native = quota_service.rate_limits(root=self.root)["codex"]
+            self.assertEqual(native["five_hour_pct"], 91)
+            home = self.profile("work")
+            home.mkdir()
+            (home / "sessions").symlink_to(self.default / "sessions")
+            for mapped in (False, True):
+                if mapped:
+                    links = self.registry / "session-links"
+                    links.mkdir()
+                    (links / (sid + ".json")).write_text(json.dumps({"schema_version": 2,
+                        "storage_account": "default", "last_selected_account": "work", "account_names": ["work"]}))
+                with self.subTest(mapped=mapped):
+                    for cached in (None, native, dict(native, quota_observation={"source": "active_query"})):
+                        with mock.patch.object(quota_service, "read_cache", return_value={"codex": cached} if cached else {}):
+                            block = quota_service.rate_limits(root=self.root, use_cache=True)["codex"]
+                        expected = 91 if cached and cached.get("quota_observation", {}).get("source") == "active_query" else None
+                        self.assertEqual(block.get("five_hour_pct"), expected)
+
+    def test_session_link_versions_and_invalid_records(self):
+        root = self.registry / "session-links"
+        root.mkdir(parents=True)
+        sid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        path = root / (sid + ".json")
+        for version, names, invalid in ((1, ["default"], False), (1, ["alpha"], True),
+                                         (2, ["alpha"], False), (2, ["alpha", "beta"], False)):
+            with self.subTest(version=version, names=names):
+                path.write_text(json.dumps({"schema_version": version, "storage_account": "default",
+                                           "last_selected_account": names[-1], "account_names": names}))
+                links = codex_profiles.session_links()
+                self.assertEqual(bool(links.errors), invalid)
+                self.assertEqual(links.excludes(sid), invalid or len(names) > 1)
+        for value in ("not-json", "[]", json.dumps({"schema_version": 2, "storage_account": "default",
+                      "last_selected_account": "beta", "account_names": ["alpha"]})):
+            path.write_text(value)
+            links = codex_profiles.session_links()
+            self.assertTrue(links.excludes(sid))
+            self.assertTrue(links.errors)
 
     def test_passive_quota_reaches_existing_accounts_consumer(self):
         for name, used in (("alpha", 21), ("beta", 82)):

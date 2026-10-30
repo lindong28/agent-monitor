@@ -532,6 +532,8 @@ def load_rate_limits(sessions_dir=None, state_db=None, *, session_links=None, so
     if links.unavailable:
         return None
     sessions_path = Path(sessions_dir or SESSIONS_DIR)
+    if links.shared_store and codex_profiles.shared_source(sessions_path):
+        return None
     if not sessions_path.is_dir():
         return None
 

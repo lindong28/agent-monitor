@@ -12,24 +12,27 @@ class SessionLinks:
     excluded: frozenset = frozenset()
     unavailable: bool = False
     errors: tuple = ()
+    shared_store: bool = False
 
     def excludes(self, session_id):
         return self.unavailable or session_id in self.excluded or (bool(self.excluded) and not session_id)
 
     @property
     def signature(self):
-        return self.unavailable, tuple(sorted(self.excluded))
+        return self.unavailable, tuple(sorted(self.excluded)), self.shared_store
 
     def apply(self, rows):
         return [dict(row, account=None) if row["agent_id"] == "codex" and self.excludes(row["session_id"])
                 else row for row in rows]
 
     def accepts_cached_quota(self, block):
-        if not block or not (self.unavailable or self.excluded):
+        if not block or not (self.unavailable or self.excluded or self.shared_store):
             return True
         observation = block.get("quota_observation") or {}
         if observation.get("source") == "active_query":
             return True
+        if self.shared_store:
+            return False
         sid = observation.get("session_id")
         return bool(sid) and not self.excludes(sid)
 
@@ -70,11 +73,14 @@ def session_links(root=None, source_errors=None):
                 raise ValueError("symlink record")
             value = json.loads(path.read_text())
             names = value.get("account_names")
-            if (type(value.get("schema_version")) is not int or value["schema_version"] != 1
+            if (type(value.get("schema_version")) is not int or value["schema_version"] not in (1, 2)
                     or not isinstance(names, list) or not names
                     or any(not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", name) for name in names)
                     or len(set(names)) != len(names)
-                    or value.get("storage_account") not in names or value.get("last_selected_account") not in names):
+                    or not isinstance(value.get("storage_account"), str)
+                    or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", value["storage_account"])
+                    or (value["schema_version"] == 1 and value["storage_account"] not in names)
+                    or value.get("last_selected_account") not in names):
                 raise ValueError("invalid session link")
             if len(names) > 1:
                 excluded.add(sid)
@@ -83,7 +89,10 @@ def session_links(root=None, source_errors=None):
             error(path)
     if source_errors is not None:
         source_errors.extend(errors)
-    return SessionLinks(frozenset(excluded), unavailable, tuple(errors))
+    shared_store = any(shared_source(profile.home / child)
+                       for profile in discover(root.parent, source_errors=source_errors)
+                       for child in ("sessions", "archived_sessions"))
+    return SessionLinks(frozenset(excluded), unavailable, tuple(errors), shared_store)
 
 
 @dataclass(frozen=True)
@@ -127,11 +136,27 @@ def discover(root=None, source_errors=None):
     return result
 
 
+def shared_source(path):
+    """A shared rollout directory has no account-level attribution."""
+    from . import codex
+    default = Path(codex.SESSIONS_DIR)
+    return Path(path).resolve() in {default.resolve(), (default.parent / "archived_sessions").resolve()}
+
+
 def sources(source_errors=None):
     from . import codex
     # Keep the existing constants patchable by isolated parser/collector tests.
-    result = [(Path(codex.SESSIONS_DIR), Path(codex.STATE_DB), None)]
+    default = Path(codex.SESSIONS_DIR)
+    result, seen = [], set()
+    for path in (default, default.parent / "archived_sessions"):
+        if path.resolve() not in seen:
+            result.append((path, Path(codex.STATE_DB), None))
+            seen.add(path.resolve())
     for profile in discover(source_errors=source_errors):
         for child in ("sessions", "archived_sessions"):
-            result.append((profile.home / child, profile.home / "state_5.sqlite", profile.account))
+            path = profile.home / child
+            if path.resolve() in seen:
+                continue
+            seen.add(path.resolve())
+            result.append((path, profile.home / "state_5.sqlite", profile.account))
     return result
