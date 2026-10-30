@@ -24,9 +24,12 @@ class PythonEntrypointTests(unittest.TestCase):
         for action, module in (('deploy', 'agent_monitor.runtime.deploy'),
                                ('rebuild-runtime', 'agent_monitor.runtime.runtime_rebuild')):
             with self.subTest(action=action), self.context('management') as (_, caller, record, environment):
-                arguments = ['--expect', 'synthetic'] if action == 'deploy' else ['--python', sys.executable]
-                def execute(python, command):
-                    self.assertEqual(python, sys.executable)
+                # CI runs this test from the checkout's .venv. Rescue must use
+                # its base interpreter, which survives replacing that runtime.
+                python = sys.executable if action == 'deploy' else str(Path(sys.executable).resolve())
+                arguments = ['--expect', 'synthetic'] if action == 'deploy' else ['--python', python]
+                def execute(executable, command):
+                    self.assertEqual(executable, python)
                     result = subprocess.run(self.probe_command(command, module), capture_output=True,
                                             text=True, timeout=10)
                     self.assertEqual(result.returncode, 0, result.stderr)
