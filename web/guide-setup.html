@@ -77,6 +77,9 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
           <p>若快照不可读或更新时间未变化，先查看采集详情中的错误，再检查对应配置与连接。</p>
           <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>Hub 负责拉取快照；采集器独立保存各机数据。开始前，确认 Hub 能通过 SSH 连接各采集器。</p><ol><li>首次配置时，将 <code>config/hub.json</code> 复制为 <code>config/hub.local.json</code>，填写 Hub、URL 和采集机器；在 <code>config/machines.local.json</code> 中配置匹配的机器名称与 SSH 目标。已有本地配置时直接编辑，不覆盖；根目录旧配置仍受支持，同一配置只保留一个覆盖位置。保留机器身份和退休记录，改变配置位置后重启相关服务。</li><li>在每台机器的代码目录中运行以下命令。将占位符替换为该机器在配置中的名称。</li></ol>
           <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div><p>安装后，进入 Hub 的「采集与诊断」，逐台核对机器名称、纳入状态与数据更新时间。显示旧快照时，按该机器的错误继续排查。</p></details>
+          <h3>在网络页查看本机 Agent</h3>
+          <p>若浏览器与服务端不在同一电脑，请先在浏览器电脑上从 <a href="https://github.com/lindong28/agent-monitor#requirements" target="_blank" rel="noopener noreferrer">公开安装指南</a>安装项目。以启动 Codex/Claude 的同一用户，运行网络页给出的 <code>agent-monitor connect --server URL</code>，保持终端打开，再点击「读取本机 Agent」。无需访问服务商账号文件。</p>
+          <p>已有连接器更新后，托管服务运行 <code>agent-monitor connect restart</code>；前台连接器停止后重跑原命令。允许此可信页面的本机弹窗。网络页将进程配置、当前连接与固定目标探测分开，服务端诊断另行展开；它们都不是日期范围内的历史统计。</p>
           <p>完整命令、无账号示例与服务迁移见代码目录中的 <code>README.md</code> 和 <code>docs/public-usage.md</code>。</p>
         </section>
         </article>

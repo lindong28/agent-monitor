@@ -1,0 +1,11 @@
+# Local agent network observations
+
+2026-10-30: Add an on-demand local process report to the existing network page. Reuse the connector loopback popup with exact configured origin, nonce and window identity checks; keep the report in the browser, without persisting it or sending it through the Hub. Preserve the existing server diagnostic API and account forwarding behavior.
+
+Collect only the current OS user's native Codex/Claude and recognized Node CLI entrypoints. Keep process instance identity, observation time, redacted startup network settings and current TCP peers distinct. Startup settings do not establish runtime routing; a socket peer or proxy name does not establish public egress. Missing observations stay unknown and do not close the broader process-equivalence goal.
+
+This reuses the publicly installed connector rather than adding a daemon, routing actual agent traffic through monitor, or storing process reports on the Hub. The existing connector still requires a reachable configured server and its system proxy runtime. Document this prerequisite, upgrade/restart and failure recovery through the existing public installation and connect commands on macOS/Linux; preserve identities, state symlinks and unrelated account behavior.
+
+Independent decision review passed seven criteria. Implementation, privacy boundaries, platform collection, browser consumption, lifecycle and public adoption remain to be verified; the decision is not an egress verification receipt. Task evidence is under the contribution guide's task-artifacts entry, task 20261030-process-network-4c42.
+
+Follow-up decision: provide an explicit fixed-target probe through a uniquely identified startup proxy that matches a current process socket, after rechecking the process instance. Keep that receipt separate from the actual agent's unverified public egress; a fixed domain does not establish this process's service target or authentication mode. No provider credentials, redirects, retries, direct fallback or automatic probing. Preserve per-instance/target cooldown and Retry-After. Ambiguous routing, bypass rules, changed instances and custom endpoints do not trigger requests. Independent review corrected the initial target attribution and accepted this scope; local validation proceeds, while live upstream validation requires its specific approval.

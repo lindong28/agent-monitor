@@ -43,9 +43,10 @@ usage() {
   echo "Service management: agent-monitor service {status|restart local-web|restart hub|restart collector|restart connector|deploy [--expect SHA]|rebuild-runtime --python /absolute/python}"
   echo "Local dashboard: agent-monitor local {start|stop|restart|status|open}"
   echo "Component status: agent-monitor service status [web|rollup-daemon|connector]"
+  echo "Local Agent network: agent-monitor process-network [--json] (read-only process observations)"
   echo "Provider holds: agent-monitor upstream-holds {status|resume} {claude|codex} [--pause-id ID]"
   echo "Quota pause status and approved recovery: agent-monitor quota-recover --help"
-  echo "usage: agent-monitor {start|stop|restart|status|open|refresh|connect [install --server URL|status|stop|restart|--server URL]|network [--json] [--force]|session-quota SESSION_ID [--json]|export (--out PATH|--version)|machines (accept NAME [--yes]|retire NAME...)|rollup [--check [--json]|adopt-timezone|blockers|recover|recover-reviewed]}"
+  echo "usage: agent-monitor {start|stop|restart|status|open|refresh|connect [install --server URL|status|stop|restart|--server URL]|process-network [--json]|network [--json] [--force]|session-quota SESSION_ID [--json]|export (--out PATH|--version)|machines (accept NAME [--yes]|retire NAME...)|rollup [--check [--json]|adopt-timezone|blockers|recover|recover-reviewed]}"
 }
 
 is_running() {
@@ -350,6 +351,10 @@ case "${1:-}" in
   connect)
     shift
     exec "${PYTHON_MODULE[@]}" agent_monitor.network.client_connector "$@"
+    ;;
+  process-network)
+    shift
+    exec "${PYTHON_MODULE[@]}" agent_monitor.network.process_network "$@"
     ;;
   export)
     shift

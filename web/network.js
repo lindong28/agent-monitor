@@ -3,14 +3,18 @@
   if (typeof module === "object" && module.exports) module.exports = factory;
   else (root.AgentMonitorModules ||= {}).network = factory;
 })(typeof window === "undefined" ? globalThis : window, function createNetwork(dependencies) {
-  const { platform, qs, updateNavLinks, api, withRefresh, formatDate, escapeHtml } = dependencies;
+  const { platform, qs, updateNavLinks, api, withRefresh, formatDate, escapeHtml, onPageCleanup } = dependencies;
   const { window, document } = platform;
   async function initNetwork() {
+    let active = true;
+    onPageCleanup?.(() => { active = false; });
     async function load(force) {
       try {
         const data = await api("/api/network", force ? { force: "1" } : {});
+        if (!active) return;
         renderNetwork(data, () => load(true));
       } catch (error) {
+        if (!active) return;
         renderNetwork({
           error: error && error.message ? error.message : String(error),
           verdict: "unknown",
@@ -22,7 +26,121 @@
       refresh.addEventListener("click", () => withRefresh(refresh, () => load(true)));
     }
     updateNavLinks();
-    await load(false);
+    if (qs("#process-network")) {
+      initProcessNetwork();
+      const server = qs("#server-network");
+      server?.addEventListener("toggle", () => {
+        if (server.open && !server.dataset.loaded) {
+          server.dataset.loaded = "1";
+          load(false);
+        }
+      });
+    } else {
+      await load(false);
+    }
+  }
+
+  function initProcessNetwork() {
+    const button = qs("#process-network-refresh"), status = qs("#process-network-status");
+    const select = qs("#process-network-select"), result = qs("#process-network-result");
+    const help = qs("#process-network-help"), cancel = qs("#process-network-cancel");
+    const probeButton = qs("#process-network-probe"), probeHelp = qs("#process-network-probe-help");
+    qs("#process-network-command").textContent = `agent-monitor connect --server '${window.location.origin.replaceAll("'", "'\\''")}'`;
+    let report = null, pending = null;
+    onPageCleanup?.(() => pending?.finish("页面已离开，本次读取已取消。"));
+    function render() {
+      const item = report?.processes?.[Number(select.value)];
+      if (!item) { result.textContent = ""; return; }
+      probeButton.hidden = !item.instance;
+      probeHelp.hidden = !item.instance;
+      probeHelp.textContent = `可主动通过该进程当前连接的代理，向固定目标 https://${item.agent === "codex" ? "chatgpt.com" : "api.anthropic.com"}/cdn-cgi/trace 发出一次匿名诊断请求。无账号认证、无重试；目标不一定是此进程实际使用的服务。绕过规则、配置冲突或连接无法核实时不发送。`;
+      const errors = (item.errors || []).map(e => `${e.stage}: ${e.type}`).join("；");
+      result.innerHTML = [
+        kvRow("进程实例", escapeHtml(item.instance || "未取得；进程可能已退出或无权读取")),
+        kvRow("公网出口 IP / 地区", "未核实；当前 TCP 对端可能只是代理或服务器，不能当作公网出口。"),
+        item.probe ? '<h3>固定目标探测回执</h3>' + [
+          kvRow("探测目标 / 代理", `${escapeHtml(item.probe.host || "未发出")} / ${escapeHtml(item.probe.proxy_address || "未确认")}`),
+          kvRow("此次探测 IP / 地区", `${escapeHtml(item.probe.ip || "未取得")} / ${escapeHtml(item.probe.country_code || "未取得")}`),
+          kvRow("观测 / 缓存", `${escapeHtml(item.probe.observed_at ? formatDate(new Date(item.probe.observed_at * 1000).toISOString()) : "未记录")} · ${item.probe.cached ? "复用回执" : "本次结果"}`),
+          `<p class="scope-note">此结果仅属于上述目标的匿名探测，不代表 Agent 已发生的请求。${item.probe.process_still_matches === false ? "探测结束时进程或连接已改变。" : ""}${item.probe.retry_after_seconds ? ` 最早 ${Number(item.probe.retry_after_seconds)} 秒后可重新探测；此前点击只读取缓存。` : ""}</p>`,
+          item.probe.error ? `<p class="error">${escapeHtml(item.probe.error)}</p>` : "",
+        ].join("") : "",
+        '<h3>当前 TCP 连接</h3>',
+        item.connections_status === "observed"
+          ? (item.connections?.length ? item.connections.map(c => kvRow(escapeHtml(c.state), `${escapeHtml(c.local)} → ${escapeHtml(c.peer)}`)).join("")
+            : '<p>本次未观察到已建立的 TCP 连接；不代表进程没有联网，也不代表直连。</p>')
+          : '<p>连接信息未取得。</p>',
+        '<h3>启动网络配置</h3>',
+        '<p class="scope-note">来自该进程的启动环境；不读取账号或配置文件。客户端配置覆盖、运行中变更、DNS 和 UDP 路径未核实。未设置环境代理不代表没有系统代理、VPN 或透明代理。</p>',
+        ...Object.entries(item.environment || {}).map(([key, value]) => kvRow(key,
+          escapeHtml(value.address ?? value.value ?? "未取得/格式无法展示") + (value.credentials_present ? "（认证信息已隐藏）" : ""))),
+        !Object.keys(item.environment || {}).length ? `<p>${item.environment_status === "startup_snapshot" ? "启动环境中未发现支持的网络字段。" : "启动环境未取得或为空。"}</p>` : "",
+        errors ? `<p class="error">部分采集失败：${escapeHtml(errors)}</p>` : "",
+      ].join("");
+    }
+    select.addEventListener("change", render);
+    cancel.addEventListener("click", () => pending?.finish(pending.probing ? "已停止等待；已发出的探测可能仍在完成，冷却期间不会重复请求。" : "已取消读取；未更新本机报告。"));
+    button.addEventListener("click", () => collect(false));
+    probeButton.addEventListener("click", () => collect(true));
+    function collect(probing) {
+      if (pending) return;
+      const item = report?.processes?.[Number(select.value)];
+      if (probing && !item?.instance) return;
+      if (!probing) {
+        report = null; result.textContent = ""; select.innerHTML = '<option>正在读取…</option>';
+        probeButton.hidden = true; probeHelp.hidden = true;
+      }
+      select.disabled = true;
+      const nonce = [...window.crypto.getRandomValues(new Uint8Array(16))].map(n => n.toString(16).padStart(2, "0")).join("");
+      const path = probing ? `process-network-probe?pid=${Number(item.pid)}&instance=${encodeURIComponent(item.instance)}&` : "process-network?";
+      const popup = window.open(`http://127.0.0.1:39002/${path}origin=${encodeURIComponent(window.location.origin)}&nonce=${nonce}`, "agent-monitor-process-network", "width=520,height=240");
+      if (!popup) { status.textContent = "浏览器阻止了连接窗口。请允许弹窗后重试。"; if (!probing) select.innerHTML = '<option>未取得本机报告</option>'; select.disabled = !report?.processes?.length; help.open = true; return; }
+      status.textContent = probing ? "正在核对进程与代理并探测固定目标…" : "正在读取浏览器所在电脑的 Agent 进程…";
+      button.disabled = true; probeButton.disabled = true; cancel.hidden = false;
+      const attempt = { probing, finish(error, data) {
+        if (pending !== attempt) return;
+        pending = null; window.clearTimeout(attempt.timer);
+        window.removeEventListener("message", receive); window.removeEventListener("pagehide", leave);
+        popup.close(); button.disabled = false; probeButton.disabled = false; cancel.hidden = true;
+        select.disabled = !report?.processes?.length;
+        if (error) {
+          status.textContent = error; if (!probing) select.innerHTML = '<option>未取得本机报告</option>'; help.open = true;
+          return;
+        }
+        if (probing) {
+          item.probe = data; status.textContent = `本机 ${report.host} · 进程快照 ${formatDate(report.observed_at)} · 固定目标探测已返回，详情见回执。`;
+          render(); return;
+        }
+        report = data;
+        status.textContent = `本机 ${data.host} · 观测于 ${formatDate(data.observed_at)} · ${data.processes.length} 个进程。此为一次性快照，进程和连接可能随后变化。`;
+        if (data.errors?.length) status.textContent += " 采集不完整：" + data.errors.map(e => `${e.stage}/${e.type}`).join("；");
+        select.innerHTML = data.processes.map((p, i) => `<option value="${i}">${escapeHtml(p.agent)} · PID ${Number(p.pid)}</option>`).join("") || '<option>未发现可识别进程</option>';
+        select.disabled = !data.processes.length;
+        if (!data.processes.length) result.textContent = "请以启动 Codex/Claude 的同一操作系统用户运行连接器。仅覆盖本机原生进程和已识别的 Node CLI 入口；SSH、容器内及其他用户的进程不属于此报告。";
+        else render();
+      }};
+      function receive(event) {
+        if (event.origin !== "http://127.0.0.1:39002" || event.source !== popup || event.data?.nonce !== nonce) return;
+        if (probing && event.data.type === 'agent-monitor-probe-ready') {
+          popup.postMessage({type: 'agent-monitor-probe-ack', nonce}, event.origin); return;
+        }
+        if (event.data.type !== (probing ? "agent-monitor-process-network-probe" : "agent-monitor-process-network")) return;
+        if (event.data.error) { attempt.finish(String(event.data.error)); return; }
+        if (probing) {
+          if (event.data.probe?.instance !== item.instance) { attempt.finish("探测回执的进程实例不匹配。"); return; }
+          attempt.finish(null, event.data.probe); return;
+        }
+        const data = event.data.report;
+        if (data?.schema_version !== 1 || typeof data.host !== "string" || !Array.isArray(data.processes)) {
+          attempt.finish("本机报告格式不兼容，请更新并重启连接器。"); return;
+        }
+        attempt.finish(null, data);
+      }
+      function leave() { attempt.finish("页面已离开，本次读取已取消。"); }
+      pending = attempt;
+      window.addEventListener("message", receive); window.addEventListener("pagehide", leave, {once: true});
+      attempt.timer = window.setTimeout(() => attempt.finish("未收到本机报告。请检查连接器是否运行、版本是否已更新，以及是否允许弹窗；不会改用服务端结果。"), probing ? 26000 : 18000);
+    }
   }
 
   function renderNetwork(data, retry) {
@@ -217,7 +335,7 @@
         ? "执行主机的系统代理，按每个目标解析"
         : data.proxy_effective?.source === "published" ? "旧记录：个人代理文件指定" : "旧记录未保存有效系统策略"),
       kvRow("环境变量", sectionMessage(data, "proxy_envs") ? escapeHtml(sectionMessage(data, "proxy_envs")) : envs),
-      `<p class="scope-note">环境变量读自服务进程，不代表请求实际选用的代理。${data.proxy_effective?.source === "system" ? "账号操作与探测采用同一系统策略，目标不同仍可能使用不同出口。" : "这条旧记录不能确认当前账号请求的出口。"}</p></div>`,
+      `<p class="scope-note">这里是诊断子进程的代理变量，内部代理桥已隐藏；不代表服务原始环境或本机 Agent 的配置。${data.proxy_effective?.source === "system" ? "诊断使用服务端系统策略，目标不同仍可能使用不同出口。" : "这条旧记录不能确认当前请求的出口。"}</p></div>`,
     ].join("");
   }
 

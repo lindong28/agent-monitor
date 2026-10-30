@@ -10,6 +10,7 @@ from urllib.parse import urlsplit, parse_qs
 import argparse
 import os
 import pwd
+import re
 
 # Reject accidental discovery of the operator provider roots, including aliases.
 _REAL_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
@@ -42,6 +43,24 @@ def main():
     state = dict(disclosure=False, mode='mixed', delay=0, starts=[], previews=0, paused=False,
                  pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
                  pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause', recovery_state='ready')
+    state.update(process_reads=0, server_reads=0)
+    from agent_monitor.network import process_network
+    def process_report():
+        state['process_reads'] += 1
+        return dict(schema_version=1, host='fixture-browser-device', observed_at='2026-10-30T00:00:00Z', errors=[], processes=[
+            dict(agent=name, pid=100+i, instance=f'{100+i}:123', environment_status='startup_snapshot',
+                 environment={'HTTPS_PROXY':dict(address=f'http://proxy-{name}.test:8080')},
+                 connections_status='observed', connections=[dict(local=f'127.0.0.1:{4000+i}', peer=f'127.0.0.1:{5000+i}', state='ESTABLISHED')])
+            for i, name in enumerate(('codex', 'claude'))])
+    process_network.read_report = process_report
+    network_html = re.sub(r'<script\b[^>]*>.*?</script>', '', (ROOT / 'web/network.html').read_text(), flags=re.S)
+    network_html = network_html.replace('</body>', '''<script src="/web/network.js"></script><script>
+      window.AgentMonitorModules.network({platform:{window,document}, qs:s=>document.querySelector(s),
+        updateNavLinks:()=>{}, api:async url=>{const r=await fetch(url);return r.json()},
+        withRefresh:(_,fn)=>fn(),formatDate:String,
+        escapeHtml:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),
+        onPageCleanup:()=>{}}).initNetwork();
+      </script></body>''')
     def pause():
         return dict(id=state['pause_id'], at=1793004570, failure=dict(detail='Synthetic RPC failure', stage='quota_read', rpc_code=-32603), **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
     def quota():
@@ -92,9 +111,14 @@ def main():
         def do_GET(self):
             if self.path == '/':
                 self.send(html.encode(), 'text/html; charset=utf-8')
-            elif self.path in ('/web/styles.css', '/web/codex-accounts.js', '/web/account-egress.js', '/web/quota.js'):
+            elif self.path == '/network':
+                self.send(network_html.encode(), 'text/html; charset=utf-8')
+            elif self.path == '/api/network':
+                state['server_reads'] += 1
+                self.send(dict(checked_host='fixture-server-device', error='Synthetic server unavailable', verdict='unknown'))
+            elif self.path in ('/web/styles.css', '/web/codex-accounts.js', '/web/account-egress.js', '/web/quota.js', '/web/network.js'):
                 body = (ROOT / self.path.lstrip('/')).read_bytes()
-                if self.path.endswith('/codex-accounts.js'):
+                if self.path.endswith(('/codex-accounts.js', '/network.js')):
                     body = body.replace(b'127.0.0.1:39002', f'127.0.0.1:{pair.server_port}'.encode())
                 self.send(body, 'text/css' if self.path.endswith('.css') else 'text/javascript')
             elif self.path == '/api/codex-accounts':
@@ -211,6 +235,16 @@ def main():
     route = client_network.hub.register('fixture-browser-device')
     connector = Connector.__new__(Connector)
     connector.server, connector.stopped = origin, threading.Event()
+    connector.process_report_lock = threading.Lock()
+    connector.guard = threading.Lock()
+    connector.process_probe_tickets = {}
+    class SyntheticProbe:
+        def read(self, pid, instance):
+            state['process_probes'] = state.get('process_probes', 0) + 1
+            return dict(instance=instance, host='api.anthropic.com', proxy_address='http://proxy-claude.test:8080',
+                        ip='8.8.8.8', country_code='SG', observed_at=time.time(), cached=False,
+                        evidence='fixed_target_probe_via_observed_proxy', process_still_matches=True)
+    connector.process_probe_cache = SyntheticProbe()
     connector.registration = {'connection': {'id': route.id, 'capability': route.browser, 'label': route.label}}
     class Pair(connector.pair_handler()):
         def do_GET(self):

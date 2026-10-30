@@ -280,6 +280,12 @@ async function run() {
   for (const [url, endpoint, selector, reading] of expected) {
     const begin = env.requests.length;
     await enter(url);
+    if (url === '/network') {
+      assert(!env.requests.slice(begin).some(request => request.pathname === endpoint), 'local network view must not automatically probe the server');
+      const details = ui.qs('#server-network');
+      details.open = true; details.listeners.toggle();
+      await new Promise(resolve => setImmediate(resolve));
+    }
     assert(env.requests.slice(begin).some(request => request.pathname === endpoint), `${url}: route did not call its API`);
     assert.equal(ui.qs(selector).textContent, reading, `${url}: route did not render`);
   }

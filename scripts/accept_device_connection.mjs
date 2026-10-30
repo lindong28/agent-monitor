@@ -10,10 +10,10 @@ import {promisify} from 'node:util';
 import {parseArgs} from 'node:util';
 const {values:args} = parseArgs({options:{
   'agent-browser':{type:'string'}, browser:{type:'string'}, python:{type:'string'},
-  'disclosures-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
+  'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
 }});
 if (args.help) {
-  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
+  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks local process networks instead of accounts. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
   process.exit(0);
 }
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -31,7 +31,7 @@ const env = {PATH:process.env.PATH || '/usr/bin:/bin', LANG:process.env.LANG || 
   HOME:root, TMPDIR:root, XDG_CONFIG_HOME:path.join(root,'config'), XDG_CACHE_HOME:path.join(root,'cache'),
   CLAUDE_CONFIG_DIR:path.join(root,'.claude'), CODEX_HOME:path.join(root,'.codex'),
   AGENT_BROWSER_SOCKET_DIR:sockets, AGENT_BROWSER_IDLE_TIMEOUT_MS:'30000', AGENT_BROWSER_DEFAULT_TIMEOUT:'3000',
-  AGENT_BROWSER_ARGS:'--mute-audio,--disable-background-networking,--disable-component-update,--disable-sync,--no-proxy-server'};
+  AGENT_BROWSER_ARGS:'--mute-audio,--use-mock-keychain,--password-store=basic,--disable-background-networking,--disable-component-update,--disable-sync,--no-proxy-server'};
 const config=path.join(root,'browser-config.json'), launcher=path.join(root,'chrome');
 fs.writeFileSync(config,'{}');
 // Preserve Chrome's sandbox even when the upstream CLI adds container defaults.
@@ -121,7 +121,7 @@ const timer=setTimeout(()=>{
 },180000);
 let failure;
 try {
-  console.log('Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
+  console.log(args['network-only'] ? 'Checking two synthetic process networks in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
   await startFixture();
   assert.equal((await fetch(url,{signal:AbortSignal.timeout(3000)})).status,200,'fixture page reachable');
   browserAttempted=true;
@@ -133,6 +133,36 @@ try {
   await browserCommand(['get','url'],false,false);
   assert.equal((await bt('get','url')).data.url,new URL(url).href,'pinned fixture origin');
   console.log('Isolated browser opened the local fixture.');
+  if (args['network-only']) {
+    await bt('open',url+'/network');
+    await bt('snapshot','-i');
+    assert.equal((await stats()).server_reads,0,'local page never automatically probes Hub');
+    await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('fixture-browser-device')");
+    assert.match(await read("document.querySelector('#process-network-result').innerText"),/proxy-codex/);
+    await bt('select','#process-network-select','1');
+    assert.match(await read("document.querySelector('#process-network-result').innerText"),/proxy-claude/);
+    assert.equal((await stats()).process_reads,1,'one real connector popup collected one snapshot');
+    assert.equal(await read("document.querySelector('#process-network-cancel').getClientRects().length"),0,'finished read hides cancellation action');
+    await click('#process-network-probe',"document.querySelector('#process-network-result').innerText.includes('8.8.8.8')");
+    assert.equal((await stats()).process_probes,1,'origin acknowledgement redeems one probe ticket');
+    assert.match(await read("document.querySelector('#process-network-result').innerText"),/固定目标探测回执/);
+    await bt('screenshot',path.join(root,'process-network.png'));
+    await click('#process-network-help > summary',"document.querySelector('#process-network-help').open");
+    assert.match(await read("document.querySelector('#process-network-command').innerText"),/agent-monitor connect --server/);
+    await bt('set','viewport','390','844');
+    await bt('screenshot',path.join(root,'process-network-390.png'));
+    assert.equal(await read('document.documentElement.scrollWidth<=innerWidth'),true,'local report fits narrow viewport');
+    await click('#server-network > summary',"document.querySelector('#network-checked-host').textContent.includes('fixture-server-device')");
+    assert.equal((await stats()).server_reads,1);
+    assert.match(await read("document.querySelector('#process-network-status').textContent"),/fixture-browser-device/);
+    await configure({pair_mode:'silent'});
+    await click('#process-network-refresh',"document.querySelector('#process-network-cancel').hidden===false");
+    await click('#process-network-cancel',"document.querySelector('#process-network-status').textContent.includes('已取消')");
+    assert.equal(await read("document.querySelector('#process-network-result').textContent"),'');
+    assert.equal((await stats()).server_reads,1,'failed local report does not fall back to server');
+    fs.writeFileSync(path.join(root,'process-network-evidence.json'),JSON.stringify(await stats(),null,2));
+    console.log('PASS: real loopback popup, two processes, separate server, help, narrow layout and cancellation.');
+  } else {
   const primary='#codex-batch-next', dialog='dialog.account-egress-dialog';
   const ready=`!document.hidden && !!document.querySelector('${primary}') && !document.querySelector('${primary}').disabled && document.querySelector('${primary}').textContent.includes('6')`;
   const preview=`!!document.querySelector('${dialog} .account-egress-address')`;
@@ -394,6 +424,7 @@ try {
 
   }
 
+  }
 } catch(error) {
   failure=error;
   if (browserAttempted && fs.existsSync(pidFile)) {

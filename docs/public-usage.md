@@ -83,7 +83,24 @@ Local usage does not need a provider login. If your current account is signed in
 
 Account operations use isolated managed profiles under state. Review the account, browser-device route and confirmation before sending; a message may consume your subscription quota. No scheduled message sender is installed. Failed or uncertain sends are not automatically replayed. If the UI reports a local hold, inspect its original failure before explicitly resuming; restarting does not erase the hold.
 
-The optional connector supports `./agent-monitor connect --server URL` in the foreground and macOS service installation via `./agent-monitor connect install --server URL`. It pairs the browser device's network route with the account action. This is separate from the network diagnostics page, which reports the server machine's route.
+The optional connector supports `./agent-monitor connect --server URL` in the foreground and macOS service installation via `./agent-monitor connect install --server URL`. It pairs the browser device's network route with account actions and supplies the local process observations described below. Process observations do not change the account action's route or the actual agents' proxy settings.
+
+## Local agent network
+
+The network page starts with the **browser computer's** Codex/Claude processes. Install this repository on that computer using the [public installation steps](../README.md#requirements), even when the dashboard is hosted elsewhere. Run the connector as the same OS user who starts those agents. Use the exact dashboard origin, including its port:
+
+```bash
+./install.sh --no-services
+./agent-monitor connect --server http://your-monitor-host:39001
+```
+
+Keep this foreground command running, open the network page, click “读取本机 Agent”, then select a process. The connector needs its installed system-proxy runtime and a reachable Hub; its loopback popup uses port 39002. Allow the popup for your trusted dashboard origin. The browser checks the popup, origin and one-time nonce. The report travels directly from this computer to the page, without storage or transit through the Hub. Do not expose the connector port externally. On macOS, `./agent-monitor connect install --server URL` is the optional managed alternative. Linux uses the foreground command or your own supervisor. No maintainer-specific harness, proxy application or account credential is required for process observations.
+
+The report separates process instance identity (PID and start time), observation time, redacted startup network environment and currently established TCP sockets. A local proxy peer is not a public exit IP. Startup environment is not proof of runtime overrides or actual request routing. The supported discovery scope is same-user local native Codex/Claude, native binaries reached through `~/.local/bin/codex` or `claude`, and the recognized npm Node/Bun CLI entrypoints. Other users, containers, SSH hosts, DNS/UDP traffic and client config-file overrides are outside this observation. Permission failures, process exit and incomplete scans are shown; an empty field does not establish direct access. The CLI `./agent-monitor process-network` reads the same observations without a connector or upstream request; `--json` emits the structured report.
+
+“通过此代理探测固定目标” is a separate, explicit anonymous request to the displayed `/cdn-cgi/trace` URL. It only runs when a unique supported startup proxy matches a current process socket. Custom base URLs, bypass rules, conflicting proxies, unresolved proxy hostnames and missing sockets prevent this request instead of falling back to another route. The fixed targets are `chatgpt.com` and `api.anthropic.com`; their association with the selected process's actual login mode/service is not established. The response may be unavailable. A successful receipt gives this probe's IP, country code, target, proxy and time, **not the source IP of an earlier agent request**. No provider login, cookies or account headers are sent. Failures are not retried; the running connector shares a minimum 60-second cooldown and any longer Retry-After across pages. Cancel stops waiting, but an already-issued request can finish. Stopping the connector clears its in-memory receipt cache.
+
+After updating with the normal update/deploy procedure, restart an existing connector (`./agent-monitor connect restart` for the managed service; stop and rerun the original foreground command otherwise). An older connector cannot supply the new process report and the page shows a connection/version error. If connecting fails, check `./agent-monitor connect status`, the configured dashboard origin and whether another installation owns port 39002. Do not replace existing configuration or state to make pairing succeed. The collapsed “服务端系统网络诊断” retains the old server diagnostics as an explicit independent action. Neither report is a 30-day history; `range=30d` does not change its observation time.
 
 ## Manual updates
 

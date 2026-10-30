@@ -162,7 +162,7 @@
     ["控制台", "采集与诊断", "机器采集、历史质量与未归属账号的观测", "/collection"],
     ["控制台", "透视", "按目录、模型、机器分析成本和 token", "/explore"],
     ["控制台", "会话", "查找会话、筛选记录并查看明细", "/sessions"],
-    ["控制台", "网络", "查看服务端主机的出口和网络诊断", "/network"],
+    ["控制台", "网络", "查看本机 Agent 进程网络及服务端独立诊断", "/network"],
     ["控制台", "配额与账号", "Claude / Codex 账号余量与更新时间", "/#quota-explorer"],
     ["使用与接入", "数据来源", "本地日志、服务商账号与服务端网络", "/guide/sources"],
     ["使用与接入", "采集状态", "检查已纳入机器与快照状态", "/guide/collection"],
@@ -363,7 +363,7 @@
     await load();
   }
 
-  const network = modules.network({ platform, qs, updateNavLinks, api, withRefresh, formatDate, escapeHtml });
+  const network = modules.network({ platform, qs, updateNavLinks, api, withRefresh, formatDate, escapeHtml, onPageCleanup });
   const { initNetwork } = network;
 
   function formatDate(iso) {

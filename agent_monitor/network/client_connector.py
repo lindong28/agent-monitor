@@ -69,6 +69,10 @@ class Connector:
         self.last_contact = 0
         self.stopped = threading.Event()
         self.guard = threading.Lock()
+        self.process_report_lock = threading.Lock()
+        from agent_monitor.network.process_probe import ProbeCache
+        self.process_probe_cache = ProbeCache()
+        self.process_probe_tickets = {}
         self.sockets, self.workers = set(), set()
         self.reports = queue.Queue(maxsize=16)
         self.registration = None
@@ -117,6 +121,34 @@ class Connector:
             def log_message(self, *_args):
                 pass
 
+            def do_POST(self):
+                expected = 'http://127.0.0.1:' + str(self.server.server_port)
+                try:
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if (self.path != '/process-network-probe' or self.headers.get('Host') != expected[7:]
+                            or self.headers.get('Origin') != expected or self.headers.get('Content-Type') != 'application/json'
+                            or not 0 < length <= 1024 or connector.stopped.is_set() or not connector.registration):
+                        raise ValueError()
+                    data = json.loads(self.rfile.read(length))
+                    with connector.guard:
+                        ticket = connector.process_probe_tickets.pop(data.get('ticket'), None)
+                    if not ticket or time.monotonic() > ticket[0]: raise ValueError()
+                except (ValueError, TypeError, AttributeError):
+                    self.send_error(403); return
+                if not connector.process_report_lock.acquire(blocking=False):
+                    result = {'error': '本机已有采集正在执行，请稍候重试。'}
+                else:
+                    try:
+                        result = {'probe': connector.process_probe_cache.read(ticket[1], ticket[2])}
+                    finally:
+                        connector.process_report_lock.release()
+                body = json.dumps(result).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers(); self.wfile.write(body)
+
             def do_GET(self):
                 expected_host = "127.0.0.1:" + str(self.server.server_port)
                 if self.path == "/health" and self.headers.get("Host") == expected_host:
@@ -136,18 +168,62 @@ class Connector:
                     return
                 query = parse_qs(urlsplit(self.path).query)
                 origin, nonce = query.get("origin", [""])[0], query.get("nonce", [""])[0]
-                if (urlsplit(self.path).path != "/pair" or self.headers.get("Host") != expected_host
+                action = urlsplit(self.path).path
+                if (action not in ("/pair", "/process-network", "/process-network-probe") or self.headers.get("Host") != expected_host
                         or origin != connector.server or not re.fullmatch(r"[a-f0-9]{32}", nonce)
                         or connector.stopped.is_set() or not connector.registration):
                     self.send_error(403)
                     return
                 # Exact configured origin; a hostile website cannot redirect the
                 # capability to itself. Credentials never enter query parameters.
-                payload = json.dumps({"type": "agent-monitor-network", "nonce": nonce,
-                                      "connection": connector.registration["connection"]}).replace("<", "\\u003c")
+                if action == '/process-network-probe':
+                    pid, instance = query.get('pid', [''])[0], query.get('instance', [''])[0]
+                    if not pid.isascii() or not pid.isdecimal() or len(pid) > 10 or not re.fullmatch(r'[0-9]+:[0-9.]+', instance) or len(instance) > 80:
+                        self.send_error(400); return
+                    ticket = uuid.uuid4().hex
+                    with connector.guard:
+                        connector.process_probe_tickets = {key: value for key, value in connector.process_probe_tickets.items() if value[0] > time.monotonic()}
+                        if len(connector.process_probe_tickets) >= 32:
+                            self.send_error(429); return
+                        connector.process_probe_tickets[ticket] = (time.monotonic() + 30, int(pid), instance)
+                    # GET cannot trigger an upstream request. The configured Hub
+                    # opener must acknowledge this exact popup before same-origin
+                    # POST can redeem its one-use ticket. A query-string origin
+                    # alone is not authorization to perform an external probe.
+                    config = json.dumps({'origin': connector.server, 'nonce': nonce, 'ticket': ticket}).replace('<', '\\u003c')
+                    body = ('''<!doctype html><meta charset=utf-8><title>本机代理诊断</title><p>等待发起页面确认；仅探测固定目标，不发送账号认证。</p><script>
+const c=''' + config + ''';
+window.addEventListener('message',async function ack(e){
+ if(e.source!==window.opener||e.origin!==c.origin||e.data?.type!=='agent-monitor-probe-ack'||e.data?.nonce!==c.nonce)return;
+ window.removeEventListener('message',ack);
+ let result;try{const r=await fetch('/process-network-probe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:c.ticket})});if(!r.ok)throw Error();result=await r.json()}catch{result={error:'本机探测未完成，请重新读取进程后重试。'}}
+ window.opener.postMessage({type:'agent-monitor-process-network-probe',nonce:c.nonce,...result},c.origin);window.close();
+});
+window.opener?.postMessage({type:'agent-monitor-probe-ready',nonce:c.nonce},c.origin);
+</script>''').encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/html; charset=utf-8')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('Referrer-Policy', 'no-referrer')
+                    self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'")
+                    self.end_headers(); self.wfile.write(body); return
+                message = {"type": "agent-monitor-network", "nonce": nonce,
+                           "connection": connector.registration["connection"]}
+                if action == "/process-network":
+                    message = {"type": "agent-monitor-process-network", "nonce": nonce}
+                    if not connector.process_report_lock.acquire(blocking=False):
+                        message['error'] = '本机已有采集正在执行，请稍候重新检测。'
+                    else:
+                        try:
+                            from agent_monitor.network.process_network import read_report
+                            message['report'] = read_report()
+                        finally:
+                            connector.process_report_lock.release()
+                payload = json.dumps(message).replace("<", "\\u003c")
                 target = json.dumps(connector.server).replace("<", "\\u003c")
                 body = ("<!doctype html><meta charset=utf-8><title>连接本机网络</title>"
-                        "<p>正在将本机网络连接交回账号页面。完成后可关闭此窗口。</p>"
+                        "<p>正在将本机网络信息交回发起页面。完成后可关闭此窗口。</p>"
                         f"<script>if(window.opener){{window.opener.postMessage({payload},{target});window.close();}}</script>").encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -221,7 +297,7 @@ class Connector:
         from agent_monitor.runtime.connector_service import record
         record(self.state_file, "connected", server=self.server, instance_id=self.instance_id)
         print(f"设备网络已连接到 {self.server}。可回到账号页面点击「开始新一轮」，页面会自动准备连接。", flush=True)
-        print("仅批次发送及其出口预览使用本机网络；前台模式需保持命令运行，后台服务由launchd管理。", flush=True)
+        print("网络页可读取本用户 Agent 进程；批次发送及其出口预览使用本机网络。前台模式需保持命令运行。", flush=True)
         try:
             while not self.stopped.is_set():
                 task = self.request("next")
@@ -252,8 +328,8 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] in {"install", "status", "stop", "restart"}:
         from agent_monitor.runtime.connector_service import main as service_main
         return service_main(sys.argv[1:])
-    parser = argparse.ArgumentParser(description="让账号页面的批次使用这台机器的系统代理规则。")
-    parser.add_argument("--server", required=True, help="账号页面所在服务，例如 http://monitor.local:39001")
+    parser = argparse.ArgumentParser(description="连接本机与监控页面：读取本机 Agent 网络，并为账号批次提供本机系统代理。")
+    parser.add_argument("--server", required=True, help="监控页面所在服务，例如 http://monitor.local:39001")
     parser.add_argument("--state-file", help=argparse.SUPPRESS)
     args = parser.parse_args()
     from agent_monitor.runtime.connector_service import origin; from agent_monitor.runtime.connector_service import record

@@ -55,9 +55,32 @@
         <div class="page-toolbar">
           <div class="page-location"><span class="workspace-label">控制台</span><span class="breadcrumb-separator" aria-hidden="true">/</span><h1 class="page-title">网络</h1></div>
           <div class="toolbar">
-            <button id="refresh" class="icon-btn" type="button" title="重新检测" aria-busy="false">重新检测</button>
+            <button id="process-network-refresh" class="icon-btn" type="button">读取本机 Agent</button>
           </div>
         </div>
+        <section id="process-network" class="network-card" aria-label="本机 Agent 网络">
+          <h2>浏览器所在电脑的 Codex / Claude</h2>
+          <p class="scope-note">读取当前操作系统用户启动的进程、启动网络配置与当前 TCP 连接。不会改变 Agent 的代理设置，也不会发出服务商请求。</p>
+          <p id="process-network-status" role="status">尚未读取本机。请点击「读取本机 Agent」。</p>
+          <button id="process-network-cancel" type="button" hidden>取消读取</button>
+          <details id="process-network-help" class="note-disclosure">
+            <summary>首次使用或连接失败</summary>
+            <div class="disclosure-body">
+            <p>在浏览器所在电脑按项目安装指南安装 agent-monitor，然后在同一操作系统用户的终端运行以下命令，保持终端打开，再点击「读取本机 Agent」。</p>
+            <div class="code-card"><pre><code id="process-network-command"></code></pre></div>
+            <p>连接器需要能够连接此服务；默认使用本机 39002 端口。已有连接器的用户更新源码后运行 <code>agent-monitor connect restart</code>；前台运行的则停止后重跑原命令。读取失败不会改用服务器数据。</p>
+            <p><a href="/guide/setup">查看安装与接入说明</a></p>
+            </div>
+          </details>
+          <label for="process-network-select">选择进程</label>
+          <select id="process-network-select" disabled><option>尚无进程报告</option></select>
+          <p id="process-network-probe-help" class="scope-note" hidden></p>
+          <button id="process-network-probe" type="button" hidden>通过此代理探测固定目标</button>
+          <div id="process-network-result" class="network-card-body"></div>
+        </section>
+        <details id="server-network" class="note-disclosure">
+          <summary>服务端系统网络诊断（独立于本机 Agent）</summary>
+          <button id="refresh" class="icon-btn" type="button" title="重新检测服务端" aria-busy="false">检测服务端</button>
         <p id="network-checked-host" class="scope-note">仅检测服务端主机（身份加载中）；不检测浏览器所在设备或其他机器。</p>
         <p class="scope-note">展示最近一次诊断，不是历史统计；网址中的时间范围不影响本页。</p>
         <section id="network-banner" class="verdict-banner unknown" aria-live="polite">
@@ -88,6 +111,7 @@
             <div id="network-risk" class="network-card-body"></div>
           </article>
         </section>
+        </details>
       </main>
     </div>
     <script>

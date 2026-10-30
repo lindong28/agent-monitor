@@ -67,7 +67,7 @@ print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())
 PY
 )"
   if [ ! -f "$marker" ] || [ "$(cat "$marker")" != "$digest" ] \
-      || ! "$VENV_PY" -c 'import requests, colorama' >/dev/null 2>&1; then
+      || ! "$VENV_PY" -c 'import requests, colorama, socks' >/dev/null 2>&1; then
     if ! "$VENV_PY" -m pip install --disable-pip-version-check -r "$ROOT_DIR/requirements.txt"; then
       echo "agent-monitor runtime: failed; CLI/assets/services were not installed. Resolve the pip error and rerun ./install.sh." >&2
       emit_install_ledger artifact "agent-monitor Python runtime" failed "dependency installation failed; rerun ./install.sh"
