@@ -363,30 +363,36 @@ export function init({ autoLoad = true } = {}) {
       for (const detail of account.restriction_details || []) card.append(element("p", detail, "quota-scope"));
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "账号与操作详情"));
+      const detailBody = element("div", undefined, "disclosure-body");
+      const currentDetail = element("section", undefined, "account-detail-section");
+      const quotaDetail = element("section", undefined, "account-detail-section");
+      const historyDetail = element("section", undefined, "account-detail-section");
+      const technicalDetail = element("section", undefined, "account-detail-section");
+      const managementDetail = element("section", undefined, "account-detail-section");
       if (account.eligible === false) card.append(element("p", "已不在当前登录记录中；保留本轮结果，不纳入下一轮或继续发送。", "quota-scope"));
       const duplicateEmail = accounts.some((other) => other.id !== account.id && other.email.toLowerCase() === account.email.toLowerCase());
-      if (account.account_id) (duplicateEmail ? card : details).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
-      details.append(element("p", account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
+      if (account.account_id) (duplicateEmail ? card : managementDetail).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
+      managementDetail.append(element("p", account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
       if (batchItem && !sharedSuccess) heading.append(element("span", `本批：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
       const retained = account.batch_result;
-      if (retained && retained.batch_id !== batch?.id) details.append(element("p", `保留的批次结果：${MESSAGE_STATUS[retained.message_status] || "状态未知"} · 开始于 ${timestamp(retained.started_at)}`, "quota-scope"));
+      if (retained && retained.batch_id !== batch?.id) historyDetail.append(element("p", `保留的批次结果：${MESSAGE_STATUS[retained.message_status] || "状态未知"} · 开始于 ${timestamp(retained.started_at)}`, "quota-scope"));
       const shownMessageIds = new Set([op?.id]);
       for (const batchMessage of [retained, batchItem?.operation]) {
         if (batchMessage?.message && !shownMessageIds.has(batchMessage.id)) {
-          details.append(element("p", `保留的批次消息：${batchMessage.message}`, "quota-scope"));
+          historyDetail.append(element("p", `保留的批次消息：${batchMessage.message}`, "quota-scope"));
           shownMessageIds.add(batchMessage.id);
         }
       }
       if (op) {
-        if (op.stage !== "succeeded") card.append(element("p", op.detail));
-        details.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
-        if (op.message) details.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
-        if (op.failure) details.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
+        if (op.stage !== "succeeded" && !(account.restriction_details || []).includes(op.detail)) card.append(element("p", op.detail));
+        currentDetail.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
+        if (op.message) currentDetail.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
+        if (op.failure) technicalDetail.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
         const diag = op.diagnostics;
-        if (diag?.last_request) details.append(element("p", `最后请求：${diag.last_request} · ${timestamp(diag.last_request_at)}`, "quota-scope"));
-        if (diag?.last_event) details.append(element("p", `最后进度：${diag.last_event} · ${timestamp(diag.last_event_at)}`, "quota-scope"));
-        if (diag?.thread_id) details.append(element("p", `Thread：${diag.thread_id}${diag.turn_id ? " · Turn：" + diag.turn_id : ""}`, "quota-scope"));
-        if (diag?.interrupt) details.append(element("p", `超时中止：${diag.interrupt === "acknowledged" ? "CLI 已确认" : "未取得确认"}；不代表消息未消耗额度。`, "quota-scope"));
+        if (diag?.last_request) technicalDetail.append(element("p", `最后请求：${diag.last_request} · ${timestamp(diag.last_request_at)}`, "quota-scope"));
+        if (diag?.last_event) technicalDetail.append(element("p", `最后进度：${diag.last_event} · ${timestamp(diag.last_event_at)}`, "quota-scope"));
+        if (diag?.thread_id) technicalDetail.append(element("p", `Thread：${diag.thread_id}${diag.turn_id ? " · Turn：" + diag.turn_id : ""}`, "quota-scope"));
+        if (diag?.interrupt) technicalDetail.append(element("p", `超时中止：${diag.interrupt === "acknowledged" ? "CLI 已确认" : "未取得确认"}；不代表消息未消耗额度。`, "quota-scope"));
         if (op.stage === "login" && op.verification_url && op.user_code) {
           const box = element("div", undefined, "codex-authorization");
           const link = element("a", "打开 OpenAI 官方授权页", "btn");
@@ -402,9 +408,9 @@ export function init({ autoLoad = true } = {}) {
           const used = latestReading.seven_day_used_pct;
           reading.append(element("dt", "7 天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
           reading.append(element("dt", "本次操作的最近观测"), element("dd", timestamp(latestReading.observed_at)));
-          if (op.before?.seven_day_resets_at != null) details.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
-          details.append(reading);
-          if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) details.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
+          if (op.before?.seven_day_resets_at != null) quotaDetail.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
+          quotaDetail.append(reading);
+          if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) quotaDetail.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
         }
       }
       const controls = element("div", undefined, "codex-account-controls");
@@ -425,17 +431,23 @@ export function init({ autoLoad = true } = {}) {
         controls.append(login);
       }
       if (restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("核对后解除此账号限制", "resume", account));
-      if (account.last_failure && account.last_failure.id !== op?.id) details.append(element("p", `保留的失败摘要：${account.last_failure.detail}`, "quota-scope"));
+      if (account.last_failure && account.last_failure.id !== op?.id) historyDetail.append(element("p", `保留的失败摘要：${account.last_failure.detail}`, "quota-scope"));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials || restrictions.authentication) {
         const maintenance = element("div", undefined, "codex-account-controls");
         maintenance.append(button("清除本页登录态", "forget-login", account));
-        details.append(maintenance);
+        managementDetail.append(maintenance);
+      }
+      for (const [section, label] of [[currentDetail, "本次操作"], [quotaDetail, "配额观测"], [historyDetail, "历史记录"], [technicalDetail, "技术细节"], [managementDetail, "账号管理"]]) {
+        if (!section.children.length) continue;
+        section.prepend(element("h4", label));
+        detailBody.append(section);
       }
       details.open = Boolean(old?.querySelector("details")?.open);
       const footer = element("div", undefined, "codex-account-footer");
-      footer.append(controls, details);
-      card.append(footer);
+      details.append(detailBody);
+      footer.append(controls);
+      card.append(footer, details);
       if (old) old.replaceWith(card); else list.append(card);
       if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
     }
@@ -540,6 +552,8 @@ export function renderAccountPause(pause, target, controls) {
 export function renderAccountBatch(state, controls) {
   const { accounts, batch, selectedIds, unavailable, busy: submittingBatch, upstreamPause } = state;
   const { root, batchStart, batchNext, batchRetry, batchStatus, batchHelp, egressPreview, deviceConnect, blockedReason } = controls;
+    const observation = root.querySelector("#codex-batch-observation");
+    if (observation) { observation.textContent = ""; observation.hidden = !batch; }
     const busy = accounts.some((account) => account.busy);
     const eligible = accounts.filter((account) => account.eligible !== false);
     const count = eligible.filter(account => selectedIds?.has(account.id)).length;
@@ -597,8 +611,20 @@ export function renderAccountBatch(state, controls) {
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch || busy || Boolean(upstreamPause);
     batchRetry.textContent = `继续 ${statuses.unsent} 个未发送账号`;
+    if (observation) observation.textContent = `本轮开始于 ${timestamp(batch.created_at)}。7 天窗口重置时间已知 ${resetRead}/${batch.items.length}；这是配额读数，不代表发送结果。`;
+    const quotaUnsent = batch.items.flatMap(item => {
+      const account = accounts.find(value => value.id === item.profile_id);
+      return account && account.eligible !== false && (!item.operation || item.operation.message_status === "not_sent") && account.restrictions?.quota ? [account] : [];
+    });
+    if (blockedReason && quotaUnsent.length && !submittingBatch && !busy && !upstreamPause) {
+      const prerequisites = quotaUnsent.filter(account => !account.has_credentials || ["authentication", "unknown", "rate_limit", "login_rate_limit"].some(key => account.restrictions[key])).length;
+      const nextStep = prerequisites
+        ? `其中 ${prerequisites} 个需先完成登录或处理其他限制，再「仅刷新配额」。${prerequisites < quotaUnsent.length ? "其余可在对应账号「仅刷新配额」。" : ""}`
+        : "请先在对应账号「仅刷新配额」。";
+      blockedReason.textContent += `未发送账号中有 ${quotaUnsent.length} 个受额度限制。${nextStep}只有服务端明确允许额度使用，才会解除额度限制；解除后再继续发送。`;
+      blockedReason.hidden = false;
+    }
     const help = [
-      `本轮开始于 ${timestamp(batch.created_at)}。7 天窗口重置时间已知 ${resetRead}/${batch.items.length}；这是配额读数，不代表发送结果。`,
       "顺序：按邮箱逐个完成账号操作，包含子进程清理；不会同时发送。缺登录态时跳过，单独登录完成后需重新发起操作。",
       statuses.unsent
         ? `继续发送：先处理缺登录或暂停原因，再点击「${batchRetry.textContent}」。系统只处理仍在登录记录中且确定未发送的账号。`

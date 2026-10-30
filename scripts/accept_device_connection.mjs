@@ -10,10 +10,10 @@ import {promisify} from 'node:util';
 import {parseArgs} from 'node:util';
 const {values:args} = parseArgs({options:{
   'agent-browser':{type:'string'}, browser:{type:'string'}, python:{type:'string'},
-  launchd:{type:'boolean'}, help:{type:'boolean'},
+  'disclosures-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
 }});
 if (args.help) {
-  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
+  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
   process.exit(0);
 }
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -24,11 +24,13 @@ const python = args.python || path.join(repo,'.venv/bin/python');
 const evidence = process.env.AGENT_MONITOR_TEST_ARTIFACTS || path.join(os.homedir(),'task-artifacts','agent-monitor','device-acceptance');
 fs.mkdirSync(evidence,{recursive:true});
 const root = fs.mkdtempSync(path.join(evidence,'monitor-accept-'));
+// Unix-domain socket paths have a small OS limit; evidence stays in the durable root.
+const sockets = fs.mkdtempSync(path.join(os.tmpdir(),'am-sock-'));
 // A fresh HOME alone does not override CLI/provider/profile environment variables.
 const env = {PATH:process.env.PATH || '/usr/bin:/bin', LANG:process.env.LANG || 'en_US.UTF-8',
   HOME:root, TMPDIR:root, XDG_CONFIG_HOME:path.join(root,'config'), XDG_CACHE_HOME:path.join(root,'cache'),
   CLAUDE_CONFIG_DIR:path.join(root,'.claude'), CODEX_HOME:path.join(root,'.codex'),
-  AGENT_BROWSER_SOCKET_DIR:path.join(root,'sockets'), AGENT_BROWSER_IDLE_TIMEOUT_MS:'30000', AGENT_BROWSER_DEFAULT_TIMEOUT:'3000',
+  AGENT_BROWSER_SOCKET_DIR:sockets, AGENT_BROWSER_IDLE_TIMEOUT_MS:'30000', AGENT_BROWSER_DEFAULT_TIMEOUT:'3000',
   AGENT_BROWSER_ARGS:'--mute-audio,--disable-background-networking,--disable-component-update,--disable-sync,--no-proxy-server'};
 const config=path.join(root,'browser-config.json'), launcher=path.join(root,'chrome');
 fs.writeFileSync(config,'{}');
@@ -137,6 +139,64 @@ try {
   const closed=`!document.querySelector('${dialog}')`;
   await until('account list',()=>read(ready));
   assert.match(await read(`document.querySelector('${primary}').textContent`),/6/);
+  // Exercise the complete disclosure unit before any synthetic send action.
+  await configure({disclosure:true});
+  await bt('open',url);
+  await until('disclosure scenario',()=>read("document.querySelector('#codex-batch-status').textContent.includes('未发送 2')"));
+  await bt('set','viewport','1440','1000');
+  const card='#codex-account-list > :first-child', detail=card+' details';
+  const firstSummary=await read(`document.querySelector('${detail} > summary').getBoundingClientRect().toJSON()`);
+  const firstActions=await read("(() => {const r=document.querySelector('#codex-account-list > :first-child .codex-account-footer').getBoundingClientRect();return {...r.toJSON(),y:r.y+scrollY}})()");
+  await click(detail+' > summary',`document.querySelector('${detail}').open`);
+  await bt('screenshot',path.join(root,'disclosure-account-expanded.png'));
+  const expandedSummary=await read(`document.querySelector('${detail} > summary').getBoundingClientRect().toJSON()`);
+  assert(Math.abs(firstSummary.x-expandedSummary.x)<2,'account disclosure trigger retains its horizontal position');
+  const expandedActions=await read("(() => {const r=document.querySelector('#codex-account-list > :first-child .codex-account-footer').getBoundingClientRect();return {...r.toJSON(),y:r.y+scrollY}})()");
+  fs.writeFileSync(path.join(root,'disclosure-geometry.json'),JSON.stringify({firstSummary,expandedSummary,firstActions,expandedActions},null,2));
+  assert(Math.abs(firstActions.x-expandedActions.x)<2 && Math.abs(firstActions.y-expandedActions.y)<2,'adjacent account actions retain their position in document coordinates');
+  assert.equal(await read(`(() => {const d=document.querySelector('${detail}');const body=d.querySelector('.disclosure-body');return !!body && body.checkVisibility() && body.getBoundingClientRect().width > 300})()`),true,'account detail has a readable owned body');
+  const detailText=await read(`document.querySelector('${detail} .disclosure-body').innerText`);
+  for (const field of ['workspace-0','已保存','发送成功','历史批次消息','历史连接失败','请描述今天的天气','turn/start','turn/completed','fixture-thread-0','fixture-turn-0','CLI 已确认','21%','清除本页登录态']) assert(detailText.includes(field),'retained detail field: '+field);
+  fs.writeFileSync(path.join(root,'account-detail-text.txt'),detailText);
+  const grouped=await read(`Object.fromEntries([...document.querySelectorAll('${detail} .account-detail-section')].map(s=>[s.querySelector('h4').innerText,s.innerText]))`);
+  for (const [group,field] of [['本次操作','请描述今天的天气'],['配额观测','21%'],['历史记录','历史批次消息'],['技术细节','fixture-thread-0'],['账号管理','workspace-0']]) assert(grouped[group]?.includes(field),'field belongs to '+group);
+  assert(!grouped['本次操作'].includes('历史批次消息'),'history is separate from current operation');
+  fs.writeFileSync(path.join(root,'account-detail-groups.json'),JSON.stringify(grouped,null,2));
+  await bt('scrollintoview',detail+' .disclosure-body');
+  await bt('screenshot',path.join(root,'account-detail-groups-1440.png'));
+  await bt('scrollintoview',detail+' .disclosure-body button');
+  await bt('screenshot',path.join(root,'account-detail-end-1440.png'));
+  const pausedCard='#codex-account-list > :nth-child(2)';
+  assert.equal(await read(`document.querySelector('${pausedCard}').innerText.split('服务端明确限制了额度使用').length-1`),1,'one current quota warning per account');
+  assert.match(await read("document.querySelector('#codex-batch-blocked').innerText"),/2.*额度.*仅刷新配额/);
+  assert.equal(await read("document.querySelector('#codex-batch-retry').disabled"),false,'guidance does not change retry authorization');
+  await click('#codex-device-help > summary',"document.querySelector('#codex-device-help').open");
+  assert.equal(await read("(() => {const d=document.querySelector('#codex-device-help');return d.querySelector('button').getBoundingClientRect().top>d.querySelector('summary').getBoundingClientRect().bottom})()"),true,'first help action is separated from its summary');
+  await click('#codex-sending-help > summary',"document.querySelector('#codex-batch-help').closest('details').open");
+  assert.equal(await read("(() => {const d=document.querySelector('#codex-batch-help').closest('details');const b=d.querySelector('.disclosure-body');return b.checkVisibility() && b.getBoundingClientRect().top > d.querySelector('summary').getBoundingClientRect().bottom})()"),true,'sending rules have body spacing');
+  assert.doesNotMatch(await read("document.querySelector('#codex-batch-help').innerText"),/本轮开始于|重置时间已知|需要授权/);
+  await bt('screenshot',path.join(root,'disclosure-help-expanded.png'));
+  await click(detail+' > summary',`!document.querySelector('${detail}').open`);
+  assert.equal(await read(`document.querySelector('${detail} .disclosure-body').checkVisibility()`),false,'collapsed detail body is not painted');
+  await bt('set','viewport','390','844');
+  await click(pausedCard+' details > summary',`document.querySelector('${pausedCard} details').open`);
+  assert.equal(await read(`(() => {const e=document.querySelector('${pausedCard} .disclosure-body'); const r=e.getBoundingClientRect(); return e.checkVisibility() && r.width>0 && r.right<=innerWidth})()`),true,'narrow paused detail remains within viewport');
+  await bt('screenshot',path.join(root,'disclosure-paused-390.png'));
+  await bt('scrollintoview',pausedCard+' .disclosure-body button');
+  await bt('screenshot',path.join(root,'disclosure-paused-end-390.png'));
+  assert.deepEqual(await read(`Array.from(document.querySelectorAll('${pausedCard} .account-detail-section > h4'), e=>e.innerText)`),['本次操作','配额观测','历史记录','技术细节','账号管理'],'account details have task-oriented reading groups');
+  assert.match(await read(`document.querySelector('${pausedCard} .account-detail-section:nth-child(4)').innerText`),/quota_exhausted.*HTTP 429/,'current failure category and status remain in technical details');
+  assert.equal(await read(`(() => {const sections=[...document.querySelectorAll('${pausedCard} .account-detail-section')];return sections.every(s=>s.checkVisibility() && s.getBoundingClientRect().right<=innerWidth)})()`),true,'groups remain readable without extra disclosure steps');
+  await bt('set','viewport','1440','1000');
+  await configure({disclosure:false});
+  await bt('open',url);
+  await until('ordinary account list',()=>read(ready));
+  await click('#codex-account-list > :first-child details > summary',"document.querySelector('#codex-account-list > :first-child details').open");
+  assert.deepEqual(await read("Array.from(document.querySelectorAll('#codex-account-list > :first-child .account-detail-section > h4'),e=>e.innerText)"),['账号管理'],'empty operation, quota, history and technical groups are omitted');
+  await click('#codex-account-list > :first-child details > summary',"!document.querySelector('#codex-account-list > :first-child details').open");
+  console.log('PASS: account/help disclosures keep their body, action position, warning and retry guidance.');
+
+  if (!args['disclosures-only']) {
   await click(primary,preview);
   let counts=await stats();
   assert.deepEqual([counts.pair_requests,counts.status_requests,counts.previews,counts.starts.length],[1,1,1,0]);
@@ -259,6 +319,10 @@ try {
       await click('#codex-recovery-history > summary',focused);
       await bt('click',panel+' .recovery-technical > summary');
       assert.match(await read(`document.querySelector('${panel}').innerText`),/本次配额读取成功/);
+      assert.equal(await read(`(() => {const outer=document.querySelector('${panel} .recovery-technical-body');const inner=outer.querySelector('.recovery-diagnostic .disclosure-body');const r=inner.getBoundingClientRect(),o=outer.getBoundingClientRect();return inner.checkVisibility() && r.left>o.left && r.bottom<o.bottom})()`),true,'nested diagnostic has a visible inset and an end before parent actions');
+      await click(panel+' .recovery-diagnostic > summary',`!document.querySelector('${panel} .recovery-diagnostic').open`);
+      assert.equal(await read(`document.querySelector('${panel} .recovery-diagnostic .disclosure-body').checkVisibility()`),false,'nested diagnostic collapses its painted content');
+      await click(panel+' .recovery-diagnostic > summary',`document.querySelector('${panel} .recovery-diagnostic').open`);
       await bt('screenshot',path.join(root,'recovery-success.png'));
     }
     else {
@@ -305,6 +369,9 @@ try {
   assert.equal((await stats()).recoveries.length,beforeQuota,'quota consumer reads without probing');
   assert.equal(await hiddenRecoveryControlsHaveNoLayout(`document.querySelector('${quotaPanel}')`),true,'paused quota card hides unavailable actions in actual layout');
   assert.equal((await stats()).starts.length,1);
+  await click(quotaPanel+' .recovery-technical > summary',`document.querySelector('${quotaPanel} .recovery-technical').open`);
+  assert.equal(await read(`(() => {const d=document.querySelector('${quotaPanel} .recovery-technical');const b=d.querySelector('.disclosure-body');return b.checkVisibility() && b.firstElementChild.getBoundingClientRect().left>d.getBoundingClientRect().left && b.getBoundingClientRect().top>d.querySelector('summary').getBoundingClientRect().bottom})()`),true,'shared quota consumer has a visible owned technical body');
+  await bt('scrollintoview',quotaPanel+' .recovery-technical');
   await bt('screenshot',path.join(root,'quota-recovery-guidance.png'));
   console.log('PASS: quota diagnostics also expose the shared guidance without a recovery request or send.');
   const beforeRedraw=(await stats()).recovery_reads;
@@ -325,6 +392,7 @@ try {
   assert.equal(await hiddenRecoveryControlsHaveNoLayout('window.acceptRecoveryCard'),true,'recovered quota card hides unavailable actions in actual layout');
   console.log('PASS: snapshots preserve open recovery history and never replay a provider check.');
 
+  }
 
 } catch(error) {
   failure=error;
@@ -349,7 +417,7 @@ finally {
     }
   }
   // A browser cleanup error must not skip the fixture and native daemon cleanup.
-  try { await stopChildren();console.log('Isolated evidence retained at '+root); }
+  try { await stopChildren();fs.rmSync(sockets,{recursive:true,force:true});console.log('Isolated evidence retained at '+root); }
   catch(error) { failure ||= error;console.error('Cleanup incomplete; isolated evidence retained at '+root); }
 }
 if(failure) { console.error('FAIL: '+failure.message);process.exitCode=1; }

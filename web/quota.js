@@ -294,8 +294,12 @@
     const box = document.createElement("details");
     const summary = document.createElement("summary");
     summary.textContent = "查看本次诊断";
+    box.className = "recovery-diagnostic";
     box.appendChild(summary);
-    const add = text => { const p = document.createElement("p"); p.textContent = text; box.appendChild(p); };
+    const body = document.createElement("div");
+    body.className = "disclosure-body";
+    box.appendChild(body);
+    const add = text => { const p = document.createElement("p"); p.textContent = text; body.appendChild(p); };
     const f = receipt.failure || {};
     add(receipt.ok ? "本次配额读取成功；当前暂停状态以重新读取的结果为准。" : "本次配额读取未完成；原因尚未确认，错误码本身不能证明网络故障或登录失效。");
     if (receipt.observed_at) add(`记录时间：${receipt.observed_at}`);
@@ -352,7 +356,9 @@
     const copyNotice = make("p");
     copyNotice.setAttribute("role", "status");
     actions.append(probe, help, resume, read);
-    technical.append(context, details, copy, copyNotice, report);
+    const technicalBody = make("div", "", "disclosure-body recovery-technical-body");
+    technicalBody.append(context, details, copy, copyNotice, report);
+    technical.appendChild(technicalBody);
     panel.append(title, guidance, target, result, actions, effect, notice, steps, technical);
     let state = null, busy = false, pendingPauseId = null, unrecordedOutcome = false, refreshPending = false;
     const controller = new AbortController();

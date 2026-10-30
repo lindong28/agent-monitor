@@ -8,6 +8,24 @@ import sys
 import socket
 from urllib.parse import urlsplit, parse_qs
 import argparse
+import os
+import pwd
+
+# Reject accidental discovery of the operator provider roots, including aliases.
+_REAL_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
+_PROTECTED = [(_REAL_HOME / p).resolve() for p in (".codex", ".claude", ".local/share/codex-accounts")]
+def source_guard(event, args):
+    if event in ("open", "os.listdir", "os.scandir", "sqlite3.connect") and args and isinstance(args[0], (str, bytes, os.PathLike)):
+        target = Path(os.fsdecode(args[0])).resolve()
+        if any(target == root or root in target.parents for root in _PROTECTED):
+            raise RuntimeError("SOURCE_GUARD: real provider root rejected")
+sys.addaudithook(source_guard)
+try:
+    open(_REAL_HOME / ".codex" / "guard-positive-control")
+except RuntimeError as exc:
+    assert str(exc).startswith("SOURCE_GUARD:")
+else:
+    raise AssertionError("source guard did not reject real root")
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -21,7 +39,7 @@ def main():
     args = parser.parse_args()
     accounts = [dict(id=str(i), email=f'fixture{i}@example.test', account_id=f'workspace-{i}',
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
-    state = dict(mode='mixed', delay=0, starts=[], previews=0, paused=False,
+    state = dict(disclosure=False, mode='mixed', delay=0, starts=[], previews=0, paused=False,
                  pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
                  pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause', recovery_state='ready')
     def pause():
@@ -81,7 +99,28 @@ def main():
                 self.send(body, 'text/css' if self.path.endswith('.css') else 'text/javascript')
             elif self.path == '/api/codex-accounts':
                 visible = [dict(a, restrictions={'unknown': True} if state['restricted'] and a['id'] == '0' else {}) for a in accounts]
-                self.send(dict(accounts=visible, batch=dict(id='fixture-old', items=[], created_at='2026-10-23T01:00:00Z'),
+                items = []
+                if state['disclosure']:
+                    warning = '服务端明确限制了额度使用，已暂停发送。可仅刷新配额；只有服务端明确允许使用后才解除此暂停，0% 或重置时间经过不代表恢复。'
+                    for i, account in enumerate(visible):
+                        blocked = i in (1, 5)
+                        op = dict(id=f'op-{i}', batch_id='fixture-old', stage='failed' if blocked else 'succeeded',
+                                  message_status='not_sent' if blocked else 'succeeded', started_at='2026-10-23T01:00:00Z',
+                                  detail=warning if blocked else '发送成功', message='请描述今天的天气。')
+                        op.update(before=dict(observed_at='2026-10-23T00:59:00Z', seven_day_resets_at=1893456000, seven_day_used_pct=20),
+                                  after=dict(observed_at='2026-10-23T01:01:00Z', seven_day_resets_at=1893456000, seven_day_used_pct=21),
+                                  diagnostics=dict(last_request='turn/start', last_request_at='2026-10-23T01:00:00Z',
+                                                   last_event='turn/completed', last_event_at='2026-10-23T01:01:00Z',
+                                                   thread_id=f'fixture-thread-{i}', turn_id=f'fixture-turn-{i}', interrupt='acknowledged'))
+                        if blocked:
+                            op['failure'] = dict(stage='quota', category='quota_exhausted', http_status=429)
+                        account.update(batch_result=dict(id=f'history-{i}', batch_id='older-batch', message_status='succeeded',
+                                                         started_at='2026-10-20T00:00:00Z', message='历史批次消息。'),
+                                       last_failure=dict(id=f'failure-{i}', detail='历史连接失败，保留供核对。'))
+                        account.update(operation=op, restrictions={'quota': {'reason': 'quota'}} if blocked else {},
+                                       restriction_details=[warning] if blocked else [])
+                        items.append(dict(profile_id=account['id'], operation=op))
+                self.send(dict(accounts=visible, batch=dict(id='fixture-old', items=items, created_at='2026-10-23T01:00:00Z'),
                                upstream_pause=pause() if state['paused'] else None))
             elif self.path.startswith('/api/quota-recovery?'):
                 state['recovery_reads'] += 1
@@ -136,7 +175,7 @@ def main():
                 state['starts'].append(payload)
                 self.send({})
             elif self.path == '/fixture/config':
-                for key in ('mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state'):
+                for key in ('disclosure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state'):
                     if key in payload:
                         state[key] = payload[key]
                 self.send(state)

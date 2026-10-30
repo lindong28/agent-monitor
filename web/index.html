@@ -187,12 +187,16 @@
                   <p id="codex-device-status" role="status">开始操作时会自动连接当前设备的网络，无需先单独连接。发送前会展示出口 IP 与地区。</p>
                   <button id="codex-device-cancel" type="button" class="btn" hidden>取消连接</button>
                   <details id="codex-device-help" class="note-disclosure">
-                    <summary>首次启用或连接帮助</summary>
+                    <summary>首次启用、连接与授权帮助</summary>
+                    <div class="disclosure-body">
                     <p>首次使用：在打开此页面的设备安装 agent-monitor，然后执行以下命令启用连接服务。服务会在登录后自动启动，无需保持终端打开。</p>
                     <p><code id="codex-device-command"></code></p>
                     <p>连接异常时运行 <code>agent-monitor connect status</code> 查看状态；修复后直接重试原操作。需要停用时运行 <code>agent-monitor connect stop</code>。</p>
                     <button id="codex-device-connect" type="button" class="btn">检查本机连接</button>
                     <p>此检查仅确认本机与服务器的连接，不查询账号或出口。仅批次发送、继续未发送账号及出口预览使用本机连接；单独登录、刷新配额和网络诊断仍在服务器执行。</p>
+                    <button id="codex-egress-preview" type="button" class="btn">查看发送出口 IP 与地区</button>
+                    <p>需要授权时，先在账号安全设置中启用设备码登录，再打开对应账号卡片中的 OpenAI 官方授权页并填写设备码。确认登录账号与卡片邮箱一致后完成授权。</p>
+                    </div>
                   </details>
                 </div>
                 <p class="quota-scope">这里的选择独立于上方配额筛选。从 100 条日常短消息中为每个选中账号独立随机抽取并发送一条，可能重复；会使用账号额度。抽取的内容可在账号与操作详情中查看。</p>
@@ -201,6 +205,7 @@
                   <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
                   <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
                 </div>
+                <p id="codex-batch-observation" class="quota-scope" hidden></p>
                 <p id="codex-batch-blocked" class="quota-scope" role="status" hidden></p>
                 <div id="codex-upstream-pause" class="quota-scope" hidden>
                   <p><strong id="codex-pause-summary"></strong></p>
@@ -211,11 +216,9 @@
                   <summary>查看最近恢复记录</summary>
                   <div id="codex-recovery-body"></div>
                 </details>
-                <details class="note-disclosure">
-                  <summary>发送方式与连接帮助</summary>
-                  <button id="codex-egress-preview" type="button" class="btn">查看发送出口 IP 与地区</button>
-                  <div id="codex-batch-help" class="quota-scope"></div>
-                  <p class="quota-scope">需要授权时，先在账号安全设置中启用设备码登录，再打开对应账号卡片中的 OpenAI 官方授权页并填写设备码。确认登录账号与卡片邮箱一致后完成授权。</p>
+                <details id="codex-sending-help" class="note-disclosure">
+                  <summary>发送规则</summary>
+                  <div id="codex-batch-help" class="quota-scope disclosure-body"></div>
                 </details>
               </div>
               <div id="codex-account-unavailable" role="status" aria-live="polite"></div>

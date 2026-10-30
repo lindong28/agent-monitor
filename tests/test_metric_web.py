@@ -73,7 +73,8 @@ const fs=require("fs"),assert=require("assert");
 global.document={readyState:"loading",addEventListener(){},createElement:(tag)=>({tag})};global.window={};
 require("./web/app.js")();
 const batchStart={},batchNext={},batchRetry={},batchStatus={},batchHelp={replaceChildren(...children){this.children=children;}};
-const root={querySelector(){return null;}}, selectedIds=new Set(['p']);
+const observation={};
+const root={querySelector(selector){return selector === "#codex-batch-observation" ? observation : null;}}, selectedIds=new Set(['p']);
 const element=(tag,text)=>({tag,textContent:text});
 const unavailable=[],submittingBatch=false,timestamp=x=>x;
 const upstreamPause=null,egressPreview=null,deviceConnect=null;
@@ -84,13 +85,13 @@ const accounts=[{id:"p"}];
 const renderBatch=()=>require("./web/codex-accounts.js").renderAccountBatch(
  {accounts,batch,selectedIds,unavailable,busy:submittingBatch,upstreamPause},
  {root,batchStart,batchNext,batchRetry,batchStatus,batchHelp,egressPreview,deviceConnect});
-renderBatch(); assert(batchHelp.children.map(n=>n.textContent).join(" ").includes("已知 1/1"));
+renderBatch(); assert(observation.textContent.includes("已知 1/1"));
 op.after={observed_at:"2026-10-14T01:00:00Z",seven_day_resets_at:null};
-renderBatch(); assert(batchHelp.children.map(n=>n.textContent).join(" ").includes("已知 0/1"));
+renderBatch(); assert(observation.textContent.includes("已知 0/1"));
 accounts[0].operation={refresh_only:true,started_at:"2026-10-14T02:00:00Z",before:{...before,observed_at:"2026-10-14T02:00:00Z"}};
-renderBatch(); assert(batchHelp.children.map(n=>n.textContent).join(" ").includes("已知 1/1"));
+renderBatch(); assert(observation.textContent.includes("已知 1/1"));
 accounts[0].operation.started_at="2026-10-12T00:00:00Z";
-renderBatch(); assert(batchHelp.children.map(n=>n.textContent).join(" ").includes("已知 0/1"));
+renderBatch(); assert(observation.textContent.includes("已知 0/1"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
