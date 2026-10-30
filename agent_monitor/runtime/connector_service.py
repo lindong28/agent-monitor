@@ -155,11 +155,11 @@ def show_status(value, as_json=False):
         return
     if value["connected"]:
         print(f"本机网络通道已连接：{value['device']} → {value['server']}。")
-        print("可回到页面点击「开始新一轮」；发送前仍需确认出口。")
+        print("可在网络页点击「读取本机 Agent」；账号页可点击「开始新一轮」，发送前仍需确认出口。")
     elif not value["installed"] and not value["loaded"] and value.get("observation") is None:
-        print("可选连接服务未启用；无需修复。需要通过本机发送账号请求时再安装。")
+        print("可选连接服务未启用；无需修复。需要读取本机 Agent 网络或通过本机发送账号请求时再安装。")
     else:
-        print("本机网络通道尚未就绪；当前无法通过本机发送账号请求。")
+        print("本机网络通道尚未就绪；当前无法读取本机 Agent 网络或通过本机发送账号请求。")
         print("运行 agent-monitor connect install --server <页面根地址> 启用或恢复连接服务。")
     print("登录自动启动：" + ("已启用" if value["installed"] else "未启用")
           + "；服务加载：" + ("已加载" if value["loaded"] else "未加载"))

@@ -60,7 +60,7 @@
         </div>
         <section id="process-network" class="network-card" aria-label="本机 Agent 网络">
           <h2>浏览器所在电脑的 Codex / Claude</h2>
-          <p class="scope-note">读取当前操作系统用户启动的进程、启动网络配置与当前 TCP 连接。不会改变 Agent 的代理设置，也不会发出服务商请求。</p>
+          <p class="scope-note">「读取本机 Agent」只读取当前用户的进程、启动网络配置与当前 TCP 连接，不改变代理设置、不发出服务商请求。下方主动探测按钮会单独发送一次匿名诊断请求。</p>
           <p id="process-network-status" role="status">尚未读取本机。请点击「读取本机 Agent」。</p>
           <button id="process-network-cancel" type="button" hidden>取消读取</button>
           <details id="process-network-help" class="note-disclosure">
