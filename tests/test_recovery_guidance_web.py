@@ -95,6 +95,11 @@ async function render(changes={}, error=false) {
   value={...base};fail=false;
   const provider={key:'codex',label:'Codex'}, failure={machine:base.machine,reason:'fixture pause',query_state:'paused',pause:base.pause};
   const body=ui.quotaFailureDetails(provider,[failure]);
+  const source=body.quotaDiagnostics.entries[0];
+  assert.match(source.note.textContent,/上次配额采集已暂停/);
+  assert(!source.note.textContent.includes(failure.reason));
+  assert.equal(source.sourceText.textContent,failure.reason);
+  assert(!source.sourceText.parentNode.open,'raw collection error is closed by default');
   body.quotaDiagnostics.details.open=true;
   await all(body).find(n=>n.tag==='button' && n.textContent==='查看当前状态与恢复').click();
   await new Promise(r=>setImmediate(r));

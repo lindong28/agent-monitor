@@ -291,9 +291,19 @@ try {
   await bt('click','#quota-accounts .note-disclosure > summary');
   const quotaPanel='#quota-accounts [data-codex-pause-id]:nth-child(3) .quota-recovery-panel';
   const beforeQuota=(await stats()).recoveries.length;
+  const sourceRecord='#quota-accounts [data-codex-pause-id]:nth-child(3) .recovery-source';
+  assert.equal(await read(`document.querySelector('${sourceRecord}').open`),false,'raw collection error is collapsed');
+  await click(sourceRecord+' > summary',`document.querySelector('${sourceRecord}').open`);
+  assert(await read(`document.querySelector('${sourceRecord} p').innerText.length>0`),'raw collection record remains readable');
+  await click(sourceRecord+' > summary',`!document.querySelector('${sourceRecord}').open`);
+  const hiddenRecoveryControlsHaveNoLayout = expression => read(`(() => {
+    const card=${expression};
+    return !!card && [...card.querySelectorAll('[hidden]')].every(e => getComputedStyle(e).display==='none' && e.getClientRects().length===0);
+  })()`);
   await click('#quota-accounts [data-codex-pause-id]:nth-child(3) > button',`document.querySelector('${quotaPanel}')?.innerText.includes('检查配额并尝试恢复')`);
   assert.match(await read(`document.querySelector('${quotaPanel}').innerText`),/发送已暂停[\s\S]*不会发送消息/);
   assert.equal((await stats()).recoveries.length,beforeQuota,'quota consumer reads without probing');
+  assert.equal(await hiddenRecoveryControlsHaveNoLayout(`document.querySelector('${quotaPanel}')`),true,'paused quota card hides unavailable actions in actual layout');
   assert.equal((await stats()).starts.length,1);
   await bt('screenshot',path.join(root,'quota-recovery-guidance.png'));
   console.log('PASS: quota diagnostics also expose the shared guidance without a recovery request or send.');
@@ -311,6 +321,8 @@ try {
   await bt('eval',"fetch('/fixture/quota').then(r=>r.json()).then(q=>window.AgentMonitor.renderQuotaAccounts(q))");
   await until('recovery history survives snapshot clearing',()=>read("window.acceptRecoveryCard.isConnected && window.acceptRecoveryCard.closest('details.note-disclosure').open && window.acceptRecoveryCard.querySelector('h3').innerText==='当前没有通道暂停'"));
   assert.equal((await stats()).recoveries.length,beforeQuota);
+
+  assert.equal(await hiddenRecoveryControlsHaveNoLayout('window.acceptRecoveryCard'),true,'recovered quota card hides unavailable actions in actual layout');
   console.log('PASS: snapshots preserve open recovery history and never replay a provider check.');
 
 

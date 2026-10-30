@@ -498,7 +498,7 @@ button:disabled {
 }
 .codex-account-actions > summary { cursor: pointer; font-weight: 600; }
 .codex-account-actions > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-.codex-account-actions [hidden] { display: none; }
+.codex-account-actions [hidden], .quota-recovery-panel [hidden] { display: none; }
 .btn.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--surface); }
 .btn.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
 .btn.btn-danger, .quota-account-remove { color: var(--danger); }

@@ -15,6 +15,7 @@ function node(tag = 'div') {
   const n = { tagName: tag.toUpperCase(), children: [], dataset: {}, attributes: {},
     className: '', hidden: false, value: '', listeners: {}, style: {setProperty() {}},
     appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
+    append(...children) { children.forEach(c => this.appendChild(c)); },
     remove() { this.parentNode.children = this.parentNode.children.filter(c => c !== this); },
     setAttribute(k,v) { this.attributes[k] = String(v); }, getAttribute(k) { return this.attributes[k]; },
     addEventListener(k,f) { this.listeners[k] = f; }, click() { this.listeners.click?.(); },

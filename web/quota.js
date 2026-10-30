@@ -555,9 +555,19 @@
             entry.appendChild(record.panel);
           });
           entry.appendChild(open);
+          const sourceDetails = document.createElement("details"), sourceSummary = document.createElement("summary");
+          sourceDetails.className = "recovery-source";
+          sourceSummary.textContent = "采集记录与错误详情";
+          record.sourceText = document.createElement("p");
+          sourceDetails.append(sourceSummary, record.sourceText);
+          entry.appendChild(sourceDetails);
         }
       }
-      record.note.textContent = `${failure.machine}：${failure.reason}`;
+      if (record.sourceText) {
+        const statusText = {paused:"已暂停", skipped:"未执行", busy:"通道占用", error:"未完成"}[quotaFailureKind(failure.reason, failure.query_state)];
+        record.note.textContent = `${failure.machine}：上次配额采集${statusText}；当前状态请查看恢复卡片。`;
+        record.sourceText.textContent = failure.reason || "未记录错误详情";
+      } else record.note.textContent = `${failure.machine}：${failure.reason}`;
       if (provider.key === "codex" && failure.pause?.id) {
         record.entry.dataset.codexPauseId = failure.pause.id; record.entry.tabIndex = -1;
       } else delete record.entry.dataset.codexPauseId;
