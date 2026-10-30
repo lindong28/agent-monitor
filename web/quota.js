@@ -175,6 +175,10 @@
     const focusedObservation = document.activeElement?.closest?.(".quota-observation-details")?.dataset.observationKey;
     const openObservations = new Set(Array.from(table.querySelectorAll?.(".quota-observation-details[open]") || [])
       .filter((node) => node.tagName === "DETAILS").map((node) => node.dataset.observationKey));
+    // Keep recovery cards alive across snapshot redraws, including an in-flight check.
+    const previousDiagnostics = new Map(Array.from(table.tBodies)
+      .filter(body => body.quotaDiagnostics).map(body => [body.quotaDiagnostics.provider, body]));
+    const focusedRecovery = document.activeElement?.closest?.(".quota-failure-details") ? document.activeElement : null;
     // Only the bodies are ours; the header row is in the markup.
     Array.from(table.tBodies).forEach((body) => body.remove());
 
@@ -230,12 +234,16 @@
     }
     QUOTA_PROVIDERS.forEach((provider) => {
       const failures = rateLimits?.[provider.key]?.refresh_errors || [];
-      if (failures.length) table.appendChild(quotaFailureDetails(provider, failures));
+      const previous = previousDiagnostics.get(provider.key);
+      if (failures.length || previous?.quotaDiagnostics.entries.some(record => record.panel)) {
+        table.appendChild(quotaFailureDetails(provider, failures, previous));
+      }
     });
     Array.from(table.querySelectorAll?.(".quota-observation-details") || []).forEach((node) => {
       if (node.tagName === "DETAILS") node.open = openObservations.has(node.dataset.observationKey);
       if (focusedObservation && node.dataset.observationKey === focusedObservation) node.querySelector?.("summary")?.focus();
     });
+    if (focusedRecovery && table.contains?.(focusedRecovery)) focusedRecovery.focus?.({preventScroll:true});
     renderQuotaSignedOut(rateLimits);
     updateSyncOverviewLink();
     document.dispatchEvent?.(new Event("agent-monitor:quota-rendered"));
@@ -512,46 +520,62 @@
     return panel;
   }
 
-  function quotaFailureDetails(provider, failures) {
-    const body = document.createElement("tbody");
-    const row = document.createElement("tr");
-    const cell = document.createElement("td");
-    cell.colSpan = 7;
-    const details = document.createElement("details");
-    details.className = "note-disclosure";
-    const summary = document.createElement("summary");
-    const counts = { paused: 0, skipped: 0, busy: 0, error: 0 };
-    failures.forEach(({ reason, query_state }) => {
-      counts[quotaFailureKind(reason, query_state)] += 1;
-    });
-    const labels = [["paused", "暂停"], ["skipped", "本轮未尝试"],
-      ["busy", "通道占用未查询"], ["error", "查询异常"]];
-    const status = labels.filter(([key]) => counts[key]).map(([key, label]) => `${counts[key]} 台${label}`).join("，");
-    summary.textContent = `${provider.label} 采集详情（${status}）`;
-    details.appendChild(summary);
-    failures.forEach((failure) => {
-      const entry = document.createElement("div");
+  function quotaFailureDetails(provider, failures, previous) {
+    const body = previous || document.createElement("tbody");
+    if (!body.quotaDiagnostics) {
+      const row = document.createElement("tr"), cell = document.createElement("td");
+      cell.colSpan = 7;
+      const details = document.createElement("details");
+      details.className = "note-disclosure quota-failure-details";
+      const summary = document.createElement("summary");
+      details.appendChild(summary); cell.appendChild(details); row.appendChild(cell); body.appendChild(row);
+      body.quotaDiagnostics = {provider:provider.key, details, summary, entries:[]};
+    }
+    const saved = body.quotaDiagnostics;
+    const counts = {paused:0, skipped:0, busy:0, error:0};
+    failures.forEach(({reason,query_state}) => { counts[quotaFailureKind(reason,query_state)]++; });
+    const labels = [["paused","暂停"],["skipped","本轮未尝试"],["busy","通道占用未查询"],["error","查询异常"]];
+    const status = labels.filter(([key]) => counts[key]).map(([key,label]) => `${counts[key]} 台${label}`).join("，");
+    saved.summary.textContent = failures.length ? `${provider.label} 采集详情（${status}）` : `${provider.label} 最近恢复记录`;
+    const remaining = [...saved.entries], next = [];
+    for (const failure of failures) {
+      const index = remaining.findIndex(record => record.machine === failure.machine);
+      let record = index < 0 ? null : remaining.splice(index,1)[0];
+      if (!record) {
+        const entry = document.createElement("div"), note = document.createElement("p");
+        entry.appendChild(note);
+        record = {machine:failure.machine, entry, note, panel:null, pauseId:failure.pause?.id};
+        if (provider.key === "codex" && failure.machine) {
+          const open = document.createElement("button");
+          open.type = "button"; open.textContent = "查看当前状态与恢复";
+          open.addEventListener("click", () => {
+            if (record.panel) return;
+            open.disabled = true;
+            record.panel = createRecoveryPanel(record.machine);
+            entry.appendChild(record.panel);
+          });
+          entry.appendChild(open);
+        }
+      }
+      record.note.textContent = `${failure.machine}：${failure.reason}`;
       if (provider.key === "codex" && failure.pause?.id) {
-        entry.dataset.codexPauseId = failure.pause.id;
-        entry.tabIndex = -1;
-      }
-      details.appendChild(entry);
-      const note = document.createElement("p");
-      note.textContent = `${failure.machine}：${failure.reason}`;
-      entry.appendChild(note);
-      const pause = failure.pause;
-      if (provider.key === "codex" && failure.machine) {
-        const open = document.createElement("button");
-        open.type = "button";
-        open.textContent = "查看当前状态与恢复";
-        open.addEventListener("click", () => { open.disabled = true; entry.appendChild(createRecoveryPanel(failure.machine)); });
-        entry.appendChild(open);
-      }
-
-    });
-    cell.appendChild(details);
-    row.appendChild(cell);
-    body.appendChild(row);
+        record.entry.dataset.codexPauseId = failure.pause.id; record.entry.tabIndex = -1;
+      } else delete record.entry.dataset.codexPauseId;
+      if (record.pauseId !== failure.pause?.id) record.panel?.refresh();
+      record.pauseId = failure.pause?.id;
+      next.push(record);
+    }
+    for (const record of remaining) {
+      if (record.panel) {
+        record.note.textContent = `${record.machine} · 最近恢复记录；当前状态见下方卡片。`;
+        delete record.entry.dataset.codexPauseId;
+        if (record.pauseId !== null) record.panel.refresh();
+        record.pauseId = null;
+        next.push(record);
+      } else record.entry.remove();
+    }
+    for (const record of next) saved.details.appendChild(record.entry);
+    saved.entries = next;
     return body;
   }
 

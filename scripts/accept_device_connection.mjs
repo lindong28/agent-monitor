@@ -297,6 +297,10 @@ try {
   assert.equal((await stats()).starts.length,1);
   await bt('screenshot',path.join(root,'quota-recovery-guidance.png'));
   console.log('PASS: quota diagnostics also expose the shared guidance without a recovery request or send.');
+  const beforeRedraw=(await stats()).recovery_reads;
+  await bt('eval',`window.acceptRecoveryCard=document.querySelector('${quotaPanel}'); window.AgentMonitor.renderQuotaAccounts(window.AgentMonitor.quotaSnapshot());`);
+  assert.equal(await read(`window.acceptRecoveryCard===document.querySelector('${quotaPanel}') && window.acceptRecoveryCard.closest('details.note-disclosure').open`),true,'snapshot redraw preserves the open live card');
+  assert.equal((await stats()).recovery_reads,beforeRedraw,'identical snapshot redraw does not issue another status request');
   // Another tab's successful recovery must reconcile the already-open account card.
   await configure({paused:false});
   await bt('eval',"document.dispatchEvent(new Event('agent-monitor:recovery-state'))");
@@ -304,6 +308,11 @@ try {
   assert.equal((await stats()).recoveries.length,beforeQuota);
   assert.equal((await stats()).starts.length,1);
   console.log('PASS: another consumer can remove the pause without leaving the account card stale.');
+  await bt('eval',"fetch('/fixture/quota').then(r=>r.json()).then(q=>window.AgentMonitor.renderQuotaAccounts(q))");
+  await until('recovery history survives snapshot clearing',()=>read("window.acceptRecoveryCard.isConnected && window.acceptRecoveryCard.closest('details.note-disclosure').open && window.acceptRecoveryCard.querySelector('h3').innerText==='当前没有通道暂停'"));
+  assert.equal((await stats()).recoveries.length,beforeQuota);
+  console.log('PASS: snapshots preserve open recovery history and never replay a provider check.');
+
 
 } catch(error) {
   failure=error;

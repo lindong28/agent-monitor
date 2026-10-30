@@ -10,11 +10,12 @@ class RecoveryGuidanceTests(unittest.TestCase):
 const assert = require('node:assert/strict');
 function node(tag) {
   let text = '';
-  return {tag, children: [], listeners: {}, disabled: false, hidden: false,
+  return {tag, dataset: {}, children: [], listeners: {}, disabled: false, hidden: false,
     set textContent(v) { text=String(v); this.children=[]; },
     get textContent() { return text+this.children.map(n=>n.textContent).join('\n'); },
-    attrs: {}, setAttribute(k,v) {this.attrs[k]=v;}, append(...nodes) {this.children.push(...nodes);},
-    appendChild(n) {this.children.push(n);return n;},
+    attrs: {}, setAttribute(k,v) {this.attrs[k]=v;}, append(...nodes) {nodes.forEach(n=>this.appendChild(n));},
+    appendChild(n) {n.remove?.(); n.parentNode=this; this.children.push(n);return n;},
+    remove() {if(this.parentNode) this.parentNode.children=this.parentNode.children.filter(n=>n!==this); this.parentNode=null;},
     replaceChildren(...nodes) {text='';this.children=nodes;},
     addEventListener(k, f) {this.listeners[k]=f;},
     click() {return this.listeners.click?.();}, focus() {}, select() {this.selected=true;}
@@ -90,6 +91,29 @@ async function render(changes={}, error=false) {
   assert(all(p).find(n=>n.attrs?.['data-recovery-action']==='continue').hidden, 'remote consumer cannot resume local sending');
   assert.match(p.textContent,/发送/);
   assert(calls.every(([,method])=>method==='GET'),'viewing instructions never probes or sends');
+
+  value={...base};fail=false;
+  const provider={key:'codex',label:'Codex'}, failure={machine:base.machine,reason:'fixture pause',query_state:'paused',pause:base.pause};
+  const body=ui.quotaFailureDetails(provider,[failure]);
+  body.quotaDiagnostics.details.open=true;
+  await all(body).find(n=>n.tag==='button' && n.textContent==='查看当前状态与恢复').click();
+  await new Promise(r=>setImmediate(r));
+  const originalPanel=body.quotaDiagnostics.entries[0].panel, readsBefore=calls.length;
+  assert.strictEqual(ui.quotaFailureDetails(provider,[failure],body),body);
+  assert.strictEqual(body.quotaDiagnostics.entries[0].panel,originalPanel);
+  assert(body.quotaDiagnostics.details.open,'snapshot refresh preserves the open disclosure');
+  assert.equal(calls.length,readsBefore,'unchanged snapshots must not poll status again');
+  ui.quotaFailureDetails(provider,[{...failure,pause:{...base.pause,id:'new'}}],body);
+  await new Promise(r=>setImmediate(r));
+  assert.equal(calls.length,readsBefore+1,'changed pause refreshes the existing card');
+  value={...base,pause:null};
+  ui.quotaFailureDetails(provider,[],body); await new Promise(r=>setImmediate(r));
+  assert.strictEqual(body.quotaDiagnostics.entries[0].panel,originalPanel,'removing a failure retains the result being read');
+  assert.match(body.quotaDiagnostics.summary.textContent,/最近恢复记录/);
+  assert.match(originalPanel.textContent,/当前没有通道暂停/);
+  assert(!body.quotaDiagnostics.entries[0].entry.dataset.codexPauseId);
+  ui.quotaFailureDetails(provider,[],body);
+  assert.equal(calls.length,readsBefore+2,'retained history must not create recurring remote reads');
   const action=(p,key)=>all(p).find(n=>n.attrs?.['data-recovery-action']===key);
   const settle=()=>new Promise(r=>setImmediate(r));
   for (const scenario of ['matched','missing','still-paused']) {
