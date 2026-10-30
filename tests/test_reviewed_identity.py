@@ -171,7 +171,6 @@ class ReviewedIdentityTests(unittest.TestCase):
             shutil.copy2(src / name, cli / name)
         shutil.copytree(src / "parsers", cli / "parsers")
         shutil.copytree(src / "agent_monitor", cli / "agent_monitor")
-        shutil.copy2(src / "project_paths.py", cli / "project_paths.py")
         (cli / "state").symlink_to(self.root, target_is_directory=True)
         manifest = self.root / "reviewed.json"
         manifest.write_text(json.dumps(self.manifest))

@@ -38,12 +38,13 @@ class DeploymentRegressionTests(unittest.TestCase):
     def test_selected_configuration_changes_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / 'hub.json').write_text('{}')
+            (root / 'config').mkdir()
+            (root / 'config/hub.json').write_text('{}')
             before = service_runtime.signature(root)
             (root / 'hub.local.json').write_text('{"port":39003}')
             self.assertNotEqual(before, service_runtime.signature(root))
             current = service_runtime.signature(root)
-            (root / 'hub.json').write_text('{"unused":true}')
+            (root / 'config/hub.json').write_text('{"unused":true}')
             self.assertEqual(current, service_runtime.signature(root))
 
     def test_readiness_requires_source_and_version_and_is_bounded(self):
@@ -109,7 +110,7 @@ class ShellLifecycleTests(unittest.TestCase):
         self.env = dict(os.environ, HOME=str(self.home), PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         AGENT_MONITOR_PYTHON=sys.executable, PYTHONPATH=str(self.root), SSH_CONNECTION='', DISPLAY='', WAYLAND_DISPLAY='')
         shutil.copytree(ROOT / 'agent_monitor', self.root / 'agent_monitor', ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ('project_paths.py', 'uninstall.sh', 'status.sh', 'agent-monitor', 'agent_monitor/runtime/rollup_service.py', 'agent_monitor/runtime/service_runtime.py', 'agent_monitor/runtime/deployment_guard.py'):
+        for name in ('uninstall.sh', 'agent-monitor', 'agent_monitor/runtime/rollup_service.py', 'agent_monitor/runtime/service_runtime.py', 'agent_monitor/runtime/deployment_guard.py'):
             shutil.copy2(ROOT / name, self.root / name)
 
     def executable(self, name, source):
@@ -264,8 +265,15 @@ class ShellLifecycleTests(unittest.TestCase):
         self.assertTrue(all((link_dir / name).is_symlink() for name in ('agent-monitor', 'ip-check')))
 
     def test_connector_status_queries_loaded_state_without_plist(self):
-        self.executable('uname', '#!/bin/sh\necho Darwin\n')
-        (self.root / 'agent_monitor/runtime/cli.sh').write_text('#!/bin/sh\necho "loaded owner unverified" >&2\nexit 2\n')
-        result = self.run_script('status.sh', 'connector')
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('loaded owner unverified', result.stderr)
+        # Keep both public CLI and service_manager real; fake only the final
+        # connector observer, so dropping the selector/exit code fails this test.
+        (self.root / 'agent_monitor/network/client_connector.py').write_text(
+            'import sys\nassert sys.argv[1:] == ["status"]\n'
+            'print("loaded owner unverified", file=sys.stderr)\nraise SystemExit(2)\n')
+        result = self.run_script('agent-monitor', 'service', 'status', 'connector')
+        if sys.platform == 'darwin':
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn('loaded owner unverified', result.stderr)
+        else:
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('no startup definition installed on this platform', result.stdout)

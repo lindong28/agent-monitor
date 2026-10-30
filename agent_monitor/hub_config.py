@@ -3,13 +3,10 @@ import json
 import re
 from pathlib import Path
 from urllib.parse import urlparse
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT, configuration_path
 
 ROOT = PROJECT_ROOT
-CONFIG_PATH = ROOT / "hub.json"
-_LOCAL_CONFIG_PATH = ROOT / "hub.local.json"
-if _LOCAL_CONFIG_PATH.exists() or _LOCAL_CONFIG_PATH.is_symlink():
-    CONFIG_PATH = _LOCAL_CONFIG_PATH
+CONFIG_PATH = configuration_path("hub")
 MACHINE_PATH = ROOT / "state" / "hub-machine"
 
 

@@ -107,7 +107,6 @@ class ProcessGroupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             shutil.copytree(ROOT/'agent_monitor',root/'agent_monitor',ignore=shutil.ignore_patterns('__pycache__'))
-            shutil.copy2(ROOT/'project_paths.py',root/'project_paths.py')
             for name in ('agent-monitor','agent_monitor/runtime/process_identity.py','agent_monitor/runtime/deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
             (root/'agent_monitor/runtime/hub.py').write_text('print("standalone")\n')
@@ -162,7 +161,6 @@ class ProcessGroupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             shutil.copytree(ROOT/'agent_monitor',root/'agent_monitor',ignore=shutil.ignore_patterns('__pycache__'))
-            shutil.copy2(ROOT/'project_paths.py',root/'project_paths.py')
             for name in ('agent-monitor','agent_monitor/runtime/process_identity.py','agent_monitor/runtime/deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
             (root/'agent_monitor/runtime/hub.py').write_text('print("standalone")\n')
@@ -193,7 +191,6 @@ class ProcessGroupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             shutil.copytree(ROOT/'agent_monitor',root/'agent_monitor',ignore=shutil.ignore_patterns('__pycache__'))
-            shutil.copy2(ROOT/'project_paths.py',root/'project_paths.py')
             for name in ('agent-monitor','agent_monitor/runtime/process_identity.py','agent_monitor/runtime/deployment_guard.py'):
                 shutil.copy2(ROOT/name,root/name)
             (root/'agent_monitor/runtime/hub.py').write_text('print("standalone")\n')
@@ -312,7 +309,6 @@ s.serve_forever()
         with tempfile.TemporaryDirectory() as directory:
             base=Path(directory)
             shutil.copytree(ROOT/'agent_monitor',base/'agent_monitor',ignore=shutil.ignore_patterns('__pycache__'))
-            shutil.copy2(ROOT/'project_paths.py',base/'project_paths.py')
             shutil.copy2(ROOT/'agent-monitor', base/'agent-monitor')
             (base/'agent_monitor/runtime/hub.py').write_text('print("standalone")\n')
             if (ROOT/'agent_monitor/runtime/process_identity.py').exists(): (base/'agent_monitor/runtime/process_identity.py').write_bytes((ROOT/'agent_monitor/runtime/process_identity.py').read_bytes())

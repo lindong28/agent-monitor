@@ -21,7 +21,7 @@ from pathlib import Path
 from agent_monitor.runtime import service_runtime
 from agent_monitor.quota.quota_messages import write_message as _write_quota_message
 from agent_monitor import hub_config
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 
 ROOT = PROJECT_ROOT

@@ -6,7 +6,7 @@ dependencies, tests and task artifacts are not application source roots.
 import hashlib
 from pathlib import Path
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT, configuration_path
 
 
 PACKAGE_ROOTS = ("agent_monitor", "parsers", "ip_check", "proxy_runtime")
@@ -39,8 +39,7 @@ def deployment_sources(root=PROJECT_ROOT):
     files.extend((root / "proxy_runtime").rglob("*.cjs"))
     files.extend((root / "requirements.txt", root / "state/hub-machine"))
     for name in ("machines", "hub"):
-        local = root / (name + ".local.json")
-        files.append(local if local.exists() or local.is_symlink() else root / (name + ".json"))
+        files.append(configuration_path(name, root=root))
     return sorted(files)
 
 
@@ -53,7 +52,7 @@ def authority_pathspecs():
     return (
         ":(glob)*.py",
         *(f":(glob){name}/**" for name in PACKAGE_ROOTS),
-        "pricing.json", "agent-monitor", "install.sh", "requirements.txt",
+        "agent-monitor", "install.sh", "requirements.txt",
     )
 
 

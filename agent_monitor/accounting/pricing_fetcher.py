@@ -15,11 +15,11 @@ import token_cost
 # cache with fetched_at and enforces a 7-day TTL.
 LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 TTL_SECONDS = 7 * 24 * 3600
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 CACHE_PATH = ROOT / "state" / "pricing_cache.json"
-FALLBACK_PATH = ROOT / "pricing.json"
+FALLBACK_PATH = Path(__file__).with_name("pricing.json")
 ESTIMATED_PRICING_MODELS = {"glm-5.1", "glm-5.2"}
 
 logger = logging.getLogger(__name__)

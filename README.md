@@ -112,7 +112,7 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 
 ## 配置与更新
 
-新安装默认只有一台本地机器，Hub 模式关闭。根目录的 `machines.json`、`hub.json` 是随源码提供的默认配置，也是首次定制的模板；`examples/` 不再维护相同副本。在新克隆中，若要自定义机器名或 SSH 目标，将 `machines.json` 复制为 **`machines.local.json`** 后编辑；需要 Hub 时，将 `hub.json` 复制为 **`hub.local.json`** 后编辑。已有本地配置时直接编辑它，不重复复制或覆盖。进程启动时，本地配置优先于对应的受版本控制的默认配置。本地配置无效时会明确报错，不会退回另一组机器配置。新增或删除本地配置文件后，请重启。
+新安装默认只有一台本地机器，Hub 模式关闭。`config/machines.json`、`config/hub.json` 是默认配置及首次定制的模板。需要定制时，将对应文件复制为同目录的 **`machines.local.json`** 或 **`hub.local.json`** 后编辑；已有本地配置时直接编辑，不覆盖。根目录的旧 `*.local.json` 继续兼容；同一配置的新旧位置同时存在时会报冲突，请保全并核对后只留一处。本地配置无效或软链接失效时会报错，不会退回默认身份。配置文件选择在进程启动时完成，迁移后须重启。迁移及回退见[配置升级说明](docs/public-usage.md#configuration-path-migration)。
 
 只有一台机器应设置 `self: true`。开始采集数据后，应保持机器名、SSH 身份和 `retired_names` 稳定。不要用示例覆盖已有配置。安装器会保留本地配置文件、已有 `state`（包括软链接）和持久锁。Git 会忽略本地配置及运行时数据。迁移和多机配置详见[配置与保留数据](docs/public-usage.md#configuration-and-retained-data)。
 
@@ -131,7 +131,7 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 | 使用可选的账号或浏览器设备操作 | [账号与连接器指南](docs/public-usage.md#optional-quota-and-account-actions) |
 | 移除项目管理的服务和 CLI 集成 | `./uninstall.sh`；保留源码、状态和锁。详见[组件归属与实例选择](docs/public-usage.md#services-and-deployment) |
 
-日常操作优先使用 `./agent-monitor`。根目录的 `install.sh`、`uninstall.sh` 负责安装与移除集成；`start.sh`、`stop.sh`、`status.sh` 保留兼容旧调用。`status.sh web|rollup-daemon|connector` 可单独检查一个组件，与不带参数的全组件检查不同。`deploy.py`、`runtime_rebuild.py`、`upstream_controls.py` 是部署、运行时恢复和服务商暂停控制的专用入口，按[对应操作指南](docs/public-usage.md#services-and-deployment)使用，不需要在这些文件中修改实现。
+日常操作统一使用 `./agent-monitor`，包括 `service deploy`、`service status [web|rollup-daemon|connector]` 和 `upstream-holds`。根目录保留 `install.sh`、`uninstall.sh` 和独立网络诊断 `ip-check`；`runtime_rebuild.py` 用于项目虚拟环境损坏时通过外部 Python 恢复。旧脚本的替代命令见[操作指南](docs/public-usage.md#command-migration)。
 
 `--no-services` 不改变服务。macOS 的普通安装会管理定时采集和已配置的 Hub，连接器需要主动启用。Linux 提供 CLI 和手动启动的仪表盘。Hub 客户端通常打开中心仪表盘；可以通过[本地实例选择方式](docs/public-usage.md#services-and-deployment)管理可选的本地实例。受管更新可能中断正在执行的操作：应先等账号操作结束，不要重发结果不确定的消息。组件重启、恢复和运行时替换的细节见上述指南。
 
@@ -146,19 +146,20 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 ## 目录与文档
 
 ```text
-agent-monitor / install.sh / deploy.py   CLI、安装和部署入口
-project_paths.py / agent_monitor/        共享路径、源码清单与内部职责组件
+agent-monitor / install.sh              CLI、安装和部署入口
+agent_monitor/                         共享路径、源码清单与内部职责组件
+config/                                机器和 Hub 默认配置及本地定制
 agent_monitor/runtime/                  安装、服务生命周期、部署与恢复实现
 agent_monitor/cli/                      CLI 子命令的 Python 处理器
 agent_monitor/contracts/                共享用量、额度类型与快照常量
 agent_monitor/ingestion/                数据加载、归档合并与项目身份恢复
 agent_monitor/views/                    概览、会话与网络查询及其缓存
-*.py                                    公开命令适配器、路径引导与共享计费契约
+runtime_rebuild.py / token_cost.py       外部 Python 恢复入口与跨项目计费契约
 parsers/                                Claude/Codex 日志与账号数据源读取器
 web/                                    仪表盘页面模块、导航、共享组件和样式
 proxy_runtime/                          系统代理解析辅助程序
 ip_check/                               网络诊断与归因
-examples/                               虚构样本；首次定制模板使用根目录默认配置
+examples/                               虚构样本；首次定制模板位于 config/
 scripts/ / tests/                       显式验收、测量与回归测试
 docs/                                   使用、架构、运维与核算指南
 ```

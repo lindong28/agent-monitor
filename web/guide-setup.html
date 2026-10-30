@@ -60,14 +60,14 @@
           <p>开始前，准备 Python 3.10 或更新版本（含 venv 和 pip）、Git、curl 和 nc，并进入自己的 agent-monitor 代码目录。</p>
           <p>使用真实 HOME 会读取本地日志和当前账号状态。打开页面或浏览单机概览时，Monitor 可自动使用已有登录主动查询配额；仅在同意这些读取和请求时继续，否则按 README 使用隔离样例。</p>
           <ol>
-            <li>公开候选默认只包含本机。如需修改，复制 <code>examples/machines.json</code> 为 <code>machines.local.json</code> 后编辑。已有安装须从当前配置复制，保留机器身份和退休记录。</li>
+            <li>默认只包含本机。如需修改，复制 <code>config/machines.json</code> 为 <code>config/machines.local.json</code> 后编辑。已有安装须保留当前配置、机器身份和退休记录；根目录的旧本地配置仍受支持，不要在新旧位置同时创建覆盖配置。</li>
             <li>运行 <code>./install.sh --no-services</code> 安装 Monitor。</li>
             <li>运行 <code>AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start</code> 启动仅本机可访问的服务。</li>
             <li>运行 <code>./agent-monitor open</code> 打开页面，在「会话」中选择日期范围并打开已有会话。</li>
             <li>需要立即追加一轮采集与配额查询时，运行 <code>./agent-monitor refresh</code>；这可能访问自己的账号和已配置机器。</li>
           </ol>
           <p><code>--no-services</code> 不安装定时任务。需要定时采集时，macOS 可运行默认安装器；Linux 用户需自行配置调度。服务没有客户端身份验证，不应暴露到不可信网络。</p>
-          <div class="code-card"><div class="code-card-head"><span>新单机 machines.local.json 示例</span><button type="button" data-copy-code="machine-config">复制配置</button></div><pre><code id="machine-config">{
+          <div class="code-card"><div class="code-card-head"><span>新单机 config/machines.local.json 示例</span><button type="button" data-copy-code="machine-config">复制配置</button></div><pre><code id="machine-config">{
   "machines": [{"name": "local", "ssh_host": "localhost", "self": true}],
   "retired_names": []
 }</code></pre></div>
@@ -75,7 +75,7 @@
 AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 ./agent-monitor open</code></pre></div>
           <p>若快照不可读或更新时间未变化，先查看采集详情中的错误，再检查对应配置与连接。</p>
-          <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>Hub 负责拉取快照；采集器独立保存各机数据。开始前，确认 Hub 能通过 SSH 连接各采集器。</p><ol><li>在 <code>machines.local.json</code> 中配置机器名称与 SSH 目标，在 <code>hub.local.json</code> 中配置 Hub、URL 和采集机器。已有安装须保留机器身份和退休记录。</li><li>在每台机器的代码目录中运行以下命令。将占位符替换为该机器在配置中的名称。</li></ol>
+          <details class="note-disclosure"><summary>多机接入 · Hub 与采集器</summary><p>Hub 负责拉取快照；采集器独立保存各机数据。开始前，确认 Hub 能通过 SSH 连接各采集器。</p><ol><li>首次配置时，将 <code>config/hub.json</code> 复制为 <code>config/hub.local.json</code>，填写 Hub、URL 和采集机器；在 <code>config/machines.local.json</code> 中配置匹配的机器名称与 SSH 目标。已有本地配置时直接编辑，不覆盖；根目录旧配置仍受支持，同一配置只保留一个覆盖位置。保留机器身份和退休记录，改变配置位置后重启相关服务。</li><li>在每台机器的代码目录中运行以下命令。将占位符替换为该机器在配置中的名称。</li></ol>
           <div class="code-card"><div class="code-card-head"><span>多机安装 · 替换为配置中的机器名</span><button type="button" data-copy-code="hub-commands">复制命令</button></div><pre><code id="hub-commands">./install.sh hub &lt;机器名&gt;</code></pre></div><p>安装后，进入 Hub 的「采集与诊断」，逐台核对机器名称、纳入状态与数据更新时间。显示旧快照时，按该机器的错误继续排查。</p></details>
           <p>完整命令、无账号示例与服务迁移见代码目录中的 <code>README.md</code> 和 <code>docs/public-usage.md</code>。</p>
         </section>

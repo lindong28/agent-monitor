@@ -3,15 +3,12 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from project_paths import resource_path, state_path
+from agent_monitor.paths import configuration_path, state_path
 
 
-DEFAULT_CONFIG_PATH = resource_path("machines.json")
-_LOCAL_CONFIG_PATH = DEFAULT_CONFIG_PATH.with_name("machines.local.json")
 # Resolve once for every importer, including retirement's read/write target.
 # A broken local symlink is an invalid configuration, not a fallback request.
-if _LOCAL_CONFIG_PATH.exists() or _LOCAL_CONFIG_PATH.is_symlink():
-    DEFAULT_CONFIG_PATH = _LOCAL_CONFIG_PATH
+DEFAULT_CONFIG_PATH = configuration_path("machines")
 DEFAULT_RETIREMENT_ROOT = state_path("generations")
 _DEFAULT_RETIREMENT_ROOT = object()
 _ROOT_FIELDS = {"machines", "retired_names"}

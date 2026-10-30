@@ -34,7 +34,7 @@ import agent_monitor.views.query_view as query_view
 from agent_monitor.quota import quota_sync
 from agent_monitor import diagnostics
 import agent_monitor.asset_delivery as asset_delivery
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 from agent_monitor import source_inventory
 from agent_monitor.quota.account_memory import AccountMemory; from agent_monitor.quota.account_memory import UNSPECIFIED_ACCOUNT_LABEL; from agent_monitor.quota.account_memory import parse_observed_at
 from agent_monitor.collection import CollectionCoordinator

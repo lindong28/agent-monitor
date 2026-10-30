@@ -11,7 +11,7 @@ from logging.handlers import RotatingFileHandler
 import os
 import re
 from pathlib import Path
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 import threading
 import time
 import uuid

@@ -47,7 +47,7 @@ class MachineConfigTests(unittest.TestCase):
                         load_machine_config(path)
 
     def test_public_default_config_declares_only_local_machine(self):
-        source = Path(__file__).resolve().parents[1] / "machines.json"
+        source = Path(__file__).resolve().parents[1] / "config/machines.json"
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "machines.json"
             path.write_bytes(source.read_bytes())

@@ -16,7 +16,7 @@ import tempfile
 
 from agent_monitor.runtime import service_runtime
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 LABEL = "com.agent-monitor.rollup"
@@ -38,7 +38,7 @@ def launch(*args):
     except subprocess.TimeoutExpired:
         raise ValueError(f"rollup schedule: launchctl {args[0]} timed out after {LAUNCH_TIMEOUT}s; "
                          "loaded state is unverified. Configuration and data remain; "
-                         "run ./status.sh rollup-daemon before retrying.") from None
+                         "run ./agent-monitor service status rollup-daemon before retrying.") from None
     except OSError as exc:
         raise ValueError(f"rollup schedule: cannot run launchctl {args[0]} (errno={exc.errno}); "
                          "state is unverified. Check macOS launchd availability; "
@@ -97,7 +97,7 @@ def definition(command, interval):
 def require_success(result, action, remaining):
     if result.returncode:
         raise ValueError(f"rollup schedule: launchctl {action} failed (exit={result.returncode}); "
-                         f"{remaining} Run ./status.sh rollup-daemon before retrying.")
+                         f"{remaining} Run ./agent-monitor service status rollup-daemon before retrying.")
 
 
 def install(command, interval):
@@ -107,7 +107,7 @@ def install(command, interval):
     loaded = loaded_info(old)
     if loaded is not None and old == wanted:
         print(f"rollup schedule unchanged: every {interval}s; collection result not checked. "
-              "Use ./status.sh rollup-daemon.", file=sys.stderr)
+              "Use ./agent-monitor service status rollup-daemon.", file=sys.stderr)
         return "present"
     (ROOT / "state").mkdir(parents=True, exist_ok=True)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -127,7 +127,7 @@ def install(command, interval):
         raise ValueError("rollup schedule: configuration saved but job is not loaded after bootstrap; "
                          "log into the macOS desktop and rerun ./install.sh rollup-daemon.")
     print(f"rollup schedule loaded: every {interval}s; collection result not checked. "
-          f"Use ./status.sh rollup-daemon; log={ROOT / 'state/rollup-daemon.log'}", file=sys.stderr)
+          f"Use ./agent-monitor service status rollup-daemon; log={ROOT / 'state/rollup-daemon.log'}", file=sys.stderr)
     return "installed" if old is None else "updated"
 
 
@@ -183,7 +183,7 @@ def uninstall():
         require_success(launch("bootout", target()), "bootout", "Original configuration retained.")
         if loaded_info(managed) is not None:
             raise ValueError("rollup schedule: job remains loaded after bootout; configuration retained. "
-                             "Inspect ./status.sh rollup-daemon before retrying.")
+                             "Inspect ./agent-monitor service status rollup-daemon before retrying.")
     if managed:
         path.unlink()
     print("rollup schedule: owned integration removed or already absent; collected data, logs and locks retained.")
@@ -212,7 +212,7 @@ def main(argv=None):
     except (OSError, ValueError) as exc:
         print(str(exc) if isinstance(exc, ValueError) else
               f"rollup schedule: filesystem operation failed (errno={exc.errno}); "
-              "service state unverified. Check ./status.sh rollup-daemon before retrying.", file=sys.stderr)
+              "service state unverified. Check ./agent-monitor service status rollup-daemon before retrying.", file=sys.stderr)
         return 1
 
 

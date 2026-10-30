@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 import urllib.request
 from agent_monitor.runtime import service_runtime
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 LABEL = "com.agent-monitor.connector"

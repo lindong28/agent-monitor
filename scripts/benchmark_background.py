@@ -38,7 +38,7 @@ def source_identity():
     paths = sorted(set(ROOT.glob("*.py")) | set((ROOT / "parsers").rglob("*.py")) |
                    set((ROOT / "agent_monitor").rglob("*.py")) |
                    set((ROOT / "scripts").glob("benchmark*.py")))
-    paths += [ROOT / "requirements.txt", ROOT / "pricing.json"]
+    paths += [ROOT / "requirements.txt", ROOT / "agent_monitor/accounting/pricing.json"]
     files = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
              for p in paths if p.is_file()}
     return {"files": files, "sha256": hashlib.sha256(

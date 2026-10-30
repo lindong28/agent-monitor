@@ -13,7 +13,7 @@ from agent_monitor.contracts.calendar import BUCKET_TIMEZONE as USAGE_TIMEZONE
 
 from agent_monitor.contracts.usage import LoadedEntries, complete_usage_observation
 from parsers import claude, codex, codex_profiles
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 from .project_identity import ProjectIdentityBlocked
 
 logger = logging.getLogger(__name__)

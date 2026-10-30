@@ -472,7 +472,6 @@ class AggregatorTests(unittest.TestCase):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
-            shutil.copy2(source_root / "project_paths.py", cli_root / "project_paths.py")
             source_path = cli_root / "repo"
             source = str(source_path)
             candidate = "github.com/owner/new-name"
@@ -565,7 +564,6 @@ class AggregatorTests(unittest.TestCase):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
-            shutil.copy2(source_root / "project_paths.py", cli_root / "project_paths.py")
             state = cli_root / "state"
             state.mkdir()
             identity_db = state / "project_identity.db"
@@ -638,7 +636,6 @@ class AggregatorTests(unittest.TestCase):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
-            shutil.copy2(source_root / "project_paths.py", cli_root / "project_paths.py")
             state = cli_root / "state"
             state.mkdir()
             with sqlite3.connect(state / "project_identity.db") as conn:

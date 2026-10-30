@@ -7,7 +7,7 @@ import subprocess
 import sys
 from agent_monitor.runtime import deployment_guard
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 

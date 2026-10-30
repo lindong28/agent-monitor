@@ -262,7 +262,6 @@ class GuiQuotaTests(unittest.TestCase):
     def test_cli_forwards_gui_and_cached_quota_flags(self):
         source = Path(__file__).resolve().parents[1]
         shutil.copytree(source / "agent_monitor", self.root / "agent_monitor", ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copy2(source / "project_paths.py", self.root / "project_paths.py")
         cli = self.root / "agent-monitor"
         shutil.copyfile(Path(__file__).resolve().parents[1] / "agent-monitor", cli)
         python = self.root / ".venv/bin/python"

@@ -185,7 +185,7 @@ def main(argv=None):
     parser.add_argument("action", choices=("status", "resume"))
     parser.add_argument("provider", choices=("codex", "claude"))
     parser.add_argument("--pause-id", help="核对原因后，填入 status 显示的当前暂停标识")
-    from project_paths import state_path
+    from agent_monitor.paths import state_path
     parser.add_argument("--state-root", type=Path, default=state_path("upstream_controls"))
     args = parser.parse_args(argv)
     controls = Controls(args.state_root)

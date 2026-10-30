@@ -662,12 +662,10 @@ class RollupCheckTests(unittest.TestCase):
             cli_root.mkdir()
             for name in (
                 "agent-monitor",
-                "pricing.json",
             ):
                 shutil.copy2(source_root / name, cli_root / name)
             shutil.copytree(source_root / "parsers", cli_root / "parsers")
             shutil.copytree(source_root / "agent_monitor", cli_root / "agent_monitor")
-            shutil.copy2(source_root / "project_paths.py", cli_root / "project_paths.py")
             state = cli_root / "state"
             state.mkdir()
             pricing_cache = state / "pricing_cache.json"

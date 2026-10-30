@@ -14,7 +14,7 @@ In **总览**, inspect cost/token totals and model/project attribution. Use **�
 
 ## Configuration and retained data
 
-Public defaults declare one machine called `local`, with SSH target `localhost` and `self: true`. No Hub role is active until explicitly installed. In a fresh clone, customize by copying the root `machines.json` to `machines.local.json`; the default file is also the template. If a local file already exists, edit it without replacing it. Preserve existing identities and retired names when updating an installation. Names are lowercase ASCII slugs. Exactly one active machine must be local. Comment lines starting with `#` or `//` and trailing commas are accepted in the machine file.
+Public defaults declare one machine called `local`, with SSH target `localhost` and `self: true`. No Hub role is active until explicitly installed. In a fresh clone, customize by copying `config/machines.json` to `config/machines.local.json`; the default file is also the template. If a local file already exists, edit it without replacing it. Preserve existing identities and retired names when updating an installation. Names are lowercase ASCII slugs. Exactly one active machine must be local. Comment lines starting with `#` or `//` and trailing commas are accepted in the machine file.
 
 For an existing installation, copy its **current** machine/Hub files to the corresponding `.local.json` files before changing tracked defaults. Preserve its values instead of resetting to the public defaults. The installer never overwrites these local files. A process chooses the local/default path at startup; restart after adding or removing an override. Malformed local files and broken local symlinks produce errors rather than using another configuration.
 
@@ -75,7 +75,7 @@ If any identity, retained-data or source check fails, stop before enabling colle
 
 Supply your own SSH aliases, with `agent-monitor` installed on each source. The collecting machine needs SSH and rsync access and invokes `~/.local/bin/agent-monitor export` remotely. Exporters require committed source and verify their runtime source identity. Noninteractive SSH environments must resolve the installed CLI and any required SSH agent.
 
-For first-time macOS Hub setup, copy the root `hub.json` to `hub.local.json` on each participating machine that does not already have a local file; otherwise edit the existing file. Set `hub`, its trusted-network HTTP origin and port, and participating names. Match those names to `machines.local.json`. Then run `./install.sh hub MACHINE_NAME` on each host with its own selected role. This installs macOS services and starts collection; use only after reviewing your source and account access. The Hub pulls snapshots; collectors retain their own data. Intervals are specified in the Hub JSON.
+For first-time macOS Hub setup, copy `config/hub.json` to `config/hub.local.json` on each participating machine that does not already have a local file; otherwise edit the existing file. Set `hub`, its trusted-network HTTP origin and port, and participating names. Match those names to the selected machine configuration. Then run `./install.sh hub MACHINE_NAME` on each host with its own selected role. This installs macOS services and starts collection; use only after reviewing your source and account access. The Hub pulls snapshots; collectors retain their own data. Intervals are specified in the Hub JSON.
 
 ## Optional quota and account actions
 
@@ -122,9 +122,31 @@ For the README's **default real-data setup**, run the following from its origina
 
 Open the printed address and check the expected machines, totals and a retained session. Successful installation or process startup alone does not verify those results. On failure, keep state/configuration and inspect the reported error and `state/server.log`; do not retry with different data sources or clear retained history. To remove integration, use the ownership-aware `./uninstall.sh` described below; it retains source and state.
 
+## Configuration path migration
+
+New defaults and overrides live under `config/`. Existing root `machines.local.json` and `hub.local.json` remain supported without automatic relocation. Both old and new overrides for one configuration are a conflict, even when their contents match or one is a broken symlink. Resolve that conflict before restarting; no identity is selected silently.
+
+To relocate an existing override, stop the affected services, back up the selected configuration, check that the destination does not exist (including a symlink), then move the file into `config/`. Do not copy the public defaults over an installation's selected identities or retired names. For a relative symlink, preserve its effective target by adjusting the link, or leave it at the supported legacy location. Restart and check the selected machine/Hub identity before resuming collection.
+
+When rolling back to a version that only reads root configurations, stop the affected services and preserve the current override first. Restore its contents or valid link to the root `*.local.json` path before reverting source. If a root override already exists, reconcile and preserve both versions rather than overwriting one. Then restart and verify identity. Reverting source alone is insufficient after adopting `config/*.local.json`; installations still using root overrides need no configuration move.
+
+## Command migration
+
+The redundant root adapters have been retired. Update external scripts as well as interactive commands using this table; repository checks cannot discover every external caller.
+
+| Previous command | Current command |
+| --- | --- |
+| `./start.sh` / `./stop.sh` | `./agent-monitor start` / `./agent-monitor stop` |
+| `./status.sh` | `./agent-monitor service status` |
+| `./status.sh COMPONENT` | `./agent-monitor service status COMPONENT` |
+| `./deploy.py ARGS` | `./agent-monitor service deploy ARGS` |
+| `.venv/bin/python upstream_controls.py ARGS` | `./agent-monitor upstream-holds ARGS` |
+
+Component names are `web`, `rollup-daemon` and `connector`; selectors retain their narrower status checks and exit status. Deployment arguments and admission checks remain in the deployment owner. `runtime_rebuild.py` remains available with an external interpreter for rescue when `.venv` is broken.
+
 ## Services and deployment
 
-`./install.sh --no-services` installs dependencies/assets and CLI links without changing services or running the post-install public probe. `./install.sh` on macOS additionally configures hourly collection with `com.agent-monitor.rollup`; Linux skips that LaunchAgent. The default installer is therefore a service-changing action. `./status.sh rollup-daemon` reports the scheduler.
+`./install.sh --no-services` installs dependencies/assets and CLI links without changing services or running the post-install public probe. `./install.sh` on macOS additionally configures hourly collection with `com.agent-monitor.rollup`; Linux skips that LaunchAgent. The default installer is therefore a service-changing action. `./agent-monitor service status rollup-daemon` reports the scheduler.
 
 The standalone schedule runs `rollup` locally; manual `refresh` retains its existing dashboard/Hub behavior. Scheduler status distinguishes not installed, installed but not loaded, running, previous success/failure and unverified collection. A loaded job alone does not prove a successful collection. A launchctl query failure other than confirmed absence blocks modification and preserves the existing definition; inspect the printed diagnostics before retrying.
 
@@ -132,13 +154,13 @@ The standalone schedule runs `rollup` locally; manual `refresh` retains its exis
 
 On a Hub client, `open` and `refresh` target the configured central Hub. Default `start`, `stop` and `restart` refuse to change a different local instance and direct you to the Hub host; `status` reports the role and central target without claiming availability. Use `./agent-monitor local start|stop|restart|status|open` for the client's local dashboard. On the Hub itself, default status inspects its launchd job and local HTTP deployment identity; the `local` selector is rejected to avoid operating on that Hub's process.
 
-Service-managed updates use `./deploy.py` from the primary, clean `main` checkout at the verified live `origin/main` commit. It checks source identity before calling the installer:
+Service-managed updates use `./agent-monitor service deploy` from the primary, clean `main` checkout at the verified live `origin/main` commit. It checks source identity before calling the installer:
 
 ```bash
 git fetch origin
 git merge --ff-only origin/main
-./deploy.py --check-only --expect FULL_SHA
-./deploy.py --expect FULL_SHA
+./agent-monitor service deploy --check-only --expect FULL_SHA
+./agent-monitor service deploy --expect FULL_SHA
 ```
 
 Replace `FULL_SHA` with the published commit you selected. `--check-only` does not install. A successful preflight is not service health: inspect status and the actual dashboard afterward. Deployment does not push, discard changes, migrate state or replace locks. Development worktrees are not persistent production roots. Preserve local edits and coordinate writers if preflight reports a dirty or diverged checkout.
@@ -149,11 +171,11 @@ The installer/managed command has a 30-minute execution limit. On interruption o
 
 For the configured macOS Hub and an already installed connector, installation compares source and selected configuration identity, reloads changed jobs, and checks the local HTTP endpoint for the target checkout and version. The polling budget is 30 seconds, plus at most two seconds for the final HTTP attempt. The connector retains its configured server and status-file path; without an existing installation it stays disabled. `--no-services` skips both convergence and these checks. Periodic collectors and CLI commands read updated source on their next execution.
 
-`./agent-monitor service deploy` forwards the same arguments and source checks to `deploy.py`. Normal deployment updates an already-running owned local dashboard as well as managed components. It captures the local Web's full startup environment privately before stopping, retains its bind address and port, and checks the replacement's HTTP source/configuration identity. Matching processes are retained; a stopped optional Web is not started. `--no-services` and the targeted `rollup-daemon` installer do not update Web processes. Default `open` on a client still opens the central Hub; use `local open` for the local page.
+`./agent-monitor service deploy` executes `agent_monitor.runtime.deploy` with its source checks and installer argument forwarding. Normal deployment updates an already-running owned local dashboard as well as managed components. It captures the local Web's full startup environment privately before stopping, retains its bind address and port, and checks the replacement's HTTP source/configuration identity. Matching processes are retained; a stopped optional Web is not started. `--no-services` and the targeted `rollup-daemon` installer do not update Web processes. Default `open` on a client still opens the central Hub; use `local open` for the local page.
 
 Managed updates use stop/start and can interrupt requests or connector routes. Finish account operations before updating; uncertain sends are not automatically replayed. The installer preserves retained state and startup definitions after a failed replacement, reports nonzero, and does not claim that the old process is still available. Use `./agent-monitor service status`, `state/hub.log` and `./agent-monitor connect status` to locate the remaining failure before rerunning the same deployment entry. A source rollback is only appropriate when compatible with the retained data/configuration; this update does not migrate their schemas. Manually started standalone dashboards use [manual updates](#manual-updates).
 
-`./agent-monitor service status` and `./status.sh` include the role, central target (availability unchecked), owned local Web with HTTP identity, collector result and optional connector. Checks continue when one component fails and the overall exit is nonzero. A disabled optional component is not a failure. The older `status.sh web|rollup-daemon|connector` selectors retain their meaning. `service restart local-web|hub|collector|connector` manages one component through its existing lifecycle owner. Local Web restart preserves startup conditions, including from the private recovery record if a replacement failed; first enablement still uses `local start`. Collector restart refuses to interrupt a running collection; completion must be checked afterward. Connector restart retains its existing semantics: old routes can fail and uncertain sends are not replayed.
+`./agent-monitor service status` includes the role, central target (availability unchecked), owned local Web with HTTP identity, collector result and optional connector. Checks continue when one component fails and the overall exit is nonzero. A disabled optional component is not a failure. Use `service status web|rollup-daemon|connector` to inspect one component with its original narrower scope. `service restart local-web|hub|collector|connector` manages one component through its existing lifecycle owner. Local Web restart preserves startup conditions, including from the private recovery record if a replacement failed; first enablement still uses `local start`. Collector restart refuses to interrupt a running collection; completion must be checked afterward. Connector restart retains its existing semantics: old routes can fail and uncertain sends are not replayed.
 
 `./uninstall.sh` selects `web`, `rollup-daemon` or `connector` and defaults to all three, including disabling connector autostart. It checks service ownership before stopping or removing integration, retains foreign or unrecognized definitions/loaded jobs, and removes only CLI links pointing to this checkout. It never removes state or persistent locks. A foreign component can fail removal while other owned components are still removed; the overall exit code is nonzero.
 
@@ -185,7 +207,7 @@ On failure, restoration is attempted for every original component; the command e
 - Empty usage: confirm the source directories, date filter and log presence. Test with the included sample in its own checkout if needed. Do not infer historical zero spend from missing files.
 - Startup: inspect this checkout's `state/server.log` and `./agent-monitor status`. Share only sanitized excerpts; errors and paths can contain private metadata.
 - Collection: use **采集与诊断** to find the affected machine and stage. An old snapshot can remain readable while a new collection attempt fails.
-- Provider hold: `.venv/bin/python upstream_controls.py status claude` (or `codex`) reads the local hold. After reviewing its reason, `resume PROVIDER --pause-id ID` acknowledges the specific current hold without sending a request. Account-specific restrictions remain separate.
+- Provider hold: `./agent-monitor upstream-holds status claude` (or `codex`) reads the local hold. After reviewing its reason, `resume PROVIDER --pause-id ID` acknowledges the specific current hold without sending a request. Account-specific restrictions remain separate.
 - Network: `./agent-monitor network --json` runs public probes for the server host and can contact external diagnostic services. It is not an account-health test or a report of the browser device's IP. See [network diagnostic findings](operations/services.md#network-diagnostic-findings) for interpreting missing observations and checking the affected route.
 
 Use [SECURITY.md](../SECURITY.md) for sensitive reporting. Do not attach raw state, credentials, account profiles or unredacted provider logs to issues.

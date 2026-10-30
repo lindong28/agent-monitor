@@ -10,8 +10,9 @@ from agent_monitor.runtime import deployment_guard
 from agent_monitor.runtime import local_web
 from agent_monitor.runtime import process_identity
 from agent_monitor.runtime import service_runtime
+from agent_monitor.runtime.python_entrypoint import module_command
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 
@@ -64,6 +65,20 @@ def status():
     return 1 if result else 0
 
 
+def component_status(component):
+    """Retain the narrow observations previously exposed by status.sh."""
+    if component == 'all':
+        return status()
+    if component == 'rollup-daemon':
+        return run('-m', 'agent_monitor.runtime.rollup_service', 'status')
+    if component == 'connector' and sys.platform != 'darwin':
+        print('connector: no startup definition installed on this platform')
+        return 0
+    arguments = ['status'] if component == 'web' else ['connect', 'status']
+    return deployment_guard._run(
+        ['bash', str(ROOT / 'agent_monitor/runtime/cli.sh'), *arguments], ROOT, timeout=60)
+
+
 def restart(component):
     from agent_monitor.runtime import hub
     with deployment_guard.mutation_guard(ROOT):
@@ -111,7 +126,7 @@ def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     # Preserve the original deploy parser and all its source verification.
     if args[:1] == ['deploy']:
-        os.execv(sys.executable, [sys.executable, str(ROOT / 'deploy.py'), *args[1:]])
+        os.execv(sys.executable, module_command('agent_monitor.runtime.deploy', *args[1:]))
     if args[:1] == ['rebuild-runtime']:
         parser = argparse.ArgumentParser()
         parser.add_argument('--python', required=True)
@@ -124,15 +139,17 @@ def main(argv=None):
         # The controller must survive replacement of this project's runtime.
         if python.is_relative_to(ROOT / '.venv') or python.resolve().is_relative_to((ROOT / '.venv').resolve()):
             parser.error('select an interpreter outside this project runtime')
-        os.execv(str(python), [str(python), str(ROOT / 'runtime_rebuild.py'), *args[1:]])
+        os.execv(str(python), module_command('agent_monitor.runtime.runtime_rebuild', *args[1:], python=python))
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
-    sub.add_parser('status')
+    status_parser = sub.add_parser('status')
+    status_parser.add_argument('component', nargs='?', default='all',
+                              choices=('all', 'web', 'rollup-daemon', 'connector'))
     restart_parser = sub.add_parser('restart')
     restart_parser.add_argument('component', choices=('local-web', 'hub', 'collector', 'connector'))
     parsed = parser.parse_args(args)
     try:
-        return status() if parsed.action == 'status' else restart(parsed.component)
+        return component_status(parsed.component) if parsed.action == 'status' else restart(parsed.component)
     except (OSError, ValueError, subprocess.SubprocessError, process_identity.IdentityUnknown) as error:
         print(f'Service management failed: {error}', file=sys.stderr)
         return 1

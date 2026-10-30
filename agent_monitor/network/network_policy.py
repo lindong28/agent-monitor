@@ -25,7 +25,7 @@ import urllib.request
 from proxy_runtime.install import executable
 from proxy_runtime.system_changes import SystemChanges
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 INTERNAL = "AGENT_MONITOR_PROXY_INTERNAL"

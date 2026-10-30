@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import uuid
 from datetime import datetime, timezone
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 
 ROOT = PROJECT_ROOT

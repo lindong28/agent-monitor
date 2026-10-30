@@ -23,7 +23,6 @@ class DeploymentGuardTests(unittest.TestCase):
         self.root = self.home / 'checkout'
         self.root.mkdir()
         shutil.copytree(SOURCE / "agent_monitor", self.root / "agent_monitor", ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copy2(SOURCE / "project_paths.py", self.root / "project_paths.py")
         shutil.copy2(SOURCE / 'agent_monitor/runtime/deployment_guard.py', self.root / 'agent_monitor/runtime/deployment_guard.py')
         (self.root / 'source.txt').write_text('original\n')
         self.env = dict(os.environ, HOME=str(self.home), CLAUDE_CONFIG_DIR=str(self.home / '.claude'),

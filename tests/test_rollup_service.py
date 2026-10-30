@@ -237,11 +237,11 @@ else: sys.exit(9)
 
     def test_shell_entrypoints_propagate_unknown_status(self):
         shutil.copytree(SOURCE / "agent_monitor", self.root / "agent_monitor", ignore=shutil.ignore_patterns("__pycache__"))
-        for name in ("project_paths.py", "status.sh", "uninstall.sh", "agent_monitor/runtime/rollup_service.py", "agent_monitor/runtime/service_runtime.py", "agent_monitor/runtime/deployment_guard.py"):
+        for name in ("agent-monitor", "uninstall.sh", "agent_monitor/runtime/rollup_service.py", "agent_monitor/runtime/service_runtime.py", "agent_monitor/runtime/deployment_guard.py"):
             shutil.copy2(SOURCE / name, self.root / name)
         with patch.dict(os.environ, PRINT_RC="7"):
-            for name in ("status.sh", "uninstall.sh"):
-                result = subprocess.run(["bash", str(self.root / name), "rollup-daemon"],
+            for name, arguments in (("agent-monitor", ["service", "status", "rollup-daemon"]), ("uninstall.sh", ["rollup-daemon"])):
+                result = subprocess.run(["bash", str(self.root / name), *arguments],
                                         capture_output=True, text=True, timeout=10)
                 if sys.platform != "darwin":
                     self.assertEqual(result.returncode, 0)

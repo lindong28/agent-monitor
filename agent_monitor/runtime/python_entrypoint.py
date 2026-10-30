@@ -1,7 +1,7 @@
 """Launch checkout modules without changing the caller's cwd or environment."""
 import sys
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 
 _BOOTSTRAP = (
@@ -10,7 +10,7 @@ _BOOTSTRAP = (
 )
 
 
-def module_command(module, *arguments):
+def module_command(module, *arguments, python=None):
     """Pin implementation imports while retaining relative caller paths."""
-    return [sys.executable, "-c", _BOOTSTRAP, str(PROJECT_ROOT), module,
+    return [str(python or sys.executable), "-c", _BOOTSTRAP, str(PROJECT_ROOT), module,
             *map(str, arguments)]

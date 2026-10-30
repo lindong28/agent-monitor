@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 
-from project_paths import state_path
+from agent_monitor.paths import state_path
 
 
 class BudgetExpired(TimeoutError):

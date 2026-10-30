@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 from agent_monitor.network import client_network
 from agent_monitor.network import network_policy
 from agent_monitor.runtime import service_runtime
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 BOOT_DEPLOYMENT_SIGNATURE = service_runtime.signature(PROJECT_ROOT)
 

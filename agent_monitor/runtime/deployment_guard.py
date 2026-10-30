@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 LOCK_ENV = 'AGENT_MONITOR_DEPLOYMENT_LOCK_FD'
 SOURCE_ENV = 'AGENT_MONITOR_DEPLOYMENT_SOURCE_FD'
@@ -59,8 +59,10 @@ def source_snapshot(root):
             relative = Path(directory).relative_to(root)
             dirs[:] = [name for name in dirs if _source_path(relative / name)]
             files.update(relative / name for name in names)
-    files.update(Path(name + '.local.json') for name in ('machines', 'hub')
-                 if (root / (name + '.local.json')).exists() or (root / (name + '.local.json')).is_symlink())
+    files.update(prefix / (name + '.local.json')
+                 for prefix in (Path('.'), Path('config')) for name in ('machines', 'hub')
+                 if (root / prefix / (name + '.local.json')).exists()
+                 or (root / prefix / (name + '.local.json')).is_symlink())
     digest = hashlib.sha256()
     for relative in sorted(path for path in files if _source_path(path)):
         path = root / relative

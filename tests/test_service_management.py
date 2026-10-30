@@ -35,7 +35,7 @@ class IsolatedCheckout(unittest.TestCase):
         (self.root / '.venv/bin').mkdir(parents=True)
         (self.root / '.venv/bin/python').symlink_to(sys.executable)
         shutil.copytree(SOURCE / 'agent_monitor', self.root / 'agent_monitor', ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ('project_paths.py', 'agent-monitor', 'agent_monitor/runtime/deployment_guard.py', 'agent_monitor/runtime/process_identity.py', 'agent_monitor/runtime/service_runtime.py', 'agent_monitor/runtime/local_web.py'):
+        for name in ('agent-monitor', 'agent_monitor/runtime/deployment_guard.py', 'agent_monitor/runtime/process_identity.py', 'agent_monitor/runtime/service_runtime.py', 'agent_monitor/runtime/local_web.py'):
             shutil.copy2(SOURCE / name, self.root / name)
         (self.root / 'agent_monitor/runtime/hub.py').write_text("def is_hub(): return False\ndef enabled(): return False\nif __name__ == '__main__': print('standalone')\n")
         (self.root / 'agent_monitor/http_server.py').write_text('''import argparse, json
@@ -275,6 +275,27 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
         self.addCleanup(child.terminate)
         with self.assertRaisesRegex(ValueError, 'Processes still use'):
             runtime_rebuild.no_runtime_users()
+
+
+class ComponentStatusTests(unittest.TestCase):
+    def test_selectors_preserve_observer_arguments_and_exit_status(self):
+        cases = (
+            ('web', ['bash', str(service_manager.ROOT / 'agent_monitor/runtime/cli.sh'), 'status']),
+            ('connector', ['bash', str(service_manager.ROOT / 'agent_monitor/runtime/cli.sh'), 'connect', 'status']),
+            ('rollup-daemon', [sys.executable, '-m', 'agent_monitor.runtime.rollup_service', 'status']),
+        )
+        for component, expected in cases:
+            for exit_code in (0, 2):
+                with self.subTest(component=component, exit_code=exit_code), \
+                        mock.patch.object(service_manager.sys, 'platform', 'darwin'), \
+                        mock.patch.object(deployment_guard, '_run', return_value=exit_code) as run:
+                    self.assertEqual(service_manager.main(['status', component]), exit_code)
+                    self.assertEqual(run.call_args.args[0], expected)
+        with mock.patch.object(service_manager.sys, 'platform', 'linux'), \
+                mock.patch.object(deployment_guard, '_run') as run, redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(service_manager.main(['status', 'connector']), 0)
+            run.assert_not_called()
+            self.assertIn('no startup definition installed', output.getvalue())
 
 
 if __name__ == '__main__':

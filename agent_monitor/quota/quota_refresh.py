@@ -33,7 +33,7 @@ from agent_monitor import diagnostics
 from agent_monitor.quota import quota_applicability
 from agent_monitor.runtime.python_entrypoint import module_command
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 TIMEOUT = 35

@@ -32,7 +32,7 @@ from agent_monitor.storage import (
     assert_lock_held as _assert_lock_held,
 )
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 
 ROOT = PROJECT_ROOT

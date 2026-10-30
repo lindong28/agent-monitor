@@ -18,7 +18,7 @@ from agent_monitor.snapshots import statistics_snapshot
 from agent_monitor.quota import quota_service; from agent_monitor import storage
 from agent_monitor.source_inventory import authority_pathspecs
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 
 ROOT = PROJECT_ROOT

@@ -92,7 +92,7 @@ install_rollup_daemon() {
     emit_install_ledger service "agent-monitor rollup" failed "schedule convergence failed; see diagnostics"
     return 1
   fi
-  emit_install_ledger service "agent-monitor rollup" "$rollup_state" "launchd schedule every ${ROLLUP_INTERVAL_SECONDS}s; last run not checked (./status.sh rollup-daemon)"
+  emit_install_ledger service "agent-monitor rollup" "$rollup_state" "launchd schedule every ${ROLLUP_INTERVAL_SECONDS}s; last run not checked (./agent-monitor service status rollup-daemon)"
 }
 
 if [ "$#" -gt 1 ] && [ "$SERVICE" != hub ]; then

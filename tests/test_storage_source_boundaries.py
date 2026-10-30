@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from agent_monitor import source_inventory
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 EXTRA_ROLLUP_SOURCES = (

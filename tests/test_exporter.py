@@ -413,7 +413,6 @@ class ExporterTests(unittest.TestCase):
         for pathspec in (
             ":(glob)*.py",
             ":(glob)parsers/**",
-            "pricing.json",
             "agent-monitor",
             "install.sh",
             "requirements.txt",

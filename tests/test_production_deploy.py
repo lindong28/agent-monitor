@@ -20,7 +20,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         home.mkdir()
         self.env = {**os.environ, "HOME": str(home), "GIT_CONFIG_GLOBAL": os.devnull,
                     "CLAUDE_CONFIG_DIR": str(home / '.claude'), "CODEX_HOME": str(home / '.codex'),
-                    "PYTHONDONTWRITEBYTECODE": '1', "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+                    "AGENT_MONITOR_PYTHON": sys.executable, "PYTHONDONTWRITEBYTECODE": '1', "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
         for key in list(self.env):
             if key.startswith(("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
                 del self.env[key]
@@ -32,13 +32,12 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.run_git(self.repo, "config", "user.name", "Deployment Test")
         self.run_git(self.repo, "config", "user.email", "test@example.invalid")
         shutil.copytree(SOURCE / "agent_monitor", self.repo / "agent_monitor", ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copy2(SOURCE / "project_paths.py", self.repo / "project_paths.py")
-        shutil.copy2(SOURCE / "deploy.py", self.repo / "deploy.py")
+        shutil.copy2(SOURCE / "agent-monitor", self.repo / "agent-monitor")
         (self.repo / ".gitignore").write_text("installed\n")
         (self.repo / "agent_monitor/runtime/install.sh").write_text('#!/bin/sh\n# AGENT_MONITOR_INSTALL_BODY\nprintf "%s\\n" "$@" > installed\nexit "${TEST_INSTALL_EXIT:-0}"\n')
         shutil.copy2(SOURCE / "install.sh", self.repo / "install.sh")
         (self.repo / "source.txt").write_text("published\n")
-        self.run_git(self.repo, "add", "deploy.py", "project_paths.py", "agent_monitor", "install.sh", ".gitignore", "source.txt")
+        self.run_git(self.repo, "add", "agent-monitor", "agent_monitor", "install.sh", ".gitignore", "source.txt")
         self.run_git(self.repo, "commit", "-m", "fixture")
         self.run_git(self.repo, "remote", "add", "origin", str(self.remote))
         self.run_git(self.repo, "push", "origin", "main")
@@ -50,7 +49,7 @@ class ProductionDeploymentTests(unittest.TestCase):
 
     def deploy(self, *args, root=None):
         repo = root or self.repo
-        return subprocess.run([sys.executable, str(repo / "deploy.py"), *args], cwd=repo,
+        return subprocess.run([str(repo / "agent-monitor"), "service", "deploy", *args], cwd=repo,
                               env=self.env, capture_output=True, text=True, timeout=40)
 
     def blocked(self, result):

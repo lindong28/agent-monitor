@@ -97,8 +97,7 @@ class FreshnessWiringTests(unittest.TestCase):
             shutil.copy2(ROOT / "agent_monitor/runtime/hub.py", launcher_root / "agent_monitor/runtime/hub.py")
             shutil.copy2(ROOT / "agent_monitor/runtime/deployment_guard.py", launcher_root / "agent_monitor/runtime/deployment_guard.py")
             shutil.copy2(ROOT / "agent_monitor/runtime/service_runtime.py", launcher_root / "agent_monitor/runtime/service_runtime.py")
-            shutil.copy2(ROOT / "project_paths.py", launcher_root / "project_paths.py")
-            shutil.copy2(ROOT / "hub.json", launcher_root / "hub.json")
+            shutil.copytree(ROOT / "config", launcher_root / "config")
             shutil.copy2(ROOT / "agent_monitor/runtime/process_identity.py", launcher_root / "agent_monitor/runtime/process_identity.py")
 
             # This is a launcher-wiring test: curl and the opener below are

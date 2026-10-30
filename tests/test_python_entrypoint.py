@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -18,6 +19,26 @@ PROBE = "tests.fixtures.entrypoint_context"
 
 
 class PythonEntrypointTests(unittest.TestCase):
+    def test_management_children_preserve_cwd_and_pin_checkout(self):
+        from agent_monitor.runtime import service_manager
+        for action, module in (('deploy', 'agent_monitor.runtime.deploy'),
+                               ('rebuild-runtime', 'agent_monitor.runtime.runtime_rebuild')):
+            with self.subTest(action=action), self.context('management') as (_, caller, record, environment):
+                arguments = ['--expect', 'synthetic'] if action == 'deploy' else ['--python', sys.executable]
+                def execute(python, command):
+                    self.assertEqual(python, sys.executable)
+                    result = subprocess.run(self.probe_command(command, module), capture_output=True,
+                                            text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    # execv never returns to the parser on success.
+                    raise SystemExit(0)
+                with mock.patch.object(service_manager.os, 'execv', side_effect=execute):
+                    with self.assertRaises(SystemExit) as completed:
+                        service_manager.main([action, *arguments])
+                    self.assertEqual(completed.exception.code, 0)
+                value = self.assert_context(caller, record, environment)
+                self.assertEqual(value['arguments'], arguments)
+
     @contextmanager
     def context(self, kind):
         with tempfile.TemporaryDirectory() as directory:

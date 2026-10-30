@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from agent_monitor import source_inventory
-import project_paths
+from agent_monitor import paths as project_paths
 from agent_monitor.runtime import service_runtime
 
 
@@ -47,7 +47,8 @@ class SourceInventoryTests(unittest.TestCase):
     def test_deployment_configuration_is_distinct_from_compile_inventory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            default = root / "hub.json"
+            (root / "config").mkdir()
+            default = root / "config/hub.json"
             local = root / "hub.local.json"
             default.write_text("{}")
             before = service_runtime.signature(root)
@@ -77,6 +78,10 @@ class SourceInventoryTests(unittest.TestCase):
                 self.assertIn(str(path.relative_to(root)), git(*args))
                 path.unlink()
                 self.assertEqual("", git(*args))
+            price = root / "agent_monitor/accounting/pricing.json"
+            price.parent.mkdir(parents=True, exist_ok=True)
+            price.write_text('{}')
+            self.assertIn(str(price.relative_to(root)), git(*args))
 
 
 class ProjectPathsTests(unittest.TestCase):

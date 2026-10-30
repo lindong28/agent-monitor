@@ -8,7 +8,7 @@ from pathlib import Path
 
 from agent_monitor.snapshots import machine_config
 
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 

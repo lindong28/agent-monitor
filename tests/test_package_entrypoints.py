@@ -14,6 +14,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PackageEntrypointTests(unittest.TestCase):
+    def test_ip_check_version_uses_its_local_package(self):
+        from ip_check import __version__
+        with tempfile.TemporaryDirectory() as directory:
+            for option in ('--version', '-v', '-V'):
+                result = subprocess.run([str(ROOT / 'ip-check'), option], cwd=directory,
+                                        env={**os.environ, 'AGENT_MONITOR_PYTHON': sys.executable},
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), f'ipcheck {__version__}')
+
+    def test_unified_cli_dispatch_from_foreign_cwd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = {**os.environ, 'HOME': directory, 'AGENT_MONITOR_PYTHON': sys.executable,
+                   'PYTHONDONTWRITEBYTECODE': '1'}
+            for args, expected in ((['service', 'deploy', '--help'], '--check-only'),
+                                   (['service', 'status', '--help'], 'rollup-daemon'),
+                                   (['upstream-holds', 'status', 'codex', '--state-root', directory], '未查询上游状态')):
+                result = subprocess.run([str(ROOT / 'agent-monitor'), *args], cwd=directory,
+                                        env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(expected, result.stdout)
+
     def test_local_web_old_module_and_foreign_argv(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

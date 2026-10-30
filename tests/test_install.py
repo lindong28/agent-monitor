@@ -30,7 +30,6 @@ class RollupInstallerTests(unittest.TestCase):
             hashlib.sha256(b"fixture").hexdigest()))
         shutil.copy2(ROOT / "agent_monitor/runtime/rollup_service.py", self.component / "agent_monitor/runtime/rollup_service.py")
         shutil.copy2(ROOT / "agent_monitor/runtime/deployment_guard.py", self.component / "agent_monitor/runtime/deployment_guard.py")
-        shutil.copy2(ROOT / "status.sh", self.component / "status.sh")
         for name in ('agent_monitor/runtime/local_web.py', 'agent_monitor/runtime/process_identity.py'):
             shutil.copy2(ROOT / name, self.component / name)
         for name in ("agent-monitor", "ip-check"):
@@ -58,10 +57,10 @@ class RollupInstallerTests(unittest.TestCase):
         shutil.copy2(ROOT / "requirements.txt", self.component / "requirements.txt")
         shutil.copy2(ROOT / "agent_monitor/runtime/hub.py", self.component / "agent_monitor/runtime/hub.py")
         shutil.copy2(ROOT / "agent_monitor/runtime/service_runtime.py", self.component / "agent_monitor/runtime/service_runtime.py")
-        shutil.copy2(ROOT / "project_paths.py", self.component / "project_paths.py")
         (self.component / "agent_monitor/runtime/connector_service.py").write_text("import pathlib\npathlib.Path.home().joinpath('connector-actions').write_text('converge')\n")
         # Fixtures must not depend on the operator's deployment configuration.
-        (self.component / "hub.json").write_text(json.dumps({
+        (self.component / "config").mkdir()
+        (self.component / "config/hub.json").write_text(json.dumps({
             "schema_version": 1, "hub": "node-d", "url": "http://node-d:39001",
             "port": 39001, "sync_interval_seconds": 120, "quota_interval_seconds": 3600,
             "machines": ["node-b", "node-c", "node-d"]}))
@@ -295,8 +294,8 @@ pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text('fixture')
         del self.env["FAIL_BOOTOUT"]
         self.assertEqual(self.install("rollup-daemon").returncode, 0)
         self.assertEqual(plistlib.loads(self.plist.read_bytes())["StartInterval"], 7200)
-        r = subprocess.run(["bash", str(self.component / "status.sh"), "rollup-daemon"],
-                           env=self.env, text=True, capture_output=True, timeout=20)
+        r = subprocess.run([sys.executable, "-m", "agent_monitor.runtime.service_manager", "status", "rollup-daemon"],
+                           cwd=self.component, env=self.env, text=True, capture_output=True, timeout=20)
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("last collection result is unverified", r.stdout)
         self.assertIn("loaded interval=7200 seconds", r.stdout)

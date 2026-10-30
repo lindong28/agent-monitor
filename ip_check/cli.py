@@ -706,7 +706,7 @@ def get_cli_tz_name():
 # ── 主程序 ────────────────────────────────────────────────
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ('--version', '-v', '-V'):
-        from ipcheck import __version__
+        from ip_check import __version__
         print(f"ipcheck {__version__}")
         return
 

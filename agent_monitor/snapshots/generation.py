@@ -23,7 +23,7 @@ from agent_monitor.contracts.rollup import USAGE_ROLLUP_AUTHORITY_FLOOR_KEY
 
 
 from agent_monitor.file_io import fsync_directory as _fsync_directory, fsync_file as _fsync_file
-from project_paths import PROJECT_ROOT
+from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 DEFAULT_GENERATIONS_ROOT = ROOT / "state" / "generations"
