@@ -22,16 +22,21 @@ class NetworkReport:
         self._lock = threading.Lock()
 
     def read(self):
-        return {**self.report(), "checked_host": self.hostname()}
+        data, refresh = self._read()
+        return {**data, "checked_host": self.hostname(), "refresh": refresh}
 
     def report(self):
+        return self._read()[0]
+
+    def _read(self):
         # A refresh click shares the same request budget as polling. Hold the lock
         # through the bounded child call so concurrent clients share failures too.
         with self._lock:
             now = self.clock()
             if (self._cache["data"] is not None
                     and now - self._cache["ts"] < self._cache.get("ttl", self.ttl)):
-                return self._cache["data"]
+                remaining = self._cache.get("ttl", self.ttl) - (now - self._cache["ts"])
+                return self._cache["data"], {"reused": True, "retry_in_seconds": math.ceil(remaining)}
             data = self.probe()
             delay = data.get("retry_after_seconds")
             ttl = self.ttl
@@ -39,7 +44,7 @@ class NetworkReport:
                     and math.isfinite(delay) and delay >= 0):
                 ttl = max(ttl, delay)
             self._cache.update(ts=self.clock(), data=data, ttl=ttl)
-            return data
+            return data, {"reused": False, "retry_in_seconds": math.ceil(ttl)}
 
 
     def probe(self):

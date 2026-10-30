@@ -88,14 +88,14 @@ class GapTests(unittest.TestCase):
     def test_failed_lan_probe_is_a_gap_but_feeds_no_verdict(self):
         # get_lan_ip() returns the string "获取失败" instead of raising.
         data = snapshot(local={"lan_ip": "获取失败", "ipv6_leaked": False, "dns": [{"ip": "1.1.1.1", "country": "US"}], "dns_has_cn": False})
-        self.assertIn("局域网 IP", gaps_by_name(data))
-        self.assertNotIn("局域网 IP", verdict_gaps(data))
+        self.assertIn("IPv4 路由源地址", gaps_by_name(data))
+        self.assertNotIn("IPv4 路由源地址", verdict_gaps(data))
 
     def test_empty_dns_list_uncovers_the_resolver_signal(self):
         # get_dns_servers() returns [] on failure, which makes dns_has_cn False --
         # identical to "checked, no CN resolver", which the verdict reads as clean.
         data = snapshot(local={"lan_ip": "192.168.1.2", "ipv6_leaked": False, "dns": [], "dns_has_cn": False})
-        self.assertIn("DNS 归属", verdict_gaps(data))
+        self.assertIn("DNS 名单归属", verdict_gaps(data))
 
     def test_spam_failure_is_a_gap_but_never_caveats_the_verdict(self):
         # Regression: get_stopforumspam() wraps failures into ordinary raw_lines,
@@ -232,7 +232,7 @@ class RenderTests(unittest.TestCase):
             ]
         )
         text = network_report.render(data, "test")
-        self.assertIn("未检出地址", text)
+        self.assertIn("未取得路由源地址", text)
         self.assertIn("IPv6 公网泄漏未核实", text)
         # Upstream's ok-conclusions must not be passed through: "no address
         # detected" is not "disabled", which is the whole point of the caveat
@@ -244,7 +244,7 @@ class RenderTests(unittest.TestCase):
         # contains it and network_report has no path that emits it.
         self.assertNotIn("IPv6 is disabled", text)
         self.assertNotIn("No CN DNS resolver detected", text)
-        self.assertIn("未命中已知国内 DNS 解析器", text)
+        self.assertIn("未命中国内 DNS 服务静态名单", text)
 
     def test_local_ipv6_address_keeps_public_leakage_caveat(self):
         data = snapshot(
@@ -252,7 +252,7 @@ class RenderTests(unittest.TestCase):
             conclusions=[{"level": "bad", "text": "IPv6 leak detected; real address is exposed"}],
         )
         text = network_report.render(data, "test")
-        self.assertIn("本地地址：2001:db8::1", text)
+        self.assertRegex(text, r"IPv6 路由源地址\s+2001:db8::1")
         self.assertIn("IPv6 公网泄漏未核实", text)
 
     def test_empty_dns_list_is_not_rendered_as_no_cn_resolver(self):
@@ -344,14 +344,15 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(data["verdict"], "low")
         self.assertIn("未运行", note)
 
-    def test_server_source_note_claims_a_shared_cache_not_identical_bytes(self):
+    def test_server_source_note_does_not_infer_cache_reuse(self):
         # Each client receives the current report from the server cache.
         response = mock.MagicMock()
         response.__enter__.return_value = io.BytesIO(b'{"verdict": "low"}')
         with mock.patch.object(network_report, "_live_server_port", return_value=39001):
             with mock.patch.object(network_report.urllib.request, "build_opener", return_value=mock.Mock(open=mock.Mock(return_value=response))):
                 _, note = network_report.collect()
-        self.assertIn("缓存快照", note)
+        self.assertIn("诊断结果", note)
+        self.assertNotIn("缓存快照", note)
         self.assertNotIn("同一份快照", note)
 
     def test_unreachable_server_falls_back_and_says_so(self):

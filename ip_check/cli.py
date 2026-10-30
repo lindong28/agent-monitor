@@ -51,8 +51,8 @@ KNOWN_DNS = {
     '1.0.0.3':         'Cloudflare for Families (US)',
     '8.8.8.8':         'Google Public DNS (US)',
     '8.8.4.4':         'Google Public DNS (US)',
-    '9.9.9.9':         'Quad9 (US)',
-    '149.112.112.112': 'Quad9 (US)',
+    '9.9.9.9':         'Quad9 (CH)',
+    '149.112.112.112': 'Quad9 (CH)',
     '208.67.222.222':  'OpenDNS/Cisco (US)',
     '208.67.220.220':  'OpenDNS/Cisco (US)',
     '223.5.5.5':       'AliDNS 阿里 (CN)',
@@ -74,14 +74,27 @@ KNOWN_DNS = {
 
 
 def dns_label(ip):
+    label = _dns_address_label(ip)
+    return f"{ip}  {label}" if label else ip
+
+
+def _dns_address_label(ip):
     if ip in KNOWN_DNS:
-        return f"{ip}  {KNOWN_DNS[ip]}"
+        return KNOWN_DNS[ip]
     try:
-        if ipaddress.ip_address(ip).is_private:
-            return f"{ip}  局域网路由器"
-    except Exception:
+        address = ipaddress.ip_address(ip)
+        if address in (ipaddress.ip_address("100.100.100.100"), ipaddress.ip_address("fd7a:115c:a1e0::53")):
+            return "Tailscale 本机 DNS 代理；上游未核实"
+        if address.is_loopback:
+            return "本机回环地址；上游未核实"
+        private_ranges = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+        if any(address in ipaddress.ip_network(net) for net in private_ranges):
+            return "内网 DNS 地址；上游未核实"
+        if not address.is_global:
+            return "非公网 DNS 地址；上游未核实"
+    except ValueError:
         pass
-    return ip
+    return ""
 
 
 def make_zone(name):
@@ -324,7 +337,7 @@ def get_stopforumspam(ip, route=None, on_retry_after=None):
         if not isinstance(data, dict) or data.get("appears") not in (0, 1):
             raise ValueError("信誉库未返回明确收录状态")
         if data["appears"] == 0:
-            return [ok("未收录  低风险 ✓")]
+            return ["未收录（仅指 stopforumspam 数据库，不代表其他风险已排除）"]
         confidence = data.get("confidence")
         frequency = data.get("frequency")
         if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
@@ -333,10 +346,12 @@ def get_stopforumspam(ip, route=None, on_retry_after=None):
                 or frequency < 0):
             raise ValueError("信誉库未返回有效置信度或举报次数")
         last_seen  = (data.get("lastseen") or "")[:10]
-        color, level = risk_color(confidence)
-        lines = [f"{color}{confidence:.1f}/100 {level}{C.RESET}  举报 {frequency} 次"]
+        count = ("frequency=255（可能为黑名单占位，真实举报次数未核实）"
+                 if frequency == 255 else f"举报 {frequency} 次")
+        lines = [f"滥用置信度 {confidence}%  {count}"]
         if last_seen:
-            lines.append(f"最近举报 {last_seen}")
+            lines.append(f"供应商时间 {last_seen}（可能为占位时间，真实举报时间未核实）"
+                         if frequency == 255 else f"最近举报 {last_seen}")
         return lines
     except Exception as e:
         return [warn(f"查询失败（{e}）")]
@@ -393,8 +408,8 @@ def get_proxy_envs():
 def _dns_entries(addresses):
     entries = []
     for address in addresses:
-        label = KNOWN_DNS.get(address, "")
-        country = next((code for code in ("CN", "US", "CY") if f"({code})" in label), None)
+        label = _dns_address_label(address)
+        country = next((code for code in ("CN", "US", "CY", "CH") if f"({code})" in label), None)
         entries.append({"ip": address, "label": label or None, "country": country})
     return entries
 
@@ -483,9 +498,13 @@ def collect_all() -> dict:
                 spam["level"] = "medium"
             elif level == "high" or "高" in level:
                 spam["level"] = "high"
+        confidence_match = _re.search(r"滥用置信度\s+([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)%", joined, _re.IGNORECASE)
+        if confidence_match:
+            # Keep the existing JSON score key; its unit is provider confidence.
+            spam["score"] = float(confidence_match.group(1))
 
         frequency_match = _re.search(
-            r"(?:举报|reports?)\s*([0-9]+)\s*(?:次|times?)?",
+            r"(?:举报|reports?|frequency=)\s*([0-9]+)\s*(?:次|times?)?",
             joined,
             _re.IGNORECASE,
         )
@@ -493,7 +512,7 @@ def collect_all() -> dict:
             spam["frequency"] = int(frequency_match.group(1))
 
         last_seen_match = _re.search(
-            r"(?:最近举报|last(?:\s+spam)?\s+report(?:ed)?|last\s+seen)\s*([0-9]{4}-[0-9]{2}-[0-9]{2})",
+            r"(?:最近举报|供应商时间|last(?:\s+spam)?\s+report(?:ed)?|last\s+seen)\s*([0-9]{4}-[0-9]{2}-[0-9]{2})",
             joined,
             _re.IGNORECASE,
         )
@@ -620,10 +639,10 @@ def collect_all() -> dict:
             pub_offset = _dt.datetime.now(pub_zi).utcoffset() if pub_zi else None
             if is_iana:
                 matched = (tz_name == pub_data["timezone"])
-                match_label = "一致" if matched else "不一致"
+                match_label = "时区名称一致" if matched else "时区名称不同"
             elif pub_offset is not None:
                 matched = (cli_offset == pub_offset)
-                match_label = "UTC 偏移一致" if matched else "不一致"
+                match_label = "UTC 偏移一致" if matched else "UTC 偏移不同"
         out["tz_check"] = {
             "cli_tz": tz_name,
             "cli_offset": _utc_str(cli_offset),
@@ -641,15 +660,15 @@ def collect_all() -> dict:
     proxy_detected = bool(pub_data.get("proxy") or risk.get("marked_proxy"))
 
     if local.get("ipv6_leaked"):
-        conclusions.append({"level": "bad", "text": "检出本地 IPv6 地址；公网泄漏未核实"})
+        conclusions.append({"level": "bad", "text": "取得本地 IPv6 路由源地址；公网泄漏未核实"})
     elif local:
-        conclusions.append({"level": "warn", "text": "未检出本地 IPv6 地址；公网泄漏未核实"})
+        conclusions.append({"level": "warn", "text": "未取得 IPv6 路由源地址；是否有其他 IPv6 地址及公网泄漏未核实"})
     if local.get("dns_has_cn"):
-        conclusions.append({"level": "bad", "text": "检出已知国内 DNS 解析器"})
+        conclusions.append({"level": "bad", "text": "命中国内 DNS 服务静态名单；实际解析节点地域未核实"})
     elif "dns" in out["coverage"]["missing"]:
-        conclusions.append({"level": "warn", "text": "DNS 解析器地域未知或列表缺失，无法完整判断"})
+        conclusions.append({"level": "warn", "text": "DNS 服务归属未知或配置列表缺失，上游未核实"})
     else:
-        conclusions.append({"level": "ok", "text": "未命中已知国内 DNS 解析器"})
+        conclusions.append({"level": "ok", "text": "未命中国内 DNS 服务静态名单；实际解析节点地域未核实"})
     if pub_data.get("ok"):
         score = risk.get("score")
         if score is not None:
@@ -664,12 +683,12 @@ def collect_all() -> dict:
         if proxy_detected and out["verdict"] != "high":
             conclusions.append({
                 "level": "warn",
-                "text": "IP 被标记为代理/VPN——走隧道时属正常，但 Claude 的反爬可能误判",
+                "text": "IP 被标记为代理/VPN；分类来源：" + ("ip-api" if pub_data.get("proxy") else "proxycheck") + "，不代表账号可用性",
             })
     if tz.get("matched") is True:
-        conclusions.append({"level": "ok", "text": "时区一致"})
+        conclusions.append({"level": "ok", "text": tz.get("match_label") or "时区一致"})
     elif tz.get("matched") is False:
-        conclusions.append({"level": "bad", "text": "时区不一致"})
+        conclusions.append({"level": "bad", "text": "时区不一致：" + (tz.get("match_label") or "比较方式未记录")})
     out["conclusions"] = conclusions
     return out
 
@@ -725,10 +744,11 @@ def main():
     tbl_top()
 
     # 本机网络
-    tbl_row("局域网 IP", get_lan_ip())
+    tbl_row("IPv4 路由源地址", get_lan_ip())
     ipv6_addr = get_ipv6()
     ipv6_leaked = ipv6_addr is not None
-    tbl_row("IPv6 地址", ipv6_addr if ipv6_leaked else warn("未检出地址"))
+    tbl_row("IPv6 路由源地址", ipv6_addr if ipv6_leaked else warn("未取得路由源地址"))
+    tbl_row("地址范围", "特定目标的路由源地址；未枚举全部网卡，未测公网泄漏")
     dns = get_dns_servers()
     if dns:
         tbl_row("DNS 服务器", dns_label(dns[0]))
@@ -738,6 +758,7 @@ def main():
         tbl_row("DNS 服务器", warn("获取失败"))
     dns_entries = _dns_entries(dns)
     dns_cn = any(entry["country"] == "CN" for entry in dns_entries)
+    tbl_row("DNS 标注范围", "静态服务名单，不是节点地域；各目标实际解析器未核实")
 
     tbl_sep()
 
@@ -807,11 +828,11 @@ def main():
 
         if is_iana:
             tz_matched = tz_name == pub_tz_name
-            match = ok("一致 ✓") if tz_matched else bad("不一致 ✗")
+            match = ok("时区名称一致 ✓") if tz_matched else bad("时区名称不同 ✗")
         elif pub_offset is not None:
             tz_matched = cli_offset == pub_offset
             if tz_matched:
-                match = warn("UTC 偏移一致（建议设置 $TZ=IANA 名称精确比对）")
+                match = warn("UTC 偏移一致（未比较时区名称）")
             else:
                 match = bad("不一致 ✗（UTC 偏移不同）")
         else:
@@ -821,17 +842,17 @@ def main():
     tbl_sep()
     conclusions = []
     if ipv6_leaked:
-        conclusions.append(bad("✗ 检出本地 IPv6 地址；公网泄漏未核实"))
+        conclusions.append(bad("✗ 取得本地 IPv6 路由源地址；公网泄漏未核实"))
     else:
-        conclusions.append(warn("- 未检出本地 IPv6 地址；公网泄漏未核实"))
+        conclusions.append(warn("- 未取得本地 IPv6 路由源地址；公网泄漏未核实"))
     if dns_cn:
-        conclusions.append(bad("✗ 检出已知国内 DNS 解析器"))
+        conclusions.append(bad("✗ 命中国内 DNS 服务静态名单"))
     elif not dns:
         conclusions.append(warn("- DNS 获取失败，无法评估"))
     elif any(not entry["country"] for entry in dns_entries):
-        conclusions.append(warn("- 部分 DNS 解析器地域未知，无法完整判断"))
+        conclusions.append(warn("- 部分 DNS 服务归属未知，上游未核实"))
     else:
-        conclusions.append(ok("✓ 未命中已知国内 DNS 解析器"))
+        conclusions.append(ok("✓ 未命中国内 DNS 服务静态名单"))
     if not pub_ok:
         conclusions.append(warn("- IP 信息获取失败，无法评估风险"))
     elif pub.get("proxy") or pub.get("hosting"):
@@ -841,7 +862,7 @@ def main():
             elif risk_score < 70:
                 conclusions.append(warn(f"! IP 风险中等（{risk_score}/100），建议关注"))
             else:
-                conclusions.append(bad(f"✗ IP 风险高（{risk_score}/100），建议更换节点"))
+                conclusions.append(bad(f"✗ IP 风险高（{risk_score}/100），不代表账号可用性"))
         else:
             conclusions.append(warn("! IP 为机房/代理，未查到风险分数"))
     elif pub.get("proxy") is False and pub.get("hosting") is False:
@@ -851,7 +872,7 @@ def main():
     if tz_matched is True:
         conclusions.append(ok("✓ 时区一致"))
     elif tz_matched is False:
-        conclusions.append(bad("✗ 时区不一致，建议调整"))
+        conclusions.append(bad("✗ 时区比较不一致；不证明网络故障，无需仅据此修改主机时区"))
     else:
         conclusions.append(warn("- 时区无法比对"))
     verdict, coverage = _network_assessment(
@@ -872,7 +893,7 @@ def main():
     else:
         tbl_row("综合结论", ok("已观测信号低风险；服务可用性未验证"))
     if coverage["missing"]:
-        labels = {"public": "公网信息", "dns": "DNS 归属", "risk": "风险分", "timezone": "时区"}
+        labels = {"public": "公网信息", "dns": "DNS 名单归属", "risk": "风险分", "timezone": "时区"}
         tbl_row("观测缺项", warn("、".join(labels[key] for key in coverage["missing"])))
 
     tbl_bot()

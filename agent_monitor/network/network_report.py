@@ -102,12 +102,12 @@ def collect(force=False):
             }) if force else url
             # Administrative loopback, matching Chrome's implicit local bypass.
             with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=FETCH_TIMEOUT) as response:
-                return json.load(response), "agent-monitor 服务 (:%d) 的缓存快照，与 /network 页面同源" % port
+                return json.load(response), "agent-monitor 服务 (:%d) 的诊断结果，与 /network 页面同源" % port
         except (urllib.error.URLError, OSError, ValueError) as exc:
-            detour = "agent-monitor 服务在 :%d 但取数失败（%s），已改为本进程直接检测" % (port, exc)
+            detour = "agent-monitor 服务在 :%d 但取数失败（%s），已改为本进程读取诊断结果" % (port, exc)
 
     snapshot = LOCAL_REPORT.read()
-    return snapshot, detour or "本进程直接运行 ip-check（agent-monitor 服务未运行）"
+    return snapshot, detour or "本进程读取诊断结果（agent-monitor 服务未运行；遵循同一缓存预算）"
 
 
 def _reject_unusable(snapshot):
@@ -187,13 +187,13 @@ def _gaps(snapshot):
         gaps.append((SECTION_NAMES["local"], "查询失败：%s" % errors.get("local", "无数据"), True))
     else:
         if _probe_failed(local.get("lan_ip")) or not local.get("lan_ip"):
-            gaps.append(("局域网 IP", "未取得本机地址", False))
+            gaps.append(("IPv4 路由源地址", "未取得本机地址", False))
         if not local.get("dns"):
             # dns_has_cn is a verdict signal and it reads False on an empty list,
             # which is what "no resolver found" and "no CN resolver" both produce.
-            gaps.append(("DNS 归属", "未取得 DNS 服务器列表，无法判断解析器地域", True))
+            gaps.append(("DNS 名单归属", "未取得 DNS 服务器列表，无法判断 DNS 服务归属", True))
         elif any(not entry.get("country") for entry in local["dns"]):
-            gaps.append(("DNS 归属", "部分解析器地域未知，无法完整判断", True))
+            gaps.append(("DNS 名单归属", "部分 DNS 服务归属未知，无法完整判断", True))
 
     if not public_ok:
         gaps.append(
@@ -253,7 +253,7 @@ def _not_queried_reason(public):
         return "已触发查询，但未取得结果"
     if any(not isinstance(public.get(key), bool) for key in ("proxy", "hosting")):
         return "未查询：公网代理或机房标记未知"
-    return "不适用：公网 IP 无 proxy / hosting 标记，本项无需查询"
+    return "未查询：ip-api 无 proxy / hosting 标记，未触发信誉查询；不代表信誉库无记录"
 
 
 def _proxy_endpoint(value):
@@ -351,6 +351,10 @@ def render_headline(snapshot, source_note, lines):
     when = "%s（%s）" % (timestamp, age) if age else (timestamp or "未知")
     lines.append("采集  %s" % when)
     lines.append("来源  %s" % source_note)
+    refresh = snapshot.get("refresh") or {}
+    if isinstance(refresh.get("reused"), bool):
+        receipt = "复用缓存观测" if refresh["reused"] else "本次取得新观测"
+        lines.append("读取  %s；至少等待 %s 秒后才可再次探测" % (receipt, refresh.get("retry_in_seconds", "未知")))
     lines.append("范围  仅本机；其它机器不在本结论内，需分别在该机器上运行 ip-check")
     return gaps
 
@@ -427,17 +431,18 @@ def render_details(snapshot, gaps, lines):
     lines.append(" 本机网络")
     if local:
         dns = local.get("dns") or []
-        lines.append(_kv("局域网 IP", local.get("lan_ip") or "—"))
+        lines.append(_kv("IPv4 路由源地址", local.get("lan_ip") or "—"))
         # Not "已禁用": ip-check returns no address both when IPv6 is genuinely
         # off and when the probe itself failed, and it does not distinguish them.
         lines.append(
-            _kv("IPv6", "本地地址：%s" % local["ipv6"] if local.get("ipv6") else "未检出地址")
+            _kv("IPv6 路由源地址", local.get("ipv6") or "未取得路由源地址")
         )
+        lines.append("    地址来自特定目标的路由选择，不是全网卡枚举，也不是公网泄漏检测。")
         lines.append(
             _kv(
                 "DNS 服务器",
                 "、".join(
-                    "%s%s" % (entry.get("ip", "?"), " [%s]" % entry["country"] if entry.get("country") else "")
+                    "%s%s" % (entry.get("ip", "?"), " [%s]" % entry["label"] if entry.get("label") else "")
                     for entry in dns
                 )
                 or "—",
@@ -446,13 +451,14 @@ def render_details(snapshot, gaps, lines):
         if not dns:
             # dns_has_cn reads False on an empty list, so "无国内 DNS 解析器" here would
             # report a negative that no resolver lookup ever produced.
-            lines.append(_kv("DNS 归属", "未取得解析器列表，无法判断"))
+            lines.append(_kv("DNS 名单归属", "未取得解析器列表，无法判断"))
         else:
             unknown = sum(not entry.get("country") for entry in dns)
-            observed = "检出已知国内 DNS 解析器" if local.get("dns_has_cn") else "未命中已知国内 DNS 解析器"
+            observed = "命中国内 DNS 服务静态名单" if local.get("dns_has_cn") else "未命中国内 DNS 服务静态名单"
             if unknown:
-                observed += "；%d 个解析器地域未知" % unknown
-            lines.append(_kv("DNS 归属", observed))
+                observed += "；%d 个 DNS 服务归属未知" % unknown
+            lines.append(_kv("DNS 名单归属", observed))
+        lines.append("    国家标注来自 DNS 服务静态名单，不是解析节点地域；本机代理的上游及各目标实际解析器未核实。")
     else:
         lines.append(_kv("状态", "查询失败：%s" % errors.get("local", "无数据")))
 
@@ -477,6 +483,8 @@ def render_details(snapshot, gaps, lines):
             _kv("风险分 (proxycheck)", "%s/100（≥70 判为高风险）" % risk["score"])
         )
         lines.append(_kv("类型 (proxycheck)", risk.get("type") or "—"))
+        if risk.get("display"):
+            lines.append(_kv("供应商读数 (proxycheck)", risk["display"]))
     else:
         lines.append(
             _kv(
@@ -489,7 +497,7 @@ def render_details(snapshot, gaps, lines):
     # Both flags come from the public lookup; rendering its absence as "否" would
     # report a clean result the lookup never produced.
     if public.get("ok"):
-        lines.append(_kv("标记为代理", "是" if public.get("proxy") is True or risk.get("marked_proxy") is True else "否" if public.get("proxy") is False else "未知"))
+        lines.append(_kv("标记为代理", "是" if public.get("proxy") is True else "否" if public.get("proxy") is False else "未知"))
         lines.append(_kv("标记为机房 IP", "是" if public.get("hosting") is True else "否" if public.get("hosting") is False else "未知"))
     else:
         lines.append(_kv("标记为代理", "未知：公网查询失败"))
@@ -497,10 +505,14 @@ def render_details(snapshot, gaps, lines):
     if spam:
         score = spam.get("score")
         if score is not None:
-            lines.append(_kv("垃圾信誉分", "%s/100 %s" % (score, spam.get("level") or "")))
+            lines.append(_kv("滥用置信度 (stopforumspam)", "%s%%（供应商估计，非 proxycheck 风险分）" % score))
             lines.append(
-                _kv("被举报次数", str(spam.get("frequency")) if spam.get("frequency") is not None else "—")
+                _kv("供应商频次字段" if spam.get("frequency") == 255 else "被举报次数", str(spam.get("frequency")) if spam.get("frequency") is not None else "—")
             )
+            if spam.get("last_seen"):
+                lines.append(_kv("供应商时间" if spam.get("frequency") == 255 else "最近举报", spam["last_seen"]))
+            if spam.get("frequency") == 255:
+                lines.append("    255 可能是黑名单占位值，时间可能随查询更新；真实举报次数与最近举报时间未核实。")
         else:
             # Queried, but the upstream text did not parse into a score. Showing
             # the raw answer beats "—", which reads as "clean".
@@ -547,7 +559,7 @@ def render_details(snapshot, gaps, lines):
             "本地代理环境变量",
             "、".join("%s=%s" % (key, _redact_proxy(value)) for key, value in sorted(envs.items()))
             if envs
-            else "未设置",
+            else "读取失败：%s" % errors["proxy_envs"] if errors.get("proxy_envs") else "未设置",
         )
     )
 
@@ -559,7 +571,7 @@ def render_details(snapshot, gaps, lines):
         lines.append(
             _kv("公网 IP 时区", "%s (%s)" % (public["timezone"], public.get("tz_offset") or "—") if public.get("timezone") else "—")
         )
-        lines.append(_kv("比对结果", verdict))
+        lines.append(_kv("比对结果", tz.get("match_label") or verdict))
     else:
         lines.append(_kv("状态", "查询失败：%s" % errors.get("tz_check", "无数据")))
 
@@ -574,7 +586,7 @@ def render(snapshot, source_note):
     render_details(snapshot, gaps, lines)
     lines.append("")
     lines.append(
-        "判定规则  检出本地 IPv6 地址（泄漏未核实）/ 已知国内 DNS 解析器 / 风险分 ≥ 70 / 时区不一致，"
+        "判定规则  取得 IPv6 路由源地址（泄漏未核实）/ 命中国内 DNS 服务静态名单 / 风险分 ≥ 70 / 时区比较不一致，"
         "任一命中即判启发式高风险；公网、DNS 或时区缺测且无高风险信号时为未知。"
         "仅缺风险分保留已观测信号的档位并披露缺项；档位不保证服务可用。"
     )
@@ -597,7 +609,7 @@ def main(argv=None):
         ),
     )
     parser.add_argument("--json", action="store_true", help="输出 /api/network 的原始 JSON")
-    parser.add_argument("--force", action="store_true", help="跳过缓存，强制重新检测")
+    parser.add_argument("--force", action="store_true", help="请求重新检测；仍遵守共享缓存和上游冷却时间")
     args = parser.parse_args(argv)
 
     try:
