@@ -163,14 +163,14 @@ try {
   await click('#codex-device-cancel',"document.querySelector('#codex-device-cancel').hidden");
   assert.deepEqual([(await stats()).previews,(await stats()).starts.length],[2,1]);
   console.log('PASS: pairing failure and cancellation do not preview or send another batch.');
-  const recovery='#codex-pause-recovery', panel='#codex-recovery-body .quota-recovery-panel';
-  const probe=panel+' > button:nth-of-type(2)', refresh=panel+' > button:first-of-type';
-  const paused=`document.querySelector('${primary}').disabled && !document.querySelector('#codex-upstream-pause').hidden`;
+  const panel='#codex-recovery-body .quota-recovery-panel';
+  const probe=panel+' [data-recovery-action="probe"]', refresh=panel+' [data-recovery-action="read"]';
+  const paused=`document.querySelector('${primary}').disabled && document.querySelector('${panel}')?.checkVisibility()`;
   const focused=`!!document.querySelector('${panel}') && document.querySelector('${panel}').textContent.includes('执行机器：fixture-hub')`;
   await configure({paused:true});
   await bt('open',url);
   await until('pause explanation',()=>read(paused));
-  await click(recovery,focused);
+  await until('visible recovery card',()=>read(focused));
   assert.equal((await stats()).recoveries.length,0,'reading status makes no recovery request');
   assert.equal((await stats()).starts.length,1,'reading status never sends a batch');
   assert.match(await read(`document.querySelector('${panel}').textContent`),/默认 Codex 目录/);
@@ -178,31 +178,35 @@ try {
     await configure({pause_record});
     await bt('open',url);
     await until('pause',()=>read(paused));
-    await click(recovery,focused);
+    await until('visible recovery card',()=>read(focused));
     assert.equal(await read(`document.querySelector('${probe}').disabled`),false,'fresh source status replaces stale overview');
   }
   await configure({pause_record:'matched',probe_used:true});
   await bt('open',url);
   await until('pause',()=>read(paused));
-  await click(recovery,focused);
+  await until('visible recovery card',()=>read(focused));
   assert.equal(await read(`document.querySelector('${probe}').disabled`),true);
   assert.match(await read(`document.querySelector('${panel}').innerText`),/检查机会已使用/);
-  for(const [recovery_state, explanation] of [['active','当前操作尚未结束'],['identity','查询账号身份不完整'],['unreadable','暂停记录无法读取'],['unavailable','当前状态未核实']]) {
+  for(const [recovery_state, explanation] of [['active','已有操作正在进行'],['identity','查询账号身份不完整'],['unreadable','暂停记录无法读取'],['unavailable','暂时无法确认恢复状态']]) {
     await configure({recovery_state,probe_used:false});
     await bt('open',url);
     await until('pause',()=>read(paused));
-    await click(recovery,`document.querySelector('${panel}')?.innerText.includes('${explanation}')`);
+    await until(explanation,()=>read(`document.querySelector('${panel}')?.innerText.includes('${explanation}')`));
     assert.equal(await read(`document.querySelector('${probe}').disabled`),true,explanation);
   }
   await configure({recovery_state:'ready'});
   await bt('open',url);
   await until('pause',()=>read(paused));
-  await click(recovery,focused);
-  assert.match(await read(`document.querySelector('${panel}').innerText`),/为什么不能发送[\s\S]*现在可以检查一次[\s\S]*检查后怎么继续/);
+  await until('visible recovery card',()=>read(focused));
+  assert.match(await read(`document.querySelector('${panel}').innerText`),/发送已暂停，需要先检查配额[\s\S]*检查配额并尝试恢复/);
+  assert.equal(await read(`document.querySelector('${panel} .recovery-technical').open`),false);
+  assert.doesNotMatch(await read(`document.querySelector('${panel}').innerText`),/workspace-0|凭据位置|RPC/);
+  await bt('screenshot',path.join(root,'recovery-paused.png'));
+  await bt('click',panel+' .recovery-technical > summary');
   // HTTP deployments may not expose the Clipboard API; the manual path must work.
   await bt('eval',"Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined})");
   const readCount=(await stats()).recovery_reads;
-  await click(panel+' > button:nth-of-type(3)',`!document.querySelector('${panel} textarea').hidden`);
+  await click(panel+' [data-recovery-action="copy"]',`!document.querySelector('${panel} textarea').hidden`);
   const copied=await read(`document.querySelector('${panel} textarea').value`);
   assert.match(copied,/fixture-hub/); assert.match(copied,/不会发送或重发消息/);
   assert.equal((await stats()).recovery_reads,readCount,'copy uses displayed diagnostics only');
@@ -234,7 +238,8 @@ try {
     await configure({recovery_mode});
     await bt('open',url);
     await until('recoverable pause',()=>read(paused));
-    await click(recovery,focused);
+    await until('visible recovery card',()=>read(focused));
+    await click('#codex-account-list input[type="checkbox"]', "document.querySelector('#codex-selection-count').textContent.includes('已选 5 / 6')");
     const before=(await stats()).recoveries.length;
     const pauseId=(await stats()).pause_id;
     await confirmControl(probe,false);
@@ -242,24 +247,31 @@ try {
     await confirmControl(probe);
     await until('recovery receipt',async()=>(await stats()).recoveries.length===before+1);
     assert.deepEqual((await stats()).recoveries.at(-1),{machine:'fixture-hub',account_id:'workspace-0',account_label:'fixture0@example.test',pause_id:pauseId});
+    await until('selection preserved after recovery',()=>read("document.querySelector('#codex-selection-count').textContent.includes('已选 5 / 6')"));
     if(recovery_mode==='success') {
-      await until('unpaused readback',()=>read(ready));
+      await until('unpaused readback',()=>read(`!document.hidden && !document.querySelector('${primary}').disabled && document.querySelector('${primary}').textContent.includes('所选 5')`));
       assert.equal(await read(`document.querySelector('${panel}').checkVisibility()`),true,'success stays visible after pause banner hides');
-      assert.match(await read(`document.querySelector('${panel}').innerText`),/本机暂停已解除或当前不存在[\s\S]*此前发送结果保留/);
+      assert.match(await read(`document.querySelector('${panel}').innerText`),/当前没有通道暂停[\s\S]*已有结果和选择保留/);
+      await bt('click',panel+' [data-recovery-action="continue"]');
+      await until('focus returns to send',()=>read(`document.activeElement === document.querySelector('${primary}')`));
       await bt('open',url);
       await until('unpaused page reload',()=>read(ready));
       await click('#codex-recovery-history > summary',focused);
-      await bt('click',panel+' details > summary');
+      await bt('click',panel+' .recovery-technical > summary');
       assert.match(await read(`document.querySelector('${panel}').innerText`),/本次配额读取成功/);
       await bt('screenshot',path.join(root,'recovery-success.png'));
     }
     else {
       await until('new pause readback',()=>read(`document.querySelector('${panel}').textContent.includes('pause-after-${before+1}')`));
       assert.equal(await read(paused),true);
+      await until('failed check guidance',()=>read(`document.querySelector('${panel} h3').innerText==='配额检查未成功，发送仍暂停'`));
+      await click(panel+' [data-recovery-action="help"]',`!document.querySelector('${panel} .recovery-steps').hidden`);
+      assert.match(await read(`document.querySelector('${panel} .recovery-steps').innerText`),/fixture-hub[\s\S]*保持原来的出口/);
+      if(recovery_mode==='failure') await bt('screenshot',path.join(root,'recovery-failed.png'));
       assert.match(await read(`document.querySelector('${panel}').textContent`),/-32603/,'automatic readback retains stored diagnostics even for a JSON unknown receipt');
       await bt('open',url);
       await until('pause after reload',()=>read(paused));
-      await click(recovery,focused);
+      await until('visible recovery card',()=>read(focused));
       await bt('eval',`document.querySelector('${panel} details').open=true`);
       const text=await read(`document.querySelector('${panel}').innerText`);
       assert.match(text,/-32603/); assert.match(text,/上游 HTTP：未取得/);
@@ -279,12 +291,20 @@ try {
   await bt('click','#quota-accounts .note-disclosure > summary');
   const quotaPanel='#quota-accounts [data-codex-pause-id]:nth-child(3) .quota-recovery-panel';
   const beforeQuota=(await stats()).recoveries.length;
-  await click('#quota-accounts [data-codex-pause-id]:nth-child(3) > button',`document.querySelector('${quotaPanel}')?.innerText.includes('现在可以检查一次')`);
-  assert.match(await read(`document.querySelector('${quotaPanel}').innerText`),/为什么不能发送[\s\S]*检查后怎么继续/);
+  await click('#quota-accounts [data-codex-pause-id]:nth-child(3) > button',`document.querySelector('${quotaPanel}')?.innerText.includes('检查配额并尝试恢复')`);
+  assert.match(await read(`document.querySelector('${quotaPanel}').innerText`),/发送已暂停[\s\S]*不会发送消息/);
   assert.equal((await stats()).recoveries.length,beforeQuota,'quota consumer reads without probing');
   assert.equal((await stats()).starts.length,1);
   await bt('screenshot',path.join(root,'quota-recovery-guidance.png'));
   console.log('PASS: quota diagnostics also expose the shared guidance without a recovery request or send.');
+  // Another tab's successful recovery must reconcile the already-open account card.
+  await configure({paused:false});
+  await bt('eval',"document.dispatchEvent(new Event('agent-monitor:recovery-state'))");
+  await until('external recovery updates existing card',()=>read(`!document.querySelector('${primary}').disabled && document.querySelector('${panel} h3').innerText==='当前没有通道暂停'`));
+  assert.equal((await stats()).recoveries.length,beforeQuota);
+  assert.equal((await stats()).starts.length,1);
+  console.log('PASS: another consumer can remove the pause without leaving the account card stale.');
+
 } catch(error) {
   failure=error;
   if (browserAttempted && fs.existsSync(pidFile)) {

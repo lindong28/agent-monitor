@@ -306,35 +306,50 @@
     return box;
   }
 
-  function createRecoveryPanel(machine = "self") {
-    const panel = document.createElement("section");
-    panel.className = "quota-recovery-panel";
-    const context = document.createElement("div");
-    const guidance = document.createElement("div");
-    const notice = document.createElement("p");
+  function createRecoveryPanel(machine = "self", {onContinue} = {}) {
+    const make = (tag, text, className) => {
+      const node = document.createElement(tag);
+      if (text) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    };
+    const panel = make("section", "", "quota-recovery-panel");
+    const title = make("h3", "正在读取恢复状态…");
+    const guidance = make("p");
+    const target = make("p", "", "recovery-target");
+    const result = make("p", "", "recovery-result");
+    const actions = make("div", "", "codex-account-controls");
+    const effect = make("p", "", "recovery-effect");
+    const notice = make("p");
     notice.setAttribute("role", "status");
-    const details = document.createElement("div");
-    const read = document.createElement("button");
-    const probe = document.createElement("button");
-    const copy = document.createElement("button");
-    const report = document.createElement("textarea");
-    const copyNotice = document.createElement("p");
-    report.hidden = true;
-    report.readOnly = true;
-    report.rows = 12;
-    report.setAttribute("aria-label", "诊断信息，可选择后复制给维护者");
+    const technical = make("details", "", "recovery-technical");
+    technical.appendChild(make("summary", "技术详情与复制诊断"));
+    const context = make("div");
+    const details = make("div");
+    const steps = make("div", "", "recovery-steps");
+    steps.hidden = true;
+    const read = make("button", "更新状态");
+    const probe = make("button", "重新检查配额");
+    const help = make("button", "查看排查步骤");
+    const resume = make("button", "返回发送操作");
+    const copy = make("button", "复制诊断信息", "btn");
+    for (const [button, action] of [[read,"read"],[probe,"probe"],[help,"help"],[resume,"continue"],[copy,"copy"]]) {
+      button.type = "button";
+      button.className = "btn";
+      button.setAttribute("data-recovery-action", action);
+    }
+    const report = make("textarea");
+    report.hidden = true; report.readOnly = true; report.rows = 10;
+    report.setAttribute("aria-label", "诊断信息，可选择后复制");
+    const copyNotice = make("p");
     copyNotice.setAttribute("role", "status");
-    copy.type = read.type = probe.type = "button";
-    read.className = probe.className = "btn";
-    copy.className = "btn";
-    read.textContent = "重新读取状态";
-    probe.textContent = "检查配额一次";
-    copy.textContent = "复制诊断信息";
-    probe.disabled = true;
-    panel.append(guidance, context, read, probe, notice, details, copy, copyNotice, report);
-    let state = null, busy = false;
+    actions.append(probe, help, resume, read);
+    technical.append(context, details, copy, copyNotice, report);
+    panel.append(title, guidance, target, result, actions, effect, notice, steps, technical);
+    let state = null, busy = false, pendingPauseId = null, unrecordedOutcome = false, refreshPending = false;
     const controller = new AbortController();
     window.AgentMonitor?.onPageCleanup?.(() => controller.abort());
+    const when = value => value ? formatDate(value) : "时间未记录";
     async function requestJSON(url, options = {}, timeout = 20000) {
       const attempt = new AbortController();
       const abort = () => attempt.abort();
@@ -349,115 +364,149 @@
         controller.signal.removeEventListener("abort", abort);
       }
     }
-    function explain(value, unavailable = false) {
-      guidance.replaceChildren();
-      const add = (title, text) => {
-        const p = document.createElement("p");
-        const label = document.createElement("strong");
-        label.textContent = title + "：";
-        p.appendChild(label);
-        const body = document.createElement("span");
-        body.textContent = text;
-        p.appendChild(body); guidance.appendChild(p);
-      };
-      if (unavailable || !value) {
-        add("当前状态未核实", "暂时不能检查配额。点击“重新读取状态”；若仍失败，复制诊断信息交给执行机器的维护者，检查 Monitor 服务是否可达。下方旧记录不代表当前状态。");
-        return;
-      }
-      if (!value.pause) {
-        add("本机暂停已解除或当前不存在", "无需再做恢复检查。返回“Codex 账号操作”，核对选择、账号登录及限制后，按页面提示继续发送或开始新一轮。此前发送结果保留，不会自动重发；这不保证每个账号都能发送。");
-        if (value.active) add("当前操作尚未结束", "先等待，再重新读取状态并查看账号操作结果。");
-        return;
-      }
-      add("为什么不能发送", "Monitor 的本机 Codex 通道处于保护暂停，因此本机通道的发送、登录和配额查询被阻止；这不表示所有账号都被供应商拒绝。触发暂停的已记录摘要见下方；具体失败原因以诊断证据为准，错误码本身不能确定根因。");
-      const reasons = [];
-      if (value.active) reasons.push("当前操作尚未结束；先等待，再点击“重新读取状态”查看已有结果，不要重复提交。");
-      if (value.pause.id === "unreadable") reasons.push("暂停记录无法读取；请让执行机器的维护者检查 Monitor 的状态记录与服务日志，修复后重新读取状态。");
-      if (value.pause.probe_attempt) reasons.push("本次暂停的检查机会已使用，不能再次提交。先重新读取状态查看已有结果；若仍暂停，复制诊断信息交给维护者排查，页面不能直接重置这次机会。");
-      if (!value.account?.account_id || !value.account?.account_label) reasons.push("查询账号身份不完整；请让执行机器的维护者核对该服务使用的 Codex 账号配置，恢复身份读取后重新读取状态。");
-      if (reasons.length) {
-        add("现在不能检查", reasons.join(" "));
-      } else {
-        add("现在可以检查一次", "先确认下方执行机器与查询账号是你要恢复的对象，再点击“检查配额一次”并确认。它只查询一次配额，使用该机器原有系统代理，不会发送或重发消息，也不保证成功。");
-        if (value.last_recovery?.ok === false) add("上次检查未成功", "建议先复制诊断信息，让执行机器的维护者核对本次错误、账号配置及既有系统代理的运行状态；处理后重新读取状态。再次检查需要你重新确认，不会自动重试。");
-      }
-      add("检查后怎么继续", "有效配额读数保存成功后才解除本机暂停，再回账号操作明确发送。检查失败会保留暂停与结果；回执不明时先重新读取状态，不按没有执行处理。");
-    }
     function render(value) {
-      explain(value);
-      context.replaceChildren();
-      const add = text => { const p = document.createElement("p"); p.textContent = text; context.appendChild(p); };
-      const a = value.account || {};
-      add(`执行机器：${value.machine}；状态读取于 ${value.observed_at}。`);
-      add(`查询账号：${a.account_label || "身份未取得"}；工作区：${a.account_id || "未取得"}。`);
-      add(`账号来源：${({default:"默认 Codex 目录",managed:"托管账号 " + (a.profile || ""),configured:"服务配置指定目录"})[a.source] || "未知"}；凭据位置：${a.credential_path || "未取得"}。`);
-      add("以上仅为本地身份记录，不证明上游认证有效。新增托管账号与此失败的因果关系未核实；不会自动切换账号。");
-      add(value.pause ? "Monitor 保护暂停仍生效；不表示所有账号都被供应商拒绝。此前的批次结果仍保留。" : "当前没有本机 Codex 通道暂停；本次状态读取没有发出上游请求，也没有自动发送消息。");
-      if (value.pause) {
-        add(`当前暂停：${value.pause.id}；已记录的错误摘要：${value.pause.failure?.detail || "未记录，原因未核实"}`);
-        describeDiagnosticSummary(add, value.pause.failure?.detail);
+      const a = value?.account || {}, pause = value?.pause;
+      const mode = !value ? "unknown" : value.active ? "active"
+        : pendingPauseId ? "unknown-outcome" : !pause ? "ready"
+        : pause.id === "unreadable" ? "unreadable" : pause.probe_attempt ? "used"
+        : !a.account_id || !a.account_label ? "identity"
+        : value.last_recovery?.ok === false ? "failed" : "paused";
+      const copyText = {
+        unknown: ["暂时无法确认恢复状态", "先更新状态。读取失败期间不能检查配额；下方技术详情可能是此前的记录。"],
+        "unknown-outcome": ["本次检查结果尚未确认", "先更新状态核对本次检查的结果，暂不再次提交，避免重复检查。"],
+        active: ["已有操作正在进行", "等待当前操作结束后更新状态。已有发送结果和账号选择保留，请勿重复提交。"],
+        ready: ["当前没有通道暂停", onContinue ? "可以返回发送操作，核对账号登录及限制后继续。已有结果和选择保留，不会自动发送消息。" : "该机器的通道暂停已解除或当前不存在；其他机器和账号的可用性需分别查看。不会自动发送消息。"],
+        unreadable: ["暂停记录无法读取", "发送仍暂停。先按排查步骤修复状态记录，再更新状态；不能直接清除暂停。"],
+        used: ["本次暂停的检查机会已使用", "先更新状态查看已有结果。若仍未结束，按下方排查步骤处理；此处不能重复检查或重置机会。"],
+        identity: ["查询账号身份不完整", "发送仍暂停。先核对该机器使用的账号配置，再更新状态；不会自动切换到其他账号。"],
+        failed: ["配额检查未成功，发送仍暂停", "具体原因尚未确认。先查看排查步骤，处理后可再次检查；已有发送结果和账号选择保留。"],
+        paused: ["发送已暂停，需要先检查配额", "Monitor 在此前请求异常后暂停了此机器的 Codex 发送、登录和配额查询。这是本地保护，不表示所有账号均不可用。"],
+      };
+      [title.textContent, guidance.textContent] = copyText[mode];
+      if (!["failed","unreadable","identity","used"].includes(mode)) {
+        steps.hidden = true; help.textContent = "查看排查步骤";
       }
-      add("复制内容用于交给有权读取这些信息的维护者，包含账号、机器、路径和诊断地址；不适合直接公开发布，分享前请检查内容与接收者。凭据脱敏不等于已适合公开。");
-      probe.disabled = busy || !value.pause || value.pause.id === "unreadable" || !!value.pause.probe_attempt || !!value.active || !a.account_id || !a.account_label;
+      target.textContent = value ? `检查对象：${value.machine} · ${a.account_label || "账号未识别"}` : "";
+      const last = value?.last_recovery;
+      result.textContent = value ? (last
+        ? `最近检查：${when(last.observed_at)} · ${last.ok ? "当次成功" : "未成功"}。当前状态以本卡片为准。`
+        : `暂停记录：${when(pause?.at ? pause.at * 1000 : null)}。`) : "";
+      if (value && !pause && !last) result.textContent = `状态更新：${when(value.observed_at)}。`;
+      if (value && unrecordedOutcome) result.textContent = "最近检查：未取得该次结果记录。当前是否暂停以上方状态为准。";
+      probe.hidden = !["paused", "failed"].includes(mode);
+      probe.disabled = busy || probe.hidden;
+      probe.textContent = mode === "failed" ? "处理后再次检查配额" : "检查配额并尝试恢复";
+      effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，沿用该机器原有系统代理；不会发送消息。";
+      help.hidden = !["failed", "unreadable", "identity", "used"].includes(mode);
+      resume.hidden = mode !== "ready" || !onContinue;
+      read.disabled = busy;
+      read.textContent = ["unknown", "unknown-outcome"].includes(mode) ? "重新读取状态" : mode === "active" ? "更新进度" : "更新状态";
+      const primary = mode === "paused" ? probe : ["failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
+      for (const button of [read,probe,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
+      steps.replaceChildren();
+      const list = make("ol");
+      const host = value?.machine || "执行机器";
+      const instructions = mode === "unreadable" ? [
+        `在 ${host} 的终端运行 agent-monitor status，核对服务状态及显示的日志位置。`,
+        "查看日志中的状态文件读取错误，修复对应文件的权限或格式；不要删除暂停记录来恢复发送。",
+        "修复后点击“更新状态”。需要协助时，展开技术详情并复制诊断。"
+      ] : mode === "identity" ? [
+        "展开技术详情，查看账号来源和凭据位置，确认它是否为你要使用的 Codex 目录。",
+        `在 ${host} 核对该目录的账号配置；如需重新登录，先处理本机暂停，不要在其他账号上试登录来绕过。`,
+        "账号配置修正后点击“更新状态”。无法判断配置时，复制诊断供协助排查。"
+      ] : [
+        `核对上方检查对象。检查发生在 ${host}，不是自动使用打开网页这台设备的网络。`,
+        `在 ${host} 打开现有代理程序或系统网络设置，确认原有代理正在运行、配置仍有效；保持原来的出口，不切换节点。错误码本身不能确认是代理或登录故障。`,
+        mode === "used" ? "点击“更新状态”查看是否已有检查结果。若检查机会一直占用，复制诊断排查服务日志；不要删除暂停或重复提交。" : "处理后点击“处理后再次检查配额”，确认对象后只检查一次。若仍失败，保留结果并复制诊断继续定位，不反复盲试。"
+      ];
+      for (const text of instructions) list.appendChild(make("li", text));
+      steps.append(make("strong", "排查步骤"), list);
+      if (!value) return;
+      context.replaceChildren();
+      const add = text => context.appendChild(make("p", text));
+      add(`执行机器：${value.machine}；状态读取于 ${when(value.observed_at)}。`);
+      add(`查询账号：${a.account_label || "未取得"}；工作区：${a.account_id || "未取得"}。`);
+      add(`账号来源：${({default:"默认 Codex 目录",managed:"托管账号 " + (a.profile || ""),configured:"服务配置指定目录"})[a.source] || "未知"}；凭据位置：${a.credential_path || "未取得"}。`);
+      add("本地身份记录不证明上游登录有效。状态更新只读本地记录，不查询上游。检查配额使用执行机器的原有系统代理，不会发送或重发消息。");
+      if (pause) {
+        add(`当前暂停：${pause.id}；已记录的错误摘要：${pause.failure?.detail || "未记录，原因未核实"}`);
+        describeDiagnosticSummary(add, pause.failure?.detail);
+      }
+      add("诊断包含账号、机器、路径和地址。对外分享前请核对接收者及内容，不要直接公开发布。");
       details.replaceChildren();
-      if (value.last_recovery) details.appendChild(recoveryDiagnostics(value.last_recovery));
-      else if (value.pause?.failure) details.appendChild(recoveryDiagnostics({ok:false, failure:value.pause.failure}));
-      else { const p = document.createElement("p"); p.textContent = "尚无已保存的恢复诊断。旧记录缺失的网络证据无法追溯补造。"; details.appendChild(p); }
+      if (last || pause?.failure) {
+        const diagnostic = recoveryDiagnostics(last || {ok:false,failure:pause.failure});
+        diagnostic.open = true;
+        details.appendChild(diagnostic);
+      } else details.appendChild(make("p", "尚无已保存的检查诊断。"));
     }
     async function refresh() {
-      if (busy || controller.signal.aborted) return;
+      if (controller.signal.aborted) return;
+      if (busy) { refreshPending = true; return; }
+      refreshPending = false;
       busy = true; read.disabled = probe.disabled = true;
-      notice.textContent = "正在读取目标机器的本地状态，不查询上游…";
+      panel.setAttribute("aria-busy", "true");
+      notice.textContent = "正在读取状态，不查询上游…";
       try {
         const {response, value} = await requestJSON(`/api/quota-recovery?machine=${encodeURIComponent(machine)}`);
-        if (!response.ok || !value.machine || !value.observed_at) throw new Error(value.error || "状态回执不完整");
+        if (!response.ok || !value.machine || !value.observed_at || !Object.hasOwn(value, "pause") || !Object.hasOwn(value, "active")) throw new Error(value.error || "状态回执不完整");
+        if (controller.signal.aborted) return;
         state = value;
+        if (pendingPauseId && value.last_recovery?.request?.pause_id === pendingPauseId) pendingPauseId = null;
+        if (pendingPauseId && !value.active && !value.pause) {
+          pendingPauseId = null;
+          unrecordedOutcome = true;
+        }
         busy = false; render(value);
-        notice.textContent = "状态已更新；未发出上游请求。";
+        notice.textContent = "";
         document.dispatchEvent?.(new Event("agent-monitor:recovery-state"));
       } catch (error) {
-        state = null;
-        explain(null, true);
-        notice.textContent = `${error.message} 当前状态未核实，探测保持禁用。`;
-      } finally { busy = false; read.disabled = false; }
+        state = null; busy = false; render(null);
+        notice.textContent = `状态读取失败：${error.message}`;
+      } finally {
+        busy = false; read.disabled = false; panel.setAttribute("aria-busy", "false");
+        if (refreshPending && !controller.signal.aborted) refresh();
+      }
     }
+    panel.refresh = refresh;
     read.addEventListener("click", refresh);
+    help.addEventListener("click", () => { steps.hidden = !steps.hidden; help.textContent = steps.hidden ? "查看排查步骤" : "收起排查步骤"; });
+    resume.addEventListener("click", () => onContinue?.());
     copy.addEventListener("click", async () => {
-      const paragraphs = element => Array.from(element.children).map(child => child.textContent).join("\n");
-      const diagnosticText = Array.from(details.children).map(paragraphs).join("\n");
-      const text = ["Agent Monitor 恢复诊断", state ? "当前状态读取于 " + state.observed_at : "当前状态未核实；以下可能含上次显示的历史记录", paragraphs(guidance), paragraphs(context), notice.textContent, diagnosticText].join("\n\n");
-      // Copy only the already-displayed projection, never fetch raw account data.
-      report.value = text;
-      report.hidden = true;
+      const text = ["Agent Monitor 恢复诊断", state ? "当前状态读取于 " + state.observed_at : "当前状态未核实；以下可能含历史记录", title.textContent, guidance.textContent, target.textContent, result.textContent, notice.textContent, context.textContent, details.textContent].join("\n\n");
+      report.value = text; report.hidden = true;
       try {
         if (!window.navigator?.clipboard?.writeText) throw new Error("clipboard unavailable");
         await window.navigator.clipboard.writeText(text);
-        copyNotice.textContent = "诊断信息已复制。请仅交给有权读取这些信息的维护者，不要直接公开发布。";
+        copyNotice.textContent = "诊断信息已复制。";
       } catch (_) {
-        report.hidden = false;
-        report.focus(); report.select();
-        copyNotice.textContent = "浏览器未允许自动复制；已选中下方诊断信息，请手动复制。请仅交给有权读取这些信息的维护者，不要直接公开发布。";
+        report.hidden = false; report.focus(); report.select();
+        copyNotice.textContent = "浏览器未允许自动复制；已选中下方信息，请手动复制。";
       }
     });
     probe.addEventListener("click", async () => {
       if (busy || probe.disabled || !state) return;
-      const request = {machine: state.machine, account_id: state.account.account_id, account_label: state.account.account_label, pause_id: state.pause.id};
-      if (!window.confirm(`仅在 ${request.machine} 为 ${request.account_label} 查询一次 Codex 配额。\n使用该机器既有系统代理；不生成模型回复、不自动重试。\n暂停标识：${request.pause_id}\n有效读数保存后恢复自动查询；失败继续暂停。确认允许这一次查询？`)) return;
+      const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id};
+      if (!window.confirm(`在 ${request.machine} 为 ${request.account_label} 检查一次 Codex 配额？\n沿用该机器原有系统代理。不会发送消息，也不会自动重试。\n成功保存有效配额后解除该机器的暂停；失败仍暂停。`)) return;
+      unrecordedOutcome = false;
       busy = true; read.disabled = probe.disabled = true;
-      notice.textContent = "正在探测，请等待回执…";
+      panel.setAttribute("aria-busy", "true");
+      title.textContent = "正在检查配额…";
+      guidance.textContent = "请等待本次检查结束。不会发送消息，请勿重复提交。";
+      notice.textContent = "";
       let receipt, code;
       try {
-        const {response, value} = await requestJSON("/api/quota-recovery", {method:"POST", headers:{"Content-Type":"application/json","X-Agent-Monitor":"action"},body:JSON.stringify(request)}, 90000);
-        code = response.status;
-        receipt = value;
-        notice.textContent = receipt.message || receipt.error || "请查看回执并重新读取状态。";
-      } catch (_) { notice.textContent = "回执未取得，执行结果未知；只读取已有记录，勿重复探测。"; }
-      const outcome = notice.textContent;
+        const {response, value} = await requestJSON("/api/quota-recovery", {method:"POST",headers:{"Content-Type":"application/json","X-Agent-Monitor":"action"},body:JSON.stringify(request)},90000);
+        code = response.status; receipt = value;
+      } catch (_) { /* Reconcile before enabling any further provider action. */ }
+      pendingPauseId = !receipt || (typeof receipt.ok !== "boolean" && !receipt.failure) ? request.pause_id : null;
       busy = false;
       await refresh();
-      notice.textContent = outcome + " " + notice.textContent;
-      if (receipt?.ok || receipt?.failure) details.replaceChildren(recoveryDiagnostics({...receipt, request}, code));
-      else if (code) notice.textContent += ` Monitor HTTP：${code}（本地接口结果）；下方保留刚读取的历史诊断。`;
+      if (receipt?.ok || receipt?.failure) {
+        const diagnostic = recoveryDiagnostics({...receipt,request}, code);
+        diagnostic.open = true; details.replaceChildren(diagnostic);
+      }
+      if (code && !receipt?.ok && !receipt?.failure) notice.textContent = `检查请求未完成（Monitor HTTP ${code}）。请先更新状态；详情见诊断。`;
     });
     refresh();
     return panel;

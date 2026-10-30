@@ -25,7 +25,7 @@ const state = {accounts: [{id: "a", eligible: true, busy: false}], selectedIds: 
 const render = () => renderAccountBatch(state, controls);
 render();
 assert.equal(controls.batchNext.disabled, true);
-assert.match(controls.blockedReason.textContent, /暂停/);
+assert.equal(controls.blockedReason.hidden, true, "recovery card owns the pause explanation");
 assert.match(controls.batchStatus.textContent, /暂停/);
 assert.match(controls.batchStatus.textContent, /发送成功 1\/1/);
 state.upstreamPause = null; render();
@@ -46,7 +46,7 @@ assert.equal(controls.batchStart.disabled, true);
 assert.match(controls.batchStatus.textContent, /暂停/);
 ''')
 
-    def test_pause_panel_uses_exact_identity_and_keeps_unknown_explicit(self):
+    def test_pause_fallback_preserves_context_and_local_recovery_entry(self):
         self.run_js(r'''
 const assert = require("assert");
 global.document = {createElement: () => ({})};
@@ -58,19 +58,19 @@ const target = {machine: "fixture-hub", account_label: "fixture@example.test", a
 const render = (p, t) => renderAccountPause(p, t, controls);
 render(pause, target);
 assert.equal(controls.pausePanel.hidden, false);
-assert.match(controls.pauseSummary.textContent, /fixture-hub/);
-assert.match(controls.pauseDetail.textContent, /fixture connection failed/);
+assert.match(controls.pauseSummary.textContent, /暂停/);
+assert.match(controls.pauseDetail.textContent, /选择.*结果保留/);
 assert.doesNotMatch(controls.pauseDetail.textContent, /原始失败/);
 assert.match(controls.pauseDetail.textContent, /2026-10-26/);
 assert.equal(controls.pauseRecovery.disabled, false);
 for (const wrong of [null, {...target, pause: {id: "old"}}, {...target, account_id: ""}]) {
   render(pause, wrong);
   assert.equal(controls.pauseRecovery.disabled, false, "local status remains readable even when overview is stale");
-  assert.match(controls.pauseDetail.textContent, /未.*匹配|无法.*匹配/);
+  assert.match(controls.pauseSummary.textContent, /准备恢复操作/);
 }
 render({...pause, id: "unreadable"}, null);
 assert.equal(controls.pauseRecovery.disabled, false, "local status remains readable even when overview is stale");
-assert.match(controls.pauseDetail.textContent, /无法读取/);
+assert.match(controls.pauseSummary.textContent, /准备恢复操作/);
 render(pause, {...target, pause: {id: "p1", probe_attempt: {id: "used"}}});
 assert.equal(controls.pauseRecovery.disabled, false, "used probe still has a readable recovery record");
 render(null, null);

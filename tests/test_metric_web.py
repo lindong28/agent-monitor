@@ -84,13 +84,13 @@ const accounts=[{id:"p"}];
 const renderBatch=()=>require("./web/codex-accounts.js").renderAccountBatch(
  {accounts,batch,selectedIds,unavailable,busy:submittingBatch,upstreamPause},
  {root,batchStart,batchNext,batchRetry,batchStatus,batchHelp,egressPreview,deviceConnect});
-renderBatch(); assert(batchStatus.textContent.includes("已知 1/1"));
+renderBatch(); assert(batchHelp.children.map(n=>n.textContent).join(" ").includes("已知 1/1"));
 op.after={observed_at:"2026-10-14T01:00:00Z",seven_day_resets_at:null};
-renderBatch(); assert(batchStatus.textContent.includes("已知 0/1"));
+renderBatch(); assert(batchHelp.children.map(n=>n.textContent).join(" ").includes("已知 0/1"));
 accounts[0].operation={refresh_only:true,started_at:"2026-10-14T02:00:00Z",before:{...before,observed_at:"2026-10-14T02:00:00Z"}};
-renderBatch(); assert(batchStatus.textContent.includes("已知 1/1"));
+renderBatch(); assert(batchHelp.children.map(n=>n.textContent).join(" ").includes("已知 1/1"));
 accounts[0].operation.started_at="2026-10-12T00:00:00Z";
-renderBatch(); assert(batchStatus.textContent.includes("已知 0/1"));
+renderBatch(); assert(batchHelp.children.map(n=>n.textContent).join(" ").includes("已知 0/1"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

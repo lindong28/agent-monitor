@@ -200,21 +200,20 @@
                   <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
                   <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
                   <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
-                  <button id="codex-egress-preview" type="button" class="btn">查看出口 IP 与地区</button>
                 </div>
                 <p id="codex-batch-blocked" class="quota-scope" role="status" hidden></p>
                 <div id="codex-upstream-pause" class="quota-scope" hidden>
                   <p><strong id="codex-pause-summary"></strong></p>
                   <p id="codex-pause-detail"></p>
                   <button id="codex-pause-recovery" type="button" class="btn">查看暂停原因与恢复</button>
-                  <p>打开恢复说明，查看当前能做什么。重新读取状态不会查询上游；检查配额需要单独确认，也不会重新发送消息。</p>
                 </div>
                 <details id="codex-recovery-history" class="note-disclosure">
-                  <summary>暂停诊断与最近恢复结果</summary>
+                  <summary>查看最近恢复记录</summary>
                   <div id="codex-recovery-body"></div>
                 </details>
                 <details class="note-disclosure">
-                  <summary>如何授权、继续发送或开始新一轮</summary>
+                  <summary>发送方式与连接帮助</summary>
+                  <button id="codex-egress-preview" type="button" class="btn">查看发送出口 IP 与地区</button>
                   <div id="codex-batch-help" class="quota-scope"></div>
                   <p class="quota-scope">需要授权时，先在账号安全设置中启用设备码登录，再打开对应账号卡片中的 OpenAI 官方授权页并填写设备码。确认登录账号与卡片邮箱一致后完成授权。</p>
                 </details>

@@ -248,19 +248,41 @@ export function init({ autoLoad = true } = {}) {
   }
 
   function renderPause() {
-    if (current()) renderAccountPause(upstreamPause, window.AgentMonitor.codexPauseTarget?.(upstreamPause?.id), pauseControls);
+    if (!current()) return;
+    renderAccountPause(upstreamPause, window.AgentMonitor.codexPauseTarget?.(upstreamPause?.id), pauseControls);
+    if (upstreamPause) openRecovery(false);
+    const panel = recoveryBody?.querySelector(".quota-recovery-panel");
+    if (panel) {
+      pauseControls.pausePanel.hidden = true;
+      if (recoveryPauseId !== upstreamPause?.id) {
+        recoveryPauseId = upstreamPause?.id;
+        panel.refresh?.();
+      }
+    }
+    const summary = recoveryHistory?.querySelector("summary");
+    if (summary) summary.textContent = upstreamPause ? "恢复发送" : "查看最近恢复记录";
   }
   const recoveryHistory = root.querySelector("#codex-recovery-history");
   const recoveryBody = root.querySelector("#codex-recovery-body");
-  function openRecovery() {
+  let recoveryPauseId;
+  function openRecovery(scroll = true) {
     if (!recoveryBody) return;
     let panel = recoveryBody.querySelector(".quota-recovery-panel");
     if (!panel) {
-      panel = window.AgentMonitor.createRecoveryPanel?.("self");
+      panel = window.AgentMonitor.createRecoveryPanel?.("self", {onContinue: async () => {
+        await load();
+        const next = !batchRetry.hidden && !batchRetry.disabled ? batchRetry : batch ? batchNext : batchStart;
+        next.scrollIntoView({block: "center"});
+        if (!next.disabled) next.focus({preventScroll: true});
+      }});
       if (panel) recoveryBody.appendChild(panel);
+      recoveryPauseId = upstreamPause?.id;
+    } else if (recoveryPauseId !== upstreamPause?.id) {
+      recoveryPauseId = upstreamPause?.id;
+      panel.refresh?.();
     }
     if (recoveryHistory) recoveryHistory.open = true;
-    panel?.scrollIntoView({block: "nearest"});
+    if (scroll) panel?.scrollIntoView({block: "nearest"});
   }
   pauseControls.pauseRecovery?.addEventListener("click", openRecovery);
   recoveryHistory?.addEventListener("toggle", () => {
@@ -508,20 +530,11 @@ export function renderAccountPause(pause, target, controls) {
   if (!pausePanel) return;
   pausePanel.hidden = !pause;
   if (!pause) return;
-  const matched = target?.pause?.id === pause.id && target.machine && target.account_id && target.account_label;
-  pauseSummary.textContent = `${matched ? target.machine : "服务端本机"} 的 Codex 通道已暂停，阻止本页所有账号发送、登录和查询配额。`;
+  pauseSummary.textContent = "发送已暂停，正在准备恢复操作。";
   const time = pause.at ? timestamp(pause.at, true) : "未记录";
-  const reason = pause.failure?.detail || (matched && target.failure?.detail) || "错误摘要未记录，原因未核实。";
-  pauseDetail.textContent = `暂停时间：${time}。已记录的错误摘要（凭据脱敏，最多 512 字符）：${reason}`;
-  if (["[url redacted]", "[opaque value redacted]"].some(marker => reason.includes(marker))) {
-    pauseDetail.textContent += " 摘要含有脱敏占位符，仅凭这条摘要无法还原被隐藏的地址或标识；其他日志或历史记录是否保留原文，尚未核实。占位符本身不证明内容有风险，也不能确认是哪一版规则处理的。";
-  }
-  if (matched) pauseDetail.textContent += ` 恢复查询账号：${target.account_label}。`;
-  else pauseDetail.textContent += pause.id === "unreadable"
-    ? " 暂停状态无法读取，请在服务端修复状态文件；不能直接解除。"
-    : " 概览尚未匹配到当前暂停；请查看当前状态与诊断，直接读取服务端本机记录。暂停仍保留。";
+  pauseDetail.textContent = `暂停记录：${time}。账号选择和已有发送结果保留。`;
   pauseRecovery.disabled = false;
-  pauseRecovery.textContent = "查看当前状态与诊断";
+  pauseRecovery.textContent = "查看恢复操作";
 }
 
 export function renderAccountBatch(state, controls) {
@@ -539,7 +552,7 @@ export function renderAccountBatch(state, controls) {
     batchNext.textContent = `开始新一轮 · 所选 ${count} 个账号`;
     batchNext.disabled = submittingBatch || busy || !count || Boolean(upstreamPause);
     if (blockedReason) {
-      blockedReason.textContent = upstreamPause ? "发送已暂停：请先查看下方暂停原因与恢复入口。"
+      blockedReason.textContent = upstreamPause ? ""
         : submittingBatch ? "正在连接、确认或提交本次操作，请等待完成。"
         : busy ? "有账号操作正在进行；完成或取消后才能开始新一轮。"
         : !count ? "请至少选择一个账号。" : "";
@@ -571,22 +584,21 @@ export function renderAccountBatch(state, controls) {
       else if (op?.message_status === "failed") statuses.failed++;
       else if (account?.eligible !== false && (!op || op.message_status === "not_sent")) statuses.unsent++;
       const refresh = account?.operation;
-      const applicableRefresh = refresh?.refresh_only && Date.parse(refresh.started_at) >= Date.parse(batch.created_at) ? refresh : null;
-      const reading = window.AgentMonitor.latestCodexQuotaReading({operation: applicableRefresh, batch_result: op});
+      const applicable = refresh?.refresh_only && Date.parse(refresh.started_at) >= Date.parse(batch.created_at) ? refresh : null;
+      const reading = window.AgentMonitor.latestCodexQuotaReading({operation: applicable, batch_result: item.operation});
       if (typeof reading?.seven_day_resets_at === "number" && reading.seven_day_resets_at * 1000 > Date.now()) resetRead++;
     }
-    const parts = [`${timestamp(batch.created_at)} 开始的批次`, `本轮发送成功 ${statuses.succeeded}/${batch.items.length}`];
+    const parts = [`本轮发送成功 ${statuses.succeeded}/${batch.items.length}`];
     for (const [key, label] of Object.entries({ waiting: "等待授权", queued: "授权排队", running: "处理中", unsent: "未发送", unknown: "结果未知", failed: "发送失败" })) {
       if (statuses[key]) parts.push(`${label} ${statuses[key]}`);
     }
-    parts.push(`下次重置时间已知 ${resetRead}/${batch.items.length}`);
     if (upstreamPause) parts.push("本机 Codex 通道已暂停，暂不能发送");
     batchStatus.textContent = parts.join(" · ");
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch || busy || Boolean(upstreamPause);
     batchRetry.textContent = `继续 ${statuses.unsent} 个未发送账号`;
     const help = [
-      `本轮开始于 ${timestamp(batch.created_at)}。`,
+      `本轮开始于 ${timestamp(batch.created_at)}。7 天窗口重置时间已知 ${resetRead}/${batch.items.length}；这是配额读数，不代表发送结果。`,
       "顺序：按邮箱逐个完成账号操作，包含子进程清理；不会同时发送。缺登录态时跳过，单独登录完成后需重新发起操作。",
       statuses.unsent
         ? `继续发送：先处理缺登录或暂停原因，再点击「${batchRetry.textContent}」。系统只处理仍在登录记录中且确定未发送的账号。`

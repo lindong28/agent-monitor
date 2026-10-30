@@ -1,0 +1,11 @@
+# Keep recovery beside the blocked sending task
+
+Accepted: 2026-10-30 after one independent decision review. Scope: account sending and the shared quota recovery UI. The user reported that disabled sending followed by several buttons and long explanations still did not tell them what to do.
+
+Use one stateful recovery card beside sending. Show the current obstacle, preserved work, latest relevant result and one recommended action; keep machine/account identity needed for confirmation nearby and technical evidence in a closed disclosure. Failed checks lead to concrete troubleshooting, with explicit rechecking as a secondary action when allowed. Unknown outcomes lead to a local state read. Success returns to the original account controls without sending automatically. Remote-machine diagnostics do not imply that the serving machine's accounts were restored.
+
+This refines the presentation in the two 2026-10-28 pause/recovery ADRs without changing provider admission, confirmation, one-check identity binding, egress or persistence. A separate recovery page would add navigation and duplicated state; merely shortening the previous paragraphs would leave competing next actions and detached continuation. Ordinary diagnostic URLs remain available under the existing private-reader policy.
+
+Implementation and real browser behavior were not verified at decision acceptance. Acceptance must cover the blocked task, failed/unknown checks, unavailable checking, successful continuation, selection preservation and both consumers; synthetic recovery is separate from live provider recovery. RPC -32603 does not establish an upstream root cause.
+
+Implementation acceptance: 61 frontend unit cases plus the quota-consumer test and module/route suites passed. The isolated Chrome flow exercised six synthetic accounts, cancelled and confirmed checks, failed/lost/successful responses, unavailable-check states, selection changes (6 to 5), diagnostic copying, reload and both consumers. Independent change review found two state-reconciliation defects; both were fixed and checked: pause release without a persisted receipt, and a pause removed through another consumer. These observations do not establish real provider recovery or every viewport.

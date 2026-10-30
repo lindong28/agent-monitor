@@ -13,7 +13,7 @@ function node(tag) {
   return {tag, children: [], listeners: {}, disabled: false, hidden: false,
     set textContent(v) { text=String(v); this.children=[]; },
     get textContent() { return text+this.children.map(n=>n.textContent).join('\n'); },
-    setAttribute() {}, append(...nodes) {this.children.push(...nodes);},
+    attrs: {}, setAttribute(k,v) {this.attrs[k]=v;}, append(...nodes) {this.children.push(...nodes);},
     appendChild(n) {this.children.push(n);return n;},
     replaceChildren(...nodes) {text='';this.children=nodes;},
     addEventListener(k, f) {this.listeners[k]=f;},
@@ -46,12 +46,18 @@ async function render(changes={}, error=false) {
   ]) {
     const p=await render(change);
     assert.match(p.textContent,expected);
-    assert.match(p.textContent,/重新读取状态/);
-    assert.equal(all(p).find(n=>n.tag==='button' && /配额一次/.test(n.textContent)).disabled,true);
+    assert.match(p.textContent,/更新状态|更新进度/);
+    assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='probe').disabled,true);
   }
   let p=await render();
-  assert.match(p.textContent,/为什么不能发送/);
-  assert.match(p.textContent,/可以检查一次/);
+  const technical=all(p).find(n=>n.tag==='details' && n.className==='recovery-technical');
+  assert(technical && !technical.open, 'technical evidence must be secondary by default');
+  const visibleText=n => n.hidden ? '' : n.tag==='details' && !n.open ? n.children[0]?.textContent || '' : n.children.length ? n.children.map(visibleText).join('\n') : n.textContent;
+  assert(!visibleText(p).includes('fixture-id'), 'workspace identifiers must not dominate the recovery task');
+  assert.equal(all(p).filter(n=>n.tag==='button' && n.className.includes('btn-primary') && !n.hidden).length,1,'one recommended action');
+
+  assert.match(visibleText(p),/发送已暂停，需要先检查配额/);
+  assert.match(visibleText(p),/检查只查询一次配额/);
   assert.match(p.textContent,/不会.*发送|不.*重发/);
   const copy=all(p).find(n=>n.tag==='button' && n.textContent==='复制诊断信息');
   assert(copy);
@@ -77,12 +83,52 @@ async function render(changes={}, error=false) {
   p=await render({pause:{...base.pause,failure:{detail:'request failed (https://example.test/usage?workspace=ordinary)'}}});
   assert.match(p.textContent,/https:\/\/example.test\/usage\?workspace=ordinary/);
   p=await render({},true);
-  assert.match(p.textContent,/状态未核实/);
-  assert.equal(all(p).find(n=>n.tag==='button' && /配额一次/.test(n.textContent)).disabled,true);
+  assert.match(p.textContent,/无法确认恢复状态/);
+  assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='probe').disabled,true);
   p=await render({pause:null});
-  assert.match(p.textContent,/返回.*账号操作/);
+  assert.match(p.textContent,/当前没有通道暂停/);
+  assert(all(p).find(n=>n.attrs?.['data-recovery-action']==='continue').hidden, 'remote consumer cannot resume local sending');
   assert.match(p.textContent,/发送/);
   assert(calls.every(([,method])=>method==='GET'),'viewing instructions never probes or sends');
+  const action=(p,key)=>all(p).find(n=>n.attrs?.['data-recovery-action']===key);
+  const settle=()=>new Promise(r=>setImmediate(r));
+  for (const scenario of ['matched','missing','still-paused']) {
+    let current={...base}, posts=0, continued=0;
+    const recovery=require('./web/quota.js')({platform:{document:{createElement:node,dispatchEvent(){}},
+      window:{AgentMonitor:{onPageCleanup(){}},confirm:()=>true},fetch:async(url,options)=>{
+        if(options?.method==='POST') {
+          posts++;
+          current={...base,pause:scenario==='still-paused'?base.pause:null,
+            last_recovery:scenario==='matched'?{ok:true,request:{pause_id:base.pause.id}}:null};
+          throw Error('lost response');
+        }
+        return {ok:true,json:async()=>current};
+      }},formatDate:String});
+    p=recovery.createRecoveryPanel('self',{onContinue:()=>continued++}); await settle();
+    await action(p,'probe').click();
+    await action(p,'read').click();
+    if(scenario==='still-paused') {
+      assert.match(p.textContent,/本次检查结果尚未确认/);
+      assert(action(p,'continue').hidden); assert(action(p,'probe').disabled);
+    } else {
+      assert.match(p.textContent,/当前没有通道暂停/);
+      assert(!action(p,'continue').hidden); await action(p,'continue').click(); assert.equal(continued,1);
+      if(scenario==='missing') assert.match(p.textContent,/未取得该次结果记录/);
+    }
+    assert.equal(posts,1,'neither state reconciliation nor continuation repeats a probe');
+  }
+  let reads=0, finish;
+  const delayed=require('./web/quota.js')({platform:{document:{createElement:node,dispatchEvent(){}},
+    window:{AgentMonitor:{onPageCleanup(){}}},fetch:async()=>{
+      reads++;
+      if(reads===1) await new Promise(resolve=>finish=resolve);
+      return {ok:true,json:async()=>({...base,pause:reads===1?base.pause:null})};
+    }},formatDate:String});
+  p=delayed.createRecoveryPanel('self',{onContinue(){}});
+  p.refresh(); finish(); await settle(); await settle();
+  assert.equal(reads,2,'a state transition during a read must schedule one follow-up read');
+  assert.match(p.textContent,/当前没有通道暂停/);
+
 })().catch(e=>{console.error(e);process.exitCode=1;});
 '''
         result = subprocess.run(['node', '-e', script], cwd=Path(__file__).resolve().parents[1],
