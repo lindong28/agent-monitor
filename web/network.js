@@ -45,6 +45,8 @@
   async function initProcessNetwork(context = {}) {
     let current = true;
     const local = context.local_network === true;
+    const localEntry = qs('#local-network-entry');
+    if (localEntry) localEntry.hidden = local;
     const button = qs("#process-network-refresh"), status = qs("#process-network-status");
     const select = qs("#process-network-select"), result = qs("#process-network-result");
     const search = qs("#process-network-search"), help = qs("#process-network-help"), cancel = qs("#process-network-cancel");
@@ -296,8 +298,9 @@
         }
       } catch (_) { /* Invalid local cache never changes server admission. */ }
       await collectLocal();
-    } else if (qs('#local-network-source')) {
-      qs('#local-network-source').textContent = `当前是远程网页${context.host ? `（服务主机 ${context.host}）` : ''}，不能将它视为你的电脑。推荐在浏览器所在电脑安装后运行 ./agent-monitor open；随后从本地总览进入网络。也可继续使用下方连接器手动读取。`;
+    } else {
+      status.textContent = '尚未读取这台电脑的进程。可打开本机网络页，或使用连接器读取。';
+      if (qs('#local-network-source')) qs('#local-network-source').textContent = `当前是远程网页${context.host ? `（服务主机 ${context.host}）` : ''}，不能将它视为你的电脑。推荐打开本机网络页；也可继续使用下方连接器手动读取。`;
     }
   }
 

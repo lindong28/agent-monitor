@@ -89,6 +89,17 @@ const localReport = () => ({...capable(), subject_id: 'A', host: 'local-A',
     addresses:[{interface:'en0',address:'192.0.2.5'}], dns:['192.0.2.53'], system_proxy:{status:'observed',entries:[]}},
 });
 
+test('remote entry ends loading and offers local navigation without starting a read', async () => {
+  const remote = await fixture();
+  assert.match(remote.qs('#process-network-status').textContent, /尚未读取/);
+  assert.equal(remote.qs('#local-network-entry').hidden, false);
+  assert.equal(remote.popups.length, 0);
+  assert.equal(remote.requests(), 0);
+  const local = await fixture({fetch: async () => ({ok: true, json: async () => localReport()})});
+  assert.equal(local.qs('#local-network-entry').hidden, true);
+  assert.match(local.qs('#process-network-status').textContent, /系统观测于/);
+});
+
 test('normal local entry shows host and all process facts before selection without probes', async () => {
   const data = localReport();
   data.processes[0].proxy_observation = {status:'observed',connections:[{host:'model.example.test',port:443,chains:['node','group']}]};
