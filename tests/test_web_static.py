@@ -2046,13 +2046,12 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         ):
             self.assertIn(token, app)
 
-    def test_g7_network_is_local_and_sessions_explain_admitted_scope(self):
-        for filename in ("network.html",):
-            html = (ROOT / "web" / filename).read_text()
-            with self.subTest(filename=filename):
-                self.assertIn("本机", html)
-                self.assertIn("服务端主机", html)
-                self.assertIn("不检测浏览器所在设备", html)
+    def test_network_and_sessions_explain_their_scope(self):
+        html = (ROOT / "web" / "network.html").read_text()
+        self.assertIn("检测此页面服务所在主机的系统网络，不代表各个 Agent 的连接", html)
+        self.assertIn('id="network-conclusion"', html)
+        self.assertNotIn('id="process-network', html)
+        self.assertNotIn("<details", html)
         sessions = (ROOT / "web" / "sessions.html").read_text()
         self.assertIn("汇集已纳入机器的会话", sessions)
         self.assertIn('id="filter-machine"', sessions)
