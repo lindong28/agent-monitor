@@ -283,7 +283,9 @@ async function run() {
     if (url === '/network') {
       assert(!env.requests.slice(begin).some(request => request.pathname === endpoint), 'local network view must not automatically probe the server');
       const details = ui.qs('#server-network');
-      details.open = true; details.listeners.toggle();
+      details.open = true; details.listeners.toggle?.();
+      assert(!env.requests.slice(begin).some(request => request.pathname === endpoint), 'disclosure must not trigger server detection');
+      await ui.qs('#refresh').listeners.click();
       await new Promise(resolve => setImmediate(resolve));
     }
     assert(env.requests.slice(begin).some(request => request.pathname === endpoint), `${url}: route did not call its API`);

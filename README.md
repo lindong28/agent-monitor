@@ -133,7 +133,7 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 
 日常操作统一使用 `./agent-monitor`，包括 `service deploy`、`service status [web|rollup-daemon|connector]` 和 `upstream-holds`。根目录保留 `install.sh`、`uninstall.sh` 和独立网络诊断 `ip-check`；`runtime_rebuild.py` 用于项目虚拟环境损坏时通过外部 Python 恢复。旧脚本的替代命令见[操作指南](docs/public-usage.md#command-migration)。
 
-「网络」页默认查看**浏览器所在电脑**的 Codex/Claude 进程。先在该电脑按上述步骤安装，再以启动 Agent 的同一用户运行页面给出的 `agent-monitor connect --server URL`，点击「读取本机 Agent」并选择进程。无需维护者私有工具。页面分别展示启动配置、当前连接和主动触发的固定目标探测回执，不把服务端诊断或代理端口当作 Agent 公网出口；权限不足、版本不匹配和未核实信息会明确显示。已有连接器更新后需重启；完整范围、升级和排障见[本机 Agent 网络](docs/public-usage.md#local-agent-network)。只需终端查看时可运行 `./agent-monitor process-network`，不会发送公网请求。
+「网络」页默认查看**浏览器所在电脑**的 Codex/Claude 进程。先在该电脑按上述步骤安装，再以启动 Agent 的同一用户运行页面给出的 `agent-monitor connect --server URL`，点击「读取本机 Agent」并选择进程。无需维护者私有工具。页面按条件组合启动配置、当前连接、可选本机 Mihomo 链路、主动触发的第三方或固定服务目标探测回执，不把服务端诊断或代理端口当作 Agent 公网出口；权限不足、版本不匹配和未核实信息会明确显示。已有连接器更新后需重启；完整范围、升级和排障见[本机 Agent 网络](docs/public-usage.md#local-agent-network)。只需终端查看时可运行 `./agent-monitor process-network`，不会发送公网请求。
 
 `--no-services` 不改变服务。macOS 的普通安装会管理定时采集和已配置的 Hub，连接器需要主动启用。Linux 提供 CLI 和手动启动的仪表盘。Hub 客户端通常打开中心仪表盘；可以通过[本地实例选择方式](docs/public-usage.md#services-and-deployment)管理可选的本地实例。受管更新可能中断正在执行的操作：应先等账号操作结束，不要重发结果不确定的消息。组件重启、恢复和运行时替换的细节见上述指南。
 

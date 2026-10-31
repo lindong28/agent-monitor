@@ -56,15 +56,53 @@ async function until(name, predicate, budget=10000) {
   throw new Error(name+' did not complete within the test observation budget');
 }
 async function browserCommand(argv, cleanup=false, pin=true) {
+  if (!cleanup) budget.signal.throwIfAborted();
   let result;
+  const started=Date.now();
+  const command=argv[0]+(argv[1] && argv[0]!=='eval' ? " "+argv[1] : "");
+  fs.appendFileSync(path.join(root,'commands.jsonl'),JSON.stringify({event:"start",command,at:new Date().toISOString()})+"\n");
   try {
-    result=await execute(tool,['--session','accept','--config',config,'--executable-path',launcher,pin?'--pin-tab':'--no-pin-tab','--json',...argv],
-      {env,cwd:root,timeout:cleanup?10000:argv[0]==='click'?5000:35000,signal:cleanup?undefined:budget.signal,maxBuffer:1024*1024});
+    result=await new Promise((resolve,reject) => {
+      // npm's launcher spawns a native child. Killing only the launcher leaves
+      // that child holding the request socket and inherited output pipes.
+      const child=spawn(tool,['--session','accept','--config',config,'--executable-path',launcher,pin?'--pin-tab':'--no-pin-tab','--json',...argv],
+        {env,cwd:root,detached:true,stdio:['ignore','pipe','pipe']});
+      let stdout='',stderr='',termination,killTimer;
+      const signalGroup = signal => {
+        if (!child.pid) return;
+        try {process.kill(-child.pid,signal);} catch(error) {if(error.code!=='ESRCH') termination ||= error;}
+      };
+      const terminate = reason => {
+        if (termination) return;
+        termination=reason;
+        signalGroup('SIGTERM');
+        killTimer=setTimeout(()=>signalGroup('SIGKILL'),1000);
+      };
+      const abort=()=>terminate(budget.signal.reason || new Error('Acceptance cancelled'));
+      const commandTimer=setTimeout(()=>terminate(new Error('Command exceeded its observation budget')),cleanup?10000:argv[0]==='click'?5000:35000);
+      if (!cleanup) budget.signal.addEventListener('abort',abort,{once:true});
+      const dispose=()=>{clearTimeout(commandTimer);clearTimeout(killTimer);budget.signal.removeEventListener('abort',abort);};
+      const capture=key=>chunk=>{
+        if(key==='stdout') stdout+=chunk; else stderr+=chunk;
+        if(Buffer.byteLength(stdout)+Buffer.byteLength(stderr)>1024*1024) terminate(new Error('Command output exceeded its limit'));
+      };
+      child.stdout.on('data',capture('stdout'));child.stderr.on('data',capture('stderr'));
+      child.once('error',error=>{dispose();reject(error);});
+      child.once('close',(code,signal)=>{
+        dispose();
+        fs.appendFileSync(path.join(root,'commands.jsonl'),JSON.stringify({event:'process_closed',command,pid:child.pid,code,signal})+'\n');
+        if(termination || code!==0) reject(Object.assign(termination || new Error(`Command exited ${code}`),{stdout,stderr,code,killed:!!termination}));
+        else resolve({stdout,stderr});
+      });
+      if (!cleanup && budget.signal.aborted) abort();
+    });
   } catch(error) {
+    fs.appendFileSync(path.join(root,'commands.jsonl'),JSON.stringify({event:"error",command,ms:Date.now()-started,code:error.code,killed:error.killed})+"\n");
     let reason;
     try {reason=JSON.parse(error.stdout).error;} catch {}
     throw Object.assign(new Error('agent-browser '+argv[0]+': '+(reason || error.stderr?.trim() || error.message),{cause:error}),{code:error.code,killed:error.killed});
   }
+  fs.appendFileSync(path.join(root,'commands.jsonl'),JSON.stringify({event:"end",command,ms:Date.now()-started})+"\n");
   const resultJSON=JSON.parse(result.stdout);
   assert.equal(resultJSON.success,true,resultJSON.error || 'agent-browser command failed');
   return resultJSON;
@@ -115,10 +153,14 @@ async function stopChildren() {
     },10000);
   }
 }
+// Seven network popup interactions can each spend 5s in click plus up to
+// 35s reconciling the native CLI response (observed: about 30s per popup).
+// Keep 20s for ordinary local steps; product 18/26s deadlines are unchanged.
+const acceptanceBudgetMs=args['network-only'] ? 7 * (5000 + 35000) + 20000 : 180000;
 const timer=setTimeout(()=>{
-  budget.abort(new Error('Browser acceptance exceeded its 180 second test budget'));
+  budget.abort(new Error(`Browser acceptance exceeded its ${acceptanceBudgetMs/1000} second test budget`));
   failure ||= budget.signal.reason;
-},180000);
+},acceptanceBudgetMs);
 let failure;
 try {
   console.log(args['network-only'] ? 'Checking two synthetic process networks in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
@@ -138,30 +180,61 @@ try {
     await bt('snapshot','-i');
     assert.equal((await stats()).server_reads,0,'local page never automatically probes Hub');
     await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('fixture-browser-device')");
-    assert.match(await read("document.querySelector('#process-network-result').innerText"),/proxy-codex/);
-    await bt('select','#process-network-select','1');
-    assert.match(await read("document.querySelector('#process-network-result').innerText"),/proxy-claude/);
+    const resultText = "document.querySelector('#process-network-result').innerText";
+    const selection = "document.querySelector('#process-network-select').value";
+    assert.equal(await read(selection),'','first report requires an explicit choice');
+    assert.match(await read(resultText),/选择进程/);
+    await bt('fill','#process-network-search','fixture-claude');
+    assert.equal(await read("document.querySelector('#process-network-select').options.length"),2,'search leaves one matching process and the placeholder');
+    await bt('select','#process-network-select','101:123');
+    assert.match(await read(resultText),/fixture-claude/);
+    assert.match(await read(resultText),/fixture-service.test/);
+    assert.match(await read(resultText),/fixture-exit/);
+    await bt('fill','#process-network-search','');
     assert.equal((await stats()).process_reads,1,'one real connector popup collected one snapshot');
     assert.equal(await read("document.querySelector('#process-network-cancel').getClientRects().length"),0,'finished read hides cancellation action');
-    await click('#process-network-probe',"document.querySelector('#process-network-result').innerText.includes('8.8.8.8')");
-    assert.equal((await stats()).process_probes,1,'origin acknowledgement redeems one probe ticket');
-    assert.match(await read("document.querySelector('#process-network-result').innerText"),/固定目标探测回执/);
+    await click('#process-network-probe',`${resultText}.includes('192.0.2.10')`);
+    await click('#process-network-third-party',`${resultText}.includes('192.0.2.20')`);
+    assert.deepEqual((await stats()).process_probe_kinds,['provider','third_party'],'origin acknowledgement redeems a ticket bound to each probe kind');
+    assert.match(await read(resultText),/供应商固定目标/);
+    assert.match(await read(resultText),/第三方出口观测/);
+    assert.match(await read("document.querySelector('#process-network-third-party-help').innerText"),/HTTP 非加密.*非商业/);
+    await configure({process_mode:'reordered'});
+    await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('00:00:02Z')");
+    assert.equal(await read(selection),'101:123','refresh retains full identity even when order changes');
+    assert.match(await read(resultText),/历史回执/);
+    assert.match(await read(resultText),/192.0.2.10/);
+    assert.match(await read(resultText),/192.0.2.20/);
+    await configure({process_mode:'blocked'});
+    await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('00:00:03Z') && document.querySelector('#process-network-probe').disabled");
+    assert.match(await read("document.querySelector('#process-network-probe-help').innerText"),/合成绕过规则尚未核实.*核对原有策略/);
+    assert.equal(await read("document.querySelector('#process-network-third-party').disabled"),false,'provider refusal does not disable third-party evidence');
+    assert.equal((await stats()).process_probes,2,'blocked admission does not issue another probe');
     await bt('screenshot',path.join(root,'process-network.png'));
     await click('#process-network-help > summary',"document.querySelector('#process-network-help').open");
     assert.match(await read("document.querySelector('#process-network-command').innerText"),/agent-monitor connect --server/);
     await bt('set','viewport','390','844');
     await bt('screenshot',path.join(root,'process-network-390.png'));
     assert.equal(await read('document.documentElement.scrollWidth<=innerWidth'),true,'local report fits narrow viewport');
-    await click('#server-network > summary',"document.querySelector('#network-checked-host').textContent.includes('fixture-server-device')");
-    assert.equal((await stats()).server_reads,1);
+    await click('#server-network > summary',"document.querySelector('#server-network').open");
+    assert.equal((await stats()).server_reads,0,'opening details does not issue a server diagnostic');
+    await click('#refresh',"document.querySelector('#network-checked-host').textContent.includes('fixture-server-device')");
+    assert.equal((await stats()).server_reads,1,'explicit detection issues one server request');
     assert.match(await read("document.querySelector('#process-network-status').textContent"),/fixture-browser-device/);
+    const retained = await read(resultText);
     await configure({pair_mode:'silent'});
     await click('#process-network-refresh',"document.querySelector('#process-network-cancel').hidden===false");
+    assert.equal(await read(resultText),retained,'pending refresh retains old evidence');
     await click('#process-network-cancel',"document.querySelector('#process-network-status').textContent.includes('已取消')");
-    assert.equal(await read("document.querySelector('#process-network-result').textContent"),'');
-    assert.equal((await stats()).server_reads,1,'failed local report does not fall back to server');
+    assert.equal(await read(resultText),retained,'cancelled refresh retains old evidence');
+    assert.equal(await read(selection),'101:123');
+    assert.match(await read("document.querySelector('#process-network-status').textContent"),/保留.*00:00:03Z/);
+    assert.equal((await stats()).server_reads,1,'cancelled local report does not fall back to server');
+    await configure({pair_mode:'ready',process_mode:'removed'});
+    await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('原选进程实例已不在')");
+    assert.equal(await read(selection),'','disappeared process is not silently replaced');
     fs.writeFileSync(path.join(root,'process-network-evidence.json'),JSON.stringify(await stats(),null,2));
-    console.log('PASS: real loopback popup, two processes, separate server, help, narrow layout and cancellation.');
+    console.log('PASS: real loopback popup, explicit/searchable selection, reordered refresh, two probe kinds, blocked provider, retained cancellation evidence, disappearance, explicit server action and narrow layout.');
   } else {
   const primary='#codex-batch-next', dialog='dialog.account-egress-dialog';
   const ready=`!document.hidden && !!document.querySelector('${primary}') && !document.querySelector('${primary}').disabled && document.querySelector('${primary}').textContent.includes('6')`;

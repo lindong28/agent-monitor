@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 from urllib.parse import urlsplit
+from agent_monitor.network import process_route
 
 MAX_BYTES = 1024 * 1024
 PROXY_KEYS = ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy')
@@ -152,6 +153,16 @@ class Linux:
         raw = read_limited(self.root / str(pid) / 'environ')
         return dict(p.decode('utf-8', 'replace').split('=', 1) for p in raw.split(b'\0') if b'=' in p)
 
+    def context(self, pid):
+        fields = read_limited(self.root / str(pid) / 'stat').rsplit(b') ', 1)[1].split()
+        result = {'parent_pid': int(fields[1]), 'cwd': os.readlink(self.root / str(pid) / 'cwd')}
+        for line in read_limited(self.root / 'stat').decode().splitlines():
+            if line.startswith('btime '):
+                at = int(line.split()[1]) + int(fields[19]) / os.sysconf('SC_CLK_TCK')
+                result['started_at'] = datetime.datetime.fromtimestamp(at, datetime.timezone.utc).isoformat()
+                break
+        return result
+
     def connections(self, pid):
         path = self.root / str(pid)
         inodes = set()
@@ -218,6 +229,23 @@ class Darwin:
             raise OSError(ctypes.get_errno(), 'process environment unavailable')
         return parse_darwin_args(buf.raw[:size.value])
 
+    def context(self, pid):
+        if not hasattr(self, '_contexts'):
+            values = subprocess.run(['ps', '-axo', 'pid=,ppid=,tty='], capture_output=True, text=True, timeout=2, check=True)
+            self._contexts = {}
+            for line in values.stdout.splitlines():
+                parts = line.split()
+                if len(parts) == 3:
+                    self._contexts[int(parts[0])] = {'parent_pid': int(parts[1]), 'terminal': parts[2]}
+        result = dict(self._contexts.get(pid, {}))
+        at = float(self.identity(pid))
+        result['started_at'] = datetime.datetime.fromtimestamp(at, datetime.timezone.utc).isoformat()
+        cwd = subprocess.run(['lsof', '-a', '-p', str(pid), '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=1)
+        directories = [line[1:] for line in cwd.stdout.splitlines() if line.startswith('n/')]
+        if len(directories) == 1:
+            result['cwd'] = directories[0]
+        return result
+
     def connections(self, pid):
         result = subprocess.run(['lsof', '-nP', '-a', '-p', str(pid), '-iTCP', '-F', 'fnT'],
                                 capture_output=True, text=True, timeout=3)
@@ -240,12 +268,15 @@ def failure(exc):
     return {'type': type(exc).__name__, 'errno': getattr(exc, 'errno', None)}
 
 
-def capture(backend=None):
+def capture(backend=None, observer=None):
     began = time.monotonic()
     report = {'schema_version': 1, 'host': socket.gethostname(), 'platform': sys.platform,
               'observed_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'scope': 'same_user_local_processes', 'processes': [], 'errors': []}
     try:
+        if backend is None and observer is None:
+            from agent_monitor.network.process_observer import MihomoObserver
+            observer = MihomoObserver(deadline=began + 7)
         backend = backend or (Darwin() if sys.platform == 'darwin' else Linux() if sys.platform.startswith('linux') else None)
         if backend is None:
             raise NotImplementedError()
@@ -271,6 +302,13 @@ def capture(backend=None):
                 if not kind:
                     continue
                 item.update(agent=kind, instance=f'{pid}:{before}')
+                if isinstance(backend, (Linux, Darwin)):
+                    try:
+                        item['context'] = backend.context(pid)
+                    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                        item['context'] = {}
+                        # Identity hints are optional, not a failed network read.
+                        item['context_error'] = failure(exc)
                 try:
                     if environment_error:
                         raise environment_error
@@ -281,6 +319,7 @@ def capture(backend=None):
                     # of absence; neither OS exposes post-start client internals.
                     item['environment_status'] = 'startup_snapshot' if env else 'unavailable_or_empty'
                 except (OSError, ValueError) as exc:
+                    env = None
                     item['environment_status'] = 'unavailable'
                     item['errors'].append({'stage': 'environment', **failure(exc)})
                 try:
@@ -289,6 +328,20 @@ def capture(backend=None):
                 except (OSError, ValueError, subprocess.SubprocessError) as exc:
                     item['connections_status'] = 'unavailable'
                     item['errors'].append({'stage': 'connections', **failure(exc)})
+                item['probe_options'] = process_route.options(kind, env, item['connections'], item['instance'])
+                if observer is not None:
+                    item['proxy_observation'] = observer.observe(item['connections'], executable)
+                    if item['proxy_observation']['connections']:
+                        # Reject sockets that vanished/reused while reading the controller.
+                        try:
+                            current = backend.connections(pid)
+                        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                            current = []
+                            item['proxy_observation'].update(status='unavailable', reason='关联后的连接复核失败：' + type(exc).__name__)
+                        visible = {(c['local'], c['peer']) for c in current}
+                        item['proxy_observation']['connections'] = [c for c in item['proxy_observation']['connections'] if (c['local'], c['peer']) in visible]
+                        if not item['proxy_observation']['connections'] and item['proxy_observation']['status'] != 'unavailable':
+                            item['proxy_observation'].update(status='unmatched', reason='关联期间连接已改变，请重新读取。')
                 if backend.identity(pid) != before or backend.executable(pid) != executable:
                     raise ProcessLookupError()
                 item['public_egress'] = {'status': 'unverified', 'reason': 'No destination receipt; socket peer is not public egress.'}

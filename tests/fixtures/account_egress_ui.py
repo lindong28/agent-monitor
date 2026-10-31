@@ -43,15 +43,32 @@ def main():
     state = dict(disclosure=False, mode='mixed', delay=0, starts=[], previews=0, paused=False,
                  pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
                  pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause', recovery_state='ready')
-    state.update(process_reads=0, server_reads=0)
+    state.update(process_reads=0, server_reads=0, process_probes=0, process_probe_kinds=[], process_mode="ready")
     from agent_monitor.network import process_network
     def process_report():
         state['process_reads'] += 1
-        return dict(schema_version=1, host='fixture-browser-device', observed_at='2026-10-30T00:00:00Z', errors=[], processes=[
-            dict(agent=name, pid=100+i, instance=f'{100+i}:123', environment_status='startup_snapshot',
-                 environment={'HTTPS_PROXY':dict(address=f'http://proxy-{name}.test:8080')},
-                 connections_status='observed', connections=[dict(local=f'127.0.0.1:{4000+i}', peer=f'127.0.0.1:{5000+i}', state='ESTABLISHED')])
-            for i, name in enumerate(('codex', 'claude'))])
+        processes = []
+        for i, name in enumerate(('codex', 'claude')):
+            proxy = f'http://proxy-{name}.test:8080'
+            target = f'https://{"chatgpt.com" if name == "codex" else "api.anthropic.com"}/cdn-cgi/trace'
+            options = {
+                'provider': dict(status='available', target=target, proxy_address=proxy),
+                'third_party': dict(status='available', target='http://ip-api.com/json/?fields=status,query,countryCode,country,regionName,city', proxy_address=proxy),
+            }
+            if state['process_mode'] == 'blocked':
+                options['provider'].update(status='blocked', reason='合成绕过规则尚未核实', next_step='核对原有策略后重新读取；不要移除绕过规则')
+            processes.append(dict(agent=name, pid=100+i, instance=f'{100+i}:123', environment_status='startup_snapshot',
+                 context=dict(cwd=f'/work/fixture-{name}', started_at='2026-10-30T00:00:00Z', parent_pid=90+i, terminal=f'ttys{i}'),
+                 environment={'HTTPS_PROXY': dict(address=proxy)}, probe_options=options,
+                 proxy_observation=dict(status='observed', connections=[dict(host='fixture-service.test', port=443,
+                     local=f'127.0.0.1:{4000+i}', peer=f'127.0.0.1:{5000+i}', chains=['fixture-exit', 'GLOBAL'],
+                     rule='MATCH', observed_at='2026-10-30T00:00:00Z')]),
+                 connections_status='observed', connections=[dict(local=f'127.0.0.1:{4000+i}', peer=f'127.0.0.1:{5000+i}', state='ESTABLISHED')]))
+        if state['process_mode'] == 'reordered':
+            processes.reverse()
+        if state['process_mode'] == 'removed':
+            processes = processes[:1]
+        return dict(schema_version=1, host='fixture-browser-device', observed_at=f'2026-10-30T00:00:{state["process_reads"]:02d}Z', errors=[], processes=processes)
     process_network.read_report = process_report
     network_html = re.sub(r'<script\b[^>]*>.*?</script>', '', (ROOT / 'web/network.html').read_text(), flags=re.S)
     network_html = network_html.replace('</body>', '''<script src="/web/network.js"></script><script>
@@ -199,7 +216,7 @@ def main():
                 state['starts'].append(payload)
                 self.send({})
             elif self.path == '/fixture/config':
-                for key in ('disclosure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state'):
+                for key in ('disclosure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state', 'process_mode'):
                     if key in payload:
                         state[key] = payload[key]
                 self.send(state)
@@ -239,11 +256,16 @@ def main():
     connector.guard = threading.Lock()
     connector.process_probe_tickets = {}
     class SyntheticProbe:
-        def read(self, pid, instance):
-            state['process_probes'] = state.get('process_probes', 0) + 1
-            return dict(instance=instance, host='api.anthropic.com', proxy_address='http://proxy-claude.test:8080',
-                        ip='8.8.8.8', country_code='SG', observed_at=time.time(), cached=False,
-                        evidence='fixed_target_probe_via_observed_proxy', process_still_matches=True)
+        def read(self, pid, instance, kind='provider'):
+            assert kind in ('provider', 'third_party'), 'unexpected synthetic probe kind'
+            state['process_probes'] += 1
+            state['process_probe_kinds'].append(kind)
+            name = 'codex' if int(pid) == 100 else 'claude'
+            host = ('chatgpt.com' if name == 'codex' else 'api.anthropic.com') if kind == 'provider' else 'ip-api.com'
+            target = f'https://{host}/cdn-cgi/trace' if kind == 'provider' else 'http://ip-api.com/json/?fields=status,query,countryCode,country,regionName,city'
+            return dict(instance=instance, probe_kind=kind, target=target, host=host, proxy_address=f'http://proxy-{name}.test:8080',
+                        ip='192.0.2.10' if kind == 'provider' else '192.0.2.20', country_code='SG', observed_at=time.time(), cached=False,
+                        process_still_matches=True)
     connector.process_probe_cache = SyntheticProbe()
     connector.registration = {'connection': {'id': route.id, 'capability': route.browser, 'label': route.label}}
     class Pair(connector.pair_handler()):

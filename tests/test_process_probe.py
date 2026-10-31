@@ -83,7 +83,7 @@ class ProcessProbeTests(unittest.TestCase):
         connector.process_probe_cache.read.assert_not_called()
         self.assertEqual(call('POST', '/process-network-probe', payload)[0], 200)
         self.assertEqual(call('POST', '/process-network-probe', payload)[0], 403)
-        connector.process_probe_cache.read.assert_called_once_with(12, '12:123')
+        connector.process_probe_cache.read.assert_called_once_with(12, '12:123', 'provider')
 
     def test_real_proxy_tls_wire_and_bounded_receipt(self):
         import requests

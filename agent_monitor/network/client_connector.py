@@ -139,7 +139,7 @@ class Connector:
                     result = {'error': '本机已有采集正在执行，请稍候重试。'}
                 else:
                     try:
-                        result = {'probe': connector.process_probe_cache.read(ticket[1], ticket[2])}
+                        result = {'probe': connector.process_probe_cache.read(ticket[1], ticket[2], ticket[3])}
                     finally:
                         connector.process_report_lock.release()
                 body = json.dumps(result).encode()
@@ -178,6 +178,9 @@ class Connector:
                 # capability to itself. Credentials never enter query parameters.
                 if action == '/process-network-probe':
                     pid, instance = query.get('pid', [''])[0], query.get('instance', [''])[0]
+                    kind = query.get('kind', ['provider'])[0]
+                    if kind not in ('provider', 'third_party'):
+                        self.send_error(400); return
                     if not pid.isascii() or not pid.isdecimal() or len(pid) > 10 or not re.fullmatch(r'[0-9]+:[0-9.]+', instance) or len(instance) > 80:
                         self.send_error(400); return
                     ticket = uuid.uuid4().hex
@@ -185,7 +188,7 @@ class Connector:
                         connector.process_probe_tickets = {key: value for key, value in connector.process_probe_tickets.items() if value[0] > time.monotonic()}
                         if len(connector.process_probe_tickets) >= 32:
                             self.send_error(429); return
-                        connector.process_probe_tickets[ticket] = (time.monotonic() + 30, int(pid), instance)
+                        connector.process_probe_tickets[ticket] = (time.monotonic() + 30, int(pid), instance, kind)
                     # GET cannot trigger an upstream request. The configured Hub
                     # opener must acknowledge this exact popup before same-origin
                     # POST can redeem its one-use ticket. A query-string origin
