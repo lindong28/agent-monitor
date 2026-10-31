@@ -126,6 +126,7 @@ for(const modified of [true,false]) {
 
     def test_collection_static_route_and_initializer(self):
         handler = object.__new__(server.Handler)
+        handler.client_address = ("192.0.2.1", 12345)
         handler.server = SimpleNamespace(views=server.create_views(), routes={})
         handler.path = "/collection?return=%2Fsessions%3Fsession%3Dfixture"
         handler.headers = {}

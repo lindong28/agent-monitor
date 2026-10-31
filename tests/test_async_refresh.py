@@ -127,6 +127,7 @@ global.setTimeout = cb => { cb(); return 1; };
 let calls = 0;
 let background = false;
 global.fetch = async url => {
+  if (url.pathname === '/api/runtime-context') return {ok:true,json:async()=>({statistics_source:'local'})};
   if (url.pathname === '/api/timezone') return {ok:true,json:async()=>({timezone:'UTC'})};
   if (++calls > 1) throw new Error('waited for followup');
   return {ok:true,json:async()=>({instance_id:'hub',refresh_requested:2,refresh_completed:1,syncing:!background,queued_refresh:!background,machines:[]})};
@@ -155,7 +156,8 @@ global.setTimeout = cb => { cb(); return 1; };
 const base = {instance_id:'hub',refresh_request:1,refresh_requested:1,refresh_completed:0,syncing:true,
   machines:[{name:'node-c',admitted:true,generation_id:'unchanged'}],quota_refresh:{revision:0}};
 let polls=0, progress=[];
-global.fetch=async url => ({ok:true,json:async()=>url.pathname==='/api/timezone'?{timezone:'UTC'}:
+global.fetch=async url => ({ok:true,json:async()=>url.pathname==='/api/runtime-context'?{statistics_source:'local'}:
+  url.pathname==='/api/timezone'?{timezone:'UTC'}:
   Object.assign({},base,{quota_refresh:{revision:1},refresh_completed:++polls===2?1:0})});
 require('./web/app.js')();
 window.AgentMonitor.waitForSyncTerminal(base,{onProgress:async s=>progress.push(s.refresh_completed)})

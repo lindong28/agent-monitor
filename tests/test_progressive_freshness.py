@@ -61,7 +61,9 @@ global.window = {location: {origin: "http://test"}};
 global.document = {readyState: "loading", addEventListener() {}, querySelector() {return null;}};
 global.setTimeout = fn => fn();
 let replies = [];
-global.fetch = async () => ({ok: true, json: async () => replies.shift()});
+global.fetch = async url => ({ok: true, json: async () =>
+  url.pathname === "/api/runtime-context" ? {statistics_source: "local"} :
+  url.pathname === "/api/timezone" ? {timezone: "UTC"} : replies.shift()});
 require('./web/app.js')();
 function status(quota, gen, syncing) {return {instance_id: "one", syncing,
   machines: [{name: "one", admitted: true, generation_id: gen}], quota_refresh: {requested: quota}};}
@@ -157,7 +159,9 @@ global.window = { location: { origin: "http://test" } };
 global.document = { readyState: "loading", addEventListener() {}, querySelector() { return null; } };
 global.setTimeout = (fn) => { fn(); };
 let replies = [];
-global.fetch = async () => ({ ok: true, json: async () => replies.shift() });
+global.fetch = async url => ({ok: true, json: async () =>
+  url.pathname === "/api/runtime-context" ? {statistics_source: "local"} :
+  url.pathname === "/api/timezone" ? {timezone: "UTC"} : replies.shift()});
 require('./web/app.js')();
 function status(id, running) { return {instance_id: "one", syncing: running,
   refresh_requested: 1, refresh_completed: running ? 0 : 1,

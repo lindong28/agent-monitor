@@ -42,13 +42,15 @@ const context={URL,URLSearchParams,console,Date,Intl,AbortController,setTimeout,
  delay=true;let running=refresh();
  assert.equal(visible().length,1,'timer must retain the previous real row');
  assert(filters.every(k=>nodes[k].disabled===false),'timer must retain usable filters');
- tokens=20;pending();await running;
+ tokens=20;await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(typeof pending,'function');pending();await running;
  assert(visible()[0].innerHTML.includes('20'));
  delay=false;fail=true;await refresh();
  assert(nodes['#page-status'].textContent.includes('fixture unavailable'));
  fail=false;await refresh();assert.equal(visible().length,1);
  delay=true;nodes['#filter-model'].value='M';nodes['#filter-model'].listeners.change[0]();
  assert.equal(visible().length,0,'explicit filter change still shows loading');
+ await new Promise(resolve=>setImmediate(resolve));
  pending();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(visible().length,1);
 })().catch(e=>{console.error(e);process.exitCode=1;});

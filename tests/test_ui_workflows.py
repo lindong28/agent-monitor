@@ -26,6 +26,7 @@ class ScopeTests(unittest.TestCase):
             for send_body in (True, False):
                 with self.subTest(chapter=chapter, send_body=send_body):
                     handler = object.__new__(server.Handler)
+                    handler.client_address = ("192.0.2.1", 12345)
                     handler.server = SimpleNamespace(views=server.create_views(), routes={})
                     handler.path = f"/guide/{chapter}?range=7d"
                     handler.headers = {}
@@ -56,6 +57,7 @@ class ScopeTests(unittest.TestCase):
         for accepted, compressed in [("gzip, deflate, br", True), ("gzip;q=0.5", True),
                                      ("gzip;q=0", False), ("identity", False), ("", False)]:
             handler = object.__new__(server.Handler)
+            handler.client_address = ("192.0.2.1", 12345)
             handler.server = SimpleNamespace(views=server.create_views(), routes={})
             handler.path = "/api/sessions?range=30d&with_filters=1"
             handler.headers = {"Accept-Encoding": accepted}
@@ -94,6 +96,7 @@ class ScopeTests(unittest.TestCase):
         payload = {"meta": None, "entries": [{"model": "fixture-model", "input_tokens": i} for i in range(3000)]}
         for accepted, compressed in [("gzip, deflate, br", True), ("gzip;q=0.5", True), ("gzip;q=0", False), ("identity", False), ("", False)]:
             handler = object.__new__(server.Handler)
+            handler.client_address = ("192.0.2.1", 12345)
             handler.server = SimpleNamespace(views=server.create_views(), routes={})
             handler.path = "/api/session/fixture"
             handler.headers = {"Accept-Encoding": accepted}

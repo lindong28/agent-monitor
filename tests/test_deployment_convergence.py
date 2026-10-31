@@ -221,19 +221,23 @@ class ShellLifecycleTests(unittest.TestCase):
         self.assertFalse((self.home / 'unexpected-service-action').exists())
 
     def test_linux_open_uses_desktop_or_prints_url(self):
-        # Configured Hub path avoids starting any server or accessing account state.
-        (self.root / 'agent_monitor/runtime/hub.py').write_text("print('http://fixture:39001')\n")
+        # A Hub client opens its already-running local Web; no collector or server is started.
+        (self.root / 'agent_monitor/runtime/hub.py').write_text("import sys\nprint('client' if sys.argv[1] == 'role' else 'http://fixture:39001')\n")
+        (self.root / 'agent_monitor/runtime/process_identity.py').write_text('import sys\nif sys.argv[1] == "pid": print(1)\n')
+        (self.root / 'state').mkdir()
+        (self.root / 'state/port').write_text('39001')
+        self.executable('curl', '#!/bin/sh\necho \'{"stale":false}\'\n')
         self.executable('uname', '#!/bin/sh\necho Linux\n')
         self.executable('open', '#!/bin/sh\necho forbidden >&2\nexit 99\n')
         self.executable('xdg-open', '#!/bin/sh\necho "$1" > "$HOME/opened"\n')
         result = self.run_script('agent-monitor', 'open')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('http://fixture:39001', result.stdout)
+        self.assertIn('http://127.0.0.1:39001', result.stdout)
         self.assertFalse((self.home / 'opened').exists())
         self.env['DISPLAY'] = ':fixture'
         result = self.run_script('agent-monitor', 'open')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((self.home / 'opened').read_text().strip(), 'http://fixture:39001')
+        self.assertEqual((self.home / 'opened').read_text().strip(), 'http://127.0.0.1:39001')
 
     def test_linux_ssh_open_keeps_url_when_tailscale_is_unavailable(self):
         (self.root / 'agent_monitor/runtime/hub.py').write_text('')

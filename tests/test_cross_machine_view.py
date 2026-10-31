@@ -1503,6 +1503,7 @@ global.document = {
 const pending = [];
 global.fetch = (url) => {
   const path = new URL(String(url), window.location.origin).pathname;
+  if (path === "/api/runtime-context") return Promise.resolve({ok: true, json: async () => ({statistics_source: "local"})});
   if (path === "/api/timezone") {
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ timezone: "UTC" }) });
   }
@@ -1659,6 +1660,7 @@ const unknown = {
 };
 global.fetch = (url) => {
   const path = new URL(String(url), window.location.origin).pathname;
+  if (path === "/api/runtime-context") return Promise.resolve({ok: true, json: async () => ({statistics_source: "local"})});
   if (path === "/api/health") return Promise.resolve({ ok: true, json: () => Promise.resolve(health.shift()) });
   if (path === "/api/timezone") return Promise.resolve({ ok: true, json: () => Promise.resolve({ timezone: "UTC" }) });
   if (path === "/api/sync-status") return Promise.resolve({ ok: true, json: () => Promise.resolve(unknown) });
@@ -1713,6 +1715,7 @@ global.setTimeout = (callback) => { callback(); return 1; };
 let resolveOldPoll;
 global.fetch = (url) => {
   const path = new URL(String(url), window.location.origin).pathname;
+  if (path === "/api/runtime-context") return Promise.resolve({ok: true, json: async () => ({statistics_source: "local"})});
   if (path === "/api/timezone") return Promise.resolve({ ok: true, json: () => Promise.resolve({ timezone: "UTC" }) });
   if (path === "/api/sync-status") return new Promise((resolve) => { resolveOldPoll = resolve; });
   throw new Error(path);

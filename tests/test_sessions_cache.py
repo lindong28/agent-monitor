@@ -50,6 +50,7 @@ class SessionsCacheTests(unittest.TestCase):
         self.view.clock = lambda: Clock.now().astimezone()
         for patcher in (mock.patch.object(server, "datetime", Clock),
                         mock.patch.object(server.hub, "enabled", return_value=True),
+                        mock.patch.object(server.hub, "is_hub", return_value=True),
                         mock.patch.object(server.COLLECTION, "request"),
                         mock.patch.object(server.generation, "generation_admission_snapshot")):
             value = patcher.start()
