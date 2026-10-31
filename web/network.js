@@ -76,7 +76,7 @@
         kvRow('接口地址', escapeHtml(facts.addresses?.map(a => `${a.interface}: ${a.address}`).join('；') || '未取得')),
         kvRow('DNS 配置', escapeHtml(facts.dns?.join('；') || '未取得；不能据此断定未配置 DNS')),
         kvRow('系统代理配置', proxy.status === 'observed' ? escapeHtml((proxy.entries || []).map(p => `${p.protocol}: ${p.enabled ? p.address || '地址未取得' : '未启用'}`).join('；') + `；PAC ${proxy.pac_enabled ? '已启用（未下载或执行）' : '未启用'}；自动发现 ${proxy.auto_discovery_enabled ? '已启用' : '未启用'}`) : escapeHtml(proxy.reason || '未取得')),
-        ...Object.entries(facts.monitor_environment || {}).map(([key, value]) => kvRow(`本地服务环境 ${key}`, escapeHtml(value.address ?? value.value ?? '未取得'))),
+        Object.keys(facts.monitor_environment || {}).length ? '<details id="local-monitor-environment"><summary>本地服务的代理环境变量</summary>' + Object.entries(facts.monitor_environment).map(([key, value]) => kvRow(key, escapeHtml(value.address ?? value.value ?? '未取得'))).join('') + '</details>' : '',
         '<p class="scope-note">以上为被动配置快照，不确认 DNS 的实际请求路径、浏览器或 Agent 的最终出口。公网出口尚未核实。</p>',
         ...(facts.errors || []).map(e => `<p class="error">部分系统信息未取得：${escapeHtml(e.stage)} / ${escapeHtml(e.type)}</p>`),
       ].join('');
