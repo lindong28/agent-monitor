@@ -48,7 +48,7 @@ agent-monitor 读取本地 agent 日志，也可以通过 SSH 汇总你明确配
 - 安装时需要联网下载 Python 包、Chart.js、IBM Plex 字体，以及固定版本的 Electron 系统代理运行时。下载内容保存在本源码目录的 `.venv`、`web/vendor` 和 `.runtime` 中。
 - 查看真实用量需要你自己的 Claude Code/Codex 日志。服务商 CLI、登录和订阅权限仅在可选的账号或额度操作中需要；连接远程机器时才需要 SSH 和 rsync。
 
-核心日志分析流程无需登录服务商，也无需调用模型。安装器会短暂启动代理辅助进程进行检查；使用 `--no-services` 时，不会安装后台服务或执行公网探测。
+核心日志分析流程无需登录服务商，也无需调用模型。安装器会短暂启动代理辅助进程进行检查；安装和升级不会自动执行公网诊断；需要时可主动运行 `./agent-monitor network --json`（会访问外部诊断服务）。使用 `--no-services` 时，也不会安装后台服务。
 
 <a id="first-installation"></a>
 

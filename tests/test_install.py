@@ -108,19 +108,16 @@ else: sys.exit(9)
         self.ledger = (self.home / "ledger").read_text()
         return r
 
-    def test_network_hint_points_to_readable_guidance(self):
-        guide = self.component / "docs/operations/services.md"
-        guide.parent.mkdir(parents=True)
-        shutil.copy2(ROOT / "docs/operations/services.md", guide)
+    def test_network_diagnostics_remain_explicit_after_install_and_upgrade(self):
         (self.component / "ip-check").write_text(
-            '#!/bin/sh\nprintf \'%s\\n\' \'{"verdict":"high","conclusions":[{"level":"bad","text":"synthetic finding"}]}\'\n'
+            '#!/bin/sh\necho called >> "$HOME/network-probe-calls"\nexit 0\n'
         )
-        result = self.install()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        pointer = next(line.split("How to fix: ", 1)[1] for line in result.stdout.splitlines() if "How to fix: " in line)
-        path = Path(pointer)
-        self.assertTrue(path.is_absolute())
-        self.assertIn("## Network diagnostic findings", path.read_text(encoding="utf-8"))
+        for _ in range(2):
+            result = self.install()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse((self.home / "network-probe-calls").exists())
+            self.assertIn("Network diagnostics were not run", result.stdout)
+            self.assertIn("./agent-monitor network --json", result.stdout)
 
     @unittest.skipUnless(sys.platform == "darwin", "native macOS launchd integration")
     def test_default_installs_and_repeat_reuses_loaded_schedule(self):
