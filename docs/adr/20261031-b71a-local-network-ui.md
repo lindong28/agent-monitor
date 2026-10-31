@@ -1,5 +1,7 @@
 # Local dashboard with local network observations and Hub statistics
 
+Presentation and account-entry decisions superseded by [unified dashboard](20261031-unified-dashboard.md) at the user's request on 2026-10-31. The original decision below is retained as history.
+
 Accepted 2026-10-31 after independent L1 review of the v2 candidate. Extends [process observations](20261030-4c42-process-network.md) and [capability composition](20261031-4c42-capability-network.md), superseding their popup-only normal entry and closure-only browser retention. Their account ownership, explicit probe permission and evidence boundaries remain.
 
 The normal `agent-monitor open` entry uses the existing local HTTP service and overview. A configured Hub client reads statistics through a fixed-origin GET allowlist, including session details, with `sync=0`, no `force`, redirects or forwarded credentials. Hub failures remain Hub failures, never a silent switch to local statistics. Local health and network identity remain local; statistics timezone and operating-system network timezone have separate sources. Existing Hub account management, pairing, refresh, quota recovery and remembered-account removal remain at the Hub origin, reached by explicit links from the local interface.

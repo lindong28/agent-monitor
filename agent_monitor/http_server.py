@@ -45,7 +45,7 @@ from agent_monitor.views import ViewServices
 from agent_monitor.views.overview import OverviewView
 from agent_monitor.views.sessions import SessionsView
 from agent_monitor.views.network import NetworkReport
-from agent_monitor.views import hub_reads
+from agent_monitor.views import hub_reads, hub_actions
 from agent_monitor.network.local_network import LocalNetwork
 from functools import partial
 
@@ -201,6 +201,7 @@ def health(query):
         "instance_id": SERVER_INSTANCE_ID,
         "signature": BOOT_SIGNATURE,
         "source_root": str(ROOT),
+        "pid": os.getpid(),
         "deployment_signature": BOOT_DEPLOYMENT_SIGNATURE,
         "web_signature": _web_signature(),
         "stale": _source_signature() != BOOT_SIGNATURE or _first(query, "asset_watch", "") != "1",
@@ -411,8 +412,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.server.local_network.probe(pid, instance, kind))
             return
         if self._hub_action_path(parsed.path) and hub_reads.origin():
-            self._send_json({'error': '此页面展示 Hub 数据；请到 Hub 执行此操作。',
-                             'hub_url': hub_reads.origin()}, status=409)
+            self._forward_hub_action(parsed, post=True)
             return
         if client_network.handle(self):
             return
@@ -452,6 +452,37 @@ class Handler(BaseHTTPRequestHandler):
     def _hub_action_path(path):
         return path.startswith('/api/codex-accounts') or path in (
             '/api/account-memory/remove', '/api/quota-recovery', '/api/refresh')
+
+    def _forward_hub_action(self, parsed, *, post=False, send_body=True):
+        method = 'POST' if post else self.command
+        if not hub_actions.supports(method, parsed.path):
+            self._send_json({'error': '未找到此操作或请求方法不支持。'}, status=405, send_body=send_body)
+            return
+        header = 'codex-accounts' if parsed.path.startswith('/api/codex-accounts') else 'action'
+        if not self._check_browser_boundary(header, require_origin=post, send_body=send_body):
+            return
+        if self.headers.get(hub_actions.HOP_HEADER):
+            self._send_json({'error': '服务配置形成循环；操作未继续，请检查服务配置。'}, status=502, send_body=send_body)
+            return
+        payload = None
+        if post:
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if self.headers.get('Transfer-Encoding') or not 0 <= length <= 4096:
+                    raise ValueError()
+                if parsed.path == '/api/refresh' and length == 0:
+                    payload = {}
+                else:
+                    if not length or self.headers.get_content_type() != 'application/json':
+                        raise ValueError()
+                    payload = json.loads(self.rfile.read(length))
+                    if not isinstance(payload, dict):
+                        raise ValueError()
+            except (ValueError, UnicodeDecodeError):
+                self._send_json({'error': '请求内容无效或超过大小限制；未发出操作。'}, status=400)
+                return
+        status, value = hub_actions.forward(method, parsed.path, parse_qs(parsed.query), payload, target=hub_reads.origin())
+        self._send_json(value, status=status, send_body=send_body)
 
     def _local_network_address(self):
         try:
@@ -723,7 +754,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({'error': '会话标识无效；未读取本机统计。'}, status=400, send_body=send_body)
             return
         if target and self._hub_action_path(parsed.path):
-            self._send_json({'error': '请到 Hub 查看和操作该账号。', 'hub_url': target}, status=409, send_body=send_body)
+            self._forward_hub_action(parsed, send_body=send_body)
             return
         if target and hub_reads.supports(parsed.path):
             if self.headers.get('X-Agent-Monitor-Read-Hop'):
@@ -734,8 +765,8 @@ class Handler(BaseHTTPRequestHandler):
                                 send_body=send_body, compress=True)
             except Exception as exc:
                 logger.warning('Hub read failed: %s', type(exc).__name__)
-                self._send_json({'error': 'Hub 数据暂不可用；本机网络仍可查看，统计未替换为本机数据。',
-                                 'source': target, 'failure_type': type(exc).__name__}, status=502, send_body=send_body)
+                self._send_json({'error': '统计服务暂不可用；请稍后重试。网络诊断仍可使用。',
+                                 'failure_type': type(exc).__name__}, status=502, send_body=send_body)
             return
         if parsed.path == "/api/quota-recovery":
             query = parse_qs(parsed.query)

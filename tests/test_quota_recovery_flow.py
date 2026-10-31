@@ -22,6 +22,13 @@ from parsers import accounts, codex
 
 
 class EvidenceTests(unittest.TestCase):
+    def setUp(self):
+        from parsers.codex_profiles import SessionLinks
+        for patch in (mock.patch('parsers.codex_profiles.session_links', return_value=SessionLinks()),
+                      mock.patch('agent_monitor.quota.quota_service.managed_codex_rate_limits', return_value=[])):
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def test_private_diagnostic_context_survives_storage_and_readback(self):
         from agent_monitor.accounts.upstream_controls import Controls
         for detail in (

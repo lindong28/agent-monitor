@@ -38,20 +38,6 @@
     return runtimePromise;
   }
   const hubUrl = () => runtime?.statistics_source === 'hub' ? runtime.hub_url : null;
-  function hubPage(path = currentPageUrl()) { return new URL(path, hubUrl()).href; }
-  function showStatisticsSource() {
-    if (!hubUrl()) return;
-    const main = qs('main');
-    if (main && !qs('#statistics-source') && document.createElement) {
-      const note = document.createElement('p');
-      note.id = 'statistics-source'; note.className = 'scope-note';
-      note.textContent = `统计来自 Hub ${hubUrl()}；当前 Web 主机 ${runtime.host}。账号和刷新操作在 Hub 执行。`;
-      main.prepend?.(note);
-    }
-    const refresh = qs('#refresh');
-    if (refresh && window.location.pathname !== '/network') refresh.textContent = '到 Hub 刷新';
-  }
-
   let _timezonePromise = null;
   function ensureTimezone() {
     if (!_timezonePromise) {
@@ -183,7 +169,7 @@
     ["控制台", "采集与诊断", "机器采集、历史质量与未归属账号的观测", "/collection"],
     ["控制台", "透视", "按目录、模型、机器分析成本和 token", "/explore"],
     ["控制台", "会话", "查找会话、筛选记录并查看明细", "/sessions"],
-    ["控制台", "网络", "查看本机 Agent 进程网络及服务端独立诊断", "/network"],
+    ["控制台", "网络", "查看系统网络诊断", "/network"],
     ["控制台", "配额与账号", "Claude / Codex 账号余量与更新时间", "/#quota-explorer"],
     ["使用与接入", "数据来源", "本地日志、服务商账号与服务端网络", "/guide/sources"],
     ["使用与接入", "采集状态", "检查已纳入机器与快照状态", "/guide/collection"],
@@ -266,11 +252,6 @@
 
   async function api(path, query) {
     await runtimeContext();
-    showStatisticsSource();
-    if (hubUrl() && (path === '/api/refresh' || query?.force === '1' && path !== '/api/network')) {
-      window.location.assign(hubPage());
-      throw new Error('请在 Hub 页面点击刷新；此处未发出刷新请求。');
-    }
     const tzReady = ensureTimezone();
     const url = new URL(path, window.location.origin);
     Object.entries(query || {}).forEach(([key, value]) => {
@@ -331,7 +312,7 @@
   const charts = modules.charts({ platform, palette, OTHER_COLOR, qs });
   const { money, moneyPrecise, costCoverageText, costReading, integer, compactNumber, barValueLabels, shortText, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costTableReading, renderChartTable, SERIES_LIMIT, destroyCharts, agentLabel } = charts;
 
-  const quota = modules.quota({ platform, fmtAbs, qs, api, hubUrl, hubPage, currentPageUrl, collectionUrl, updateSyncOverviewLink, formatDate });
+  const quota = modules.quota({ platform, fmtAbs, qs, api, hubUrl, currentPageUrl, collectionUrl, updateSyncOverviewLink, formatDate });
   const { latestCodexQuotaReading, updateCodexQuotaReadings, codexSessionAccountLabel, renderQuotaAccounts, renderQuotaSignedOut, formatQuotaReset, renderQuotaMachineRecords, quotaFilter, resetQuotaReadings } = quota;
 
   function currentPageUrl() {
@@ -434,7 +415,7 @@
     }
   }
 
-  const overview = modules.overview({ platform, assetVersion, qs, qsa, params, getRange, api, runtimeContext, hubUrl, hubPage, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal });
+  const overview = modules.overview({ platform, assetVersion, qs, qsa, params, getRange, api, runtimeContext, hubUrl, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal });
   const { initOverview, renderOverview, renderRangeCost, showOverviewLoadError } = overview;
 
   const sessions = modules.sessions({ platform, qs, qsa, params, getRange, setParam, copyText, api, bindShell, moneyPrecise, integer, codexSessionAccountLabel, collectionUrl, renderSyncStatus, waitForSyncTerminal, refreshStatistics, formatDate, dayKey, timeOfDay, escapeHtml, pageScope, watchPageData, replaceCurrentUrl });
@@ -838,7 +819,7 @@
   }
 
   window.AgentMonitor = {
-    runtimeContext, hubUrl, hubPage,
+    runtimeContext, hubUrl,
     ...charts, ...quota, ...network, ...sessions,
     restartAndReload, updateAreaNavigation, copyGuideCode, showOverviewLoadError,
     renderRoute, renderOverview, collectionUrl, currentPageUrl, renderCostDiagnostics, costDiagnosticsQuery,

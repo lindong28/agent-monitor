@@ -68,7 +68,7 @@ export function init({ autoLoad = true } = {}) {
   const deviceCancel = root.querySelector("#codex-device-cancel");
   const deviceHelp = root.querySelector("#codex-device-help");
   const deviceCommand = root.querySelector("#codex-device-command");
-  if (deviceCommand) deviceCommand.textContent = `agent-monitor connect install --server '${location.origin}'`;
+  if (deviceCommand) deviceCommand.textContent = `agent-monitor connect install --server '${window.AgentMonitor.hubUrl?.() || location.origin}'`;
   let pairing = null;
   function deviceFeedback(message, failed = false) {
     if (!current()) return;

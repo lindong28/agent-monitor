@@ -10,10 +10,10 @@ import {promisify} from 'node:util';
 import {parseArgs} from 'node:util';
 const {values:args} = parseArgs({options:{
   'agent-browser':{type:'string'}, browser:{type:'string'}, python:{type:'string'},
-  'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
+  'dashboard-only':{type:'boolean'}, vendor:{type:'string'}, facade:{type:'boolean'}, 'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
 }});
 if (args.help) {
-  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks local process networks instead of accounts. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
+  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks passive entry and explicit system diagnostics. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
   process.exit(0);
 }
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -127,14 +127,16 @@ async function click(selector, expect) {
 async function stats() { return (await fetch(url+'/fixture/stats',{signal:AbortSignal.timeout(3000)})).json(); }
 async function configure(value) { const r=await fetch(url+'/fixture/config',{method:'POST',body:JSON.stringify(value),signal:AbortSignal.timeout(3000)}); assert.equal(r.status,200); }
 async function startFixture() {
-  fixture=spawn(python,[path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback'],{env,cwd:repo,stdio:['ignore','pipe','pipe']});
+  const command=args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
+  fixture=spawn(python,command,{env,cwd:repo,stdio:['ignore','pipe','pipe']});
   children.push(fixture);
   let line='',error='';
   fixture.on('error',e=>{failure=e;});
   fixture.stdout.on('data',b=>line+=b);
   fixture.stderr.on('data',b=>error+=b);
   await until('fixture startup',()=>{if(failure)throw failure;if(fixture.exitCode!==null)throw new Error('Fixture failed: '+error);return line.includes('\n');});
-  url=JSON.parse(line.split('\n')[0]).url;
+  const started=JSON.parse(line.split('\n')[0]);
+  url=started.url || started.local_origin;
   assert.equal(new URL(url).hostname,'127.0.0.1');
 }
 async function stopChildren() {
@@ -153,17 +155,14 @@ async function stopChildren() {
     },10000);
   }
 }
-// Seven network popup interactions can each spend 5s in click plus up to
-// 35s reconciling the native CLI response (observed: about 30s per popup).
-// Keep 20s for ordinary local steps; product 18/26s deadlines are unchanged.
-const acceptanceBudgetMs=args['network-only'] ? 7 * (5000 + 35000) + 20000 : 180000;
+const acceptanceBudgetMs=args['network-only'] ? 60000 : 240000;
 const timer=setTimeout(()=>{
   budget.abort(new Error(`Browser acceptance exceeded its ${acceptanceBudgetMs/1000} second test budget`));
   failure ||= budget.signal.reason;
 },acceptanceBudgetMs);
 let failure;
 try {
-  console.log(args['network-only'] ? 'Checking two synthetic process networks in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
+  console.log(args['dashboard-only'] ? 'Checking the full dashboard with isolated persisted account records; provider calls are disabled.' : args['network-only'] ? 'Checking synthetic system diagnostics in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
   await startFixture();
   assert.equal((await fetch(url,{signal:AbortSignal.timeout(3000)})).status,200,'fixture page reachable');
   browserAttempted=true;
@@ -175,67 +174,52 @@ try {
   await browserCommand(['get','url'],false,false);
   assert.equal((await bt('get','url')).data.url,new URL(url).href,'pinned fixture origin');
   console.log('Isolated browser opened the local fixture.');
-  if (args['network-only']) {
+  if (args['dashboard-only']) {
+    await until('overview data',()=>read("document.querySelector('#today-cost').textContent.includes('12')"));
+    assert.doesNotMatch(await read('document.body.innerText'),/前往 Hub|到 Hub|统计来自 Hub/);
+    await click('#codex-account-actions > summary',"document.querySelector('#codex-account-actions').open");
+    await until('account controls',()=>read("!!document.querySelector('#codex-account-list') && document.querySelector('#codex-account-list').innerText.includes('尚无可操作账号')"));
+    await click('.quota-past-toggle',"!document.querySelector('#quota-past-accounts').hidden");
+    assert.match(await read("document.querySelector('#quota-past-accounts').innerText"),/fixture-history@example.test/);
+    await bt('scrollintoview','.quota-account-remove');
+    await bt('click','.quota-account-remove');
+    assert.match(JSON.stringify(await bt('dialog','status')),/fixture-history@example.test/);
+    await bt('dialog','dismiss');
+    assert.equal((await stats()).remove,0,'cancel keeps history');
+    await bt('click','.quota-account-remove');
+    await bt('dialog','accept');
+    await until('record removed',()=>read("!document.querySelector('.quota-account-remove')"));
+    assert.equal((await stats()).remove,1);
+    const memory=JSON.parse(fs.readFileSync(path.join(root,'account-memory.json'),'utf8'));
+    assert.deepEqual(memory.accounts,{},'real owner store no longer has record');
+    await bt('open',url);
+    await until('overview reload',()=>read("document.querySelector('#today-cost').textContent.includes('12')"));
+    assert.equal(await read("document.querySelector('.quota-past-toggle')"),null,'removal survives reload');
+    await click('#refresh',"document.querySelector('#today-cost').textContent.includes('13')");
+    assert.equal((await stats()).refresh,1,'one explicit refresh at owner');
+    assert.equal(new URL((await bt('get','url')).data.url).origin,url);
+    await bt('screenshot',path.join(root,'dashboard.png'));
+    console.log('PASS: full overview keeps local origin, renders account controls, cancels/removes history with persisted readback, and refreshes owner data.');
+  } else if (args['network-only']) {
     await bt('open',url+'/network');
     await bt('snapshot','-i');
     assert.equal((await stats()).server_reads,0,'local page never automatically probes Hub');
-    await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('fixture-browser-device')");
-    const resultText = "document.querySelector('#process-network-result').innerText";
-    const selection = "document.querySelector('#process-network-select').value";
-    assert.equal(await read(selection),'','first report requires an explicit choice');
-    assert.match(await read(resultText),/选择进程/);
-    await bt('fill','#process-network-search','fixture-claude');
-    assert.equal(await read("document.querySelector('#process-network-select').options.length"),2,'search leaves one matching process and the placeholder');
-    await bt('select','#process-network-select','101:123');
-    assert.match(await read(resultText),/fixture-claude/);
-    assert.match(await read(resultText),/fixture-service.test/);
-    assert.match(await read(resultText),/fixture-exit/);
-    await bt('fill','#process-network-search','');
-    assert.equal((await stats()).process_reads,1,'one real connector popup collected one snapshot');
-    assert.equal(await read("document.querySelector('#process-network-cancel').getClientRects().length"),0,'finished read hides cancellation action');
-    await click('#process-network-probe',`${resultText}.includes('192.0.2.10')`);
-    await click('#process-network-third-party',`${resultText}.includes('192.0.2.20')`);
-    assert.deepEqual((await stats()).process_probe_kinds,['provider','third_party'],'origin acknowledgement redeems a ticket bound to each probe kind');
-    assert.match(await read(resultText),/供应商固定目标/);
-    assert.match(await read(resultText),/第三方出口观测/);
-    assert.match(await read("document.querySelector('#process-network-third-party-help').innerText"),/HTTP 非加密.*非商业/);
-    await configure({process_mode:'reordered'});
-    await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('00:00:02Z')");
-    assert.equal(await read(selection),'101:123','refresh retains full identity even when order changes');
-    assert.match(await read(resultText),/历史回执/);
-    assert.match(await read(resultText),/192.0.2.10/);
-    assert.match(await read(resultText),/192.0.2.20/);
-    await configure({process_mode:'blocked'});
-    await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('00:00:03Z') && document.querySelector('#process-network-probe').disabled");
-    assert.match(await read("document.querySelector('#process-network-probe-help').innerText"),/合成绕过规则尚未核实.*核对原有策略/);
-    assert.equal(await read("document.querySelector('#process-network-third-party').disabled"),false,'provider refusal does not disable third-party evidence');
-    assert.equal((await stats()).process_probes,2,'blocked admission does not issue another probe');
-    await bt('screenshot',path.join(root,'process-network.png'));
-    await click('#process-network-help > summary',"document.querySelector('#process-network-help').open");
-    assert.match(await read("document.querySelector('#process-network-command').innerText"),/agent-monitor connect --server/);
-    await bt('set','viewport','390','844');
-    await bt('screenshot',path.join(root,'process-network-390.png'));
-    assert.equal(await read('document.documentElement.scrollWidth<=innerWidth'),true,'local report fits narrow viewport');
-    await click('#server-network > summary',"document.querySelector('#server-network').open");
-    assert.equal((await stats()).server_reads,0,'opening details does not issue a server diagnostic');
+    assert.equal(await read("document.querySelector('#process-network')"),null);
+    assert.match(await read("document.querySelector('#network-verdict').textContent"),/尚未检测/);
     await click('#refresh',"document.querySelector('#network-checked-host').textContent.includes('fixture-server-device')");
-    assert.equal((await stats()).server_reads,1,'explicit detection issues one server request');
-    assert.match(await read("document.querySelector('#process-network-status').textContent"),/fixture-browser-device/);
-    const retained = await read(resultText);
-    await configure({pair_mode:'silent'});
-    await click('#process-network-refresh',"document.querySelector('#process-network-cancel').hidden===false");
-    assert.equal(await read(resultText),retained,'pending refresh retains old evidence');
-    await click('#process-network-cancel',"document.querySelector('#process-network-status').textContent.includes('已取消')");
-    assert.equal(await read(resultText),retained,'cancelled refresh retains old evidence');
-    assert.equal(await read(selection),'101:123');
-    assert.match(await read("document.querySelector('#process-network-status').textContent"),/保留.*00:00:03Z/);
-    assert.equal((await stats()).server_reads,1,'cancelled local report does not fall back to server');
-    await configure({pair_mode:'ready',process_mode:'removed'});
-    await click('#process-network-refresh',"document.querySelector('#process-network-status').textContent.includes('原选进程实例已不在')");
-    assert.equal(await read(selection),'','disappeared process is not silently replaced');
-    fs.writeFileSync(path.join(root,'process-network-evidence.json'),JSON.stringify(await stats(),null,2));
-    console.log('PASS: real loopback popup, explicit/searchable selection, reordered refresh, two probe kinds, blocked provider, retained cancellation evidence, disappearance, explicit server action and narrow layout.');
+    assert.equal((await stats()).server_reads,1,'explicit detection issues one request');
+    assert.equal((await stats()).process_reads,0,'network page does not collect processes');
+    assert.equal((await stats()).pair_requests,0,'network page does not open connector');
+    await bt('screenshot',path.join(root,'system-network.png'));
+    await bt('set','viewport','390','844');
+    assert.equal(await read('document.documentElement.scrollWidth<=innerWidth'),true,'system report fits narrow viewport');
+    await bt('screenshot',path.join(root,'system-network-390.png'));
+    await bt('open',url+'/network');
+    assert.equal((await stats()).server_reads,1,'reentry does not probe');
+    fs.writeFileSync(path.join(root,'network-evidence.json'),JSON.stringify(await stats(),null,2));
+    console.log('PASS: cache-only entry/reentry, explicit server diagnostic, zero process scans/popups, narrow layout.');
   } else {
+  assert.doesNotMatch(await read('document.body.innerText'),/前往 Hub|到 Hub/);
   const primary='#codex-batch-next', dialog='dialog.account-egress-dialog';
   const ready=`!document.hidden && !!document.querySelector('${primary}') && !document.querySelector('${primary}').disabled && document.querySelector('${primary}').textContent.includes('6')`;
   const preview=`!!document.querySelector('${dialog} .account-egress-address')`;
@@ -307,6 +291,7 @@ try {
   assert.equal(await read(`getComputedStyle([...document.querySelectorAll('${dialog} p')].find(e=>e.textContent.includes('出口地区为中国'))).color`),'rgb(196, 43, 43)');
   await click(`${dialog} button:not(.btn-primary)`,closed);
   assert.equal((await stats()).starts.length,0);
+  assert.equal(new URL((await bt('get','url')).data.url).origin,url,'account action keeps original origin');
   console.log('PASS: primary action connects and previews; China warning is red; cancel sends zero batches.');
   await bt('open',url);
   await until('refreshed account list',()=>read(ready));

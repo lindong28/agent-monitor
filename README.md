@@ -133,9 +133,9 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 
 日常操作统一使用 `./agent-monitor`，包括 `service deploy`、`service status [web|rollup-daemon|connector]` 和 `upstream-holds`。根目录保留 `install.sh`、`uninstall.sh` 和独立网络诊断 `ip-check`；`runtime_rebuild.py` 用于项目虚拟环境损坏时通过外部 Python 恢复。旧脚本的替代命令见[操作指南](docs/public-usage.md#command-migration)。
 
-「网络」页显示运行本地 Web 的电脑的系统网络与 Codex/Claude 进程。先在浏览器所在电脑安装，以启动 Agent 的同一用户运行 `./agent-monitor open`，从总览进入网络；初入和返回自动读取地址、DNS、时区、代理配置和已有进程路径，无需先选择进程，也不发送公网诊断。需要详情时再选进程；第三方出口观测与固定供应商目标各自单独选择，结果不冒充 Agent 的实际业务出口。旧 MacStudio 等远程网络网址会说明本地接入方式，也保留手动连接器兼容。完整范围和升级方式见[本机网络](docs/public-usage.md#local-agent-network)。终端可运行 `./agent-monitor process-network`，不会发送公网请求。
+「网络」页仅显示页面服务所在主机的系统网络诊断，与 Codex/Claude 进程独立。进入或返回页面只读取最近结果；点击「检测网络」才发送公网 IP、信誉等诊断请求。账号管理、更新统计与配额、恢复和移除历史记录都在当前页面完成。完整范围和升级方式见[网络与账号操作](docs/public-usage.md#local-agent-network)。终端仍可运行 `./agent-monitor process-network` 读取进程观察，不会发送公网请求。
 
-`--no-services` 不改变服务。macOS 的普通安装会管理定时采集和已配置的 Hub，连接器需要主动启用。Linux 提供 CLI 和手动启动的仪表盘。Hub 客户端默认打开本地总览，统计继续只读来自配置的 Hub；账户和刷新按钮会前往 Hub。可以通过[本地实例选择方式](docs/public-usage.md#services-and-deployment)管理该实例。受管更新可能中断正在执行的操作：应先等账号操作结束，不要重发结果不确定的消息。组件重启、恢复和运行时替换的细节见上述指南。
+`--no-services` 不改变服务。macOS 的普通安装会管理定时采集和已配置的 Hub，连接器需要主动启用。Linux 提供 CLI 和手动启动的仪表盘。Hub 客户端默认打开本地总览，统计来自配置的 Hub，账号和刷新操作由本地页面转交同一服务执行，无需跳转。可以通过[本地实例选择方式](docs/public-usage.md#services-and-deployment)管理该实例。受管更新可能中断正在执行的操作：应先等账号操作结束，不要重发结果不确定的消息。组件重启、恢复和运行时替换的细节见上述指南。
 
 <a id="what-the-numbers-mean"></a>
 

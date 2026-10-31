@@ -1448,11 +1448,6 @@ td.numeric {
   container-type: inline-size;
 }
 
-#process-network [hidden] { display: none; }
-#process-network { margin-bottom: var(--sp-6); }
-#process-network select, #process-network-search { display: block; width: 100%; max-width: 100%; margin: var(--sp-2) 0 var(--sp-4); }
-#process-network .code-card { min-width: 0; }
-
 .network-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

@@ -319,15 +319,6 @@
   }
 
   function createRecoveryPanel(machine = "self", {onContinue} = {}) {
-    if (dependencies.hubUrl?.()) {
-      const panel = document.createElement('section');
-      panel.className = 'quota-recovery-panel';
-      const link = document.createElement('a');
-      link.href = dependencies.hubPage('/?account_actions=true#codex-account-actions');
-      link.textContent = '前往 Hub 查看账号归属并恢复配额';
-      panel.appendChild(link);
-      return panel;
-    }
     const make = (tag, text, className) => {
       const node = document.createElement(tag);
       if (text) node.textContent = text;
@@ -380,7 +371,7 @@
       const timer = setTimeout(abort, timeout);
       try {
         if (controller.signal.aborted) abort();
-        const response = await fetch(url, {...options, signal:attempt.signal});
+        const response = await fetch(url, {...options, headers:{'X-Agent-Monitor':'action', ...options.headers}, signal:attempt.signal});
         return {response, value:await response.json()};
       } finally {
         clearTimeout(timer);
@@ -860,8 +851,8 @@
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "quota-account-remove";
-      remove.textContent = dependencies.hubUrl?.() ? '到 Hub 移除' : "移除";
-      remove.setAttribute("aria-label", `${dependencies.hubUrl?.() ? '到 Hub ' : ''}移除 ${quotaAccountName(account)} 的记录`);
+      remove.textContent = "移除";
+      remove.setAttribute("aria-label", `移除 ${quotaAccountName(account)} 的记录`);
       remove.addEventListener("click", () => removeRememberedAccount(remove, provider, account));
       actions.appendChild(remove);
     }
@@ -953,10 +944,6 @@
   }
 
   async function removeRememberedAccount(button, provider, account) {
-    if (dependencies.hubUrl?.()) {
-      window.location.assign(dependencies.hubPage('/?quota_history=true#quota-explorer'));
-      return;
-    }
     const accountName = quotaAccountName(account);
     const recordTime = account.last_observation?.recorded_at || account.updated_at;
     const observedAt = formatDate(recordTime);

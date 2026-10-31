@@ -55,45 +55,11 @@
         <div class="page-toolbar">
           <div class="page-location"><span class="workspace-label">控制台</span><span class="breadcrumb-separator" aria-hidden="true">/</span><h1 class="page-title">网络</h1></div>
           <div class="toolbar">
-            <button id="process-network-refresh" class="icon-btn" type="button">读取本机 Agent</button>
+            <button id="refresh" class="icon-btn" type="button" title="检测网络" aria-busy="false">检测网络</button>
           </div>
         </div>
-        <section id="process-network" class="network-card" aria-label="本机 Agent 网络">
-          <h2>本机网络与 Codex / Claude</h2>
-          <p id="local-network-source" class="scope-note">正在确认本页接入的主机。</p>
-          <p id="local-network-entry" hidden><a href="http://127.0.0.1:39001/network">打开本机网络页</a>（默认端口 39001）。若本机服务未启动或使用其他端口，请在这台电脑运行 <code>./agent-monitor open</code>。</p>
-          <p class="scope-note">本机读取展示系统网络、当前用户的 Agent 进程、启动配置、TCP 连接与可用的本地代理关联，不改变代理设置、不发送公网诊断请求。可单独选择下方的主动探测。</p>
-          <p class="scope-note">本页展示当前快照，不是近 30 天等历史统计；网址中的时间范围不影响本页。</p>
-          <p id="process-network-status" role="status">正在读取本机接入状态。</p>
-          <div id="local-network-facts" class="network-card-body"></div>
-          <button id="process-network-cancel" type="button" hidden>取消读取</button>
-          <details id="process-network-help" class="note-disclosure">
-            <summary>首次使用或连接失败</summary>
-            <div class="disclosure-body">
-            <p>推荐在浏览器所在电脑按项目安装指南安装，然后运行 <code>./agent-monitor open</code>，从本地总览进入网络页；系统信息会自动显示。旧 MacStudio 等远程网络网址不会自动变成本机入口。</p>
-            <p>继续使用远程网页时，可在浏览器所在电脑、启动 Agent 的同一用户终端运行以下连接器命令，保持终端打开，再点击「读取本机 Agent」。</p>
-            <div class="code-card"><pre><code id="process-network-command"></code></pre></div>
-            <p>连接器需要能够连接此服务；默认使用本机 39002 端口。已有连接器的用户更新源码后运行 <code>./agent-monitor connect restart</code>；前台运行的则停止后重跑原命令。读取失败不会改用服务器数据。</p>
-            <p><a href="/guide/setup">查看安装与接入说明</a> · <a href="https://github.com/lindong28/agent-monitor/blob/main/docs/public-usage.md#local-agent-network" target="_blank" rel="noopener noreferrer">可选代理与出口观测说明</a></p>
-            </div>
-          </details>
-          <label for="process-network-search">搜索进程（目录、PID、终端或启动时间）</label>
-          <input id="process-network-search" type="search" placeholder="输入项目目录或 PID" autocomplete="off">
-          <div id="process-network-summary" class="network-card-body"></div>
-          <label for="process-network-select">选择进程</label>
-          <select id="process-network-select" disabled><option>尚无进程报告</option></select>
-          <div id="process-network-result" class="network-card-body"></div>
-          <p id="process-network-third-party-help" class="scope-note" hidden></p>
-          <button id="process-network-third-party" type="button" hidden>发送第三方出口观测</button>
-          <p id="process-network-probe-help" class="scope-note" hidden></p>
-          <button id="process-network-probe" type="button" hidden>发送供应商固定目标探测</button>
-        </section>
-        <details id="server-network" class="note-disclosure">
-          <summary>服务端系统网络诊断（独立于本机 Agent）</summary>
-          <p class="scope-note">点击「检测服务端」才请求运行此仪表盘的服务端执行诊断，可能向公网 IP、信誉等诊断服务发送请求；按服务端系统代理策略执行，不代表所选 Agent。展开此区域不会检测。</p>
-          <button id="refresh" class="icon-btn" type="button" title="重新检测服务端" aria-busy="false">检测服务端</button>
-        <p id="network-checked-host" class="scope-note">尚未检测。操作对象为运行此仪表盘的服务端主机（检测后显示身份）；不检测浏览器所在设备或其他机器。</p>
-        <p class="scope-note">展示最近一次诊断，不是历史统计；网址中的时间范围不影响本页。</p>
+        <p id="network-checked-host" class="scope-note">检测此页面服务所在主机的系统网络，不代表各个 Agent 的连接。</p>
+        <p class="scope-note">展示最近一次结果；点击「检测网络」才会请求公网 IP、信誉等诊断服务。</p>
         <section id="network-banner" class="verdict-banner unknown" aria-live="polite">
           <span id="network-verdict">—</span>
           <span id="network-updated" class="network-updated">—</span>
@@ -122,7 +88,6 @@
             <div id="network-risk" class="network-card-body"></div>
           </article>
         </section>
-        </details>
       </main>
     </div>
     <script>

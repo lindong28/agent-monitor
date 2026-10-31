@@ -36,6 +36,7 @@ from agent_monitor.network.client_connector import Connector
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--facade', action='store_true', help='Exercise real same-origin forwarding to the synthetic owner.')
     parser.add_argument('--loopback', action='store_true', help='Use a loopback page origin for automated acceptance.')
     args = parser.parse_args()
     accounts = [dict(id=str(i), email=f'fixture{i}@example.test', account_id=f'workspace-{i}',
@@ -72,8 +73,8 @@ def main():
     process_network.read_report = process_report
     network_html = re.sub(r'<script\b[^>]*>.*?</script>', '', (ROOT / 'web/network.html').read_text(), flags=re.S)
     network_html = network_html.replace('</body>', '''<script src="/web/network.js"></script><script>
-      window.AgentMonitorModules.network({platform:{window,document}, qs:s=>document.querySelector(s),
-        updateNavLinks:()=>{}, api:async url=>{const r=await fetch(url);return r.json()},
+      window.AgentMonitorModules.network({platform:{window,document,fetch:(...a)=>fetch(...a)}, qs:s=>document.querySelector(s),
+        updateNavLinks:()=>{}, api:async (url,p)=>{const r=await fetch(url,{method:p?.force?'POST':'GET',headers:{'X-Agent-Monitor':'action'}});return r.json()},
         withRefresh:(_,fn)=>fn(),formatDate:String,
         escapeHtml:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),
         onPageCleanup:()=>{}}).initNetwork();
@@ -130,9 +131,8 @@ def main():
                 self.send(html.encode(), 'text/html; charset=utf-8')
             elif self.path == '/network':
                 self.send(network_html.encode(), 'text/html; charset=utf-8')
-            elif self.path == '/api/network':
-                state['server_reads'] += 1
-                self.send(dict(checked_host='fixture-server-device', error='Synthetic server unavailable', verdict='unknown'))
+            elif self.path == '/api/network/cache':
+                self.send(dict(available=False))
             elif self.path in ('/web/styles.css', '/web/codex-accounts.js', '/web/account-egress.js', '/web/quota.js', '/web/network.js'):
                 body = (ROOT / self.path.lstrip('/')).read_bytes()
                 if self.path.endswith(('/codex-accounts.js', '/network.js')):
@@ -182,7 +182,10 @@ def main():
 
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-            if self.path == '/api/codex-accounts/egress-preview':
+            if self.path == '/api/network':
+                state['server_reads'] += 1
+                self.send(dict(checked_host='fixture-server-device', error='Synthetic server unavailable', verdict='unknown'))
+            elif self.path == '/api/codex-accounts/egress-preview':
                 try:
                     route = client_network.hub.browser_route(payload.get('connection'))
                 except client_network.NetworkError as exc:
@@ -277,7 +280,7 @@ def main():
                 nonce = parse_qs(urlsplit(self.path).query).get('nonce', [''])[0]
                 payload = json.dumps(dict(type='agent-monitor-network', nonce=nonce,
                                           error='合成连接端尚未连接服务器'))
-                body = (f'<script>window.opener.postMessage({payload},{json.dumps(origin)});window.close()</script>').encode()
+                body = (f'<script>window.opener.postMessage({payload},{json.dumps(page_origin)});window.close()</script>').encode()
             else:
                 body = '<p>合成本机配对无响应；用于超时和取消验收。</p>'.encode()
             self.send_response(200)
@@ -290,10 +293,52 @@ def main():
     def heartbeat():
         while not connector.stopped.wait(1): route.last_seen = time.monotonic()
     threading.Thread(target=heartbeat, daemon=True).start()
+    page_origin = origin
+    facade = None
+    if args.facade:
+        # Real facade transport/admission and real connector owner validation.
+        # Only the account owner and health identity are synthetic fixtures.
+        from agent_monitor import http_server as server
+        from agent_monitor.views import hub_reads, hub_actions
+        from agent_monitor.network import client_connector, network_policy
+        from agent_monitor.runtime import process_identity
+        import requests
+        fixture_root = Path(os.environ['HOME']) / 'facade-installation'
+        fixture_state = fixture_root / 'state'
+        fixture_state.mkdir(parents=True)
+        client_connector.PROJECT_ROOT = fixture_root
+        def session():
+            result = requests.Session()
+            result.trust_env = False
+            return result
+        network_policy.session = session
+        hub_reads.origin = lambda: origin
+        class Facade(server.Handler):
+            def log_message(self, *_args): pass
+            def do_GET(self):
+                path = urlsplit(self.path).path
+                if hub_actions.supports('GET', path):
+                    return super().do_GET()
+                if path == '/api/runtime-context':
+                    return Handler.send(self, dict(local_network=True, statistics_source='hub', hub_url=origin))
+                if path == '/api/health':
+                    return Handler.send(self, dict(pid=os.getpid(), source_root=str(fixture_root)))
+                return Handler.do_GET(self)
+            def do_POST(self):
+                if hub_actions.supports('POST', urlsplit(self.path).path):
+                    return super().do_POST()
+                return Handler.do_POST(self)
+            send = Handler.send
+        facade = server.ThreadingHTTPServer(('127.0.0.1', 0), Facade)
+        page_origin = f'http://127.0.0.1:{facade.server_port}'
+        (fixture_state / 'port').write_text(str(facade.server_port))
+        process_identity.record(fixture_state, fixture_root, os.getpid())
+        html = html.replace("pageScope:()=>()=>true", "hubUrl:()=>" + json.dumps(origin) + ",pageScope:()=>()=>true")
+        threading.Thread(target=facade.serve_forever, daemon=True).start()
     timer = threading.Timer(600, http.shutdown)
     timer.daemon = True
     timer.start()
-    print(json.dumps(dict(url=origin, pair_port=pair.server_port, lifetime_seconds=600)), flush=True)
+    print(json.dumps(dict(url=page_origin, hub_origin=origin, pair_port=pair.server_port, lifetime_seconds=600)), flush=True)
     try:
         http.serve_forever()
     finally:
@@ -301,6 +346,8 @@ def main():
         http.server_close()
         connector.stopped.set()
         pair.shutdown(); pair.server_close(); route.close()
+        if facade:
+            facade.shutdown(); facade.server_close()
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@
 import argparse
 import base64
 import contextlib
+import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import queue
@@ -170,8 +171,11 @@ class Connector:
                 origin, nonce = query.get("origin", [""])[0], query.get("nonce", [""])[0]
                 action = urlsplit(self.path).path
                 if (action not in ("/pair", "/process-network", "/process-network-probe") or self.headers.get("Host") != expected_host
-                        or origin != connector.server or not re.fullmatch(r"[a-f0-9]{32}", nonce)
+                        or not re.fullmatch(r"[a-f0-9]{32}", nonce)
                         or connector.stopped.is_set() or not connector.registration):
+                    self.send_error(403)
+                    return
+                if origin != connector.server and (action != '/pair' or not connector.local_pair_origin(origin)):
                     self.send_error(403)
                     return
                 # Exact configured origin; a hostile website cannot redirect the
@@ -224,7 +228,7 @@ window.opener?.postMessage({type:'agent-monitor-probe-ready',nonce:c.nonce},c.or
                         finally:
                             connector.process_report_lock.release()
                 payload = json.dumps(message).replace("<", "\\u003c")
-                target = json.dumps(connector.server).replace("<", "\\u003c")
+                target = json.dumps(origin).replace("<", "\\u003c")
                 body = ("<!doctype html><meta charset=utf-8><title>连接本机网络</title>"
                         "<p>正在将本机网络信息交回发起页面。完成后可关闭此窗口。</p>"
                         f"<script>if(window.opener){{window.opener.postMessage({payload},{target});window.close();}}</script>").encode()
@@ -237,6 +241,49 @@ window.opener?.postMessage({type:'agent-monitor-probe-ready',nonce:c.nonce},c.or
                 self.end_headers()
                 self.wfile.write(body)
         return Pair
+
+    def local_pair_origin(self, origin):
+        """Only the live dashboard recorded by this installation is an alias.
+
+        A caller-controlled loopback server's runtime JSON is not an identity
+        proof. First bind to our saved port and owned process, then verify the
+        dashboard still routes accounts to this connector's configured server.
+        """
+        from agent_monitor.runtime import process_identity
+        state = PROJECT_ROOT / 'state'
+        try:
+            port = int((state / 'port').read_text().strip())
+            if not 0 < port < 65536 or origin != f'http://127.0.0.1:{port}':
+                return False
+            owned = process_identity.read_owned(state, PROJECT_ROOT)
+            if owned is None:
+                return False
+
+            def read(path):
+                # Fixed literal loopback only; no environment proxy or redirects.
+                connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+                try:
+                    connection.request('GET', path)
+                    response = connection.getresponse()
+                    data = response.read(16385)
+                    if response.status != 200 or len(data) > 16384:
+                        raise ValueError('local_dashboard_unavailable')
+                    value = json.loads(data)
+                    if not isinstance(value, dict):
+                        raise ValueError('local_dashboard_invalid')
+                    return value
+                finally:
+                    connection.close()
+
+            health = read('/api/health?asset_watch=1')
+            context = read('/api/runtime-context')
+            return (health.get('pid') == owned[0] and health.get('source_root') == str(PROJECT_ROOT)
+                    and context.get('local_network') is True
+                    and context.get('statistics_source') == 'hub'
+                    and context.get('hub_url') == self.server
+                    and process_identity.read_owned(state, PROJECT_ROOT) == owned)
+        except (OSError, ValueError, http.client.HTTPException, process_identity.IdentityUnknown):
+            return False
 
     def forward(self, task):
         upstream = tunnel = None
@@ -300,7 +347,7 @@ window.opener?.postMessage({type:'agent-monitor-probe-ready',nonce:c.nonce},c.or
         from agent_monitor.runtime.connector_service import record
         record(self.state_file, "connected", server=self.server, instance_id=self.instance_id)
         print(f"设备网络已连接到 {self.server}。可回到账号页面点击「开始新一轮」，页面会自动准备连接。", flush=True)
-        print("网络页可读取本用户 Agent 进程；批次发送及其出口预览使用本机网络。前台模式需保持命令运行。", flush=True)
+        print("批次发送及其出口预览使用本机网络。前台模式需保持命令运行。", flush=True)
         try:
             while not self.stopped.is_set():
                 task = self.request("next")

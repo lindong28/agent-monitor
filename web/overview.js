@@ -14,8 +14,7 @@
     }
     if (firstData) {
       firstData.hidden = !missingData;
-      firstData.textContent = dependencies.hubUrl?.() ? 'Hub 尚无可读的已采集数据。前往 Hub 更新统计与配额，或查看采集与诊断。'
-        : '尚无可读的已采集数据，不代表历史支出为零。点击“更新统计与配额”读取已配置的数据源；已有登录时会查询账号额度。本机网络仍可直接查看。';
+      firstData.textContent = '尚无可读的已采集数据，不代表历史支出为零。点击“更新统计与配额”读取已配置的数据源；已有登录时会查询账号额度。网络诊断仍可使用。';
     }
     qs("#today-cost").textContent = money(data.today.cost_usd);
     qs("#week-cost").textContent = money(data.week.cost_usd);
@@ -275,13 +274,7 @@
     if (accountActions && restored.get("account_actions") === "true") accountActions.open = true;
     resetQuotaReadings();
     onPageCleanup(resetQuotaReadings);
-    if (accountActions && dependencies.hubUrl?.()) {
-      accountActions.innerHTML = '<summary>Hub 账号操作</summary><p class="scope-note">统计与账号归属来自 Hub。添加、配对和恢复在原 Hub 页面执行。</p>';
-      const link = document.createElement('a');
-      link.href = dependencies.hubPage('/?account_actions=true#codex-account-actions');
-      link.textContent = '前往 Hub 管理账号';
-      accountActions.appendChild(link);
-    } else if (accountActions) {
+    if (accountActions) {
       const currentAccountsPage = pageScope();
       import("/web/codex-accounts.js" + (assetVersion ? `?v=${assetVersion}` : "")).then((module) => {
         if (currentAccountsPage()) module.init();

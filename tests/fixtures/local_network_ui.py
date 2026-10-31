@@ -60,6 +60,13 @@ def main():
         raw = json.dumps(data).encode()
         handler.send_response(status); handler.send_header('Content-Type', 'application/json')
         handler.send_header('Content-Length', str(len(raw))); handler.end_headers(); handler.wfile.write(raw)
+    from agent_monitor.quota.account_memory import AccountMemory
+    memory = AccountMemory(args.artifacts / 'account-memory.json')
+    observed = '2026-10-31T00:00:00+00:00'
+    record_account = dict(account_state='known', account_id='fixture-history', account_label='fixture-history@example.test',
+                          updated_at=observed, five_hour_used_pct=20)
+    memory.upsert({'codex': {'accounts': [record_account]}}, expected_delete_epoch=0)
+    counts = dict(refresh=0, remove=0, probes=0)
     sync = dict(instance_id='fixture-hub', machines=[], all_machines=[], coverage={'admitted': 0, 'declared': 0}, syncing=False, terminal=True)
     overview = dict(today={'cost_usd': 12}, week={'cost_usd': 34}, range={'cost_usd': 56, 'total_tokens': 100},
                     rate_limits={'claude': {'accounts': []}, 'codex': {'accounts': []}},
@@ -70,10 +77,28 @@ def main():
             url = urlsplit(self.path)
             record(dict(side='hub', method='GET', path=url.path, query=parse_qs(url.query)))
             if mode() == 'hub_down': return send(self, {'error': 'fixture Hub offline'}, 503)
-            if url.path == '/api/overview': return send(self, overview)
+            if url.path == '/api/overview':
+                overview['rate_limits']['codex']['accounts'] = [dict(record_account, presence='remembered',
+                    updated_at=observed, last_observation={'recorded_at': observed, 'five_hour_used_pct': 20})] if memory.read()[1]['accounts'] else []
+                return send(self, overview)
+            if url.path == '/api/codex-accounts': return send(self, {'accounts': []})
             if url.path == '/api/timezone': return send(self, {'timezone': 'UTC'})
             if url.path == '/api/sync-status': return send(self, sync)
             return send(self, {'fixture_hub_page': True})
+        def do_POST(self):
+            path = urlsplit(self.path).path
+            payload = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
+            record(dict(side='hub', method='POST', path=path, payload=payload))
+            if path == '/api/refresh':
+                counts['refresh'] += 1
+                overview['today']['cost_usd'] += 1
+                return send(self, {'sync': sync, 'instance_id': 'fixture-hub'})
+            if path == '/api/account-memory/remove':
+                status, value = memory.remove(payload['provider'], payload['account_id'], payload['observed_at'], {},
+                                              account_label=payload['account_label'])
+                counts['remove'] += status == 200
+                return send(self, value, status)
+            return send(self, {'error': 'fixture unsupported action'}, 404)
     hub = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HubHandler)
     hub_origin = f'http://127.0.0.1:{hub.server_port}'
     class LocalHandler(server.Handler):
@@ -81,6 +106,7 @@ def main():
         def do_GET(self):
             path = urlsplit(self.path).path
             record(dict(side='local', method='GET', path=path))
+            if path == '/fixture/stats': return send(self, counts)
             if path.startswith('/web/vendor/'):
                 name = path.rsplit('/', 1)[-1]
                 raw = (args.vendor / name).read_bytes()

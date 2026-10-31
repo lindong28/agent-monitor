@@ -34,6 +34,10 @@
       const generation = ++loadGeneration;
       if (!validDates()) return;
       AgentMonitor.qs("#pivot-status").textContent = "加载中…";
+      if (force === true) {
+        await AgentMonitor.api('/api/refresh', {ack:'1'});
+        if (!isCurrentLoad(generation)) return;
+      }
       // Establish a generation boundary before queries can acquire a view.
       // Otherwise an old pivot can be paired with two already-new statuses.
       const before = await AgentMonitor.api("/api/sync-status");
@@ -41,7 +45,7 @@
       // URL filters are available before the option lists have arrived.
       const initialFilters = Object.fromEntries(filterNames.map((name) => [name, desiredFilterValue(name)]).filter(([, value]) => value));
       await Promise.all([
-        loadFilterOptions(force, undefined, generation),
+        loadFilterOptions(false, false, generation),
         loadPivot(false, false, generation, initialFilters),
       ]);
       if (!isCurrentLoad(generation)) return;

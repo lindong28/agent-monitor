@@ -141,15 +141,16 @@ class LocalHTTPTests(unittest.TestCase):
         self.assertEqual(self.request('/api/local-network/probe', method='POST', headers={'Content-Type': 'application/json', 'Origin': None}, body=body)[0], 403)
         self.http.local_network.probe.assert_called_once_with(101, '101:123.001', 'third_party')
 
-    def test_hub_failures_never_read_local_statistics_and_all_account_actions_stay_hub(self):
+    def test_hub_failures_never_read_local_statistics_and_unknown_actions_are_rejected(self):
         with mock.patch.object(hub_reads, 'origin', return_value='http://hub.test'), \
              mock.patch.object(hub_reads, 'read', side_effect=ValueError('offline')) as read, \
              mock.patch.object(self.http.views.overview, 'read', side_effect=AssertionError('local fallback')):
             status, result = self.request('/api/overview')
-            self.assertEqual(status, 502); self.assertIn('Hub', result['error'])
+            self.assertEqual(status, 502); self.assertIn('统计服务', result['error'])
             self.assertEqual(self.request('/api/local-network')[0], 200)
-            for path in ('/api/refresh', '/api/quota-recovery', '/api/account-memory/remove', '/api/codex-accounts/send'):
-                self.assertEqual(self.request(path, method='POST')[0], 409)
+            for path in ('/api/refresh', '/api/quota-recovery', '/api/account-memory/remove'):
+                self.assertEqual(self.request(path, method='POST')[0], 403)
+            self.assertEqual(self.request('/api/codex-accounts/send', method='POST')[0], 405)
             self.assertEqual(self.request('/api/session/%2e%2e')[0], 400)
             self.assertEqual(read.call_count, 1)
 
