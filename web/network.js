@@ -27,13 +27,24 @@
     }
     updateNavLinks();
     if (qs("#process-network")) {
-      initProcessNetwork();
+      const context = await dependencies.runtimeContext?.() || {};
+      if (!active) return;
+      await initProcessNetwork(context);
+      if (dependencies.runtimeContext) {
+        try {
+          const response = await platform.fetch('/api/network/cache');
+          const cached = response.ok && await response.json();
+          if (active && cached?.available) renderNetwork(cached, () => load(true));
+        } catch (_) { /* Optional historical server evidence does not block local facts. */ }
+      }
     } else {
       await load(false);
     }
   }
 
-  function initProcessNetwork() {
+  async function initProcessNetwork(context = {}) {
+    let current = true;
+    const local = context.local_network === true;
     const button = qs("#process-network-refresh"), status = qs("#process-network-status");
     const select = qs("#process-network-select"), result = qs("#process-network-result");
     const search = qs("#process-network-search"), help = qs("#process-network-help"), cancel = qs("#process-network-cancel");
@@ -44,9 +55,47 @@
     qs("#process-network-command").textContent = `./agent-monitor connect --server '${window.location.origin.replaceAll("'", "'\\''")}'`;
     let report = null, pending = null, selectedInstance = "", staleReport = false;
     const receipts = new Map();
+    const storageKey = local ? `agent-monitor.network.v1:${context.subject_id}` : null;
+    function save() {
+      if (!storageKey || !report) return;
+      try {
+        const value = JSON.stringify({report, selectedInstance, receipts: [...receipts].slice(-20)});
+        if (value.length <= 1048576) window.localStorage?.setItem(storageKey, value);
+      } catch (_) { /* Storage denial/full leaves this page's evidence available. */ }
+    }
+    function historical() {
+      for (const history of receipts.values()) for (const entries of Object.values(history)) entries.forEach(entry => { entry.historical = true; });
+    }
+    function renderHost() {
+      const node = qs('#local-network-facts'), facts = report?.host_network;
+      if (!node || !facts) return;
+      const proxy = facts.system_proxy || {};
+      node.innerHTML = '<h3>本机系统网络</h3>' + [
+        kvRow('观测主机 / 时间', escapeHtml(`${report.host} / ${timestamp(facts.observed_at)}`)),
+        kvRow('本机操作系统时区', escapeHtml(`${facts.timezone?.name || '未取得'} ${facts.timezone?.offset || ''}`)),
+        kvRow('接口地址', escapeHtml(facts.addresses?.map(a => `${a.interface}: ${a.address}`).join('；') || '未取得')),
+        kvRow('DNS 配置', escapeHtml(facts.dns?.join('；') || '未取得；不能据此断定未配置 DNS')),
+        kvRow('系统代理配置', proxy.status === 'observed' ? escapeHtml((proxy.entries || []).map(p => `${p.protocol}: ${p.enabled ? p.address || '地址未取得' : '未启用'}`).join('；') + `；PAC ${proxy.pac_enabled ? '已启用（未下载或执行）' : '未启用'}；自动发现 ${proxy.auto_discovery_enabled ? '已启用' : '未启用'}`) : escapeHtml(proxy.reason || '未取得')),
+        ...Object.entries(facts.monitor_environment || {}).map(([key, value]) => kvRow(`本地服务环境 ${key}`, escapeHtml(value.address ?? value.value ?? '未取得'))),
+        '<p class="scope-note">以上为被动配置快照，不确认 DNS 的实际请求路径、浏览器或 Agent 的最终出口。公网出口尚未核实。</p>',
+        ...(facts.errors || []).map(e => `<p class="error">部分系统信息未取得：${escapeHtml(e.stage)} / ${escapeHtml(e.type)}</p>`),
+      ].join('');
+    }
     const selectionKey = (p, index) => p.instance || `unavailable:${index}`;
     const selected = () => report?.processes?.find((p, index) => selectionKey(p, index) === selectedInstance);
-    const timestamp = value => value ? formatDate(typeof value === "number" ? new Date(value * 1000).toISOString() : value) : "未记录";
+    const timestamp = value => {
+      if (!value) return '未记录';
+      const date = new Date(typeof value === 'number' ? value * 1000 : value);
+      if (local) {
+        try {
+          const timeZone = report?.host_network?.timezone?.name;
+          const zone = new Intl.DateTimeFormat('en-US', {timeZone, timeZoneName: 'shortOffset'}).formatToParts(date).find(p => p.type === 'timeZoneName')?.value;
+          return date.toLocaleString('zh-CN', {timeZone}) + (zone ? ` ${zone}` : '');
+        }
+        catch (_) { return date.toLocaleString('zh-CN'); }
+      }
+      return formatDate(date.toISOString());
+    };
     const label = p => [p.agent, `PID ${p.pid}`, p.context?.cwd || "目录未取得", p.context?.terminal, p.context?.started_at ? `启动于 ${timestamp(p.context.started_at)}` : "启动时间未取得"].filter(Boolean).join(" · ");
     function options() {
       const query = search.value.trim().toLocaleLowerCase();
@@ -54,6 +103,15 @@
       select.innerHTML = '<option value="">请选择正在使用的进程</option>' + items.map(({p, key}) => `<option value="${escapeHtml(key)}">${escapeHtml(label(p))}</option>`).join("");
       select.value = selectedInstance;
       select.disabled = !!pending || !report?.processes?.length;
+      const summary = qs('#process-network-summary');
+      if (summary && report) summary.innerHTML = '<h3>已观察的 Agent</h3>' + (items.length ? items.map(({p, key}) => {
+        const observed = p.proxy_observation?.connections || [];
+        const path = observed.length ? observed.map(c => `${c.host || '目标未取得'}:${c.port || '?'} · ${[...(c.chains || [])].reverse().join(' → ') || '代理链未取得'}`).join('；')
+          : p.connections?.length ? `TCP 对端 ${[...new Set(p.connections.map(c => c.peer))].join('；')}（可能是代理，未确认业务目标）`
+          : p.connections_status === 'observed' ? '本次未观察到已建立的 TCP 连接；不代表没有联网。' : '当前连接信息未取得。';
+        return '<div class="network-card-body">' + kvRow(`${p.agent} · PID ${p.pid}`, escapeHtml(p.context?.cwd || '项目目录未取得')) + kvRow('已观察路径', escapeHtml(path)) +
+          `<button type="button" class="btn" data-process-instance="${escapeHtml(key)}">查看 ${escapeHtml(p.agent)} PID ${Number(p.pid)} 详情</button></div>`;
+      }).join('') : '<p>本次没有匹配的进程；系统网络信息仍可查看。</p>');
     }
     function render() {
       const item = selected();
@@ -64,7 +122,7 @@
         const disclosure = kind === "third_party" ? "第三方为 HTTP 非加密服务，仅限非商业使用。" : "可不执行供应商探测，独立选择第三方观测。";
         control.help.textContent = staleReport ? "上次快照仅供查看；请重新读取本机，成功后再选择探测。" : item && !item.instance ? "未取得完整进程实例；仅可查看本次报告。请重新读取，实例身份核实后才能探测。" : option ? `向 ${option.target || "目标未取得"} 经该进程已核实的 HTTPS/ALL 代理 ${option.proxy_address || "（见准入结果）"} 发送一次匿名 GET；不携带账号或消息，无自动重试。${disclosure} ${option.status === "available" ? "点击下方按钮才发送。" : `暂不可执行：${option.reason || "前置条件未满足"}。${option.next_step || "请重新读取进程报告核对条件。"}`}` : "当前连接器未提供探测条件；请更新并重启连接器后重新读取。本次仍可查看已有进程报告。";
       }
-      if (!item) { result.textContent = report?.processes?.length ? "请根据目录、启动时间和 PID 选择进程；不会自动推断你正在使用哪一个。" : "尚无可选进程。请以启动 Agent 的同一用户运行连接器，再读取本机。"; result.innerHTML = escapeHtml(result.textContent); return; }
+      if (!item) { result.textContent = report?.processes?.length ? "请根据目录、启动时间和 PID 选择进程；不会自动推断你正在使用哪一个。" : local ? "本次未取得可选 Agent 进程；仍可查看上方系统信息。请以启动 Agent 的同一用户运行 agent-monitor open 后更新本机。" : "尚无可选进程。请以启动 Agent 的同一用户运行连接器，再读取本机。"; result.innerHTML = escapeHtml(result.textContent); return; }
       const observation = item.proxy_observation;
       const paths = new Map();
       for (const c of observation?.connections || []) {
@@ -93,6 +151,7 @@
           `<h4>${kind === "provider" ? "供应商固定目标" : "第三方出口观测"}${historical ? " · 历史回执（未重新核实路径）" : " · 探测回执"}</h4>`,
           kvRow("目标 / 代理", `${escapeHtml(probe.target || probe.host || "未记录")} / ${escapeHtml(probe.proxy_address || "未确认")}`),
           kvRow("此次探测 IP / 地区", `${escapeHtml(probe.ip || "未取得")} / ${escapeHtml([probe.country || probe.country_code, probe.region, probe.city].filter(Boolean).join(" / ") || "未取得")}`),
+          kind === 'third_party' ? kvRow('ISP / 组织 / ASN', escapeHtml([probe.isp, probe.org, probe.as].filter(Boolean).join(' / ') || '未返回')) + kvRow('IP 归属时区 / 第三方标注', escapeHtml(`${probe.timezone || '未返回'}；代理 ${typeof probe.proxy === 'boolean' ? probe.proxy ? '是' : '否' : '未返回'}；托管 ${typeof probe.hosting === 'boolean' ? probe.hosting ? '是' : '否' : '未返回'}`)) : '',
           kvRow("观测时间", `${escapeHtml(timestamp(probe.observed_at))} · ${probe.cached ? "复用回执" : "本次结果"}`),
           '<p class="scope-note">仅证明这个目标在该时点的匿名探测结果，不代表 Agent 已发生的业务请求，也不代表其他目标的出口。</p>',
           probe.process_still_matches === false ? '<p class="error">探测结束时进程或连接已改变，请重新读取进程报告。</p>' : "",
@@ -109,13 +168,19 @@
         '</div></details>',
       ].join("");
     }
-    onPageCleanup?.(() => pending?.finish("页面已离开，本次读取已取消。"));
+    onPageCleanup?.(() => { current = false; save(); pending?.finish("页面已离开，本次读取已取消。"); });
     search.addEventListener("input", options);
-    select.addEventListener("change", () => { selectedInstance = select.value; render(); });
+    select.addEventListener("change", () => { selectedInstance = select.value; render(); save(); });
+    qs('#process-network-summary')?.addEventListener('click', event => {
+      const choice = event.target.closest?.('[data-process-instance]');
+      if (!choice || pending) return;
+      selectedInstance = choice.dataset.processInstance; select.value = selectedInstance; render(); save();
+    });
     cancel.addEventListener("click", () => pending?.finish(pending.probing ? "已停止等待；已发出的探测可能仍在完成，不会自动重试。" : "已取消读取。"));
     button.addEventListener("click", () => collect());
     for (const [kind, control] of Object.entries(controls)) control.button.addEventListener("click", () => collect(kind));
     function collect(kind) {
+      if (local) return collectLocal(kind);
       if (pending) return;
       const probing = !!kind, item = selected();
       if (probing && (staleReport || !item?.instance || item.probe_options?.[kind]?.status !== "available")) return;
@@ -172,6 +237,67 @@
       for (const control of Object.values(controls)) control.button.disabled = true;
       window.addEventListener("message", receive); window.addEventListener("pagehide", leave, {once: true});
       attempt.timer = window.setTimeout(() => attempt.finish("未收到本机结果。请检查连接器、版本与弹窗权限；不会改用服务端结果。"), probing ? 26000 : 18000);
+    }
+    async function collectLocal(kind) {
+      if (pending) return;
+      const item = selected();
+      if (kind && (staleReport || !item?.instance || item.probe_options?.[kind]?.status !== 'available')) return;
+      const controller = new AbortController();
+      const attempt = {probing: !!kind, finish() { controller.abort(); }};
+      pending = attempt; button.disabled = true; cancel.hidden = false;
+      options(); render();
+      status.textContent = kind ? '正在核对路径并发送所选诊断…' : `正在更新本机 ${context.host} 的被动快照；不发送公网诊断请求。`;
+      const timer = window.setTimeout(() => controller.abort(), kind ? 26000 : 24000);
+      try {
+        const response = await platform.fetch(kind ? '/api/local-network/probe' : '/api/local-network', {
+          method: kind ? 'POST' : 'GET', headers: {'X-Agent-Monitor': 'local-network', ...(kind ? {'Content-Type': 'application/json'} : {})},
+          ...(kind ? {body: JSON.stringify({pid: item.pid, instance: item.instance, probe_kind: kind})} : {}), signal: controller.signal,
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `读取失败（HTTP ${response.status}）`);
+        if (!current) return;
+        if (kind) {
+          if (data.instance !== item.instance || data.probe_kind !== kind) throw new Error('诊断回执身份不符；未接纳。');
+          const history = receipts.get(item.instance) || {}, previous = history[kind] || [];
+          history[kind] = data.error ? [...previous.filter(entry => !entry.data.error).slice(-1).map(entry => ({...entry, historical: true})), {data, historical: false}] : [{data, historical: false}];
+          receipts.set(item.instance, history);
+          status.textContent = `本机 ${report.host} · 所选诊断已返回，结果见对应回执。`;
+        } else {
+          if (data.subject_id !== context.subject_id || data.schema_version !== 1 || !Array.isArray(data.processes)) throw new Error('本机报告身份或格式不符；未接纳。');
+          historical();
+          const failedProcesses = !data.processes.length && data.errors?.length;
+          if (failedProcesses && report) report = {...report, host_network: data.host_network};
+          else report = data;
+          staleReport = !!failedProcesses;
+          if (!selected()) selectedInstance = '';
+          status.textContent = `本机 ${data.host} · 系统观测于 ${timestamp(data.host_network?.observed_at)} · ${data.processes.length} 个进程。` + (failedProcesses ? ' 本次进程读取失败；保留的上次进程快照仅供查看，不能探测。' : ' 未发送公网诊断请求。');
+          if (data.errors?.length) status.textContent += ' 采集不完整：' + data.errors.map(e => `${e.stage}/${e.type}`).join('；');
+          help.open = false; renderHost();
+        }
+        save();
+      } catch (error) {
+        if (!current) return;
+        if (!kind) staleReport = true;
+        status.textContent = `${error.name === 'AbortError' ? kind ? '已停止等待；已发出的诊断可能仍在完成，不会自动重试。' : '读取已取消或超时。' : error.message} ${report ? `保留本机 ${report.host} 在 ${timestamp(report.observed_at)} 的上次快照。` : '本机信息未取得；可点击更新本机重试。'}`;
+      } finally {
+        window.clearTimeout(timer); pending = null;
+        if (current) { button.disabled = false; cancel.hidden = true; options(); render(); }
+      }
+    }
+    if (local) {
+      button.textContent = '更新本机';
+      if (qs('#local-network-source')) qs('#local-network-source').textContent = `本机 ${context.host} · 本地 Web 接入；打开和返回本页自动更新被动信息。`;
+      try {
+        const saved = JSON.parse(window.localStorage?.getItem(storageKey) || 'null');
+        if (saved?.report?.subject_id === context.subject_id && Array.isArray(saved.report.processes)) {
+          report = saved.report; selectedInstance = saved.selectedInstance || ''; staleReport = true;
+          for (const [key, value] of saved.receipts || []) receipts.set(key, value);
+          historical(); options(); renderHost(); render();
+        }
+      } catch (_) { /* Invalid local cache never changes server admission. */ }
+      await collectLocal();
+    } else if (qs('#local-network-source')) {
+      qs('#local-network-source').textContent = `当前是远程网页${context.host ? `（服务主机 ${context.host}）` : ''}，不能将它视为你的电脑。推荐在浏览器所在电脑安装后运行 ./agent-monitor open；随后从本地总览进入网络。也可继续使用下方连接器手动读取。`;
     }
   }
 

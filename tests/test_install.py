@@ -54,6 +54,9 @@ class RollupInstallerTests(unittest.TestCase):
         )
         (self.component / "proxy_runtime").mkdir()
         (self.component / "proxy_runtime/install.py").write_text("print('present')\n")
+        # Isolate only the route provider; exercise the real installer/download consumer.
+        (self.component / 'agent_monitor/network/network_policy.py').write_text(
+            "def child_environment(base):\n    return dict(base, INSTALL_ROUTE_FIXTURE='system-route')\n")
         shutil.copy2(ROOT / "requirements.txt", self.component / "requirements.txt")
         shutil.copy2(ROOT / "agent_monitor/runtime/hub.py", self.component / "agent_monitor/runtime/hub.py")
         shutil.copy2(ROOT / "agent_monitor/runtime/service_runtime.py", self.component / "agent_monitor/runtime/service_runtime.py")
@@ -242,6 +245,20 @@ raise SystemExit(22)
         result = self.install('--no-services')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(chart.exists())
+
+    def test_asset_download_uses_product_route_with_bounded_transfer(self):
+        chart = self.component / 'web/vendor/chart.umd.min.js'
+        chart.unlink()
+        self.executable('curl', '''#!/usr/bin/env python3
+import os, pathlib, sys
+assert os.environ.get('INSTALL_ROUTE_FIXTURE') == 'system-route', 'missing product route'
+assert '--max-time' in sys.argv
+assert '--connect-timeout' in sys.argv
+pathlib.Path(sys.argv[sys.argv.index('--output') + 1]).write_text('fixture')
+''')
+        result = self.install('--no-services')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(chart.read_text(), 'fixture')
 
     def test_corrupt_chart_is_replaced_on_reinstall(self):
         chart = self.component / 'web/vendor/chart.umd.min.js'

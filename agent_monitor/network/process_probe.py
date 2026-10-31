@@ -47,10 +47,14 @@ def parse_public(raw):
     if not isinstance(country, str) or len(country) != 2 or any(c not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' for c in country) or country == 'XX':
         country = None
     result = {'ip': str(address), 'country_code': country}
-    for source, target in (('country', 'country'), ('regionName', 'region'), ('city', 'city')):
+    for source, target in (('country', 'country'), ('regionName', 'region'), ('city', 'city'),
+                           ('isp', 'isp'), ('org', 'org'), ('as', 'as'), ('timezone', 'timezone')):
         value = data.get(source)
         if isinstance(value, str) and len(value) <= 256 and not any(ord(c) < 32 for c in value):
             result[target] = value
+    for key in ('proxy', 'hosting'):
+        if isinstance(data.get(key), bool):
+            result[key] = data[key]
     return result
 
 

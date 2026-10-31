@@ -85,7 +85,7 @@ class HealthStaleTests(unittest.TestCase):
 class FreshnessWiringTests(unittest.TestCase):
     WARNING = "未能请求最新用量快照；将打开现有数据。请在页面中点 Refresh 重试。"
 
-    def _run_launcher_open(self, overview_json, overview_exit=0, running=True):
+    def _run_launcher_open(self, overview_json, overview_exit=0, running=True, hub_client=False):
         with tempfile.TemporaryDirectory() as tmp:
             sandbox = Path(tmp).resolve()
             launcher_root = sandbox / "agent-monitor"
@@ -113,6 +113,12 @@ class FreshnessWiringTests(unittest.TestCase):
 
             state = launcher_root / "state"
             state.mkdir()
+            if hub_client:
+                import json
+                (launcher_root / "config/hub.local.json").write_text(json.dumps({
+                    "schema_version": 1, "hub": "hub", "url": "http://hub.example.test:39001", "port": 39001,
+                    "sync_interval_seconds": 120, "quota_interval_seconds": 3600, "machines": ["hub", "local"]}))
+                (state / "hub-machine").write_text("local\n")
             if running:
                 (state / "pid").write_text(str(os.getpid()), encoding="utf-8")
                 (state / "port").write_text("39123", encoding="utf-8")
@@ -184,71 +190,15 @@ exit 1
                                  [str(launcher_root), "0.0.0.0", "39123", str(state / "server.log")])
             return result, curl_calls, open_calls
 
-    def test_open_requests_fresh_generation_without_using_external_proxy(self):
-        result, curl_calls, open_calls = self._run_launcher_open(
-            '{"refresh_request":1,"syncing":false}'
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        overview_calls = [call for call in curl_calls if "/api/refresh" in call]
-        self.assertEqual(len(overview_calls), 1, curl_calls)
-        overview_call = overview_calls[0]
-        self.assertIn("--noproxy *", overview_call)
-        self.assertIn("-X POST", overview_call)
-        self.assertIn("X-Agent-Monitor: action", overview_call)
-        self.assertIn("Origin: http://127.0.0.1:39123", overview_call)
-        self.assertTrue(all("--noproxy *" in call for call in curl_calls), curl_calls)
-        self.assertNotIn(self.WARNING, result.stderr)
-        self.assertEqual(open_calls, ["http://127.0.0.1:39123"])
-
-    def test_open_requests_fresh_generation_after_cold_start(self):
-        result, curl_calls, open_calls = self._run_launcher_open(
-            '{"refresh_request":1,"syncing":true}',
-            running=False,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("agent-monitor started: http://127.0.0.1:39123", result.stdout)
-        self.assertEqual(
-            len([call for call in curl_calls if "/api/refresh" in call]),
-            1,
-            curl_calls,
-        )
-        self.assertEqual(open_calls, ["http://127.0.0.1:39123"])
-
-    def test_open_reuses_an_already_running_sync(self):
-        result, curl_calls, open_calls = self._run_launcher_open(
-            '{"refresh_request":2,"syncing":true}'
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            len([call for call in curl_calls if "/api/refresh" in call]),
-            1,
-            curl_calls,
-        )
-        self.assertNotIn(self.WARNING, result.stderr)
-        self.assertEqual(open_calls, ["http://127.0.0.1:39123"])
-
-    def test_open_warns_but_still_opens_when_freshness_request_fails(self):
-        cases = (
-            ("transport failure", "", 22),
-            ("invalid response", "not-json", 0),
-            (
-                "no refresh pending",
-                '{"sync":{"refresh_pending":false,"syncing":false}}',
-                0,
-            ),
-        )
-        for name, response, exit_code in cases:
-            with self.subTest(name=name):
-                result, _curl_calls, open_calls = self._run_launcher_open(
-                    response, overview_exit=exit_code
-                )
-
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(self.WARNING, result.stderr)
-                self.assertEqual(open_calls, ["http://127.0.0.1:39123"])
+    def test_open_uses_local_overview_without_implicit_collection_for_cold_and_warm_roles(self):
+        for running in (False, True):
+            for hub_client in (False, True):
+                with self.subTest(running=running, hub_client=hub_client):
+                    result, curl_calls, open_calls = self._run_launcher_open('', running=running, hub_client=hub_client)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse(any('/api/refresh' in call for call in curl_calls), curl_calls)
+                    self.assertTrue(all('--noproxy *' in call for call in curl_calls), curl_calls)
+                    self.assertEqual(open_calls, ['http://127.0.0.1:39123'])
 
     def test_app_js_polls_health_and_renders_stale_banner(self):
         js = (ROOT / "web" / "app.js").read_text()

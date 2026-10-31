@@ -181,7 +181,7 @@ PYTHON
 if ! chart_valid "$CHART_FILE"; then
   [ ! -e "$CHART_FILE" ] || chart_state=updated
   chart_candidate="$(mktemp "$CHART_FILE.XXXXXX")"
-  if ! curl --fail --location --silent --show-error --connect-timeout 15 --max-time 120 "$CHART_URL" --output "$chart_candidate" \
+  if ! "$VENV_PY" -m agent_monitor.runtime.asset_download "$CHART_URL" "$chart_candidate" \
       || ! chart_valid "$chart_candidate"; then
     rm -f "$chart_candidate"
     echo "Chart.js download or checksum verification failed; existing asset preserved. Rerun ./install.sh to retry." >&2
@@ -228,8 +228,8 @@ for entry in "${FONT_FILES[@]}"; do
   # process's pid: a fixed name lets two concurrent installs move or delete each
   # other's in-flight file.
   tmp="$FONT_DIR/.$name.$$.part"
-  if curl --fail --location --silent --show-error \
-    "https://cdn.jsdelivr.net/npm/@fontsource/$pkg/files/$name" --output "$tmp" \
+  if "$VENV_PY" -m agent_monitor.runtime.asset_download \
+    "https://cdn.jsdelivr.net/npm/@fontsource/$pkg/files/$name" "$tmp" \
     && is_woff2 "$tmp"; then
     mv -f "$tmp" "$FONT_DIR/$name"
   else
@@ -238,8 +238,8 @@ for entry in "${FONT_FILES[@]}"; do
     font_failed_names="${font_failed_names:+$font_failed_names, }$name"
   fi
 done
-[ -s "$FONT_DIR/LICENSE.txt" ] || curl --fail --location --silent --show-error \
-  "$FONT_LICENSE_URL" --output "$FONT_DIR/LICENSE.txt" || rm -f "$FONT_DIR/LICENSE.txt"
+[ -s "$FONT_DIR/LICENSE.txt" ] || "$VENV_PY" -m agent_monitor.runtime.asset_download \
+  "$FONT_LICENSE_URL" "$FONT_DIR/LICENSE.txt" || rm -f "$FONT_DIR/LICENSE.txt"
 
 font_have=$((font_total - font_failed))
 if [ "$font_failed" -gt 0 ]; then

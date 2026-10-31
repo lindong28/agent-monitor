@@ -28,6 +28,16 @@ class NetworkReport:
     def report(self):
         return self._read()[0]
 
+    def cached(self):
+        """Return dated evidence only. Expiry never starts a diagnostic here."""
+        with self._lock:
+            data = self._cache['data']
+            if data is None:
+                return {'checked_host': self.hostname(), 'available': False}
+            remaining = max(0, self._cache.get('ttl', self.ttl) - (self.clock() - self._cache['ts']))
+            return {**data, 'checked_host': self.hostname(), 'available': True,
+                    'historical': True, 'refresh': {'reused': True, 'retry_in_seconds': math.ceil(remaining)}}
+
     def _read(self):
         # A refresh click shares the same request budget as polling. Hold the lock
         # through the bounded child call so concurrent clients share failures too.

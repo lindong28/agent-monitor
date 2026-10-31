@@ -2,7 +2,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const createNetwork = require('../web/network.js');
 
-async function fixture() {
+async function fixture(localOptions) {
   const nodes = new Map(), listeners = new Map(), timers = new Map(), popups = [], cleanups = [];
   const qs = key => {
     if (!nodes.has(key)) nodes.set(key, {value: '', dataset: {}, listeners: {}, textContent: '', innerHTML: '', querySelector() {return null;}, addEventListener(k, f) {this.listeners[k] = f;}});
@@ -12,12 +12,20 @@ async function fixture() {
     open(url) {const p = {url, close() {this.closed = true;}, postMessage(data, origin) {this.ack = {data, origin};}}; popups.push(p); return p;},
     addEventListener(k, f) {listeners.set(k, f);}, removeEventListener(k) {listeners.delete(k);},
     setTimeout(fn) {timers.set(1, fn); return 1;}, clearTimeout(id) {timers.delete(id);}};
+  const calls = [], storage = localOptions?.storage || new Map();
+  window.localStorage = {getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value)};
+  async function localFetch(path, options) {
+    calls.push({path, options});
+    if (path === '/api/network/cache') return {ok: true, json: async () => ({available: false})};
+    return localOptions.fetch(path, options);
+  }
   let requests = 0;
-  const view = createNetwork({platform: {window, document: {}}, qs, updateNavLinks() {},
+  const view = createNetwork({platform: {window, document: {}, fetch: localFetch}, qs, updateNavLinks() {},
+    ...(localOptions ? {runtimeContext: async () => ({local_network: true, host: 'local-A', subject_id: localOptions.subject || 'A'})} : {}),
     api() {requests++; throw Error('server must not be read automatically');}, withRefresh: (_, f) => f(),
     formatDate: s => s, escapeHtml: s => String(s).replaceAll('<','&lt;'), onPageCleanup: f => cleanups.push(f)});
   await view.initNetwork();
-  return {qs, window, listeners, timers, popups, cleanups, requests: () => requests};
+  return {qs, window, listeners, timers, popups, cleanups, calls, storage, requests: () => requests};
 }
 const report = {schema_version: 1, host: 'browser-machine', observed_at: '2026-01-01T00:00:00Z', processes: [
   {pid: 42, agent: 'codex', instance: '42:first', environment_status: 'startup_snapshot', environment: {HTTPS_PROXY: {address: 'http://proxy1:80'}}, connections_status: 'observed', connections: [{local: '127.0.0.1:9', peer: '127.0.0.1:80', state: 'ESTABLISHED'}]},
@@ -76,6 +84,55 @@ const capable = () => {
   };
   return data;
 };
+const localReport = () => ({...capable(), subject_id: 'A', host: 'local-A',
+  host_network: {observed_at: '2026-10-31T19:00:00+08:00', timezone: {name:'Asia/Singapore', offset:'+0800'},
+    addresses:[{interface:'en0',address:'192.0.2.5'}], dns:['192.0.2.53'], system_proxy:{status:'observed',entries:[]}},
+});
+
+test('normal local entry shows host and all process facts before selection without probes', async () => {
+  const data = localReport();
+  data.processes[0].proxy_observation = {status:'observed',connections:[{host:'model.example.test',port:443,chains:['node','group']}]};
+  const f = await fixture({fetch: async () => ({ok:true,json:async()=>data})});
+  assert.match(f.qs('#local-network-facts').innerHTML,/192.0.2.53/);
+  assert.match(f.qs('#process-network-summary').innerHTML,/model.example.test/);
+  assert.match(f.qs('#process-network-summary').innerHTML,/group → node/);
+  assert.match(f.qs('#process-network-summary').innerHTML,/PID 43/);
+  assert.equal(f.qs('#process-network-select').value,'');
+  assert.equal(f.popups.length,0);
+  assert.deepEqual(f.calls.map(c=>c.path),['/api/local-network','/api/network/cache']);
+});
+
+test('navigation and full reentry retain selection and dated receipts; failed reads block probes', async () => {
+  let failed = false;
+  const data = localReport();
+  const fetch = async (path, options) => {
+    if(failed) throw Error('offline');
+    return {ok:true,json:async()=>path.endsWith('/probe') ? {instance:'42:first',probe_kind:JSON.parse(options.body).probe_kind,isp:'Fixture ISP',ip:'192.0.2.22',observed_at:1767225600} : data};
+  };
+  const f = await fixture({fetch}); choose(f,'42:first');
+  await f.qs('#process-network-third-party').listeners.click();
+  assert.match(f.qs('#process-network-result').innerHTML,/Fixture ISP/);
+  f.cleanups.forEach(fn=>fn());
+  const next = await fixture({fetch,storage:f.storage});
+  assert.equal(next.qs('#process-network-select').value,'42:first');
+  assert.match(next.qs('#process-network-result').innerHTML,/历史回执/);
+  failed = true;
+  await next.qs('#process-network-refresh').listeners.click();
+  assert.match(next.qs('#local-network-facts').innerHTML,/192.0.2.53/);
+  assert.match(next.qs('#process-network-result').innerHTML,/Fixture ISP/);
+  assert.equal(next.qs('#process-network-third-party').disabled,true);
+  const other = await fixture({fetch,storage:f.storage,subject:'B'});
+  assert.doesNotMatch(other.qs('#local-network-facts').innerHTML,/192.0.2.53/);
+});
+test('partial local collection keeps available processes but reports incomplete discovery', async () => {
+  const data = localReport();
+  data.errors = [{stage:'discovery',type:'TimeBudgetExceeded'}];
+  const f = await fixture({fetch: async () => ({ok:true,json:async()=>data})});
+  assert.match(f.qs('#process-network-status').textContent,/采集不完整.*discovery/);
+  assert.match(f.qs('#process-network-summary').innerHTML,/PID 43/);
+  choose(f,'42:first');
+  assert.equal(f.qs('#process-network-third-party').disabled,false);
+});
 function probe(f, kind, changes = {}) {
   f.qs(kind === 'provider' ? '#process-network-probe' : '#process-network-third-party').listeners.click();
   reply(f, {probe: {instance: '42:first', probe_kind: kind, ip: '192.0.2.1', country_code: 'SG', observed_at: 1767225600, target: kind, ...changes}}, 'agent-monitor-process-network-probe');

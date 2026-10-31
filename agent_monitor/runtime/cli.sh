@@ -142,8 +142,8 @@ status() {
   fi
   if [ "$role" = client ]; then
     hub_url="$("${PYTHON_MODULE[@]}" agent_monitor.runtime.hub url)"
-    echo "Role: Hub client. Dashboard target: $hub_url (availability not checked)."
-    echo "Use open/refresh for the Hub; use local start/stop/restart/status/open for the optional local Web. Run agent-monitor service status for collector and connector observations."
+    echo "Role: Hub client. Statistics source: $hub_url (availability not checked)."
+    echo "Use open for this computer's dashboard and network; statistics remain Hub reads. Use refresh for the Hub, and local start/stop/restart/status to manage this Web instance. Run agent-monitor service status for collector and connector observations."
     return 0
   fi
   if is_running; then
@@ -184,23 +184,6 @@ refresh_if_stale() {
   fi
 }
 
-request_fresh_generation() {
-  local port response pending
-  port="$(cat "$PORT_FILE" 2>/dev/null || echo "$BASE_PORT")"
-  if ! response="$(curl --noproxy '*' -fsS -X POST -H 'X-Agent-Monitor: action' -H "Origin: http://$CONNECT_HOST:$port" "http://$CONNECT_HOST:$port/api/refresh?ack=1" 2>/dev/null)"; then
-    echo "agent-monitor: 未能请求最新用量快照；将打开现有数据。请在页面中点 Refresh 重试。" >&2
-    return 0
-  fi
-  pending="$(
-    printf '%s' "$response" \
-      | "$AGENT_MONITOR_PYTHON" -c 'import json,sys; receipt=json.load(sys.stdin); print("1" if receipt.get("refresh_request",0)>0 else "0")' 2>/dev/null \
-      || echo 0
-  )"
-  if [ "$pending" != "1" ]; then
-    echo "agent-monitor: 未能请求最新用量快照；将打开现有数据。请在页面中点 Refresh 重试。" >&2
-  fi
-}
-
 open_url() {
   local url="$1"
   if [ "$(uname -s)" = Darwin ] && command -v open >/dev/null 2>&1; then
@@ -212,17 +195,10 @@ open_url() {
 }
 
 open_dashboard() {
-  local hub_url
-  hub_url=""
-  [ -n "$LOCAL_WEB" ] || hub_url="$("${PYTHON_MODULE[@]}" agent_monitor.runtime.hub url)"
-  if [ -n "$hub_url" ]; then
-    # The browser always reaches the same central service from every computer.
-    if [ -n "${SSH_CONNECTION:-}" ]; then
-      echo "$hub_url"
-    else
-      open_url "$hub_url"
-    fi
-    return
+  # A browser's local observations must come from this computer. Hub clients
+  # reuse the existing local Web lifecycle; its read adapter supplies Hub stats.
+  if [ "$("${PYTHON_MODULE[@]}" agent_monitor.runtime.hub role)" = client ]; then
+    LOCAL_WEB=local
   fi
   if is_running; then
     refresh_if_stale
@@ -231,11 +207,11 @@ open_dashboard() {
     [ "$state_result" -eq 1 ] || return "$state_result"
     start
   fi
-  request_fresh_generation
   local port
   port="$(cat "$PORT_FILE")"
 
   if [ -n "${SSH_CONNECTION:-}" ]; then
+    echo "This URL shows the remote host. For your computer's network, run agent-monitor open in a terminal on that computer." >&2
     local ts_host
     ts_host="$(tailscale status --json 2>/dev/null | "$AGENT_MONITOR_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("Self",{}).get("DNSName",""))' 2>/dev/null || true)"
     ts_host="${ts_host%%.*}"  # extract the short hostname from the device's full DNS name

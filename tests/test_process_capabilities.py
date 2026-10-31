@@ -122,6 +122,22 @@ class CapabilityTests(unittest.TestCase):
         finally:
             server.shutdown(); server.server_close(); thread.join(2)
 
+    def test_third_party_context_keeps_typed_facts_without_inventing_missing_values(self):
+        # ip-api JSON's documented fields describe this target's receipt only.
+        result = pp.parse_public(json.dumps({'status': 'success', 'query': '8.8.8.8',
+            'isp': 'Example ISP', 'org': 'Example org', 'as': 'AS123 Example',
+            'timezone': 'Asia/Singapore', 'proxy': False, 'hosting': True}))
+        self.assertEqual(result['isp'], 'Example ISP')
+        self.assertEqual(result['org'], 'Example org')
+        self.assertEqual(result['as'], 'AS123 Example')
+        self.assertEqual(result['timezone'], 'Asia/Singapore')
+        self.assertIs(result['proxy'], False)
+        self.assertIs(result['hosting'], True)
+        invalid = pp.parse_public(json.dumps({'status': 'success', 'query': '8.8.8.8',
+            'isp': 'bad\nvalue', 'proxy': 'false', 'hosting': 0}))
+        for key in ('isp', 'org', 'as', 'timezone', 'proxy', 'hosting'):
+            self.assertNotIn(key, invalid)
+
     def test_invalid_third_party_result_does_not_become_ip(self):
         for value in ({'status': 'fail'}, {'status': 'success', 'query': '127.0.0.1'}, {'status': 'success', 'query': 'invalid'}):
             with self.assertRaises((ValueError, KeyError)):

@@ -19,7 +19,7 @@ class RouteUnavailable(ValueError):
 def target_for(agent, probe_kind):
     if probe_kind not in PROBE_KINDS or agent not in TARGETS:
         raise RouteUnavailable('无法确认诊断类型，未发出探测。')
-    return ('http://ip-api.com/json/?fields=status,query,countryCode,country,regionName,city'
+    return ('http://ip-api.com/json/?fields=status,query,countryCode,country,regionName,city,isp,org,as,timezone,proxy,hosting'
             if probe_kind == 'third_party' else 'https://' + TARGETS[agent] + '/cdn-cgi/trace')
 
 

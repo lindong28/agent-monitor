@@ -6,6 +6,17 @@
   const { platform, assetVersion, qs, qsa, params, getRange, api, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal } = dependencies;
   const { window, document } = platform;
   function renderOverview(data, selectedRange) {
+    let firstData = qs('#initial-data-notice');
+    const missingData = data.sync?.coverage?.admitted === 0 && !data.rollup_coverage?.earliest_date && !data.range?.total_tokens && !data.range?.cost_usd;
+    if (missingData && !firstData) {
+      firstData = document.createElement('p'); firstData.id = 'initial-data-notice'; firstData.className = 'scope-note';
+      qs('main')?.prepend?.(firstData);
+    }
+    if (firstData) {
+      firstData.hidden = !missingData;
+      firstData.textContent = dependencies.hubUrl?.() ? 'Hub 尚无可读的已采集数据。前往 Hub 更新统计与配额，或查看采集与诊断。'
+        : '尚无可读的已采集数据，不代表历史支出为零。点击“更新统计与配额”读取已配置的数据源；已有登录时会查询账号额度。本机网络仍可直接查看。';
+    }
     qs("#today-cost").textContent = money(data.today.cost_usd);
     qs("#week-cost").textContent = money(data.week.cost_usd);
     const weekContext = qs("#week-context");
@@ -249,6 +260,9 @@
   }
 
   async function initOverview() {
+    const initializationCurrent = pageScope();
+    await dependencies.runtimeContext?.();
+    if (!initializationCurrent()) return;
     const restored = params();
     if (restored.has("quota_provider")) {
       quotaFilter.provider = ["all", "claude", "codex"].includes(restored.get("quota_provider")) ? restored.get("quota_provider") : "all";
@@ -261,7 +275,13 @@
     if (accountActions && restored.get("account_actions") === "true") accountActions.open = true;
     resetQuotaReadings();
     onPageCleanup(resetQuotaReadings);
-    if (qs("#codex-account-actions")) {
+    if (accountActions && dependencies.hubUrl?.()) {
+      accountActions.innerHTML = '<summary>Hub 账号操作</summary><p class="scope-note">统计与账号归属来自 Hub。添加、配对和恢复在原 Hub 页面执行。</p>';
+      const link = document.createElement('a');
+      link.href = dependencies.hubPage('/?account_actions=true#codex-account-actions');
+      link.textContent = '前往 Hub 管理账号';
+      accountActions.appendChild(link);
+    } else if (accountActions) {
       const currentAccountsPage = pageScope();
       import("/web/codex-accounts.js" + (assetVersion ? `?v=${assetVersion}` : "")).then((module) => {
         if (currentAccountsPage()) module.init();

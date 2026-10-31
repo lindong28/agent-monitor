@@ -11,6 +11,7 @@ import logging
 import mimetypes
 import os
 import posixpath
+import re
 import signal
 import sys
 import threading
@@ -44,6 +45,8 @@ from agent_monitor.views import ViewServices
 from agent_monitor.views.overview import OverviewView
 from agent_monitor.views.sessions import SessionsView
 from agent_monitor.views.network import NetworkReport
+from agent_monitor.views import hub_reads
+from agent_monitor.network.local_network import LocalNetwork
 from functools import partial
 
 
@@ -318,6 +321,7 @@ class ThreadingHTTPServer(_ThreadingHTTPServer):
     def __init__(self, *args, views=None, **kwargs):
         self.views = views if views is not None else create_views()
         self.routes = create_routes(self.views)
+        self.local_network = LocalNetwork()
         super().__init__(*args, **kwargs)
 
     def service_actions(self):
@@ -388,6 +392,28 @@ class Handler(BaseHTTPRequestHandler):
         # Some actions have no body; never reuse their unread input as a request.
         self.close_connection = True
         parsed = urlparse(self.path)
+        if parsed.path == '/api/local-network/probe':
+            if not self._check_local_network_boundary(post=True):
+                return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 2048 or self.headers.get_content_type() != 'application/json':
+                    raise ValueError()
+                payload = json.loads(self.rfile.read(length))
+                pid, instance, kind = payload.get('pid'), payload.get('instance'), payload.get('probe_kind')
+                if (type(pid) is not int or not 0 < pid < 2**31 or not isinstance(instance, str)
+                        or not re.fullmatch(r'[0-9]+:[0-9.]{1,60}', instance)
+                        or kind not in ('provider', 'third_party')):
+                    raise ValueError()
+            except (ValueError, TypeError, AttributeError):
+                self._send_json({'error': '诊断参数无效；请重新读取本机。'}, status=400)
+                return
+            self._send_json(self.server.local_network.probe(pid, instance, kind))
+            return
+        if self._hub_action_path(parsed.path) and hub_reads.origin():
+            self._send_json({'error': '此页面展示 Hub 数据；请到 Hub 执行此操作。',
+                             'hub_url': hub_reads.origin()}, status=409)
+            return
         if client_network.handle(self):
             return
         if (parsed.path.startswith("/api/codex-accounts/") or parsed.path in
@@ -421,6 +447,28 @@ class Handler(BaseHTTPRequestHandler):
     def do_CONNECT(self):
         if not client_network.handle(self):
             self.send_error(404)
+
+    @staticmethod
+    def _hub_action_path(path):
+        return path.startswith('/api/codex-accounts') or path in (
+            '/api/account-memory/remove', '/api/quota-recovery', '/api/refresh')
+
+    def _local_network_address(self):
+        try:
+            address = urlparse('http://' + self.headers.get('Host', ''))
+            return (ipaddress.ip_address(self.client_address[0]).is_loopback
+                    and address.hostname in ('127.0.0.1', 'localhost', '::1')
+                    and (address.port or 80) == self.server.server_port
+                    and not address.username and not address.password)
+        except ValueError:
+            return False
+
+    def _check_local_network_boundary(self, *, post=False, send_body=True):
+        if not self._local_network_address():
+            self._send_json({'error': '本机网络仅能从本机回环网址读取。请在这台电脑运行 agent-monitor open。'},
+                            status=403, send_body=send_body)
+            return False
+        return self._check_browser_boundary('local-network', require_origin=post, send_body=send_body)
 
     def _check_browser_boundary(self, header, *, require_origin=False, send_body=True):
         # This remains a trusted personal-network service. These checks stop
@@ -650,6 +698,45 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_request(self, send_body=True):
         parsed = urlparse(self.path)
+        if parsed.path == '/api/runtime-context':
+            target = hub_reads.origin()
+            self._send_json({'host': socket.gethostname(), 'subject_id': self.server.local_network.subject_id,
+                             'local_network': self._local_network_address(), 'hub_url': target,
+                             'statistics_source': 'hub' if target else 'local'}, send_body=send_body)
+            return
+        if parsed.path == '/api/local-network':
+            if self._check_local_network_boundary(send_body=send_body):
+                try:
+                    self._send_json(self.server.local_network.read(), send_body=send_body)
+                except Exception as exc:
+                    logger.warning('Local network read failed: %s', type(exc).__name__)
+                    self._send_json({'error': '本机读取未完成；上次快照仍可查看，请稍后更新本机。'}, status=503, send_body=send_body)
+            return
+        if parsed.path == '/api/local-network/probe':
+            self._send_json({'error': '主动诊断必须明确点击并使用 POST。'}, status=405, send_body=send_body)
+            return
+        if parsed.path == '/api/network/cache':
+            self._send_json(self.server.views.network.cached(), send_body=send_body)
+            return
+        target = hub_reads.origin()
+        if target and parsed.path.startswith('/api/session/') and not hub_reads.supports(parsed.path):
+            self._send_json({'error': '会话标识无效；未读取本机统计。'}, status=400, send_body=send_body)
+            return
+        if target and self._hub_action_path(parsed.path):
+            self._send_json({'error': '请到 Hub 查看和操作该账号。', 'hub_url': target}, status=409, send_body=send_body)
+            return
+        if target and hub_reads.supports(parsed.path):
+            if self.headers.get('X-Agent-Monitor-Read-Hop'):
+                self._send_json({'error': 'Hub 配置形成循环；请核对机器角色与 Hub 地址。'}, status=502, send_body=send_body)
+                return
+            try:
+                self._send_json(hub_reads.read(parsed.path, parse_qs(parsed.query), target=target),
+                                send_body=send_body, compress=True)
+            except Exception as exc:
+                logger.warning('Hub read failed: %s', type(exc).__name__)
+                self._send_json({'error': 'Hub 数据暂不可用；本机网络仍可查看，统计未替换为本机数据。',
+                                 'source': target, 'failure_type': type(exc).__name__}, status=502, send_body=send_body)
+            return
         if parsed.path == "/api/quota-recovery":
             query = parse_qs(parsed.query)
             config = sync.load_machine_config()
@@ -671,6 +758,10 @@ class Handler(BaseHTTPRequestHandler):
                 parsed.path.startswith("/api/") and "1" in query.get("force", ())):
             self._send_json({"error": "显式刷新请使用 POST。"}, status=405, send_body=send_body)
             return
+        if self._local_network_address() and hub_reads.supports(parsed.path):
+            # Opening a local dashboard is a read, including standalone installs.
+            # Collection/quota updates remain behind the explicit POST refresh.
+            query['sync'] = ['0']
         try:
             if parsed.path.startswith("/api/session/"):
                 session_id = unquote(parsed.path[len("/api/session/") :])

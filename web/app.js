@@ -30,6 +30,27 @@
   // the actual system configuration. Until the server's zone is fetched, fall back
   // to the browser's local zone.
   let serverTimeZone = null;
+  let runtime = null, runtimePromise = null;
+  function runtimeContext() {
+    if (!runtimePromise) runtimePromise = fetch(new URL('/api/runtime-context', window.location.origin))
+      .then(response => response.ok ? response.json() : {})
+      .then(value => { runtime = value; return value; }).catch(() => ({}));
+    return runtimePromise;
+  }
+  const hubUrl = () => runtime?.statistics_source === 'hub' ? runtime.hub_url : null;
+  function hubPage(path = currentPageUrl()) { return new URL(path, hubUrl()).href; }
+  function showStatisticsSource() {
+    if (!hubUrl()) return;
+    const main = qs('main');
+    if (main && !qs('#statistics-source') && document.createElement) {
+      const note = document.createElement('p');
+      note.id = 'statistics-source'; note.className = 'scope-note';
+      note.textContent = `统计来自 Hub ${hubUrl()}；当前 Web 主机 ${runtime.host}。账号和刷新操作在 Hub 执行。`;
+      main.prepend?.(note);
+    }
+    const refresh = qs('#refresh');
+    if (refresh && window.location.pathname !== '/network') refresh.textContent = '到 Hub 刷新';
+  }
 
   let _timezonePromise = null;
   function ensureTimezone() {
@@ -244,6 +265,12 @@
   }
 
   async function api(path, query) {
+    await runtimeContext();
+    showStatisticsSource();
+    if (hubUrl() && (path === '/api/refresh' || query?.force === '1' && path !== '/api/network')) {
+      window.location.assign(hubPage());
+      throw new Error('请在 Hub 页面点击刷新；此处未发出刷新请求。');
+    }
     const tzReady = ensureTimezone();
     const url = new URL(path, window.location.origin);
     Object.entries(query || {}).forEach(([key, value]) => {
@@ -258,7 +285,8 @@
       method: "POST", headers: { "X-Agent-Monitor": "action" },
     } : undefined);
     if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}`);
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.error || `${response.status} ${response.statusText}`);
     }
     const json = await response.json();
     await tzReady;
@@ -303,7 +331,7 @@
   const charts = modules.charts({ platform, palette, OTHER_COLOR, qs });
   const { money, moneyPrecise, costCoverageText, costReading, integer, compactNumber, barValueLabels, shortText, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costTableReading, renderChartTable, SERIES_LIMIT, destroyCharts, agentLabel } = charts;
 
-  const quota = modules.quota({ platform, fmtAbs, qs, api, currentPageUrl, collectionUrl, updateSyncOverviewLink, formatDate });
+  const quota = modules.quota({ platform, fmtAbs, qs, api, hubUrl, hubPage, currentPageUrl, collectionUrl, updateSyncOverviewLink, formatDate });
   const { latestCodexQuotaReading, updateCodexQuotaReadings, codexSessionAccountLabel, renderQuotaAccounts, renderQuotaSignedOut, formatQuotaReset, renderQuotaMachineRecords, quotaFilter, resetQuotaReadings } = quota;
 
   function currentPageUrl() {
@@ -334,7 +362,7 @@
   }
 
   // Collection owns the shared status reading; shell owns server identity/lifetime.
-  const collection = modules.collection({ platform, qs, qsa, params, getRange, api, bindShell, pageScope, watchPageData, GUIDE_ROUTES, integer, agentLabel, formatDate, escapeHtml, renderQuotaMachineRecords, renderQuotaSignedOut, onServerInstance: (id) => { pageServerInstance = id; } });
+  const collection = modules.collection({ platform, qs, qsa, params, getRange, api, bindShell, pageScope, watchPageData, GUIDE_ROUTES, integer, agentLabel, formatDate, escapeHtml, renderQuotaMachineRecords, renderQuotaSignedOut, onServerInstance: (id) => { if (!hubUrl()) pageServerInstance = id; } });
   const { initCollection, renderSyncStatus, waitForSyncTerminal, snapshotFingerprint, refreshStatistics, renderCostDiagnostics, costDiagnosticsQuery } = collection;
 
   async function initGuide() {
@@ -363,7 +391,7 @@
     await load();
   }
 
-  const network = modules.network({ platform, qs, updateNavLinks, api, withRefresh, formatDate, escapeHtml, onPageCleanup });
+  const network = modules.network({ platform, qs, updateNavLinks, api, runtimeContext, withRefresh, formatDate, escapeHtml, onPageCleanup });
   const { initNetwork } = network;
 
   function formatDate(iso) {
@@ -406,7 +434,7 @@
     }
   }
 
-  const overview = modules.overview({ platform, assetVersion, qs, qsa, params, getRange, api, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal });
+  const overview = modules.overview({ platform, assetVersion, qs, qsa, params, getRange, api, runtimeContext, hubUrl, hubPage, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal });
   const { initOverview, renderOverview, renderRangeCost, showOverviewLoadError } = overview;
 
   const sessions = modules.sessions({ platform, qs, qsa, params, getRange, setParam, copyText, api, bindShell, moneyPrecise, integer, codexSessionAccountLabel, collectionUrl, renderSyncStatus, waitForSyncTerminal, refreshStatistics, formatDate, dayKey, timeOfDay, escapeHtml, pageScope, watchPageData, replaceCurrentUrl });
@@ -810,6 +838,7 @@
   }
 
   window.AgentMonitor = {
+    runtimeContext, hubUrl, hubPage,
     ...charts, ...quota, ...network, ...sessions,
     restartAndReload, updateAreaNavigation, copyGuideCode, showOverviewLoadError,
     renderRoute, renderOverview, collectionUrl, currentPageUrl, renderCostDiagnostics, costDiagnosticsQuery,
