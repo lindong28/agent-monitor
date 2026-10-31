@@ -43,7 +43,8 @@ class HubActionsTests(unittest.TestCase):
         import requests
         def session():
             value=requests.Session(); value.trust_env=False; return value
-        for patch in (mock.patch.object(hub_reads, 'origin', return_value=self.target),
+        for patch in (mock.patch.object(server.socket, 'getfqdn', return_value='fixture.example'),
+                      mock.patch.object(hub_reads, 'origin', return_value=self.target),
                       mock.patch.object(hub_actions.network_policy, 'session', side_effect=session)):
             patch.start(); self.addCleanup(patch.stop)
 
