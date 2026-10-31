@@ -378,8 +378,8 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] in {"install", "status", "stop", "restart"}:
         from agent_monitor.runtime.connector_service import main as service_main
         return service_main(sys.argv[1:])
-    parser = argparse.ArgumentParser(description="连接本机与监控页面：读取本机 Agent 网络，并为账号批次提供本机系统代理。")
-    parser.add_argument("--server", required=True, help="监控页面所在服务，例如 http://monitor.local:39001")
+    parser = argparse.ArgumentParser(description="连接本机与账号服务，为账号批次提供本机系统代理。")
+    parser.add_argument("--server", required=True, help="账号面板连接帮助中的服务地址，例如 http://monitor.local:39001")
     parser.add_argument("--state-file", help=argparse.SUPPRESS)
     args = parser.parse_args()
     from agent_monitor.runtime.connector_service import origin; from agent_monitor.runtime.connector_service import record
