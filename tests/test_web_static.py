@@ -13,6 +13,50 @@ def app_source():
 
 
 class WebStaticTests(unittest.TestCase):
+    def test_reader_state_survives_explicit_asset_refresh(self):
+        script = r'''
+const assert = require('assert');
+const storage = new Map();
+let reloaded = false, restoredScroll;
+const summary = {tagName: 'SUMMARY', focus(options) {document.activeElement = this; this.focusOptions = options;}};
+const button = {tagName: 'BUTTON', id: '', dataset: {readerState: 'codex-account:fixture:start'}, focus(options) {document.activeElement = this; this.focusOptions = options;}};
+const detail = {tagName: 'DETAILS', id: '', open: true, dataset: {observationKey: 'machine-a'}, closest(selector) {return selector === 'details' ? this : null;}, querySelector(selector) {return selector === 'summary' ? summary : null;}};
+summary.closest = selector => selector === 'details' ? detail : null;
+const body = {querySelector() {return null;}};
+global.document = {
+  readyState: 'loading', activeElement: summary, body,
+  addEventListener() {}, getElementById() {return null;},
+  querySelector(selector) {return selector === 'meta[name="asset-version"]' ? null : null;},
+  querySelectorAll(selector) {
+    if (selector === 'details[open]') return detail.open ? [detail] : [];
+    if (selector === 'details') return [detail];
+    if (selector === '[data-reader-state]') return [button];
+    return [];
+  },
+};
+global.window = {
+  location: {origin: 'http://fixture.invalid', reload() {reloaded = true;}},
+  sessionStorage: {setItem(key, value) {storage.set(key, value);}, getItem(key) {return storage.get(key) || null;}, removeItem(key) {storage.delete(key);}},
+  scrollX: 13, scrollY: 987, scrollTo(options) {restoredScroll = options;},
+};
+require('./web/app.js')();
+window.AgentMonitor.reloadPreservingReaderState();
+assert.equal(reloaded, true);
+detail.open = false; document.activeElement = {};
+assert.equal(window.AgentMonitor.restoreReaderState(), true);
+assert.equal(detail.open, true);
+assert.deepEqual(summary.focusOptions, {preventScroll: true});
+assert.deepEqual(restoredScroll, {left: 13, top: 987, behavior: 'auto'});
+reloaded = false; detail.open = true; document.activeElement = button;
+window.AgentMonitor.reloadPreservingReaderState();
+detail.open = false; document.activeElement = {};
+assert.equal(window.AgentMonitor.restoreReaderState(), true);
+assert.equal(detail.open, true);
+assert.deepEqual(button.focusOptions, {preventScroll: true});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_restart_conflict_is_not_reported_as_syntax_error(self):
         script = r'''
 const fs=require('fs'), assert=require('assert');

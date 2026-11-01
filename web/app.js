@@ -344,9 +344,9 @@
 
   // Collection owns the shared status reading; shell owns server identity/lifetime.
   const collection = modules.collection({ platform, qs, qsa, params, getRange, api, bindShell, pageScope, watchPageData, GUIDE_ROUTES, integer, agentLabel, formatDate, escapeHtml, renderQuotaMachineRecords, renderQuotaSignedOut, onServerInstance: (id) => { if (!hubUrl()) pageServerInstance = id; } });
-  const { initCollection, renderSyncStatus, waitForSyncTerminal, snapshotFingerprint, refreshStatistics, renderCostDiagnostics, costDiagnosticsQuery } = collection;
+  const { initCollection: initCollectionPage, renderSyncStatus, waitForSyncTerminal, snapshotFingerprint, refreshStatistics, renderCostDiagnostics, costDiagnosticsQuery } = collection;
 
-  async function initGuide() {
+  async function initGuidePage() {
     // Fragments were the old public entry points. Replace, rather than push,
     // so Back does not get trapped on an alias; the query is retained verbatim.
     if (window.location.pathname === "/guide") {
@@ -373,7 +373,7 @@
   }
 
   const network = modules.network({ platform, qs, updateNavLinks, api, runtimeContext, withRefresh, formatDate, escapeHtml, onPageCleanup });
-  const { initNetwork } = network;
+  const { initNetwork: initNetworkPage } = network;
 
   function formatDate(iso) {
     const date = new Date(iso);
@@ -416,10 +416,10 @@
   }
 
   const overview = modules.overview({ platform, assetVersion, qs, qsa, params, getRange, api, runtimeContext, hubUrl, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal });
-  const { initOverview, renderOverview, renderRangeCost, showOverviewLoadError } = overview;
+  const { initOverview: initOverviewPage, renderOverview, renderRangeCost, showOverviewLoadError } = overview;
 
   const sessions = modules.sessions({ platform, qs, qsa, params, getRange, setParam, copyText, api, bindShell, moneyPrecise, integer, codexSessionAccountLabel, collectionUrl, renderSyncStatus, waitForSyncTerminal, refreshStatistics, formatDate, dayKey, timeOfDay, escapeHtml, pageScope, watchPageData, replaceCurrentUrl });
-  const { initSessions } = sessions;
+  const { initSessions: initSessionsPage } = sessions;
 
   function escapeHtml(value) {
     return String(value || "")
@@ -437,6 +437,97 @@
   // phone on the Tailnet that never went through `agent-monitor open`.
   let pageWebSignature = assetVersion || null;
   let pageServerInstance = null;
+  const READER_STATE_KEY = "agent-monitor:reader-state";
+
+  function readerStateKey(node) {
+    if (!node) return null;
+    const detail = node.closest?.("details");
+    if (node.tagName === "DETAILS" || node.tagName === "SUMMARY") {
+      const key = detail?.dataset?.observationKey || detail?.dataset?.machine || detail?.id
+        || `index:${qsa("details").indexOf(detail)}`;
+      return detail ? { kind: "details", key } : null;
+    }
+    if (node.id) return { kind: "element", key: node.id };
+    if (node.dataset?.readerState) return { kind: "element", key: node.dataset.readerState };
+    return null;
+  }
+
+  function findReaderStateNode(key) {
+    if (!key) return null;
+    if (key.kind === "element") {
+      return document.getElementById?.(key.key)
+        || qsa("[id]").find((node) => node.id === key.key)
+        || qsa("[data-reader-state]").find((node) => node.dataset.readerState === key.key)
+        || null;
+    }
+    if (key.key.startsWith?.("index:")) return qsa("details")[Number(key.key.slice(6))] || null;
+    return qsa("details").find((node) =>
+      node.id === key.key || node.dataset?.observationKey === key.key || node.dataset?.machine === key.key
+    ) || null;
+  }
+
+  function captureReaderState() {
+    return {
+      route: window.location.pathname + window.location.search,
+      detailCount: qsa("details").length,
+      scrollX: Number.isFinite(window.scrollX) ? window.scrollX : 0,
+      scrollY: Number.isFinite(window.scrollY) ? window.scrollY : 0,
+      openDetails: qsa("details[open]").map(readerStateKey).filter(Boolean),
+      focus: readerStateKey(document.activeElement),
+    };
+  }
+
+  function reloadPreservingReaderState() {
+    try {
+      window.sessionStorage?.setItem(READER_STATE_KEY, JSON.stringify(captureReaderState()));
+    } catch (_) {
+      /* Private browsing or a disabled storage area must not block reload. */
+    }
+    window.location.reload();
+  }
+
+  function restoreReaderState() {
+    let state;
+    try {
+      const raw = window.sessionStorage?.getItem(READER_STATE_KEY);
+      if (!raw) return false;
+      window.sessionStorage.removeItem(READER_STATE_KEY);
+      state = JSON.parse(raw);
+    } catch (_) {
+      return false;
+    }
+    const route = window.location.pathname + window.location.search;
+    if (state.route && state.route !== route) return false;
+    const details = qsa("details");
+    (state.openDetails || []).forEach((key) => {
+      if (key.key.startsWith?.("index:") && details.length !== state.detailCount) return;
+      const node = findReaderStateNode(key);
+      if (node) node.open = true;
+    });
+    const focus = findReaderStateNode(state.focus);
+    const focusTarget = focus?.tagName === "DETAILS" ? focus.querySelector?.("summary") : focus;
+    focusTarget?.focus?.({ preventScroll: true });
+    if (typeof window.scrollTo === "function") {
+      window.scrollTo({
+        left: Number.isFinite(state.scrollX) ? state.scrollX : 0,
+        top: Number.isFinite(state.scrollY) ? state.scrollY : 0,
+        behavior: "auto",
+      });
+    }
+    return true;
+  }
+
+  async function initWithReaderState(initializer) {
+    await initializer();
+    restoreReaderState();
+  }
+
+  async function initOverview() { return initWithReaderState(initOverviewPage); }
+  async function initCollection() { return initWithReaderState(initCollectionPage); }
+  async function initNetwork() { return initWithReaderState(initNetworkPage); }
+  async function initSessions() { return initWithReaderState(initSessionsPage); }
+  async function initGuide() { return initWithReaderState(initGuidePage); }
+
   async function pollFreshness() {
     try {
       const url = new URL("/api/health", window.location.origin);
@@ -447,7 +538,8 @@
       }
       const json = await res.json();
       if (pageWebSignature && json.web_signature && json.web_signature !== pageWebSignature) {
-        window.location.reload();
+        pageWebSignature = json.web_signature;
+        showStaleBanner(json.stale ? "server" : "assets");
         return;
       }
       pageWebSignature = json.web_signature || pageWebSignature;
@@ -464,21 +556,25 @@
     }
   }
 
-  function showStaleBanner() {
+  function showStaleBanner(kind = "server") {
     if (qs("#stale-banner")) {
       return;
     }
     const banner = document.createElement("div");
     banner.id = "stale-banner";
     banner.className = "stale-banner";
-    banner.innerHTML =
-      '<span>服务代码已更新，当前页面数据可能来自旧版本。</span>' +
-      '<button type="button" id="stale-restart">重启并刷新</button>' +
-      '<span class="stale-hint">客户端本机网页：<code>agent-monitor local restart</code>；Hub 或独立模式：<code>agent-monitor restart</code></span>';
+    banner.innerHTML = kind === "assets"
+      ? '<span>页面资源已更新，刷新后应用。</span>' +
+        '<button type="button" id="stale-reload">刷新页面</button>'
+      : '<span>服务代码已更新，当前页面数据可能来自旧版本。</span>' +
+        '<button type="button" id="stale-restart">重启并刷新</button>' +
+        '<span class="stale-hint">客户端本机网页：<code>agent-monitor local restart</code>；Hub 或独立模式：<code>agent-monitor restart</code></span>';
     document.body.insertAdjacentElement("afterbegin", banner);
-    const button = qs("#stale-restart", banner);
+    const button = qs(kind === "assets" ? "#stale-reload" : "#stale-restart", banner);
     if (button) {
-      button.addEventListener("click", () => restartAndReload(button));
+      button.addEventListener("click", () => kind === "assets"
+        ? reloadPreservingReaderState()
+        : restartAndReload(button));
     }
   }
 
@@ -500,7 +596,7 @@
       /* connection reset is expected: the server is re-exec'ing */
     }
     await waitForHealthy();
-    window.location.reload();
+    reloadPreservingReaderState();
   }
 
   async function waitForHealthy() {
@@ -824,6 +920,7 @@
     restartAndReload, updateAreaNavigation, copyGuideCode, showOverviewLoadError,
     renderRoute, renderOverview, collectionUrl, currentPageUrl, renderCostDiagnostics, costDiagnosticsQuery,
     updateSyncOverviewLink, renderRangeCost, endPageLifetime,
+    captureReaderState, restoreReaderState, reloadPreservingReaderState,
     costReading,
     costCoverageText,
     formatQuotaReset,

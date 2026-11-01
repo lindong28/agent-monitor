@@ -236,6 +236,7 @@ export function init({ autoLoad = true } = {}) {
     const variant = action === "start" ? " btn-primary" : action === "forget-login" ? " btn-danger" : "";
     const node = element("button", label, "btn" + variant);
     node.type = "button";
+    node.dataset.readerState = `codex-account:${account.id}:${action}`;
     node.disabled = account.busy && action !== "cancel";
     node.addEventListener("click", () => perform(action, account.id, node));
     return node;

@@ -168,6 +168,10 @@
     if (!table) {
       return;
     }
+    const viewport = {
+      left: Number.isFinite(window.scrollX) ? window.scrollX : 0,
+      top: Number.isFinite(window.scrollY) ? window.scrollY : 0,
+    };
     renderedQuotaRateLimits = rateLimits;
     bindQuotaExplorer();
     const rememberedExpanded = options.rememberedExpanded ?? Boolean(qs("#quota-past-accounts")
@@ -241,12 +245,15 @@
     });
     Array.from(table.querySelectorAll?.(".quota-observation-details") || []).forEach((node) => {
       if (node.tagName === "DETAILS") node.open = openObservations.has(node.dataset.observationKey);
-      if (focusedObservation && node.dataset.observationKey === focusedObservation) node.querySelector?.("summary")?.focus();
+      if (focusedObservation && node.dataset.observationKey === focusedObservation) {
+        node.querySelector?.("summary")?.focus({ preventScroll: true });
+      }
     });
     if (focusedRecovery && table.contains?.(focusedRecovery)) focusedRecovery.focus?.({preventScroll:true});
     renderQuotaSignedOut(rateLimits);
     updateSyncOverviewLink();
     document.dispatchEvent?.(new Event("agent-monitor:quota-rendered"));
+    window.scrollTo?.({ left: viewport.left, top: viewport.top, behavior: "auto" });
   }
 
   function codexPauseTarget(pauseId) {
@@ -1386,7 +1393,7 @@
       }
       details.appendChild(record);
     });
-    if (hadFocus) summary.focus();
+    if (hadFocus) summary.focus({ preventScroll: true });
   }
 
   function renderQuotaMachineNotice(rateLimits) {

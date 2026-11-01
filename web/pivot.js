@@ -113,6 +113,7 @@
       });
     });
     await load(false);
+    AgentMonitor.restoreReaderState?.();
   }
 
   function applyQuery() {
