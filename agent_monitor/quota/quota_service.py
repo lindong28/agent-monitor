@@ -22,7 +22,8 @@ from agent_monitor.paths import PROJECT_ROOT
 ROOT = PROJECT_ROOT
 
 
-def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=None):
+def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=None,
+                    managed_refresh=False):
     root = Path(root) if root is not None else ROOT
     from parsers import codex_profiles
     links = codex_profiles.session_links()
@@ -36,7 +37,8 @@ def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=Non
                                "query_state": "unknown", "refresh_error": "共享或跨账号会话历史的旧日志额度归属无法核实。"}
         if links.errors and ((result.get("codex") or {}).get("quota_observation") or {}).get("source") != "active_query":
             result["codex"] = dict(result.get("codex") or {}, query_state="unknown", refresh_error=links.errors[0]["error"])
-        managed = managed_codex_rate_limits(links)
+        managed = managed_codex_rate_limits(links, refresh=managed_refresh, root=root,
+                                            blocked_accounts=blocked_accounts)
         if managed:
             result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
         return result
@@ -62,13 +64,15 @@ def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=Non
             block["signed_out"] = False
             block["query_state"] = "unknown"
             result[provider] = block
-        managed = managed_codex_rate_limits(links)
+        managed = managed_codex_rate_limits(links, refresh=managed_refresh, root=root,
+                                            blocked_accounts=blocked_accounts)
         if managed:
             result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
         return result
 
 
-def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=None):
+def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=None,
+                managed_refresh=False):
     root = Path(root) if root is not None else ROOT
     from parsers import codex_profiles
     links = codex_profiles.session_links()
@@ -213,7 +217,9 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
         note = quota_applicability.Store(root / "state").get("claude", claude["account_id"])
         if note:
             claude["subscription_confirmation"] = note
-    managed = managed_codex_rate_limits(links)
+    managed = managed_codex_rate_limits(
+        links, refresh=refresh and managed_refresh, root=root, blocked_accounts=blocked_accounts
+    )
     if managed:
         result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
     if refresh and use_cache:
@@ -221,10 +227,27 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
     return result
 
 
-def managed_codex_rate_limits(session_links=None):
-    """Passive observations from account-bound homes; no login/refresh calls."""
+def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, blocked_accounts=None):
+    """Read managed profiles, optionally using the shared account quota reader.
+
+    Passive log observations remain the default.  Active reads are bounded,
+    serial, account-bound and use the same local Agent Monitor route bridge as
+    interactive account actions.
+    """
     from parsers import codex_profiles
+    from agent_monitor.accounts import codex_accounts
+    from agent_monitor.accounts.upstream_controls import Controls
     links = session_links if session_links is not None else codex_profiles.session_links()
+    root = Path(root) if root is not None else None
+    cached = {}
+    if root is not None:
+        cached_codex = read_cache(root / "state" / "quota_snapshot.json").get("codex") or {}
+        for block in (cached_codex.get("managed_accounts", []) or []):
+            if isinstance(block, dict) and isinstance(block.get("account_profile"), str):
+                cached[block["account_profile"]] = block
+    pause = None
+    if refresh and root is not None:
+        pause = Controls(root / "state/upstream_controls").read("codex").get("pause")
     result = []
     for profile in codex_profiles.discover():
         if profile.account is None:
@@ -235,8 +258,42 @@ def managed_codex_rate_limits(session_links=None):
                   if not codex_profiles.shared_source(profile.home / child)]
         value = max((v for v in values if v is not None), key=lambda v: v.updated_at, default=None)
         block = rate_limit_block(value or RateLimits(None, None, None, None), account)
+        cached_block = cached.get(profile.account["name"])
+        same_identity = cached_block and accounts.quota_identity(
+            "codex", cached_block.get("account_id"), cached_block.get("account_label")
+        ) == accounts.quota_identity("codex", account.account_id, account.label)
+        if same_identity and quota_time(cached_block, "codex") > quota_time(block, "codex"):
+            block = dict(cached_block)
         block.update(account_profile=profile.account["name"], signed_out=False, query_state="passive")
-        if links.errors:
+        exclusions = (blocked_accounts or {}).get("codex", [])
+        blocked = "*" in exclusions or quota_refresh.account_fingerprint("codex", account) in exclusions
+        if refresh and blocked:
+            block.update(query_state="blocked", refresh_error="本轮同服务账号已有失败或结果未知；本机未再次查询。",
+                         refresh_failure=None, refresh_pause=None)
+        elif refresh and pause:
+            block.update(query_state="paused", refresh_pause={key: pause[key] for key in ("id", "at", "probe_attempt") if key in pause})
+            if not block.get("refresh_error"):
+                from agent_monitor.accounts import upstream_controls
+                block["refresh_error"] = "本机已暂停该服务的自动请求；" + upstream_controls.pause_summary(pause)
+        elif refresh:
+            try:
+                reading = codex_accounts.read_profile_quota(profile.home, account.account_id)
+                active = RateLimits(reading["five_hour_used_pct"], reading["five_hour_resets_at"],
+                                    reading["seven_day_used_pct"], reading["seven_day_resets_at"],
+                                    updated_at=reading["observed_at"],
+                                    quota_observation={"source": "active_query", "observed_at": reading["observed_at"]})
+                block = rate_limit_block(active, account)
+                block.update(account_profile=profile.account["name"], signed_out=False,
+                            query_state="succeeded", refresh_error=None, refresh_failure=None)
+            except Exception as exc:
+                # Keep the newest passive or prior active reading while exposing
+                # this attempt's bounded failure to the dashboard.
+                if isinstance(exc, codex_accounts.ActionError):
+                    detail = str(exc)
+                else:
+                    detail = "管理账号配额查询失败：" + type(exc).__name__
+                block.update(query_state="failed", refresh_error=detail, refresh_failure=None, refresh_pause=None)
+        if links.errors and (block.get("quota_observation") or {}).get("source") != "active_query":
             block.update(refresh_error=links.errors[0]["error"], query_state="unknown")
         result.append(block)
     return result
@@ -273,6 +330,13 @@ def save_cache(cache_path, result, *, session_links=None):
                     "query_state": block.get("query_state"),
                     "subscription_confirmation": block.get("subscription_confirmation"),
                 }
+            if provider == "codex" and block is not None and "managed_accounts" in block:
+                managed = _merge_managed_accounts(
+                    (old or {}).get("managed_accounts"), block.get("managed_accounts")
+                )
+                target = dict(previous.get(provider) or {})
+                target["managed_accounts"] = managed
+                previous[provider] = target
         staging = cache_path.with_name(cache_path.name + "." + uuid.uuid4().hex)
         try:
             with staging.open("x") as handle:
@@ -283,6 +347,30 @@ def save_cache(cache_path, result, *, session_links=None):
             staging.replace(cache_path)
         finally:
             staging.unlink(missing_ok=True)
+
+
+def _merge_managed_accounts(old_rows, new_rows):
+    """Merge managed rows without losing nested reads or crossing identities."""
+    if not isinstance(new_rows, list):
+        return old_rows if isinstance(old_rows, list) else []
+    merged = {}
+    for row in old_rows if isinstance(old_rows, list) else []:
+        if isinstance(row, dict) and isinstance(row.get("account_profile"), str):
+            merged[row["account_profile"]] = row
+    for row in new_rows:
+        if not isinstance(row, dict) or not isinstance(row.get("account_profile"), str):
+            continue
+        profile = row["account_profile"]
+        previous = merged.get(profile)
+        if previous is None:
+            merged[profile] = row
+            continue
+        same_identity = accounts.quota_identity(
+            "codex", previous.get("account_id"), previous.get("account_label")
+        ) == accounts.quota_identity("codex", row.get("account_id"), row.get("account_label"))
+        if not same_identity or quota_time(row, "codex") >= quota_time(previous, "codex"):
+            merged[profile] = row
+    return list(merged.values())
 
 
 def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None):

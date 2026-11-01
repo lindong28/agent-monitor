@@ -153,6 +153,20 @@ class HubTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         hub.configuration(path)
 
+    def test_managed_quota_refresh_is_explicit_and_uses_quota_interval(self):
+        path = self.root / "hub.json"
+        path.write_text(json.dumps({**hub.configuration(), "managed_quota_auto_refresh": True}))
+        self.assertTrue(hub.hub_config.configuration(path)["managed_quota_auto_refresh"])
+        with mock.patch.object(hub.hub_config, "CONFIG_PATH", path), mock.patch.object(hub, "ROOT", self.root):
+            self.assertTrue(hub.hub_config.managed_quota_auto_refresh())
+            self.assertTrue(hub.quota_due(now=3600))
+            (self.root / "state").mkdir(exist_ok=True)
+            (self.root / "state/quota-collection-at").write_text("3599")
+            self.assertFalse(hub.quota_due(now=3600))
+        path.write_text(json.dumps({**hub.configuration(), "managed_quota_auto_refresh": "yes"}))
+        with self.assertRaises(ValueError):
+            hub.hub_config.configuration(path)
+
     def test_offline_source_does_not_serialize_other_machine_exports(self):
         machines = tuple(machine_config.Machine(n, n, n == "node-d")
                          for n in ("node-b", "node-c", "node-d"))

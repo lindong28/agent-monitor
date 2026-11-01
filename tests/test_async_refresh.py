@@ -214,6 +214,21 @@ class CollectionComponentTests(unittest.TestCase):
         self.assertFalse(second.snapshot()["syncing"])
         self.assertEqual(second.snapshot()["refresh_requested"], 0)
 
+    def test_standalone_quota_round_uses_shared_due_gate(self):
+        manager = mock.Mock()
+        config = SimpleNamespace(machines=[Machine("fixture", "fixture", True)])
+        for due in (False, True):
+            coordinator = collection.CollectionCoordinator(manager, mock.Mock(), "fixture")
+            with self.subTest(due=due), \
+                 mock.patch.object(coordinator, "automatic_due", return_value=True), \
+                 mock.patch.object(collection.hub, "enabled", return_value=False), \
+                 mock.patch.object(collection.runtime_hub, "quota_due", return_value=due), \
+                 mock.patch.object(collection.sync, "load_machine_config", return_value=config), \
+                 mock.patch.object(collection.threading, "Thread") as thread:
+                self.assertTrue(coordinator.request({}))
+                self.assertEqual(coordinator.snapshot()["round_quota_refresh"], due)
+                thread.return_value.start.assert_called_once_with()
+
     def test_query_view_and_scheduler_share_coordinator_lifetime(self):
         manager = mock.Mock()
         coordinator = collection.CollectionCoordinator(manager, mock.Mock(), "fixture")

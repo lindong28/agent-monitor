@@ -183,6 +183,108 @@ class ManagedCodexTests(unittest.TestCase):
         self.assertEqual({r["account_profile"] for r in rows}, {"alpha", "beta"})
         self.assertEqual({r["plan_verification"] for r in rows}, {"unverified"})
 
+    def test_opt_in_active_refresh_reuses_account_bound_reader(self):
+        self.session(self.profile("alpha"), "alpha", 10, 21)
+        calls = []
+        reading = {"observed_at": "2026-11-01T00:00:00Z", "five_hour_used_pct": 34,
+                   "five_hour_resets_at": 1900000000, "seven_day_used_pct": 12,
+                   "seven_day_resets_at": 1901000000}
+        with mock.patch("agent_monitor.accounts.codex_accounts.read_profile_quota",
+                        side_effect=lambda home, account_id: calls.append((home, account_id)) or reading):
+            blocks = quota_service.managed_codex_rate_limits(refresh=True, root=self.root)
+        self.assertEqual(calls, [(self.registry / "alpha" / "codex", "shared-workspace")])
+        self.assertEqual(blocks[0]["five_hour_pct"], 34)
+        self.assertEqual(blocks[0]["seven_day_pct"], 12)
+        self.assertEqual(blocks[0]["quota_observation"]["source"], "active_query")
+
+    def test_hub_gui_refresh_uses_same_opt_in_managed_reader(self):
+        self.session(self.profile("alpha"), "alpha", 10, 21)
+        reading = {"observed_at": "2026-11-01T00:00:00Z", "five_hour_used_pct": 44,
+                   "five_hour_resets_at": 1900000000, "seven_day_used_pct": 19,
+                   "seven_day_resets_at": 1901000000}
+        native = {"claude": {"account_id": None}, "codex": {"account_id": "native"}}
+        with mock.patch("agent_monitor.accounts.codex_accounts.read_profile_quota", return_value=reading), \
+             mock.patch.object(quota_service, "managed_codex_rate_limits", wraps=quota_service.managed_codex_rate_limits) as reader:
+            result = quota_service.gui_rate_limits(
+                requester=lambda **kwargs: native,
+                request_error=RuntimeError,
+                root=self.root,
+                managed_refresh=True,
+            )
+        self.assertEqual(result["codex"]["managed_accounts"][0]["five_hour_pct"], 44)
+        self.assertEqual(reader.call_args.kwargs["refresh"], True)
+
+    def test_active_managed_reading_survives_unrelated_session_link_error(self):
+        self.session(self.profile("alpha"), "alpha", 10, 21)
+        reading = {"observed_at": "2026-11-01T00:00:00Z", "five_hour_used_pct": 47,
+                   "five_hour_resets_at": 1900000000, "seven_day_used_pct": 18,
+                   "seven_day_resets_at": 1901000000}
+        links = codex_profiles.SessionLinks(errors=({"error": "session link fixture error"},))
+        with mock.patch("agent_monitor.accounts.codex_accounts.read_profile_quota", return_value=reading):
+            block = quota_service.managed_codex_rate_limits(links, refresh=True, root=self.root)[0]
+        self.assertEqual(block["query_state"], "succeeded")
+        self.assertIsNone(block["refresh_error"])
+
+    def test_managed_refresh_honors_shared_blocked_accounts(self):
+        self.session(self.profile("alpha"), "alpha", 10, 21)
+        cache = self.root / "state/quota_snapshot.json"
+        cache.parent.mkdir()
+        cache.write_text(json.dumps({"codex": {"managed_accounts": [{
+            "account_profile": "alpha", "account_id": "shared-workspace", "account_label": "alpha@example.test",
+            "updated_at": "2099-01-01T00:00:00Z", "refresh_pause": {"id": "old-pause", "at": "2099-01-01T00:00:00Z"},
+            "five_hour_pct": 4
+        }]}}))
+        with mock.patch("agent_monitor.accounts.codex_accounts.read_profile_quota",
+                        side_effect=AssertionError("blocked profile must not query")):
+            block = quota_service.managed_codex_rate_limits(
+                refresh=True, root=self.root, blocked_accounts={"codex": ["*"]}
+            )[0]
+        self.assertEqual(block["query_state"], "blocked")
+        self.assertIn("未再次查询", block["refresh_error"])
+        self.assertIsNone(block["refresh_pause"])
+
+    def test_hub_gui_refresh_honors_shared_blocked_accounts(self):
+        self.session(self.profile("alpha"), "alpha", 10, 21)
+        with mock.patch("agent_monitor.accounts.codex_accounts.read_profile_quota",
+                        side_effect=AssertionError("blocked profile must not query")):
+            result = quota_service.gui_rate_limits(
+                requester=lambda **kwargs: {"claude": {}, "codex": {}},
+                request_error=RuntimeError,
+                root=self.root,
+                managed_refresh=True,
+                blocked_accounts={"codex": ["*"]},
+            )
+        block = result["codex"]["managed_accounts"][0]
+        self.assertEqual(block["query_state"], "blocked")
+
+    def test_managed_cache_does_not_cross_profile_identity_switch(self):
+        home = self.profile("alpha")
+        (home.parent / "profile.json").write_text(json.dumps({"schema_version": 1, "name": "alpha",
+            "identity": {"account_id": "new-workspace", "email": "new@example.test", "subject": "alpha"}}))
+        cache = self.root / "state/quota_snapshot.json"
+        cache.parent.mkdir()
+        cache.write_text(json.dumps({"codex": {"managed_accounts": [{
+            "account_profile": "alpha", "account_id": "old-workspace", "account_label": "old@example.test",
+            "updated_at": "2099-01-01T00:00:00Z", "five_hour_pct": 99
+        }]}}))
+        block = quota_service.managed_codex_rate_limits(root=self.root)[0]
+        self.assertEqual(block["account_id"], "new-workspace")
+        self.assertEqual(block["account_label"], "new@example.test")
+        self.assertIsNone(block["five_hour_pct"])
+
+    def test_managed_cache_merge_preserves_nested_reading_when_native_is_older(self):
+        path = self.root / "state/quota_snapshot.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps({"codex": {"account_id": "native", "updated_at": "2099-01-01T00:00:00Z",
+            "managed_accounts": [{"account_profile": "alpha", "account_id": "old", "account_label": "old@example.test",
+                                  "updated_at": "2026-01-01T00:00:00Z", "five_hour_pct": 1}]}}))
+        quota_service.save_cache(path, {"codex": {"account_id": "native", "updated_at": "2026-01-01T00:00:00Z",
+            "refresh_error": None,
+            "managed_accounts": [{"account_profile": "alpha", "account_id": "old", "account_label": "old@example.test",
+                                  "updated_at": "2098-01-01T00:00:00Z", "five_hour_pct": 88}]}})
+        stored = quota_service.read_cache(path)["codex"]["managed_accounts"]
+        self.assertEqual(stored[0]["five_hour_pct"], 88)
+
     def test_exporter_includes_profiles_without_refreshing_them(self):
         self.session(self.profile("alpha"), "alpha", 10, 21)
         with mock.patch("agent_monitor.hub_config.enabled", return_value=False), mock.patch.object(exporter, "ROOT", self.root),\

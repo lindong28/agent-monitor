@@ -14,8 +14,11 @@ def configuration(path=None):
     data = json.loads(Path(path or CONFIG_PATH).read_text())
     fields = {"schema_version", "hub", "url", "port", "sync_interval_seconds",
               "quota_interval_seconds", "machines"}
-    if not isinstance(data, dict) or set(data) != fields or data["schema_version"] != 1:
+    optional = {"managed_quota_auto_refresh"}
+    if not isinstance(data, dict) or not set(data) <= fields | optional or not fields <= set(data) or data["schema_version"] != 1:
         raise ValueError("unsupported hub configuration")
+    if "managed_quota_auto_refresh" in data and type(data["managed_quota_auto_refresh"]) is not bool:
+        raise ValueError("managed_quota_auto_refresh must be a boolean")
     names = data["machines"]
     if not isinstance(names, list) or not names or any(
         not isinstance(n, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", n) for n in names
@@ -56,3 +59,11 @@ def origin():
 
 def interval():
     return configuration()["sync_interval_seconds"] if enabled() else 600
+
+
+def quota_interval():
+    return configuration()["quota_interval_seconds"]
+
+
+def managed_quota_auto_refresh():
+    return configuration().get("managed_quota_auto_refresh", False)

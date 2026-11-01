@@ -503,6 +503,30 @@ def quota_reading(result, account_id):
     return reading
 
 
+def read_profile_quota(home, account_id, *, timeout=20, rpc_factory=Rpc):
+    """Read one managed Codex profile through the local Agent Monitor bridge.
+
+    This is the common low-level reader for scheduled managed-profile reads and
+    the interactive account action.  It deliberately does not send a turn,
+    create a Manager operation, or choose another machine/route.
+    """
+    if not isinstance(account_id, str) or not account_id:
+        raise ActionError("账号记录缺少可核验的工作区标识。", 409, "missingAccountId")
+    cancelled = threading.Event()
+    profile_lock = None
+    rpc = None
+    try:
+        profile_lock = lock_file(Path(home).parent / ".lock")
+        rpc = rpc_factory(Path(home), cancelled)
+        rpc.initialize()
+        return quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + timeout), account_id)
+    finally:
+        if rpc is not None:
+            rpc.close()
+        if profile_lock is not None:
+            profile_lock.close()
+
+
 def retain_quota(record):
     readings = [(record.get(key) or {}).get(phase)
                 for key in ("operation", "batch_result") for phase in ("after", "before")]

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from agent_monitor import diagnostics
 from agent_monitor.snapshots import generation
 from agent_monitor import hub_config as hub
+from agent_monitor.runtime import hub as runtime_hub
 import agent_monitor.views.query_view as query_view
 from agent_monitor.snapshots import sync
 from agent_monitor.snapshots import sync_process
@@ -229,7 +230,7 @@ class CollectionCoordinator:
                 round_machines=round_machines,
                 last_completed_round_machines=(),
                 round_refresh=self._state["refresh_requested"],
-                round_quota_refresh=force or not hub.enabled(),
+                round_quota_refresh=force or (not hub.enabled() and runtime_hub.quota_due()),
                 phase="statistics",
                 pending_machines=round_machines,
                 statistics_pending=round_machines,

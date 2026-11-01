@@ -55,6 +55,24 @@ def interval():
     return hub_config.interval()
 
 
+def quota_due(*, root=None, now=None):
+    root = Path(root) if root is not None else ROOT
+    stamp = root / "state" / "quota-collection-at"
+    try:
+        last = float(stamp.read_text())
+    except (FileNotFoundError, ValueError):
+        last = 0
+    current = time.time() if now is None else now
+    return current - last >= hub_config.quota_interval()
+
+
+def mark_quota_collected(*, root=None, now=None):
+    root = Path(root) if root is not None else ROOT
+    stamp = root / "state" / "quota-collection-at"
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.write_text(str(time.time() if now is None else now))
+
+
 class QuotaRequestError(RuntimeError):
     pass
 
@@ -186,7 +204,7 @@ def collect():
         last = float(stamp.read_text())
     except (FileNotFoundError, ValueError):
         last = 0
-    quota_due = time.time() - last >= configuration()["quota_interval_seconds"]
+    quota_due_now = time.time() - last >= configuration()["quota_interval_seconds"]
     stopping = threading.Event()
     queried = threading.Event()
     failures = []
@@ -200,6 +218,7 @@ def collect():
         exclusions = request["blocked_accounts"] if request else {}
         # Provider refresh has its own deadlines and persists its observed state.
         limits = quota_service.rate_limits(refresh=True, use_cache=enabled(), root=ROOT,
+                                           managed_refresh=hub_config.managed_quota_auto_refresh(),
                                            **({"blocked_accounts": exclusions} if exclusions else {}))
         if nonce is not None:
             _write_quota_message(ROOT / "state" / ("quota-refresh-receipt" + version + ".json"),
@@ -210,7 +229,7 @@ def collect():
     def serve_quota():
         try:
             request = _pending_quota_request()
-            if quota_due or request is not None:
+            if quota_due_now or request is not None:
                 query(request)
             while not stopping.wait(QUOTA_POLL_INTERVAL):
                 request = _pending_quota_request()

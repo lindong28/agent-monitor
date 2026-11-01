@@ -339,13 +339,19 @@ def _gui_rate_limits(*, blocked_accounts=None):
     return quota_service.gui_rate_limits(
         requester=hub.request_quota_refresh, request_error=hub.QuotaRequestError,
         blocked_accounts=blocked_accounts, root=ROOT,
+        managed_refresh=hub_config.managed_quota_auto_refresh(),
     )
 
 
 def _rate_limits(refresh=False, *, blocked_accounts=None):
-    return quota_service.rate_limits(
+    limits = quota_service.rate_limits(
         refresh, blocked_accounts=blocked_accounts, use_cache=hub_config.enabled(), root=ROOT,
+        managed_refresh=hub_config.managed_quota_auto_refresh(),
     )
+    if refresh:
+        from agent_monitor.runtime import hub
+        hub.mark_quota_collected(root=ROOT)
+    return limits
 
 
 def recover_codex_quota(expected_label, pause_id, *, expected_id=None):
