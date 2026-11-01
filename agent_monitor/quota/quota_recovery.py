@@ -68,6 +68,32 @@ def read_status(machine):
     return value
 
 
+class EgressPreviewError(ValueError):
+    """A target machine did not return a bounded route-bridge preview."""
+
+
+def preview_egress(machine):
+    """Preview the provider egress on the machine that owns the account."""
+    from agent_monitor.network import account_egress
+    if machine.is_self:
+        return account_egress.preview()
+    from agent_monitor.snapshots import sync
+    try:
+        result = subprocess.run(
+            [*sync._SSH_PREFIX, machine.ssh_host,
+             "~/.local/bin/agent-monitor quota-recover --egress-preview"],
+            capture_output=True, text=True, timeout=25, check=True,
+        )
+        value = json.loads(result.stdout)
+    except (subprocess.SubprocessError, OSError, ValueError, TypeError) as exc:
+        raise EgressPreviewError("目标机器未返回可核验的路由桥出口预览。") from exc
+    if (not isinstance(value, dict) or not isinstance(value.get("checked_host"), str)
+            or not value["checked_host"] or not isinstance(value.get("targets"), list)
+            or len(value["targets"]) != len(account_egress.TARGETS)):
+        raise EgressPreviewError("目标机器未返回可核验的路由桥出口预览。")
+    return value
+
+
 def safe_network(value):
     """Keep bounded bridge facts, excluding capabilities and full target URLs."""
     result = {"policy": "chromium-system", "coverage": "unavailable", "events": []}
@@ -167,9 +193,14 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--request", help="JSON: machine, account_id, account_label, pause_id; authorizes one probe")
     mode.add_argument("--status", action="store_true", help="Read local state without querying a provider")
+    mode.add_argument("--egress-preview", action="store_true", help="Preview this machine's configured route bridge")
     args = parser.parse_args()
     try:
-        result = local_status() if args.status else local_recovery(json.loads(args.request))
+        if args.egress_preview:
+            from agent_monitor.network import account_egress
+            result = account_egress.preview()
+        else:
+            result = local_status() if args.status else local_recovery(json.loads(args.request))
     except (ValueError, RuntimeError, OSError) as exc:
         result = {"ok": False, "error": "恢复未开始或未完成，请核对请求与本机部署。", "failure": diagnostics.failure_details(exc)}
     print(json.dumps(result, ensure_ascii=False))

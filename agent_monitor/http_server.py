@@ -572,7 +572,21 @@ class Handler(BaseHTTPRequestHandler):
                     if (not isinstance(scope, list) or not scope or
                             any(not isinstance(item, str) or not item for item in scope)):
                         raise codex_accounts.ActionError("预览确认范围无效。")
-                    result = account_egress.preview()
+                    if approval_action == "quota-recovery":
+                        approval_machine = payload.get("approval_machine")
+                        if (not isinstance(approval_machine, str) or
+                                approval_machine != scope[0]):
+                            raise codex_accounts.ActionError("预览目标机器无效。")
+                        machine = sync.load_machine_config().by_name.get(approval_machine)
+                        if machine is None:
+                            raise codex_accounts.ActionError("预览目标机器未配置。")
+                        from agent_monitor.quota import quota_recovery
+                        try:
+                            result = quota_recovery.preview_egress(machine)
+                        except quota_recovery.EgressPreviewError as exc:
+                            raise codex_accounts.ActionError(str(exc), 503) from exc
+                    else:
+                        result = account_egress.preview()
                     result["confirmation"] = UPSTREAM_APPROVALS.issue(approval_action, scope, expected)
                     result["approval_action"] = approval_action
                     result["approval_scope"] = scope

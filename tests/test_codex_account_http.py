@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from agent_monitor.accounts import codex_accounts
@@ -87,13 +88,30 @@ class AccountHttpTests(unittest.TestCase):
             discover.assert_not_called(); start.assert_not_called()
 
     def test_local_upstream_preview_issues_single_use_approval_without_device_route(self):
-        with mock.patch.object(server.account_egress, 'preview', return_value={'targets': []}) as preview:
+        machine = SimpleNamespace(name='fixture', ssh_host='fixture', is_self=True)
+        config = SimpleNamespace(by_name={'fixture': machine})
+        with mock.patch.object(server.sync, 'load_machine_config', return_value=config), \
+                mock.patch('agent_monitor.quota.quota_recovery.preview_egress', return_value={'targets': [], 'checked_host': 'fixture'}) as preview:
             status, value = self.request('/egress-preview', {
                 'approval_action': 'quota-recovery', 'approval_scope': ['fixture', 'account'],
-                'approval_expected': 'pause-id'})
+                'approval_expected': 'pause-id', 'approval_machine': 'fixture'})
             self.assertEqual(status, 200)
             self.assertTrue(value['confirmation'])
-            preview.assert_called_once_with()
+            preview.assert_called_once_with(machine)
+
+    def test_remote_quota_preview_uses_owning_machine_bridge(self):
+        machine = SimpleNamespace(name='macbook', ssh_host='macbook', is_self=False)
+        config = SimpleNamespace(by_name={'macbook': machine})
+        target_preview = {'targets': [{}, {}], 'checked_host': 'macbook'}
+        with mock.patch.object(server.sync, 'load_machine_config', return_value=config), \
+                mock.patch('agent_monitor.quota.quota_recovery.preview_egress', return_value=target_preview) as preview, \
+                mock.patch.object(server.account_egress, 'preview', side_effect=AssertionError('Hub egress must not be used')):
+            status, value = self.request('/egress-preview', {
+                'approval_action': 'quota-recovery', 'approval_scope': ['macbook', 'account'],
+                'approval_expected': 'pause-id', 'approval_machine': 'macbook'})
+        self.assertEqual(status, 200)
+        self.assertTrue(value['confirmation'])
+        preview.assert_called_once_with(machine)
 
     def test_unexpected_failure_can_be_found_by_http_diagnostic_id(self):
         with tempfile.TemporaryDirectory() as directory:

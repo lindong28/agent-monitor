@@ -44,6 +44,18 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual(saved['detail'], detail)
                 self.assertEqual(diagnostics.safe_failure(saved), saved)
 
+    def test_remote_egress_preview_runs_installed_target_bridge(self):
+        machine = SimpleNamespace(name="macbook", ssh_host="macbook", is_self=False)
+        payload = {"checked_host": "macbook", "targets": [{}, {}]}
+        completed = subprocess.CompletedProcess(
+            ["ssh"], 0, stdout=json.dumps(payload), stderr="",
+        )
+        with mock.patch.object(quota_recovery.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(quota_recovery.preview_egress(machine), payload)
+        command = run.call_args.args[0]
+        self.assertEqual(command[-2:], ["macbook", "~/.local/bin/agent-monitor quota-recover --egress-preview"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 25)
+
     def test_url_credentials_are_removed_without_losing_endpoint_context(self):
         for url, secrets in (
                 ('https://fixture-user:fixture-pass@example.test/path?mode=quota', ['fixture-user', 'fixture-pass']),

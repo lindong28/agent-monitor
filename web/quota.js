@@ -639,7 +639,7 @@
       try {
         const approval = await window.AgentMonitor.previewUpstream?.(
           [{email: request.account_label, account_id: request.account_id}],
-          {approval_action: "quota-recovery", approval_scope: [request.machine, request.account_id], approval_expected: request.pause_id},
+          {approval_action: "quota-recovery", approval_scope: [request.machine, request.account_id], approval_expected: request.pause_id, approval_machine: request.machine},
           controller.signal);
         if (!approval) throw new Error("已取消检查；未发出上游请求。");
         attempted = true;
