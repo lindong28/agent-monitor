@@ -201,10 +201,12 @@
                 </div>
                 <p class="quota-scope">这里的选择独立于上方配额筛选。从 100 条日常短消息中为每个选中账号独立随机抽取并发送一条，可能重复；会使用账号额度。抽取的内容可在账号与操作详情中查看。</p>
                 <div class="codex-account-controls">
+                  <button id="codex-refresh-all" type="button" class="btn" disabled>刷新全部账号配额</button>
                   <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
                   <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
                   <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
                 </div>
+                <p class="quota-scope">“刷新全部账号配额”只查询每个账号的当前配额，不发送消息；账号会通过所属机器的 Agent Monitor 路由桥逐个执行。</p>
                 <p id="codex-batch-observation" class="quota-scope" hidden></p>
                 <p id="codex-batch-blocked" class="quota-scope" role="status" hidden></p>
                 <div id="codex-upstream-pause" class="quota-scope" hidden>

@@ -44,6 +44,7 @@ export function init({ autoLoad = true } = {}) {
   const batchRetry = root.querySelector("#codex-batch-retry");
   const batchStatus = root.querySelector("#codex-batch-status");
   const batchHelp = root.querySelector("#codex-batch-help");
+  const refreshAllButton = root.querySelector("#codex-refresh-all");
   const egressPreview = root.querySelector("#codex-egress-preview");
   const blockedReason = root.querySelector("#codex-batch-blocked");
   const pauseControls = {
@@ -61,6 +62,7 @@ export function init({ autoLoad = true } = {}) {
   let unavailable = [];
   let selectedIds = null;
   let lastBatchStatus = "";
+  let refreshingAll = false;
   const controller = new AbortController();
   let deviceConnection = null;
   const deviceStatus = root.querySelector("#codex-device-status");
@@ -187,7 +189,16 @@ export function init({ autoLoad = true } = {}) {
       window.AgentMonitor.updateCodexQuotaReadings?.(accounts);
       notice.textContent = "";
       render();
+      updateRefreshAllButton();
       lastBatchStatus = batchStatus.textContent;
+  }
+
+  function updateRefreshAllButton() {
+    if (!refreshAllButton) return;
+    const targets = accounts.filter(account => account.eligible !== false);
+    refreshAllButton.disabled = refreshingAll || !targets.length || accounts.some(account => account.busy);
+    refreshAllButton.textContent = refreshingAll ? "正在刷新全部配额…"
+      : `刷新全部账号配额${targets.length ? `（${targets.length}）` : ""}`;
   }
 
   async function load() {
@@ -210,6 +221,34 @@ export function init({ autoLoad = true } = {}) {
       loading = false;
       if (reloadPending) { reloadPending = false; load(); }
       else schedule();
+    }
+  }
+
+  async function refreshAllQuotas() {
+    if (!refreshAllButton || refreshingAll) return;
+    const targets = accounts.filter(account => account.eligible !== false);
+    if (!targets.length || accounts.some(account => account.busy)) return;
+    refreshingAll = true;
+    updateRefreshAllButton();
+    try {
+      const connection = await actions.requireDevice();
+      const approval = await previewEgress(request, targets, controller.signal, {
+        connection, profile_ids: targets.map(account => account.id), approval_action: "refresh-all",
+        approval_expected: null,
+      });
+      if (!approval) return;
+      notice.textContent = "正在提交全部账号配额查询…";
+      await request("refresh-all", {
+        profile_ids: targets.map(account => account.id), connection, confirmation: approval,
+        approval_expected: null,
+      });
+      await load();
+      if (current()) notice.textContent = "已提交全部账号配额查询；账号会逐个显示结果。";
+    } catch (error) {
+      if (current() && error.name !== "AbortError") notice.textContent = error.message;
+    } finally {
+      refreshingAll = false;
+      updateRefreshAllButton();
     }
   }
 
@@ -324,9 +363,11 @@ export function init({ autoLoad = true } = {}) {
     selectedIds.clear();
     render();
   });
+  refreshAllButton?.addEventListener("click", refreshAllQuotas);
 
   function render() {
     renderBatch();
+    updateRefreshAllButton();
     const warnings = root.querySelector("#codex-account-unavailable");
     if (warnings) {
       warnings.replaceChildren(...unavailable.map((account) => element("p", `未纳入发送：${account.account_id}。${account.detail}`)));

@@ -116,6 +116,10 @@ class DiscoveryTests(unittest.TestCase):
         path = self.manager.directory(account["id"]) / "calls.jsonl"
         return sum(json.loads(line).get("method") == "turn/start" for line in path.read_text().splitlines()) if path.exists() else 0
 
+    def methods(self, account):
+        path = self.manager.directory(account["id"]) / "calls.jsonl"
+        return [json.loads(line).get("method") for line in path.read_text().splitlines()] if path.exists() else []
+
     def test_history_and_current_need_zero_manual_additions_and_send_once(self):
         self.source("shared", "one@example.com")
         self.source("shared", "ONE@example.com", "second-machine")
@@ -167,6 +171,34 @@ class DiscoveryTests(unittest.TestCase):
         self.wait()
         self.assertEqual(self.calls(first), 2)
         self.assertEqual(self.calls(second), 1)
+
+    def test_refresh_all_rejects_stale_or_partial_scope_without_provider_call(self):
+        self.source("one-workspace", "one@example.com")
+        self.source("two-workspace", "two@example.com")
+        accounts = self.request()[1]["accounts"]
+        for account in accounts:
+            seed_auth(self.manager, account)
+        ids = [account["id"] for account in accounts]
+        payload = {"profile_ids": ids[:1], "connection": self.connection, "approval_expected": None,
+                   "confirmation": self.route.issue(ids[:1], None, "refresh-all")}
+        status, _ = self.request("/refresh-all", payload)
+        self.assertEqual(status, 409)
+        self.assertTrue(all(not self.methods(account) for account in accounts))
+
+    def test_refresh_all_http_action_consumes_route_and_dispatches_current_scope(self):
+        self.source("one-workspace", "one@example.com")
+        self.source("two-workspace", "two@example.com")
+        status, data = self.request()
+        self.assertEqual(status, 200)
+        ids = [account["id"] for account in data["accounts"]]
+        expected = {"accounts": [], "message": "fixture"}
+        with mock.patch.object(self.manager, "start_refresh_batch", return_value=expected) as start:
+            payload = {"profile_ids": ids, "connection": self.connection, "approval_expected": None,
+                       "confirmation": self.route.issue(ids, None, "refresh-all")}
+            status, result = self.request("/refresh-all", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(result, {**expected, "unavailable_accounts": []})
+        start.assert_called_once_with(sorted(ids), network_route=self.route)
 
     def test_removal_excludes_next_round_and_retry_but_keeps_results(self):
         self.source("live", "live@example.com")

@@ -6,7 +6,7 @@ from agent_monitor.network import network_policy
 
 logger = logging.getLogger(__name__)
 ACCOUNT_ACTIONS = frozenset(('egress-preview', 'network-status', 'add', 'batch-start',
-                            'batch-retry', 'refresh', 'login', 'resume', 'cancel',
+                            'batch-retry', 'refresh', 'refresh-all', 'login', 'resume', 'cancel',
                             'forget-login', 'release-rate-limit'))
 POST_PATHS = frozenset('/api/codex-accounts/' + name for name in ACCOUNT_ACTIONS) | {
     '/api/account-memory/remove', '/api/quota-recovery', '/api/refresh'}

@@ -792,6 +792,39 @@ class Manager:
                 self.launch(prepared)
                 return self.view(directory)
 
+    def start_refresh_batch(self, profile_ids, *, network_route=None):
+        """Queue one quota-only operation for every current account serially."""
+        if not isinstance(profile_ids, (list, tuple, set)):
+            raise ActionError("账号选择无效。")
+        selected = list(dict.fromkeys(profile_ids))
+        if not selected or any(not isinstance(profile_id, str) or not profile_id for profile_id in selected):
+            raise ActionError("尚未发现可刷新的 Codex 登录账号。")
+        with self.guard:
+            private_dir(self.root)
+            with lock_file(self.root / ".catalog.lock"):
+                if network_route:
+                    network_route.require()
+                accounts = []
+                for profile_id in selected:
+                    directory = self.directory(profile_id)
+                    account = self.view(directory)
+                    if account["busy"]:
+                        raise ActionError("还有账号正在操作，请等待完成后再刷新全部配额。", 409)
+                    accounts.append((directory, account))
+                prepared = []
+                try:
+                    for directory, _ in accounts:
+                        item = self.prepare(directory.name, refresh_only=True)
+                        if network_route:
+                            item[2]["network_route"] = network_route
+                        prepared.append(item)
+                except Exception:
+                    for *_, lock in prepared:
+                        lock.close()
+                    raise
+                self.launch_sequence(prepared)
+                return self.list(set(selected))
+
     def start_batch(self, expected_batch_id, eligible_ids=None, *, network_route=None):
         if expected_batch_id is not None and not isinstance(expected_batch_id, str):
             raise ActionError("批次标识无效。")

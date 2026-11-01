@@ -277,6 +277,19 @@ class AccountActionsTests(unittest.TestCase):
         with self.assertRaises(ca.ActionError):
             ca.read_profile_quota(home, "workspace-one", rpc_factory=mock.Mock())
 
+    def test_refresh_batch_reads_each_account_without_turn(self):
+        accounts = [self.account(email=f"batch-{index}@example.com", account_id=f"batch-workspace-{index}")
+                    for index in range(2)]
+        result = self.manager.start_refresh_batch([account["id"] for account in accounts])
+        self.assertEqual({account["id"] for account in result["accounts"]},
+                         {account["id"] for account in accounts})
+        for account in accounts:
+            finished = self.wait(account["id"])
+            self.assertEqual(finished["operation"]["quota_status"], "observed")
+            methods = [call["method"] for call in self.calls(account)]
+            self.assertEqual(methods.count("account/rateLimits/read"), 1)
+            self.assertNotIn("turn/start", methods)
+
     def test_configuration_is_verified_before_any_turn(self):
         for scenario in ("unsafe_config", "unsafe_sandbox", "wrong_profile", "custom_profile"):
             with self.subTest(scenario=scenario):

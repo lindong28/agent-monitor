@@ -598,7 +598,7 @@ class Handler(BaseHTTPRequestHandler):
                         raise codex_accounts.ActionError("预览账号选择无效。")
                     result = account_egress.preview(route)
                     if approval_action:
-                        if approval_action not in {"batch-start", "batch-retry", "refresh", "login"}:
+                        if approval_action not in {"batch-start", "batch-retry", "refresh", "refresh-all", "login"}:
                             raise codex_accounts.ActionError("预览操作类型无效。")
                         result["confirmation"] = route.issue(selected, payload.get("approval_expected"), approval_action)
                         result["approval_action"] = approval_action
@@ -652,6 +652,19 @@ class Handler(BaseHTTPRequestHandler):
                     raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
                 route.consume(payload.get("confirmation"), [account_id], batch_id, "refresh")
                 result = manager.start(account_id, refresh_only=True, network_route=route)
+            elif path == "/api/codex-accounts/refresh-all":
+                ids, unavailable = manager.discover(QUOTA_VIEW.action_catalog())
+                requested = payload.get("profile_ids")
+                if (not isinstance(requested, list) or not requested
+                        or any(not isinstance(pid, str) or not pid for pid in requested)
+                        or len(set(requested)) != len(requested)):
+                    raise codex_accounts.ActionError("请选择一个或多个不同的账号。")
+                if set(requested) != ids:
+                    raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
+                route = client_network.hub.browser_route(payload.get("connection"))
+                route.consume(payload.get("confirmation"), ids, payload.get("approval_expected"), "refresh-all")
+                result = manager.start_refresh_batch(sorted(ids), network_route=route)
+                result["unavailable_accounts"] = unavailable
             elif path == "/api/codex-accounts/login":
                 account_id = payload.get("id")
                 route = client_network.hub.browser_route(payload.get("connection"))

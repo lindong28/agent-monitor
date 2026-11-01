@@ -525,6 +525,15 @@ assert(!text(list.children[0].querySelector("details")).includes("保留的批�
         for name in ("daily-cost-data", "top-projects-data", "model-mix-data"):
             self.assertIn("chart-data-disclosure", tree.locations[name][1]["class"])
 
+    def test_refresh_all_quota_action_is_visible_and_uses_approval_action(self):
+        index = (ROOT / "web/index.html").read_text()
+        accounts = (ROOT / "web/codex-accounts.js").read_text()
+        egress = (ROOT / "web/account-egress.js").read_text()
+        self.assertIn('id="codex-refresh-all"', index)
+        self.assertIn('refreshAllButton?.addEventListener("click", refreshAllQuotas)', accounts)
+        self.assertIn('approval_action: "refresh-all"', accounts)
+        self.assertIn('"refresh-all":"刷新全部账号配额"', egress)
+
     def test_session_detail_preserves_refresh_collection_and_page_watch(self):
         script = r'''
 const fs = require("fs"), assert = require("assert");

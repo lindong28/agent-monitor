@@ -15,8 +15,8 @@ export function countryName(code) {
 export async function previewEgress(request, targets, signal, payload = {}) {
   const sending = Array.isArray(targets) && ["batch-start", "batch-retry"].includes(payload.approval_action);
   const needsApproval = Boolean(payload.approval_action);
-  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","login":"单独登录","quota-recovery":"检查并恢复配额"})[payload.approval_action] || "发起上游操作";
-  const operationPending = ({"quota-recovery":"尚未发送配额检查请求", refresh:"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
+  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","login":"单独登录","quota-recovery":"检查并恢复配额"})[payload.approval_action] || "发起上游操作";
+  const operationPending = ({"quota-recovery":"尚未发送配额检查请求", refresh:"尚未发送配额刷新请求", "refresh-all":"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
   let receipt = null;
   const dialog = node("dialog", undefined, "account-egress-dialog");
   dialog.setAttribute("aria-labelledby", "account-egress-title");
@@ -43,6 +43,12 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     dialog.append(identities, node("p", "会使用账号额度；这是新一轮，之前已发送的账号也会再次发送。暂停中的账号不会发送；发送不保证固定或重置额度窗口。", "quota-scope"));
   } else if (needsApproval) {
     dialog.append(node("p", `确认后将${actionLabel}。预览只读取匿名出口信息，不携带账号凭据；取消或无法取得完整出口时不会继续。`, "quota-scope"));
+    if (payload.approval_action === "refresh-all") {
+      dialog.append(node("p", `本次将逐个查询以下 ${targets.length} 个账号的配额，不发送消息：`));
+      const identities = node("ul", undefined, "account-egress-identities");
+      for (const account of targets) identities.append(node("li", `${account.email}（${account.account_id}）`));
+      dialog.append(identities);
+    }
     const machine = Array.isArray(payload.approval_scope) ? payload.approval_scope[0] : null;
     if (payload.approval_action === "quota-recovery" && machine) {
       dialog.append(node("p", `本次检查将在 ${machine} 上执行，并使用该机器的 Agent Monitor 路由桥；当前浏览器不会直接访问上游。`, "quota-scope"));
