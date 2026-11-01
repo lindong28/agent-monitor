@@ -318,16 +318,20 @@
         key: "identity",
         label: "身份变化",
         summary: "账号身份变化",
-        action: "先确认这台机器登录的是目标账号，再检查配额。",
+        action: "先确认这台机器当前登录的是目标账号；页面不能替你切换机器账号。确认后打开恢复卡片更新状态。",
       };
     }
-    if (detail.upstream_code === "token_revoked" || detail.http_status === 401
-        || reason.includes("upstream_code=token_revoked") || reason.includes("invalidated oauth token")) {
+    const hasTokenCode = detail.upstream_code === "token_revoked" || reason.includes("upstream_code=token_revoked");
+    const hasHttp401 = detail.http_status === 401 || reason.includes("http_status=401");
+    const hasAuthHint = reason.includes("invalidated oauth token");
+    if (hasTokenCode || hasHttp401 || hasAuthHint) {
+      const signal = hasTokenCode && hasHttp401 ? "401/token_revoked"
+        : hasHttp401 ? "HTTP 401" : hasTokenCode ? "token_revoked" : "认证错误摘要";
       return {
-        key: "credential",
-        label: "凭据失效",
-        summary: "凭据已失效",
-        action: "先在这台机器重新登录目标账号，再检查配额。",
+        key: "upstream_auth",
+        label: "上游认证响应",
+        summary: `上游返回 ${signal}，原因未核实`,
+        action: "先打开“查看当前状态与恢复”，通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，需由 Agent Monitor 管理员核对该机器的账号、部署与上游认证。",
       };
     }
     if (detail.kind === "rpc_error" || detail.stage === "quota_read"
@@ -336,7 +340,7 @@
         key: "read_error",
         label: "读取失败",
         summary: "配额读取失败，原因未核实",
-        action: "先检查本机 Agent Monitor 路由桥与 Codex CLI。",
+        action: "先打开“查看当前状态与恢复”；检查会沿目标机器的 Agent Monitor 路由桥进行，仍失败时复制诊断交由管理员排查。",
       };
     }
     if (quotaFailureKind(failure.reason, failure.query_state) === "paused") {
@@ -467,12 +471,24 @@
       }
     }
     function render(value) {
-      const a = value?.account || {}, pause = value?.pause;
+      const a = value?.account || {}, pause = value?.pause, last = value?.last_recovery;
+      const lastRequest = last?.request;
+      const lastMatchesPause = last?.ok === false && pause?.id && lastRequest?.pause_id === pause.id
+        && lastRequest.machine === value.machine && lastRequest.account_id === a.account_id;
+      const failure = pause?.failure || (lastMatchesPause ? last.failure : null);
+      const failureGuidance = failure ? quotaFailureGuidance({
+        reason: failure.detail || "", failure, query_state: "paused",
+      }) : null;
+      const authEvidence = failureGuidance?.key === "upstream_auth"
+        ? failureGuidance.summary : "上游认证响应，原因未核实";
       const mode = !value ? "unknown" : value.active ? "active"
         : pendingPauseId ? "unknown-outcome" : !pause ? "ready"
         : pause.id === "unreadable" ? "unreadable" : pause.probe_attempt ? "used"
         : !a.account_id || !a.account_label ? "identity"
-        : value.last_recovery?.ok === false ? "failed" : "paused";
+        : failureGuidance?.key === "identity" ? "identity"
+        : failureGuidance?.key === "upstream_auth" ? "upstream-auth"
+        : failureGuidance?.key === "read_error" ? "read-error"
+        : lastMatchesPause ? "failed" : "paused";
       const copyText = {
         unknown: ["暂时无法确认恢复状态", "先更新状态。读取失败期间不能检查配额；下方技术详情可能是此前的记录。"],
         "unknown-outcome": ["本次检查结果尚未确认", "先更新状态核对本次检查的结果，暂不再次提交，避免重复检查。"],
@@ -480,30 +496,31 @@
         ready: ["当前没有通道暂停", onContinue ? "可以返回发送操作，核对账号登录及限制后继续。已有结果和选择保留，不会自动发送消息。" : "该机器的通道暂停已解除或当前不存在；其他机器和账号的可用性需分别查看。不会自动发送消息。"],
         unreadable: ["暂停记录无法读取", "发送仍暂停。先按排查步骤修复状态记录，再更新状态；不能直接清除暂停。"],
         used: ["本次暂停的检查机会已使用", "先更新状态查看已有结果。若仍未结束，按下方排查步骤处理；此处不能重复检查或重置机会。"],
-        identity: ["查询账号身份不完整", "发送仍暂停。先核对该机器使用的账号配置，再更新状态；不会自动切换到其他账号。"],
+        identity: ["查询账号身份需要确认", "发送仍暂停。先在目标机器确认当前登录的是这个账号；页面不能替你切换机器账号。确认后更新状态。"],
+        "upstream-auth": ["上游认证响应需要核对", `已记录${authEvidence}；这条读数不能区分凭据、权限或服务端原因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
+        "read-error": ["配额读取失败，需要一次受控检查", "已记录读取阶段失败，但原因未核实。先通过目标机器的 Agent Monitor 路由桥只检查一次；仍失败时复制诊断交由管理员排查。"],
         failed: ["配额检查未成功，发送仍暂停", "具体原因尚未确认。先查看排查步骤，处理后可再次检查；已有发送结果和账号选择保留。"],
         paused: ["发送已暂停，需要先检查配额", "Monitor 在此前请求异常后暂停了此机器的 Codex 发送、登录和配额查询。这是本地保护，不表示所有账号均不可用。"],
       };
       [title.textContent, guidance.textContent] = copyText[mode];
-      if (!["failed","unreadable","identity","used"].includes(mode)) {
+      if (!["failed","unreadable","identity","upstream-auth","read-error","used"].includes(mode)) {
         steps.hidden = true; help.textContent = "查看排查步骤";
       }
       target.textContent = value ? `检查对象：${value.machine} · ${a.account_label || "账号未识别"}` : "";
-      const last = value?.last_recovery;
       result.textContent = value ? (last
         ? `最近检查：${when(last.observed_at)} · ${last.ok ? "当次成功" : "未成功"}。当前状态以本卡片为准。`
         : `暂停记录：${when(pause?.at ? pause.at * 1000 : null)}。`) : "";
       if (value && !pause && !last) result.textContent = `状态更新：${when(value.observed_at)}。`;
       if (value && unrecordedOutcome) result.textContent = "最近检查：未取得该次结果记录。当前是否暂停以上方状态为准。";
-      probe.hidden = !["paused", "failed"].includes(mode);
+      probe.hidden = !["paused", "failed", "upstream-auth", "read-error"].includes(mode);
       probe.disabled = busy || probe.hidden;
-      probe.textContent = mode === "failed" ? "处理后再次检查配额" : "检查配额并尝试恢复";
+      probe.textContent = mode === "failed" ? "处理后再次检查配额" : "通过目标机器路由桥检查配额";
       effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，沿用该机器原有系统代理；不会发送消息。";
-      help.hidden = !["failed", "unreadable", "identity", "used"].includes(mode);
+      help.hidden = !["failed", "unreadable", "identity", "upstream-auth", "read-error", "used"].includes(mode);
       resume.hidden = mode !== "ready" || !onContinue;
       read.disabled = busy;
       read.textContent = ["unknown", "unknown-outcome"].includes(mode) ? "重新读取状态" : mode === "active" ? "更新进度" : "更新状态";
-      const primary = mode === "paused" ? probe : ["failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
+      const primary = ["paused", "upstream-auth", "read-error"].includes(mode) ? probe : ["failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
       for (const button of [read,probe,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
       steps.replaceChildren();
       const list = make("ol");
@@ -513,13 +530,21 @@
         "查看日志中的状态文件读取错误，修复对应文件的权限或格式；不要删除暂停记录来恢复发送。",
         "修复后点击“更新状态”。需要协助时，展开技术详情并复制诊断。"
       ] : mode === "identity" ? [
-        "展开技术详情，查看账号来源和凭据位置，确认它是否为你要使用的 Codex 目录。",
-        `在 ${host} 核对该目录的账号配置；如需重新登录，先处理本机暂停，不要在其他账号上试登录来绕过。`,
-        "账号配置修正后点击“更新状态”。无法判断配置时，复制诊断供协助排查。"
+        "展开技术详情，确认页面读取到的账号来源、工作区和机器是否与目标账号一致。",
+        `页面不能替你切换 ${host} 的登录账号；请在该机器按既有登录流程确认目标账号，不要在浏览器所在设备换出口绕过。`,
+        "账号确认后点击“更新状态”。如果仍显示身份变化，这一步需要 Agent Monitor 管理员核对账号目录和同步状态。"
+      ] : mode === "upstream-auth" ? [
+        `核对上方检查对象。下一次检查将在 ${host} 执行，并先展示该机器的 Agent Monitor 路由桥出口。`,
+        `已记录${authEvidence}；这条记录不能单独证明是凭据、权限还是服务端原因。不要直接换出口、重复登录或连续重试。`,
+        `若一次检查仍失败，页面不能替 ${host} 修复账号或部署；复制技术详情，交由 Agent Monitor 管理员继续核对。`
+      ] : mode === "read-error" ? [
+        `核对上方检查对象。检查将在 ${host} 执行，并使用该机器的 Agent Monitor 路由桥，不使用打开网页设备的直连。`,
+        "点击“通过目标机器路由桥检查配额”前先确认出口预览完整；预览失败时不会发送配额检查请求。",
+        "若仍失败，保留暂停状态并复制技术详情交由管理员排查，不要重复盲试。"
       ] : [
         `核对上方检查对象。检查发生在 ${host}，不是自动使用打开网页这台设备的网络。`,
-        `在 ${host} 打开现有代理程序或系统网络设置，确认原有代理正在运行、配置仍有效；保持原来的出口，不切换节点。错误码本身不能确认是代理或登录故障。`,
-        mode === "used" ? "点击“更新状态”查看是否已有检查结果。若检查机会一直占用，复制诊断排查服务日志；不要删除暂停或重复提交。" : "处理后点击“处理后再次检查配额”，确认对象后只检查一次。若仍失败，保留结果并复制诊断继续定位，不反复盲试。"
+        `检查会通过 ${host} 的 Agent Monitor 路由桥执行；保持该机器原有出口，不切换节点。错误码本身不能确认是代理或登录故障。`,
+        mode === "used" ? "点击“更新状态”查看是否已有检查结果。若检查机会一直占用，复制诊断排查服务日志；不要删除暂停或重复提交。" : "确认出口后点击“通过目标机器路由桥检查配额”，只检查一次。若仍失败，保留结果并复制诊断继续定位，不反复盲试。"
       ];
       for (const text of instructions) list.appendChild(make("li", text));
       steps.append(make("strong", "排查步骤"), list);

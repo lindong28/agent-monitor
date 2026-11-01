@@ -42,7 +42,7 @@ async function render(changes={}, error=false) {
   for (const [change, expected] of [
     [{pause:{...base.pause,probe_attempt:{id:'used'}}},/本次.*已使用/],
     [{active:{id:'running'}},/正在|未结束|未闭合/],
-    [{account:{account_label:'fixture@example.test'}},/身份.*不完整|身份.*缺失/],
+    [{account:{account_label:'fixture@example.test'}},/身份.*确认|身份.*缺失/],
     [{pause:{id:'unreadable'}},/记录.*无法读取|记录.*不可读/]
   ]) {
     const p=await render(change);
@@ -57,7 +57,7 @@ async function render(changes={}, error=false) {
   assert(!visibleText(p).includes('fixture-id'), 'workspace identifiers must not dominate the recovery task');
   assert.equal(all(p).filter(n=>n.tag==='button' && n.className.includes('btn-primary') && !n.hidden).length,1,'one recommended action');
 
-  assert.match(visibleText(p),/发送已暂停，需要先检查配额/);
+  assert.match(visibleText(p),/配额读取失败，需要一次受控检查/);
   assert.match(visibleText(p),/检查只查询一次配额/);
   assert.match(p.textContent,/不会.*发送|不.*重发/);
   const copy=all(p).find(n=>n.tag==='button' && n.textContent==='复制诊断信息');
@@ -107,10 +107,31 @@ async function render(changes={}, error=false) {
     {machine:'macstudio',reason:'凭据失败，upstream_code=token_revoked，http_status=401',query_state:'paused',
       failure:{upstream_code:'token_revoked',http_status:401}},
   ]);
-  assert.match(classified.quotaDiagnostics.summary.textContent,/3 台暂停；身份变化 1、读取失败 1、凭据失效 1/);
-  assert.match(classified.quotaDiagnostics.entries[0].note.textContent,/账号身份变化.*确认这台机器登录的是目标账号/);
-  assert.match(classified.quotaDiagnostics.entries[1].note.textContent,/配额读取失败，原因未核实.*路由桥与 Codex CLI/);
-  assert.match(classified.quotaDiagnostics.entries[2].note.textContent,/凭据已失效.*重新登录目标账号/);
+  assert.match(classified.quotaDiagnostics.summary.textContent,/3 台暂停；身份变化 1、读取失败 1、上游认证响应 1/);
+  assert.match(classified.quotaDiagnostics.entries[0].note.textContent,/账号身份变化.*确认这台机器当前登录的是目标账号/);
+  assert.match(classified.quotaDiagnostics.entries[1].note.textContent,/配额读取失败，原因未核实.*目标机器的 Agent Monitor 路由桥/);
+  assert.match(classified.quotaDiagnostics.entries[2].note.textContent,/上游返回 401\/token_revoked，原因未核实.*目标机器的 Agent Monitor 路由桥/);
+  p=await render({pause:{...base.pause,failure:{stage:'quota_read',upstream_code:'token_revoked',http_status:401,detail:'invalidated oauth token'}}});
+  assert.match(visibleText(p),/上游认证响应需要核对/);
+  assert.match(visibleText(p),/不能区分凭据、权限或服务端原因/);
+  assert.match(visibleText(p),/通过目标机器的 Agent Monitor 路由桥只检查一次/);
+  assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='probe').hidden,false);
+  assert.match(p.textContent,/页面不能替你修复该机器的账号或部署/);
+  p=await render({pause:{...base.pause,failure:{stage:'quota_read',http_status:401,detail:'upstream refused'}}});
+  assert.match(visibleText(p),/上游返回 HTTP 401，原因未核实/);
+  assert.doesNotMatch(visibleText(p),/token_revoked/);
+  p=await render({pause:{...base.pause,failure:{stage:'quota_read',upstream_code:'token_revoked',detail:'upstream refused'}}});
+  assert.match(visibleText(p),/上游返回 token_revoked，原因未核实/);
+  assert.doesNotMatch(visibleText(p),/HTTP 401/);
+  p=await render({pause:{id:'new-pause'},last_recovery:{ok:false,request:{pause_id:'old-pause',machine:'fixture-host',account_id:'fixture-id'},failure:{upstream_code:'token_revoked',http_status:401}}});
+  assert.doesNotMatch(visibleText(p),/上游认证响应需要核对/);
+  assert.match(visibleText(p),/发送已暂停，需要先检查配额/);
+  const only401=ui.quotaFailureDetails(provider,[{machine:'only-401',reason:'上游拒绝，http_status=401',query_state:'paused',failure:{http_status:401}}]);
+  assert.match(only401.quotaDiagnostics.entries[0].note.textContent,/上游返回 HTTP 401，原因未核实/);
+  assert.doesNotMatch(only401.quotaDiagnostics.entries[0].note.textContent,/token_revoked/);
+  const onlyToken=ui.quotaFailureDetails(provider,[{machine:'only-token',reason:'上游拒绝，upstream_code=token_revoked',query_state:'paused',failure:{upstream_code:'token_revoked'}}]);
+  assert.match(onlyToken.quotaDiagnostics.entries[0].note.textContent,/上游返回 token_revoked，原因未核实/);
+  assert.doesNotMatch(onlyToken.quotaDiagnostics.entries[0].note.textContent,/HTTP 401/);
   body.quotaDiagnostics.details.open=true;
   await all(body).find(n=>n.tag==='button' && n.textContent==='查看当前状态与恢复').click();
   await new Promise(r=>setImmediate(r));

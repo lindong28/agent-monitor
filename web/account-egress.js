@@ -16,12 +16,13 @@ export async function previewEgress(request, targets, signal, payload = {}) {
   const sending = Array.isArray(targets) && ["batch-start", "batch-retry"].includes(payload.approval_action);
   const needsApproval = Boolean(payload.approval_action);
   const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","login":"单独登录","quota-recovery":"检查并恢复配额"})[payload.approval_action] || "发起上游操作";
+  const operationPending = ({"quota-recovery":"尚未发送配额检查请求", refresh:"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
   let receipt = null;
   const dialog = node("dialog", undefined, "account-egress-dialog");
   dialog.setAttribute("aria-labelledby", "account-egress-title");
   const title = node("h2", needsApproval ? `${actionLabel}前确认出口` : "查看账号请求出口");
   title.id = "account-egress-title";
-  const status = node("p", "正在探测出口，尚未发送账号消息…", "quota-scope");
+  const status = node("p", `正在探测出口，${operationPending}…`, "quota-scope");
   status.setAttribute("role", "status");
   const results = node("div", undefined, "account-egress-results");
   const controls = node("div", undefined, "codex-account-controls");
@@ -42,6 +43,10 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     dialog.append(identities, node("p", "会使用账号额度；这是新一轮，之前已发送的账号也会再次发送。暂停中的账号不会发送；发送不保证固定或重置额度窗口。", "quota-scope"));
   } else if (needsApproval) {
     dialog.append(node("p", `确认后将${actionLabel}。预览只读取匿名出口信息，不携带账号凭据；取消或无法取得完整出口时不会继续。`, "quota-scope"));
+    const machine = Array.isArray(payload.approval_scope) ? payload.approval_scope[0] : null;
+    if (payload.approval_action === "quota-recovery" && machine) {
+      dialog.append(node("p", `本次检查将在 ${machine} 上执行，并使用该机器的 Agent Monitor 路由桥；当前浏览器不会直接访问上游。`, "quota-scope"));
+    }
   }
   dialog.append(controls);
   document.body.append(dialog);
@@ -82,7 +87,9 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     confirm.disabled = false;
   }).catch(error => {
     if (!dialog.open) return;
-    status.textContent = `出口 IP 和地区未知：${error.message}。尚未发送账号消息。`;
+    const detail = String(error?.message || "出口预览失败").replace(/[。！？；：]+$/u, "");
+    const prefix = payload.approval_action === "quota-recovery" ? "目标机器的 Agent Monitor 路由桥出口预览未完成" : "出口 IP 和地区未知";
+    status.textContent = `${prefix}：${detail}；${operationPending}。`;
     confirm.textContent = "未能确认设备出口，请关闭后重试";
     confirm.disabled = true;
   });
