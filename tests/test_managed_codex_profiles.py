@@ -181,6 +181,7 @@ class ManagedCodexTests(unittest.TestCase):
             rows = server.QUOTA_VIEW.live_from_admission(admission)["codex"]["accounts"]
         self.assertEqual({r["account_label"]: r["five_hour_used_pct"] for r in rows}, {"alpha@example.test": 21, "beta@example.test": 82})
         self.assertEqual({r["account_profile"] for r in rows}, {"alpha", "beta"})
+        self.assertEqual({r["plan_verification"] for r in rows}, {"unverified"})
 
     def test_exporter_includes_profiles_without_refreshing_them(self):
         self.session(self.profile("alpha"), "alpha", 10, 21)

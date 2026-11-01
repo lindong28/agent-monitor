@@ -58,6 +58,13 @@ assert(table.textContent.includes('主动查询已暂停'));
 assert(!table.textContent.includes('更新延迟'));
 const recoverButton=descendants(table).find(n=>n.tagName==='BUTTON' && n.textContent==='查看当前状态与恢复');
 assert(recoverButton, 'read-only recovery entry is available');
+// A current managed profile with no plan source must be visibly unverified.
+const managedWithoutPlan = {...account('managed-without-plan'), account_plan:null,
+  reading_plan:null, credential_plan:null, plan_verification:'unverified', updated_at:new Date().toISOString()};
+ui.renderQuotaAccounts({codex:{accounts:[managedWithoutPlan]}});
+const managedRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='managed-without-plan');
+assert.equal(managedRow.cells[2].textContent,'套餐未核实');
+
 // Confirmed lack of a subscription must not look like available current quota.
 const unsubscribed = {...account('unsubscribed'), quota_status:'no_subscription',
   quota_status_reason:'无有效 Claude Code 订阅（用户已确认）', plan_verification:'unverified',
@@ -182,14 +189,22 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
     assert.equal(inline.includes('来源机器未登录'),affected,provider+': '+kind);
     assert(!cell.textContent.includes('登录已失效'));
     assert(!inline.includes('保留旧值'));
+    if (kind==='account-action') {
+      assert(inline.includes('账号操作读数'));
+    }
     if (affected) {
-      assert.equal(inline,'来源机器未登录');
+      assert.equal(inline, kind==='signed-out-source' ? '读数可能过期来源机器未登录' : '来源机器未登录');
       for (const text of ['alpha',label,'最后一次','登录此账号','更新统计与配额'])
         assert(detail.textContent.includes(text),text);
       assert.equal(sample.five_hour_used_pct,91,'copy must not alter the reading');
     }
   }
 }
+const staleAction = {...account('stale-action'), updated_at:'2026-10-14T12:00:00Z', quota_source:'account_action'};
+ui.renderQuotaAccounts({codex:{accounts:[staleAction]}});
+const staleRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='stale-action');
+assert(staleRow.cells[6].textContent.includes('账号操作读数'));
+assert(staleRow.cells[6].textContent.includes('读数可能过期'));
 Date.now=realNow;
 const original=JSON.stringify(data);
 const rows=()=>table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId);

@@ -70,6 +70,16 @@ def account_entry(block, machines, self_machine=None, reading_from=None):
         account_state = "signed_out"
     else:
         account_state = "unstamped"
+    reading_plan = text(block.get("reading_plan"))
+    credential_plan = text(block.get("credential_plan"))
+    plan_verification = (
+        "unverified"
+        if account_state == "known"
+        and ("reading_plan" in block or "credential_plan" in block)
+        and not reading_plan
+        and not credential_plan
+        else None
+    )
     return {
         "account_id": account_id,
         "account_label": text(block.get("account_label")),
@@ -91,14 +101,19 @@ def account_entry(block, machines, self_machine=None, reading_from=None):
         # very value this recomputation exists to distrust. `account_id` two
         # fields up already draws the line this way, for the same reason.
         "account_plan": plan_to_show(block),
+        # A current exporter that supplied both raw plan fields but received
+        # neither value cannot establish a subscription tier. Keep that state
+        # explicit so the Web view does not turn it into a reassuring-looking
+        # dash. Older exporters omit the pair and remain distinguishable.
+        **({"plan_verification": plan_verification} if plan_verification else {}),
         # The two facts behind it, passed through unmerged so that having
         # fewer than two comparable sources stays tellable apart from two that
         # agree — the derived value alone cannot express the difference. An
         # exporter that predates the raw plan pair sends neither key, so such a
         # row has zero sources, not one; either way nothing is compared, and
         # that is not the same as comparing and finding them equal.
-        "reading_plan": text(block.get("reading_plan")),
-        "credential_plan": text(block.get("credential_plan")),
+        "reading_plan": reading_plan,
+        "credential_plan": credential_plan,
         # Three states, not two. "Signed out" and "reported by an exporter too
         # old to stamp accounts" both leave no account, but only the second is
         # fixed by updating that machine — telling a current machine to update

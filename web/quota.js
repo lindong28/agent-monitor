@@ -1242,12 +1242,19 @@
       node.textContent = text;
       cell.appendChild(node);
     };
+    const sourceUnavailable = (renderedQuotaRateLimits?.[provider.key]?.signed_out_machines || [])
+      .includes(account.reading_from);
     if (account.quota_source === "account_action") {
       const context = document.createElement("span");
       context.className = "quota-history-note";
       context.textContent = "配额来自账号操作中的配额查询；机器归属与套餐来自机器采集";
       details.appendChild(context);
+      note("账号操作读数");
+      if (stale) note("读数可能过期");
       return cell;
+    }
+    if (stale) {
+      note("读数可能过期");
     }
     if (!account.reading_from) {
       const source = document.createElement("span");
@@ -1257,8 +1264,7 @@
       details.appendChild(source);
     }
     if (quotaPresence(account) !== "remembered") {
-      const invalidSource = (renderedQuotaRateLimits?.[provider.key]?.signed_out_machines || []).includes(account.reading_from);
-      if (invalidSource) {
+      if (sourceUnavailable) {
         note("来源机器未登录");
         const recovery = document.createElement("span");
         recovery.className = "quota-history-note";
@@ -1266,7 +1272,7 @@
         details.appendChild(recovery);
       }
       if (refreshNotice) note(refreshNotice);
-      if (stale && !invalidSource) note("可能早于一次登录变更");
+      if (stale && !sourceUnavailable) note("可能早于一次登录变更");
     }
 
     return cell;

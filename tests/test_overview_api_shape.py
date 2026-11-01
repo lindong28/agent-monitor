@@ -239,6 +239,7 @@ class OverviewApiShapeTests(unittest.TestCase):
         self.assertIsNone(entry["account_plan"])
         self.assertIsNone(entry["reading_plan"])
         self.assertIsNone(entry["credential_plan"])
+        self.assertEqual(entry["plan_verification"], "unverified")
 
     def test_missing_rate_limits_are_null_not_zero(self):
         cases = [
