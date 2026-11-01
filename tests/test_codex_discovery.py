@@ -186,7 +186,8 @@ class DiscoveryTests(unittest.TestCase):
         data = self.request()[1]
         self.assertFalse(next(a for a in data["accounts"] if a["id"] == past["id"])["eligible"])
         self.assertEqual(len(data["batch"]["items"]), 2)
-        self.assertEqual(self.request("/batch-retry", {"batch_id": batch["id"], "connection": self.connection})[0], 200)
+        self.assertEqual(self.request("/batch-retry", {"batch_id": batch["id"], "connection": self.connection,
+                                                         "confirmation": self.route.issue([past["id"]], batch["id"], "batch-retry")})[0], 200)
         self.assertEqual(self.calls(past), 0)
         self.assertEqual(self.request("/start", {"id": past["id"]})[0], 409)
         next_batch = self.request("/batch-start", self.batch_payload(batch["id"]))[1]["batch"]

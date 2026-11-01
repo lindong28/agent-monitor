@@ -4,6 +4,7 @@ import json
 import sys
 import time
 import urllib.request
+from urllib.parse import urlencode
 from pathlib import Path
 
 from agent_monitor.snapshots import machine_config
@@ -80,9 +81,18 @@ def main():
             origin = "http://127.0.0.1:%d" % port
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-        def get(path, method="GET"):
+        approval = None
+
+        def get(path, method="GET", body=None):
+            if path == "/api/refresh" and method == "POST":
+                if not approval:
+                    raise RefreshError("未取得刷新出口确认；未发出上游请求。")
+                path += "?" + urlencode({"ack": "1", "approval": approval})
             request = urllib.request.Request(origin + path, method=method,
-                headers={"Origin": origin, "X-Agent-Monitor": "action"} if method == "POST" else {})
+                data=json.dumps(body).encode() if body is not None else None,
+                headers={"Origin": origin, "X-Agent-Monitor":
+                         "codex-accounts" if path.startswith("/api/codex-accounts/") else "action",
+                         "Content-Type": "application/json"} if method == "POST" else {})
             with opener.open(request, timeout=30) as response:
                 return json.load(response)
 
@@ -92,6 +102,16 @@ def main():
         if health.get("stale") or health.get("signature") != source_signature(ROOT):
             raise RefreshError("The dashboard is running different code; run 'agent-monitor restart', then 'agent-monitor refresh'.")
         names = set(machine_config.load_machine_config().by_name)
+        preview = get("/api/codex-accounts/egress-preview", method="POST", body={
+            "approval_action": "refresh", "approval_scope": ["statistics"], "approval_expected": None,
+        })
+        approval = preview.get("confirmation")
+        if not approval:
+            raise RefreshError("未取得刷新出口确认；未发出上游请求。")
+        addresses = ["%s=%s" % (target.get("host", "unknown"), target.get("ip") or "未知")
+                     for target in preview.get("targets", [])]
+        print("agent-monitor refresh: provider egress preview via agent-monitor bridge — %s" %
+              (", ".join(addresses) or "未取得出口地址"), flush=True)
         print("agent-monitor refresh: refreshing %d machines and their current-account Quota…" % len(names), flush=True)
         failures = refresh(get, names, timeout=210 * len(names) + 60)
         if failures:

@@ -32,6 +32,35 @@ class NetworkError(Exception):
         self.status = status
 
 
+class ApprovalStore:
+    """Short-lived, single-use approvals for actions using the local bridge."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._receipts = {}
+
+    def issue(self, action, scope, expected):
+        if not isinstance(action, str) or not action or not isinstance(scope, (list, tuple, set)):
+            raise NetworkError("出口确认范围无效。", 400)
+        selected = frozenset(scope)
+        if not selected or any(not isinstance(item, str) or not item or len(item) > 256 for item in selected):
+            raise NetworkError("出口确认范围无效。", 400)
+        with self._lock:
+            now = time.monotonic()
+            self._receipts = {key: value for key, value in self._receipts.items() if value[0] > now}
+            if len(self._receipts) >= 64:
+                raise NetworkError("待确认的预览过多，请关闭旧窗口后稍候再试。", 429)
+            token = secrets.token_urlsafe(32)
+            self._receipts[token] = (now + 120, action, selected, expected)
+            return token
+
+    def consume(self, token, action, scope, expected):
+        with self._lock:
+            receipt = self._receipts.pop(token, None) if isinstance(token, str) else None
+            if not receipt or receipt[0] <= time.monotonic() or receipt[1:] != (action, frozenset(scope), expected):
+                raise NetworkError("出口确认已失效或与本次操作不符，请重新查看出口并确认。")
+
+
 def authority(value):
     """Validate CONNECT syntax, preserving the existing target/port range."""
     if not isinstance(value, str) or len(value) > 512 or re.search(r"[\s/@?#]", value):
@@ -243,7 +272,7 @@ class Route:
             pass
         handler.close_connection = True
 
-    def issue(self, selected, expected):
+    def issue(self, selected, expected, action="batch-start"):
         with self.guard:
             self.require()
             now = time.monotonic()
@@ -251,14 +280,16 @@ class Route:
             if len(self.receipts) >= 32:
                 raise NetworkError("待确认的预览过多，请关闭旧窗口后稍候再试。", 429)
             token = secrets.token_urlsafe(32)
-            self.receipts[token] = (now + 120, frozenset(selected), expected)
+            self.receipts[token] = (now + 120, action, frozenset(selected), expected)
             return token
 
-    def consume(self, token, selected, expected):
+    def consume(self, token, selected, expected, action="batch-start"):
         with self.guard:
             self.require()
             receipt = self.receipts.pop(token, None) if isinstance(token, str) else None
-            if not receipt or receipt[0] <= time.monotonic() or receipt[1:] != (frozenset(selected), expected):
+            if receipt and len(receipt) == 3:
+                receipt = (receipt[0], "batch-start", receipt[1], receipt[2])
+            if not receipt or receipt[0] <= time.monotonic() or receipt[1:] != (action, frozenset(selected), expected):
                 raise NetworkError("出口确认已失效或与本轮账号不符，请重新查看出口并确认。")
 
     def close(self):

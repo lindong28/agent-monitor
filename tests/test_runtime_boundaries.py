@@ -60,8 +60,14 @@ class HttpMutationTests(unittest.TestCase):
             sync.assert_not_called()
     def test_same_origin_refresh_reaches_action_once(self):
         with mock.patch.object(server,'refresh_endpoint',return_value={'refresh_requested':1}) as refresh:
-            self.assertEqual(self.request('POST','/api/refresh?ack=1'),200)
-            refresh.assert_called_once_with({'ack':['1']})
+            token = server.UPSTREAM_APPROVALS.issue('refresh', ['statistics'], None)
+            self.assertEqual(self.request('POST','/api/refresh?ack=1&approval=' + token),200)
+            refresh.assert_called_once_with({'ack':['1'],'approval':[token]})
+
+    def test_same_origin_refresh_without_approval_does_not_start_collection(self):
+        with mock.patch.object(server, 'refresh_endpoint', return_value={'refresh_requested': 1}) as refresh:
+            self.assertEqual(self.request('POST', '/api/refresh?ack=1'), 409)
+            refresh.assert_not_called()
 
     def test_network_cli_forced_post_and_cached_get_use_actual_http_boundary(self):
         with mock.patch.object(network_report,'_live_server_port',return_value=self.http.server_port),\

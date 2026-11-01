@@ -65,6 +65,7 @@ QUOTA_REFRESH = quota_sync.Manager(ROOT / "state" / "machine_quota.json")
 QUOTA_VIEW = QuotaView(ACCOUNT_MEMORY, QUOTA_REFRESH)
 QUOTA_REFRESH.on_complete = QUOTA_VIEW.remember_published
 COLLECTION = CollectionCoordinator(QUOTA_REFRESH, QUOTA_VIEW.remember_published, SERVER_INSTANCE_ID)
+UPSTREAM_APPROVALS = client_network.ApprovalStore()
 
 # Host/port this process is serving on, stashed by main() so /api/restart can
 # re-exec with identical arguments.
@@ -175,8 +176,12 @@ def cost_diagnostics_endpoint(query, *, views):
     return views.sessions.cost_diagnostics(query)
 
 
-def refresh_endpoint(query):
+def refresh_endpoint(query, *, require_approval=False):
     receipt = {}
+    if require_approval:
+        if _first(query, "ack", "0") != "1":
+            raise client_network.NetworkError("显式刷新需要出口确认。", 409)
+        UPSTREAM_APPROVALS.consume(_first(query, "approval", ""), "refresh", ["statistics"], None)
     COLLECTION.request({"force": ["1"]}, request_receipt=receipt)
     if _first(query, "ack", "0") == "1":
         runtime = COLLECTION.snapshot()
@@ -436,8 +441,16 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/api/refresh", "/api/network"):
             try:
                 query = parse_qs(parsed.query)
-                action = refresh_endpoint if parsed.path == "/api/refresh" else self.server.routes["/api/network"]
+                if parsed.path == "/api/refresh":
+                    if _first(query, "ack", "0") != "1":
+                        raise client_network.NetworkError("显式刷新需要出口确认。", 409)
+                    UPSTREAM_APPROVALS.consume(_first(query, "approval", ""), "refresh", ["statistics"], None)
+                    action = refresh_endpoint
+                else:
+                    action = self.server.routes["/api/network"]
                 self._send_json(action(query))
+            except client_network.NetworkError as exc:
+                self._send_json({"error": str(exc)}, status=exc.status)
             except Exception:
                 logger.exception("refresh action failed")
                 self._send_json({"error": "刷新失败，请检查服务状态。"}, status=500)
@@ -551,14 +564,32 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, UnicodeDecodeError):
                 raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
             if path == "/api/codex-accounts/egress-preview":
-                route = client_network.hub.browser_route(payload.get("connection"))
-                selected = payload.get("profile_ids", [])
-                if (not isinstance(selected, list) or len(selected) > 200
-                        or any(not isinstance(pid, str) or len(pid) > 128 for pid in selected)):
-                    raise codex_accounts.ActionError("预览账号选择无效。")
-                result = account_egress.preview(route)
-                if selected:
-                    result["confirmation"] = route.issue(selected, payload.get("expected_batch_id"))
+                approval_action = payload.get("approval_action") or ""
+                local_actions = {"quota-recovery", "refresh"}
+                if approval_action in local_actions and not payload.get("connection"):
+                    scope = payload.get("approval_scope")
+                    expected = payload.get("approval_expected")
+                    if (not isinstance(scope, list) or not scope or
+                            any(not isinstance(item, str) or not item for item in scope)):
+                        raise codex_accounts.ActionError("预览确认范围无效。")
+                    result = account_egress.preview()
+                    result["confirmation"] = UPSTREAM_APPROVALS.issue(approval_action, scope, expected)
+                    result["approval_action"] = approval_action
+                    result["approval_scope"] = scope
+                else:
+                    route = client_network.hub.browser_route(payload.get("connection"))
+                    selected = payload.get("profile_ids", [])
+                    if (not isinstance(selected, list) or len(selected) > 200
+                            or any(not isinstance(pid, str) or len(pid) > 128 for pid in selected)):
+                        raise codex_accounts.ActionError("预览账号选择无效。")
+                    result = account_egress.preview(route)
+                    if approval_action:
+                        if approval_action not in {"batch-start", "batch-retry", "refresh", "login"}:
+                            raise codex_accounts.ActionError("预览操作类型无效。")
+                        result["confirmation"] = route.issue(selected, payload.get("approval_expected"), approval_action)
+                        result["approval_action"] = approval_action
+                    elif selected:
+                        result["confirmation"] = route.issue(selected, payload.get("expected_batch_id"))
             elif path == "/api/codex-accounts/network-status":
                 route = client_network.hub.browser_route(payload.get("connection"))
                 result = {"label": route.label, "connected": True}
@@ -581,7 +612,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not selected:
                     raise codex_accounts.ActionError("尚未发现可发送的 Codex 登录账号。")
                 route = client_network.hub.browser_route(payload.get("connection"))
-                route.consume(payload.get("confirmation"), selected, payload["expected_batch_id"])
+                route.consume(payload.get("confirmation"), selected, payload["expected_batch_id"], "batch-start")
                 manager.start_batch(payload["expected_batch_id"], selected, network_route=route)
                 result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/batch-retry":
@@ -590,15 +621,31 @@ class Handler(BaseHTTPRequestHandler):
                 if not batch or (batch.get("network_device") or {}).get("id") != route.id:
                     raise codex_accounts.ActionError("请连接本轮原设备；旧版批次需重新查看出口并明确开始新一轮。", 409)
                 ids, unavailable = manager.discover(QUOTA_VIEW.action_catalog())
-                manager.retry_batch(payload.get("batch_id"), ids)
+                current = manager.list(ids)
+                pending = {item["profile_id"] for item in (current.get("batch") or {}).get("items", [])
+                           if not item.get("operation") or item["operation"].get("message_status") == "not_sent"}
+                route.consume(payload.get("confirmation"), pending, payload.get("batch_id"), "batch-retry")
+                manager.retry_batch(payload.get("batch_id"), ids, network_route=route)
                 result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/start":
                 manager.directory(payload.get("id"))
                 raise codex_accounts.ActionError("请通过开始新一轮查看设备出口并确认后发送。", 409)
             elif path == "/api/codex-accounts/refresh":
-                result = manager.start(payload.get("id"), refresh_only=True)
+                account_id = payload.get("id")
+                route = client_network.hub.browser_route(payload.get("connection"))
+                batch_id = (manager.read_batch() or {}).get("id")
+                if payload.get("approval_expected") != batch_id:
+                    raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
+                route.consume(payload.get("confirmation"), [account_id], batch_id, "refresh")
+                result = manager.start(account_id, refresh_only=True, network_route=route)
             elif path == "/api/codex-accounts/login":
-                result = manager.start(payload.get("id"), login_only=True)
+                account_id = payload.get("id")
+                route = client_network.hub.browser_route(payload.get("connection"))
+                batch_id = (manager.read_batch() or {}).get("id")
+                if payload.get("approval_expected") != batch_id:
+                    raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
+                route.consume(payload.get("confirmation"), [account_id], batch_id, "login")
+                result = manager.start(account_id, login_only=True, network_route=route)
             elif path == "/api/codex-accounts/resume":
                 result = manager.resume(payload.get("id"), payload.get("operation_id"), payload.get("pause_id"))
             elif path == "/api/codex-accounts/cancel":
@@ -623,12 +670,20 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", ""))
             if not 0 < length <= 4096 or self.headers.get_content_type() != "application/json":
                 raise ValueError()
-            value = quota_recovery.validate_request(json.loads(self.rfile.read(length)))
+            raw = json.loads(self.rfile.read(length))
+            if not isinstance(raw, dict):
+                raise ValueError()
+            value = quota_recovery.validate_request({k: raw.get(k) for k in ("machine", "account_id", "account_label", "pause_id")})
             machine = sync.load_machine_config().by_name.get(value["machine"])
             if machine is None:
                 raise ValueError()
+            scope = [value["machine"], value["account_id"]]
+            UPSTREAM_APPROVALS.consume(raw.get("confirmation"), "quota-recovery", scope, value["pause_id"])
         except (ValueError, UnicodeDecodeError):
             self._send_json({"error": "恢复目标或请求格式无效。"}, status=400)
+            return
+        except client_network.NetworkError as exc:
+            self._send_json({"error": str(exc)}, status=exc.status)
             return
         with QUOTA_REFRESH.recovery_scope() as available:
             if not available:

@@ -260,6 +260,9 @@ class RecoveryHttpTests(unittest.TestCase):
                 thread = threading.Thread(target=httpd.serve_forever)
                 thread.start()
                 def post(value=request, origin=None):
+                    value = dict(value)
+                    if origin is None and "confirmation" not in value and value.get("account_id") == request["account_id"]:
+                        value["confirmation"] = server.UPSTREAM_APPROVALS.issue("quota-recovery", [value["machine"], value["account_id"]], value["pause_id"])
                     request_finished.clear()
                     connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=3)
                     try:
@@ -282,7 +285,8 @@ class RecoveryHttpTests(unittest.TestCase):
                     self.assertEqual(post(), 409)
                     manager.recovering = False
                     run.assert_not_called()
-                    self.assertEqual(post(), 200)
+                    confirmation = server.UPSTREAM_APPROVALS.issue("quota-recovery", [request["machine"], request["account_id"]], request["pause_id"])
+                    self.assertEqual(post({**request, "confirmation": confirmation}), 200)
                     run.assert_called_once()
                     stored = json.loads(manager.path.read_text())
                     self.assertIsNone(stored["machines"]["fixture"]["payload"]["rate_limits"]["codex"]["refresh_error"])

@@ -13,11 +13,13 @@ export function countryName(code) {
 }
 
 export async function previewEgress(request, targets, signal, payload = {}) {
-  const sending = Array.isArray(targets);
+  const sending = Array.isArray(targets) && ["batch-start", "batch-retry"].includes(payload.approval_action);
+  const needsApproval = Boolean(payload.approval_action);
+  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","login":"单独登录","quota-recovery":"检查并恢复配额"})[payload.approval_action] || "发起上游操作";
   let receipt = null;
   const dialog = node("dialog", undefined, "account-egress-dialog");
   dialog.setAttribute("aria-labelledby", "account-egress-title");
-  const title = node("h2", sending ? "发送前确认出口" : "查看账号请求出口");
+  const title = node("h2", needsApproval ? `${actionLabel}前确认出口` : "查看账号请求出口");
   title.id = "account-egress-title";
   const status = node("p", "正在探测出口，尚未发送账号消息…", "quota-scope");
   status.setAttribute("role", "status");
@@ -27,10 +29,10 @@ export async function previewEgress(request, targets, signal, payload = {}) {
   cancel.type = "button";
   cancel.addEventListener("click", () => dialog.close());
   controls.append(cancel);
-  const confirm = node("button", "确认发送", "btn btn-primary");
+  const confirm = node("button", needsApproval ? `确认${actionLabel}` : "确认发送", "btn btn-primary");
   confirm.type = "button";
   confirm.disabled = true;
-  if (sending) controls.append(confirm);
+  if (needsApproval) controls.append(confirm);
   dialog.append(title, status, results,
     node("p", "分别探测 ChatGPT 业务与认证域名，不携带账号凭据。以下是探测时的出口；后续连接、其他目标或代理切换仍可能改变出口。", "quota-scope"));
   if (sending) {
@@ -38,6 +40,8 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     const identities = node("ul", undefined, "account-egress-identities");
     for (const account of targets) identities.append(node("li", `${account.email}（${account.account_id}）`));
     dialog.append(identities, node("p", "会使用账号额度；这是新一轮，之前已发送的账号也会再次发送。暂停中的账号不会发送；发送不保证固定或重置额度窗口。", "quota-scope"));
+  } else if (needsApproval) {
+    dialog.append(node("p", `确认后将${actionLabel}。预览只读取匿名出口信息，不携带账号凭据；取消或无法取得完整出口时不会继续。`, "quota-scope"));
   }
   dialog.append(controls);
   document.body.append(dialog);
@@ -59,7 +63,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
   request("egress-preview", payload).then(data => {
     if (!dialog.open) return;
     if (!Array.isArray(data.targets) || !data.targets.length) throw new Error("未取得出口信息");
-    if (sending && !data.confirmation) throw new Error("服务未返回本轮出口确认，请重新预览");
+    if (needsApproval && !data.confirmation) throw new Error("服务未返回本轮出口确认，请重新预览");
     receipt = data.confirmation || null;
     status.textContent = `出站设备：${data.checked_host} · 探测不会登录、发送消息或读取额度。`;
     for (const target of data.targets) {
@@ -74,7 +78,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
       results.append(row);
     }
     const incomplete = data.targets.some(target => !target.ip || !target.country_code);
-    confirm.textContent = incomplete ? "出口信息不完整，仍然发送" : "确认发送";
+    confirm.textContent = incomplete ? `出口信息不完整，仍然${actionLabel}` : `确认${actionLabel}`;
     confirm.disabled = false;
   }).catch(error => {
     if (!dialog.open) return;

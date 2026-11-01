@@ -216,10 +216,30 @@ export function init({ autoLoad = true } = {}) {
   async function perform(action, id, button) {
     if (action === "resume" && !window.confirm("我已核对此账号已记录的失败信息、账号状态及服务端要求，确认解除此账号的本地限制。\n\n这不证明上游已恢复；不会自动登录、查询或发送。额度限制和本机 Codex 通道暂停仍保留。")) return;
     if (action === "release-rate-limit" && !window.confirm("仅解除此账号在本页的限流暂停，不会发送消息或查询配额。\n\n这不证明服务端限流已解除；请按服务端指引等待后再尝试。认证和额度限制仍会保留。")) return;
+    const account = accounts.find(value => value.id === id);
+    const upstream = ["refresh", "login"].includes(action);
+    let approval = null;
+    if (upstream) {
+      try {
+        const connection = await actions.requireDevice();
+        const expected = batch?.id ?? null;
+        approval = await previewEgress(request, account ? [account] : [], controller.signal, {
+          connection, profile_ids: [id], approval_action: action, approval_expected: expected,
+        });
+        if (!approval) return;
+        button.disabled = true;
+        notice.textContent = action === "refresh" ? "正在提交配额查询…" : "正在提交登录操作…";
+        await request(action, { id, connection, confirmation: approval, approval_expected: expected });
+      } catch (error) {
+        if (current() && error.name !== "AbortError") notice.textContent = error.message;
+        return;
+      }
+      if (current()) await load();
+      return;
+    }
     button.disabled = true;
     notice.textContent = action === "forget-login" ? "正在清除本页保存的登录态…" : "正在提交操作…";
     try {
-      const account = accounts.find(value => value.id === id);
       await request(action, { id, ...(action === "resume" ? {operation_id: account?.operation?.id} : {}) });
       if (!current()) return;
       notice.textContent = action === "cancel" ? "正在取消；已发出的消息无法撤回。" : "";
@@ -480,18 +500,25 @@ export function createAccountActions(dependencies) {
   async function performBatch(action, ids) {
     if (submittingBatch) return;
     // Confirmation and submission must refer to the same members and CAS.
+    const expected = getBatch()?.id ?? null;
     const payload = action === "batch-start"
-      ? { expected_batch_id: getBatch()?.id ?? null, profile_ids: ids || [...getSelectedIds()] }
-      : { batch_id: getBatch().id };
-    const targets = action === "batch-start" ? getAccounts().filter(a => payload.profile_ids.includes(a.id)) : null;
-    if (targets && !targets.length) return;
+      ? { expected_batch_id: expected, profile_ids: ids || [...getSelectedIds()], approval_action: action, approval_expected: expected }
+      : { batch_id: expected, approval_action: action, approval_expected: expected };
+    const targets = action === "batch-start"
+      ? getAccounts().filter(a => payload.profile_ids.includes(a.id))
+      : getAccounts().filter(a => {
+        const item = getBatch()?.items?.find(row => row.profile_id === a.id);
+        return item && (!item.operation || item.operation.message_status === "not_sent");
+      });
+    if (action === "batch-start" && !targets.length) return;
     submittingBatch = true;
     render();
     let failure = "";
     let submitted = false;
     try {
       payload.connection = await requireDevice();
-      if (targets) {
+      if (action === "batch-start" || action === "batch-retry") {
+        if (targets.length) payload.profile_ids = targets.map(account => account.id);
         payload.confirmation = await previewEgress(request, targets, controller.signal, payload);
         if (!payload.confirmation) return;
       }
@@ -531,7 +558,7 @@ export function createAccountActions(dependencies) {
     }
     finally { submittingBatch = false; if (current()) render(); }
   }
-  return { performBatch, preview, connect, get busy() { return submittingBatch; } };
+  return { performBatch, preview, connect, requireDevice, get busy() { return submittingBatch; } };
 }
 
 export function operationReading(account) {

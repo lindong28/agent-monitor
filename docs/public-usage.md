@@ -83,6 +83,8 @@ Local usage does not need a provider login. If your current account is signed in
 
 Account operations use isolated managed profiles under state. Review the account, browser-device route and confirmation before sending; a message may consume your subscription quota. No scheduled message sender is installed. Failed or uncertain sends are not automatically replayed. If the UI reports a local hold, inspect its original failure before explicitly resuming; restarting does not erase the hold.
 
+Every Web action that can contact an AI provider now uses the same one-time exit approval: the page previews the target machine's anonymous ChatGPT and authentication-domain egress, warns when the reported region is China, and only then submits an action-bound confirmation. This covers a new batch, continuing unsent accounts, single-account quota refresh, single-account login, quota recovery and explicit statistics refresh. Reading saved status, account lists or recovery state stays local and does not open the approval dialog. The server rejects missing, expired, reused or scope-mismatched confirmations before starting a provider child process or collection round.
+
 The optional connector supports `./agent-monitor connect --server URL` in the foreground and macOS service installation via `./agent-monitor connect install --server URL`. It pairs the browser device's network route with account actions and supplies the local process observations described below. Process observations do not change the account action's route or the actual agents' proxy settings.
 
 <a id="local-agent-network"></a>
@@ -101,7 +103,7 @@ Update the local dashboard and an existing connector together through the normal
 | Capability | Entry and scope | Missing condition / next step |
 | --- | --- | --- |
 | System network diagnostics | **网络 → 检测网络**; explicit external IP/reputation requests from the page service host | With no cached evidence, request a diagnostic explicitly. Failure remains visible; it does not switch to process or browser-device observations. |
-| Account management, refresh and recovery | Existing controls in the overview; requests remain on the current origin and execute at the configured owner | Keep existing account/pause/egress requirements. Unknown outcomes require state reconciliation, not replay. |
+| Account management, refresh and recovery | Existing controls in the overview; provider actions first show the one-time egress approval and execute at the configured owner through the agent-monitor proxy bridge | Keep the displayed account, machine and pause scope unchanged. Unknown outcomes require state reconciliation, not replay. |
 | Passive process observations | `./agent-monitor process-network` or `--json`; same-user supported native Codex/Claude processes on macOS/Linux | Missing tools, permissions, sockets or context remain unknown. This CLI makes no public request; it does not prove the exit of past Agent traffic. |
 
 The process CLI and existing process diagnostic APIs remain available for technical consumers; the Web network page no longer presents them or stores their reports. Their instance/route admission, explicit probe permission, cooldowns and secret-redaction boundaries remain unchanged; see [architecture](public-architecture.md). Old browser-local reports can be forgotten by clearing this site's local storage; the current page neither reads nor refreshes them.

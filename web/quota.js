@@ -528,19 +528,24 @@
     probe.addEventListener("click", async () => {
       if (busy || probe.disabled || !state) return;
       const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id};
-      if (!window.confirm(`在 ${request.machine} 为 ${request.account_label} 检查一次 Codex 配额？\n沿用该机器原有系统代理。不会发送消息，也不会自动重试。\n成功保存有效配额后解除该机器的暂停；失败仍暂停。`)) return;
       unrecordedOutcome = false;
       busy = true; read.disabled = probe.disabled = true;
       panel.setAttribute("aria-busy", "true");
       title.textContent = "正在检查配额…";
       guidance.textContent = "请等待本次检查结束。不会发送消息，请勿重复提交。";
       notice.textContent = "";
-      let receipt, code;
+      let receipt, code, attempted = false;
       try {
-        const {response, value} = await requestJSON("/api/quota-recovery", {method:"POST",headers:{"Content-Type":"application/json","X-Agent-Monitor":"action"},body:JSON.stringify(request)},90000);
+        const approval = await window.AgentMonitor.previewUpstream?.(
+          [{email: request.account_label, account_id: request.account_id}],
+          {approval_action: "quota-recovery", approval_scope: [request.machine, request.account_id], approval_expected: request.pause_id},
+          controller.signal);
+        if (!approval) throw new Error("已取消检查；未发出上游请求。");
+        attempted = true;
+        const {response, value} = await requestJSON("/api/quota-recovery", {method:"POST",headers:{"Content-Type":"application/json","X-Agent-Monitor":"action"},body:JSON.stringify({...request, confirmation: approval})},90000);
         code = response.status; receipt = value;
-      } catch (_) { /* Reconcile before enabling any further provider action. */ }
-      pendingPauseId = !receipt || (typeof receipt.ok !== "boolean" && !receipt.failure) ? request.pause_id : null;
+      } catch (error) { notice.textContent = error?.message || "出口确认未完成；未发出检查请求。"; }
+      pendingPauseId = attempted && (!receipt || (typeof receipt.ok !== "boolean" && !receipt.failure)) ? request.pause_id : null;
       busy = false;
       await refresh();
       if (receipt?.ok || receipt?.failure) {

@@ -124,7 +124,7 @@ async function render(changes={}, error=false) {
   for (const scenario of ['matched','missing','still-paused']) {
     let current={...base}, posts=0, continued=0;
     const recovery=require('./web/quota.js')({platform:{document:{createElement:node,dispatchEvent(){}},
-      window:{AgentMonitor:{onPageCleanup(){}},confirm:()=>true},fetch:async(url,options)=>{
+      window:{AgentMonitor:{onPageCleanup(){},previewUpstream:async()=>"fixture-confirmation"},confirm:()=>true},fetch:async(url,options)=>{
         if(options?.method==='POST') {
           posts++;
           current={...base,pause:scenario==='still-paused'?base.pause:null,

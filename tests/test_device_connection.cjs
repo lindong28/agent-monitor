@@ -216,9 +216,10 @@ test('standalone preview and retry also pair on their own user gesture', async (
     const pending = action === 'preview' ? f.standalonePreview() : f.retry();
     assert.equal(f.popups.length, 1); assert.equal(f.calls.length, 0); f.message();
     if (action === 'preview') await f.preview();
+    else await f.preview(true);
     await pending;
     if (action === 'preview') assert.deepEqual(f.calls.map(call => call.action), ['network-status', 'egress-preview']);
-    else {assert.equal(f.calls[1].action, 'batch-retry'); assert.equal(f.calls[1].payload.batch_id, 'original-batch');}
+    else {assert.equal(f.calls[1].action, 'egress-preview'); assert.equal(f.calls[2].action, 'batch-retry'); assert.equal(f.calls[2].payload.batch_id, 'original-batch');}
   }
 });
 test('failed pairing and rejected exit confirmation never submit a batch', async () => {

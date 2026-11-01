@@ -86,6 +86,15 @@ class AccountHttpTests(unittest.TestCase):
             preview.assert_called_once()
             discover.assert_not_called(); start.assert_not_called()
 
+    def test_local_upstream_preview_issues_single_use_approval_without_device_route(self):
+        with mock.patch.object(server.account_egress, 'preview', return_value={'targets': []}) as preview:
+            status, value = self.request('/egress-preview', {
+                'approval_action': 'quota-recovery', 'approval_scope': ['fixture', 'account'],
+                'approval_expected': 'pause-id'})
+            self.assertEqual(status, 200)
+            self.assertTrue(value['confirmation'])
+            preview.assert_called_once_with()
+
     def test_unexpected_failure_can_be_found_by_http_diagnostic_id(self):
         with tempfile.TemporaryDirectory() as directory:
             monitor = diagnostics.Monitor()
@@ -145,8 +154,29 @@ class AccountHttpTests(unittest.TestCase):
         with mock.patch.object(self.manager, "start", return_value={"accepted": True}) as start:
             self.assertEqual(self.request("/login", {"id": account["id"]}, {"Origin": "https://other.example"})[0], 403)
             start.assert_not_called()
-            self.assertEqual(self.request("/login", {"id": account["id"]})[0], 200)
-            start.assert_called_once_with(account["id"], login_only=True)
+            payload = {"id": account["id"], "connection": self.connection,
+                       "approval_expected": None,
+                       "confirmation": self.route.issue([account["id"]], None, "login")}
+            self.assertEqual(self.request("/login", payload)[0], 200)
+            start.assert_called_once_with(account["id"], login_only=True, network_route=self.route)
+
+    def test_single_account_upstream_actions_require_action_bound_confirmation(self):
+        account = self.manager.add("refresh@example.com", "workspace-refresh")
+        with mock.patch.object(self.manager, "start", return_value={"accepted": True}) as start:
+            base = {"id": account["id"], "connection": self.connection, "approval_expected": None}
+            self.assertEqual(self.request("/refresh", base)[0], 409)
+            self.assertEqual(self.request("/login", {**base, "confirmation": self.route.issue([account["id"]], None, "refresh")})[0], 409)
+            start.assert_not_called()
+            token = self.route.issue([account["id"]], None, "refresh")
+            self.assertEqual(self.request("/refresh", {**base, "confirmation": token})[0], 200)
+            self.assertEqual(start.call_args.kwargs["network_route"], self.route)
+
+    def test_single_account_route_failure_does_not_queue_operation(self):
+        account = self.manager.add("route-failure@example.com", "workspace-route-failure")
+        self.route.close()
+        with self.assertRaises(client_network.NetworkError):
+            self.manager.start(account["id"], refresh_only=True, network_route=self.route)
+        self.assertIsNone(self.manager.view(self.manager.directory(account["id"]))["operation"])
 
     def test_invalid_payloads_do_not_create_profiles_or_leak_errors(self):
         for body in ([], {"email": "invalid"}, {"email": "x" * 4097}):
@@ -180,7 +210,8 @@ class AccountHttpTests(unittest.TestCase):
             self.assertEqual(duplicate["batch"]["id"], batch_id)
             self.assertEqual(len(duplicate["batch"]["items"]), 2)
             self.assertEqual(self.request("/batch-retry", {"batch_id": "old", "connection": self.connection})[0], 409)
-            self.assertEqual(self.request("/batch-retry", {"batch_id": batch_id, "connection": self.connection})[0], 200)
+            self.assertEqual(self.request("/batch-retry", {"batch_id": batch_id, "connection": self.connection,
+                                                             "confirmation": self.route.issue(ids, batch_id, "batch-retry")})[0], 200)
             self.manager.close()
         self.assertEqual(self.request("/batch-start", {"expected_batch_id": batch_id}, {"Origin": "https://other.example"})[0], 403)
 

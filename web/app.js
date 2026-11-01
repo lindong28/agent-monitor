@@ -250,9 +250,34 @@
     if (code) await copyText(button, code.textContent);
   }
 
+  async function previewUpstream(targets, payload = {}, signal = new AbortController().signal) {
+    const version = document.querySelector?.('meta[name="asset-version"]')?.content;
+    const module = await import("/web/account-egress.js" + (version ? `?v=${version}` : ""));
+    const request = async (action, body) => {
+      const response = await fetch(new URL("/api/codex-accounts/" + action, window.location.origin), {
+        method: "POST",
+        headers: { "X-Agent-Monitor": "codex-accounts", "Content-Type": "application/json" },
+        body: JSON.stringify(body), signal,
+      });
+      const value = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(value.error || `出口预览失败（HTTP ${response.status}）`);
+      return value;
+    };
+    return module.previewEgress(request, targets, signal, payload);
+  }
+
   async function api(path, query) {
     await runtimeContext();
     const tzReady = ensureTimezone();
+    const approvalDialogSupported = document.body && typeof document.createElement === "function"
+      && typeof document.createElement("dialog").showModal === "function";
+    if (path === "/api/refresh" && approvalDialogSupported) {
+      const approval = await previewUpstream(null, {
+        approval_action: "refresh", approval_scope: ["statistics"], approval_expected: null,
+      });
+      if (!approval) throw new Error("已取消刷新；未发出上游请求。");
+      query = Object.assign({}, query, { ack: "1", approval });
+    }
     const url = new URL(path, window.location.origin);
     Object.entries(query || {}).forEach(([key, value]) => {
       if (Array.isArray(value)) {
@@ -935,6 +960,7 @@
     watchPageData,
     replaceCurrentUrl,
     api,
+    previewUpstream,
     autoTimeDim,
     bindShell,
     chart,

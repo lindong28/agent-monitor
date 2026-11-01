@@ -121,7 +121,7 @@ const {performBatch}=actions;
  await performBatch('batch-start');assert.equal(calls.length,0,'cancel sends nothing');
  selectedIds=new Set(['a']);batch={id:'old'};accept=true;
  await performBatch('batch-start');
- assert.deepEqual(calls[0],{action:'batch-start',payload:{expected_batch_id:'old',profile_ids:['a'],connection,confirmation:true}});
+ assert.deepEqual(calls[0],{action:'batch-start',payload:{expected_batch_id:'old',profile_ids:['a'],approval_action:'batch-start',approval_expected:'old',connection,confirmation:true}});
  fail=true;selectedIds=new Set(['a']);
  await performBatch('batch-start');assert(notice.textContent.includes('selection expired'));assert.equal(actions.busy,false);
 })().catch(error=>{console.error(error);process.exitCode=1;});

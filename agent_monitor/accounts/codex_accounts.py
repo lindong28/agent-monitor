@@ -752,14 +752,20 @@ class Manager:
                 lock.close()
                 job["done"].set()
 
-    def start(self, profile_id, *, refresh_only=False, login_only=False):
+    def start(self, profile_id, *, refresh_only=False, login_only=False, network_route=None):
         with self.guard:
             directory = self.directory(profile_id)
             with lock_file(self.root / ".catalog.lock"):
                 batch = self.read_batch()
                 if not refresh_only and not login_only and batch and profile_id in batch["profile_ids"]:
                     raise ActionError("这个账号已纳入当前批次。请使用「继续未发送账号」或明确开始新一轮，避免重复发送。", 409)
-                self.launch(self.prepare(profile_id, refresh_only=refresh_only, login_only=login_only, published_id=batch["id"] if batch else None))
+                if network_route:
+                    network_route.require()
+                prepared = self.prepare(profile_id, refresh_only=refresh_only, login_only=login_only,
+                                        published_id=batch["id"] if batch else None)
+                if network_route:
+                    prepared[2]["network_route"] = network_route
+                self.launch(prepared)
                 return self.view(directory)
 
     def start_batch(self, expected_batch_id, eligible_ids=None, *, network_route=None):
@@ -810,14 +816,14 @@ class Manager:
                 self.launch_sequence(prepared)
                 return self.list()
 
-    def retry_batch(self, batch_id, eligible_ids=None):
+    def retry_batch(self, batch_id, eligible_ids=None, *, network_route=None):
         with self.guard:
             private_dir(self.root)
             with lock_file(self.root / ".catalog.lock"):
                 batch = self.read_batch()
                 if not batch or batch["id"] != batch_id:
                     raise ActionError("批次已变化，请刷新后查看。", 409)
-                network_route = self.batch_routes.get(batch_id)
+                network_route = network_route or self.batch_routes.get(batch_id)
                 if batch.get("network_device"):
                     if not network_route:
                         raise ActionError("本轮设备连接已失效，请连接本机网络后明确开始新一轮；不会切换出口重发。", 409)
