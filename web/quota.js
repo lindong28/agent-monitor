@@ -310,6 +310,67 @@
     return "error";
   }
 
+  function quotaFailureGuidance(failure) {
+    const detail = failure?.failure || {};
+    const reason = String(failure?.reason || "");
+    if (detail.kind === "account_mismatch" || reason.includes("登录账号已变化")) {
+      return {
+        key: "identity",
+        label: "身份变化",
+        summary: "账号身份变化",
+        action: "先确认这台机器登录的是目标账号，再检查配额。",
+      };
+    }
+    if (detail.upstream_code === "token_revoked" || detail.http_status === 401
+        || reason.includes("upstream_code=token_revoked") || reason.includes("invalidated oauth token")) {
+      return {
+        key: "credential",
+        label: "凭据失效",
+        summary: "凭据已失效",
+        action: "先在这台机器重新登录目标账号，再检查配额。",
+      };
+    }
+    if (detail.kind === "rpc_error" || detail.stage === "quota_read"
+        || reason.includes("kind=rpc_error") || reason.includes("stage=quota_read")) {
+      return {
+        key: "read_error",
+        label: "读取失败",
+        summary: "配额读取失败，原因未核实",
+        action: "先检查本机 Agent Monitor 路由桥与 Codex CLI。",
+      };
+    }
+    if (quotaFailureKind(failure.reason, failure.query_state) === "paused") {
+      return {
+        key: "paused",
+        label: "本地暂停",
+        summary: "本地保护暂停",
+        action: "先查看恢复状态，原因未核实前不要重试。",
+      };
+    }
+    if (quotaFailureKind(failure.reason, failure.query_state) === "skipped") {
+      return {
+        key: "skipped",
+        label: "未执行",
+        summary: "本轮未执行",
+        action: "先处理前序机器的失败，再决定是否检查配额。",
+      };
+    }
+    if (quotaFailureKind(failure.reason, failure.query_state) === "busy") {
+      return {
+        key: "busy",
+        label: "通道占用",
+        summary: "配额通道占用",
+        action: "等待当前操作结束后再检查，不要并发重试。",
+      };
+    }
+    return {
+      key: "unknown",
+      label: "原因未核实",
+      summary: "配额读取未完成，原因未核实",
+      action: "先查看采集记录与错误详情，不要直接重试。",
+    };
+  }
+
   function describeDiagnosticSummary(add, detail) {
     add("错误摘要经过凭据脱敏、空白整理，最多保留 512 个字符；不是完整原始响应。");
     if (["[url redacted]", "[opaque value redacted]"].some(marker => detail?.includes(marker))) {
@@ -575,6 +636,15 @@
     const labels = [["paused","暂停"],["skipped","本轮未尝试"],["busy","通道占用未查询"],["error","查询异常"]];
     const status = labels.filter(([key]) => counts[key]).map(([key,label]) => `${counts[key]} 台${label}`).join("，");
     saved.summary.textContent = failures.length ? `${provider.label} 采集详情（${status}）` : `${provider.label} 最近恢复记录`;
+    const guidanceCounts = new Map();
+    failures.forEach((failure) => {
+      const guidance = quotaFailureGuidance(failure);
+      guidanceCounts.set(guidance.label, (guidanceCounts.get(guidance.label) || 0) + 1);
+    });
+    const guidanceText = [...guidanceCounts.entries()].map(([label, count]) => label + " " + count).join("、");
+    if (failures.length && guidanceText) {
+      saved.summary.textContent = saved.summary.textContent.replace(/）$/, "；" + guidanceText + "）");
+    }
     const remaining = [...saved.entries], next = [];
     for (const failure of failures) {
       const index = remaining.findIndex(record => record.machine === failure.machine);
@@ -603,8 +673,11 @@
       }
       if (record.sourceText) {
         const statusText = {paused:"已暂停", skipped:"未执行", busy:"通道占用", error:"未完成"}[quotaFailureKind(failure.reason, failure.query_state)];
-        record.note.textContent = `${failure.machine}：上次配额采集${statusText}；当前状态请查看恢复卡片。`;
         record.sourceText.textContent = failure.reason || "未记录错误详情";
+        const guidance = quotaFailureGuidance(failure);
+        record.note.dataset.failureCategory = guidance.key;
+        record.note.textContent = failure.machine + "：上次配额采集" + statusText + "；"
+          + guidance.summary + "。" + guidance.action;
       } else record.note.textContent = `${failure.machine}：${failure.reason}`;
       if (provider.key === "codex" && failure.pause?.id) {
         record.entry.dataset.codexPauseId = failure.pause.id; record.entry.tabIndex = -1;

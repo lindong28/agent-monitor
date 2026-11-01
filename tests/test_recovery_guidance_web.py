@@ -100,6 +100,17 @@ async function render(changes={}, error=false) {
   assert(!source.note.textContent.includes(failure.reason));
   assert.equal(source.sourceText.textContent,failure.reason);
   assert(!source.sourceText.parentNode.open,'raw collection error is closed by default');
+  const classified = ui.quotaFailureDetails(provider, [
+    {machine:'macbook',reason:'登录账号已变化，等待统计同步确认',query_state:'paused'},
+    {machine:'macmini',reason:'配额读取失败，stage=quota_read，kind=rpc_error',query_state:'paused',
+      failure:{stage:'quota_read',kind:'rpc_error'}},
+    {machine:'macstudio',reason:'凭据失败，upstream_code=token_revoked，http_status=401',query_state:'paused',
+      failure:{upstream_code:'token_revoked',http_status:401}},
+  ]);
+  assert.match(classified.quotaDiagnostics.summary.textContent,/3 台暂停；身份变化 1、读取失败 1、凭据失效 1/);
+  assert.match(classified.quotaDiagnostics.entries[0].note.textContent,/账号身份变化.*确认这台机器登录的是目标账号/);
+  assert.match(classified.quotaDiagnostics.entries[1].note.textContent,/配额读取失败，原因未核实.*路由桥与 Codex CLI/);
+  assert.match(classified.quotaDiagnostics.entries[2].note.textContent,/凭据已失效.*重新登录目标账号/);
   body.quotaDiagnostics.details.open=true;
   await all(body).find(n=>n.tag==='button' && n.textContent==='查看当前状态与恢复').click();
   await new Promise(r=>setImmediate(r));
