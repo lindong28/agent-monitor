@@ -132,6 +132,13 @@ async function render(changes={}, error=false) {
   const onlyToken=ui.quotaFailureDetails(provider,[{machine:'only-token',reason:'上游拒绝，upstream_code=token_revoked',query_state:'paused',failure:{upstream_code:'token_revoked'}}]);
   assert.match(onlyToken.quotaDiagnostics.entries[0].note.textContent,/上游返回 token_revoked，原因未核实/);
   assert.doesNotMatch(onlyToken.quotaDiagnostics.entries[0].note.textContent,/HTTP 401/);
+  value={...base,pause:{...base.pause,failure:{stage:'quota_read',kind:'rpc_error',detail:'target read failed'}}};
+  p=ui.createRecoveryPanel('fixture-host',{sourceFailure:{machine:'fixture-host',reason:'登录账号已变化，等待统计同步确认',query_state:'paused',failure:{}}});
+  await new Promise(r=>setImmediate(r));
+  assert.match(visibleText(p),/恢复状态来源不一致，需要核对/);
+  assert.match(visibleText(p),/页面汇总显示“账号身份变化”，目标机器状态显示“配额读取失败，原因未核实”/);
+  assert.match(visibleText(p),/目标机器的 Agent Monitor 路由桥只检查一次/);
+  assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='probe').hidden,false);
   body.quotaDiagnostics.details.open=true;
   await all(body).find(n=>n.tag==='button' && n.textContent==='查看当前状态与恢复').click();
   await new Promise(r=>setImmediate(r));

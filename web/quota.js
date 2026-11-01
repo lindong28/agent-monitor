@@ -410,7 +410,7 @@
     return box;
   }
 
-  function createRecoveryPanel(machine = "self", {onContinue} = {}) {
+  function createRecoveryPanel(machine = "self", {onContinue, sourceFailure = null} = {}) {
     const make = (tag, text, className) => {
       const node = document.createElement(tag);
       if (text) node.textContent = text;
@@ -476,15 +476,25 @@
       const lastMatchesPause = last?.ok === false && pause?.id && lastRequest?.pause_id === pause.id
         && lastRequest.machine === value.machine && lastRequest.account_id === a.account_id;
       const failure = pause?.failure || (lastMatchesPause ? last.failure : null);
-      const failureGuidance = failure ? quotaFailureGuidance({
+      const hasFailure = failure && typeof failure === "object" && Object.keys(failure).length > 0;
+      const failureGuidance = hasFailure ? quotaFailureGuidance({
         reason: failure.detail || "", failure, query_state: "paused",
       }) : null;
+      const sourceGuidance = sourceFailure ? quotaFailureGuidance(sourceFailure) : null;
+      const sourceMismatch = sourceGuidance && failureGuidance
+        && ["identity", "upstream_auth", "read_error"].includes(sourceGuidance.key)
+        && ["identity", "upstream_auth", "read_error"].includes(failureGuidance.key)
+        && sourceGuidance.key !== failureGuidance.key;
       const authEvidence = failureGuidance?.key === "upstream_auth"
         ? failureGuidance.summary : "上游认证响应，原因未核实";
+      const mismatchEvidence = sourceMismatch
+        ? `页面汇总显示“${sourceGuidance.summary}”，目标机器状态显示“${failureGuidance.summary}”`
+        : "";
       const mode = !value ? "unknown" : value.active ? "active"
         : pendingPauseId ? "unknown-outcome" : !pause ? "ready"
         : pause.id === "unreadable" ? "unreadable" : pause.probe_attempt ? "used"
         : !a.account_id || !a.account_label ? "identity"
+        : sourceMismatch ? "source-mismatch"
         : failureGuidance?.key === "identity" ? "identity"
         : failureGuidance?.key === "upstream_auth" ? "upstream-auth"
         : failureGuidance?.key === "read_error" ? "read-error"
@@ -497,13 +507,14 @@
         unreadable: ["暂停记录无法读取", "发送仍暂停。先按排查步骤修复状态记录，再更新状态；不能直接清除暂停。"],
         used: ["本次暂停的检查机会已使用", "先更新状态查看已有结果。若仍未结束，按下方排查步骤处理；此处不能重复检查或重置机会。"],
         identity: ["查询账号身份需要确认", "发送仍暂停。先在目标机器确认当前登录的是这个账号；页面不能替你切换机器账号。确认后更新状态。"],
+        "source-mismatch": ["恢复状态来源不一致，需要核对", `${mismatchEvidence}；两份记录不一致，页面不能据此判断根因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
         "upstream-auth": ["上游认证响应需要核对", `已记录${authEvidence}；这条读数不能区分凭据、权限或服务端原因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
         "read-error": ["配额读取失败，需要一次受控检查", "已记录读取阶段失败，但原因未核实。先通过目标机器的 Agent Monitor 路由桥只检查一次；仍失败时复制诊断交由管理员排查。"],
         failed: ["配额检查未成功，发送仍暂停", "具体原因尚未确认。先查看排查步骤，处理后可再次检查；已有发送结果和账号选择保留。"],
         paused: ["发送已暂停，需要先检查配额", "Monitor 在此前请求异常后暂停了此机器的 Codex 发送、登录和配额查询。这是本地保护，不表示所有账号均不可用。"],
       };
       [title.textContent, guidance.textContent] = copyText[mode];
-      if (!["failed","unreadable","identity","upstream-auth","read-error","used"].includes(mode)) {
+      if (!["failed","unreadable","identity","source-mismatch","upstream-auth","read-error","used"].includes(mode)) {
         steps.hidden = true; help.textContent = "查看排查步骤";
       }
       target.textContent = value ? `检查对象：${value.machine} · ${a.account_label || "账号未识别"}` : "";
@@ -512,15 +523,15 @@
         : `暂停记录：${when(pause?.at ? pause.at * 1000 : null)}。`) : "";
       if (value && !pause && !last) result.textContent = `状态更新：${when(value.observed_at)}。`;
       if (value && unrecordedOutcome) result.textContent = "最近检查：未取得该次结果记录。当前是否暂停以上方状态为准。";
-      probe.hidden = !["paused", "failed", "upstream-auth", "read-error"].includes(mode);
+      probe.hidden = !["paused", "failed", "source-mismatch", "upstream-auth", "read-error"].includes(mode);
       probe.disabled = busy || probe.hidden;
       probe.textContent = mode === "failed" ? "处理后再次检查配额" : "通过目标机器路由桥检查配额";
       effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，沿用该机器原有系统代理；不会发送消息。";
-      help.hidden = !["failed", "unreadable", "identity", "upstream-auth", "read-error", "used"].includes(mode);
+      help.hidden = !["failed", "unreadable", "identity", "source-mismatch", "upstream-auth", "read-error", "used"].includes(mode);
       resume.hidden = mode !== "ready" || !onContinue;
       read.disabled = busy;
       read.textContent = ["unknown", "unknown-outcome"].includes(mode) ? "重新读取状态" : mode === "active" ? "更新进度" : "更新状态";
-      const primary = ["paused", "upstream-auth", "read-error"].includes(mode) ? probe : ["failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
+      const primary = ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
       for (const button of [read,probe,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
       steps.replaceChildren();
       const list = make("ol");
@@ -533,6 +544,10 @@
         "展开技术详情，确认页面读取到的账号来源、工作区和机器是否与目标账号一致。",
         `页面不能替你切换 ${host} 的登录账号；请在该机器按既有登录流程确认目标账号，不要在浏览器所在设备换出口绕过。`,
         "账号确认后点击“更新状态”。如果仍显示身份变化，这一步需要 Agent Monitor 管理员核对账号目录和同步状态。"
+      ] : mode === "source-mismatch" ? [
+        "保留两份记录，不要删除暂停或自行切换出口。",
+        `下一次检查将在 ${host} 执行，并使用该机器的 Agent Monitor 路由桥；预览失败时不会发送配额检查请求。`,
+        `若一次检查仍失败，页面不能替 ${host} 修复账号或部署；复制技术详情，交由 Agent Monitor 管理员核对汇总与机器记录。`
       ] : mode === "upstream-auth" ? [
         `核对上方检查对象。下一次检查将在 ${host} 执行，并先展示该机器的 Agent Monitor 路由桥出口。`,
         `已记录${authEvidence}；这条记录不能单独证明是凭据、权限还是服务端原因。不要直接换出口、重复登录或连续重试。`,
@@ -684,7 +699,7 @@
           open.addEventListener("click", () => {
             if (record.panel) return;
             open.disabled = true;
-            record.panel = createRecoveryPanel(record.machine);
+            record.panel = createRecoveryPanel(record.machine, {sourceFailure: failure});
             entry.appendChild(record.panel);
           });
           entry.appendChild(open);
