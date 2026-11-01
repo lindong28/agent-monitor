@@ -156,6 +156,26 @@
     return account.presence === undefined ? "in_use" : account.presence;
   }
 
+  function quotaFailureMatchesAccount(failure, account, accounts = []) {
+    if (!failure || !account || !failure.machine || !(account.machines || []).includes(failure.machine)) {
+      return false;
+    }
+    const failureId = typeof failure.account_id === "string" && failure.account_id ? failure.account_id : null;
+    const failureLabel = typeof failure.account_label === "string" && failure.account_label
+      ? failure.account_label.toLowerCase() : null;
+    // A machine-only failure can be kept compatible for a machine with one
+    // live account, but cannot be projected onto one of several account rows.
+    if (!failureId && !failureLabel) {
+      const candidates = accounts.filter((candidate) => quotaPresence(candidate) === "in_use"
+        && (candidate.machines || []).includes(failure.machine));
+      return candidates.length === 1 && candidates[0] === account;
+    }
+    const accountId = typeof account.account_id === "string" && account.account_id ? account.account_id : null;
+    const accountLabel = typeof account.account_label === "string" && account.account_label
+      ? account.account_label.toLowerCase() : null;
+    return (!failureId || failureId === accountId) && (!failureLabel || failureLabel === accountLabel);
+  }
+
   function codexSessionAccountLabel(account) {
     return account ? `账号：${account.name} · ${account.email}` : "账号归属未记录或冲突";
   }
@@ -605,23 +625,24 @@
   function quotaRefreshNotice(provider, account) {
     if (account.quota_status_reason) return account.quota_status_reason;
     const block = renderedQuotaRateLimits?.[provider.key];
-    const failed = new Set((block?.refresh_errors || []).map((failure) => failure.machine));
-    if (quotaPresence(account) !== "in_use" || !(account.machines || []).some((name) => failed.has(name))) {
+    const failures = (block?.refresh_errors || []).filter((failure) => quotaFailureMatchesAccount(
+      failure, account, block?.accounts || []));
+    if (quotaPresence(account) !== "in_use" || !failures.length) {
       return null;
     }
+    const failed = new Set(failures.map((failure) => failure.machine));
     const hasValue = provider.windows.some((spec) => quotaUsage(account[spec.used]).known);
     const sourceHealthy = account.reading_from && !failed.has(account.reading_from)
       && !(block?.signed_out_machines || []).includes(account.reading_from);
     const fresh = Number.isFinite(Date.parse(account.updated_at)) && !quotaIsStale(account.updated_at);
     if (sourceHealthy && fresh && hasValue) return null;
-    const kinds = new Set((block?.refresh_errors || [])
-      .filter(({ machine }) => (account.machines || []).includes(machine))
-      .map(({ reason, query_state }) => quotaFailureKind(reason, query_state)));
+    const kinds = new Set(failures.map(({ reason, query_state }) => quotaFailureKind(reason, query_state)));
     const state = kinds.has("paused") ? "查询已暂停" : kinds.has("skipped") ? "上次查询未执行"
       : kinds.has("busy") ? "查询通道占用" : null;
     if (state) {
       const reading = hasValue ? (fresh ? (account.quota_observation?.source === "codex_session" ? "当前读数来自会话日志" : "当前读数仍在更新时限内") : "读数已过期，保留上次读数") : "暂无读数";
-      return `${reading}；主动${state}，请展开“${provider.label} 采集详情”核对原因`;
+      const machines = [...new Set(failures.map((failure) => failure.machine).filter(Boolean))].join("、");
+      return `${reading}；${machines} 的主动${state}，请展开“${provider.label} 采集详情”核对原因`;
     }
     return hasValue ? "更新延迟，保留上次读数；可点击刷新重试" : "暂不可用，可点击刷新重试";
   }

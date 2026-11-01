@@ -55,9 +55,34 @@ ui.renderQuotaAccounts({codex:{accounts:[passive],refresh_errors:[{machine:'alph
   reason:'Codex 配额请求失败，请检查网络',query_state:'paused',account_id:'passive',account_label:'passive@example.test',pause:{id:'a'.repeat(32),at:1}}]}});
 assert(table.textContent.includes('当前读数来自会话日志'));
 assert(table.textContent.includes('主动查询已暂停'));
+assert(table.textContent.includes('alpha 的主动查询已暂停'));
 assert(!table.textContent.includes('更新延迟'));
 const recoverButton=descendants(table).find(n=>n.tagName==='BUTTON' && n.textContent==='查看当前状态与恢复');
 assert(recoverButton, 'read-only recovery entry is available');
+
+// A machine pause for another account must not be projected onto this row.
+const unrelated={...account('other'),updated_at:new Date().toISOString(),
+  quota_observation:{source:'codex_session',observed_at:new Date().toISOString()}};
+ui.renderQuotaAccounts({codex:{accounts:[unrelated],refresh_errors:[{machine:'alpha',
+  reason:'other account paused',query_state:'paused',account_id:'passive',account_label:'passive@example.test'}]}});
+assert(!table.textContent.includes('主动查询已暂停'));
+
+// A matching pause on another machine is harmless while the displayed source is healthy.
+const healthySource={...account('passive','known','in_use','alpha'),reading_from:'beta',
+  updated_at:new Date().toISOString(),quota_observation:{source:'codex_session',observed_at:new Date().toISOString()}};
+ui.renderQuotaAccounts({codex:{accounts:[healthySource],refresh_errors:[{machine:'alpha',
+  reason:'same account paused elsewhere',query_state:'paused',account_id:'passive',account_label:'passive@example.test'}]}});
+assert(!table.textContent.includes('主动查询已暂停'));
+
+// A machine-only failure may keep the legacy row notice when the machine has
+// exactly one live account; it must not be guessed when accounts are shared.
+ui.renderQuotaAccounts({codex:{accounts:[{...unrelated,machines:['alpha']}],refresh_errors:[{machine:'alpha',
+  reason:'identity unavailable',query_state:'paused'}]}});
+assert(table.textContent.includes('alpha 的主动查询已暂停'));
+const sharedMachineAccounts=[{...account('first'),machines:['alpha']},{...account('second'),machines:['alpha']}];
+ui.renderQuotaAccounts({codex:{accounts:sharedMachineAccounts,refresh_errors:[{machine:'alpha',
+  reason:'identity unavailable',query_state:'paused'}]}});
+assert(!table.textContent.includes('主动查询已暂停'));
 // A current managed profile with no plan source must be visibly unverified.
 const managedWithoutPlan = {...account('managed-without-plan'), account_plan:null,
   reading_plan:null, credential_plan:null, plan_verification:'unverified', updated_at:new Date().toISOString()};
