@@ -1250,11 +1250,7 @@
       context.textContent = "配额来自账号操作中的配额查询；机器归属与套餐来自机器采集";
       details.appendChild(context);
       note("账号操作读数");
-      if (stale) note("读数可能过期");
       return cell;
-    }
-    if (stale) {
-      note("读数可能过期");
     }
     if (!account.reading_from) {
       const source = document.createElement("span");

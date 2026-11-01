@@ -189,11 +189,12 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
     assert.equal(inline.includes('来源机器未登录'),affected,provider+': '+kind);
     assert(!cell.textContent.includes('登录已失效'));
     assert(!inline.includes('保留旧值'));
+    assert(!inline.includes('读数可能过期'));
     if (kind==='account-action') {
       assert(inline.includes('账号操作读数'));
     }
     if (affected) {
-      assert.equal(inline, kind==='signed-out-source' ? '读数可能过期来源机器未登录' : '来源机器未登录');
+      assert.equal(inline, '来源机器未登录');
       for (const text of ['alpha',label,'最后一次','登录此账号','更新统计与配额'])
         assert(detail.textContent.includes(text),text);
       assert.equal(sample.five_hour_used_pct,91,'copy must not alter the reading');
@@ -204,7 +205,7 @@ const staleAction = {...account('stale-action'), updated_at:'2026-10-14T12:00:00
 ui.renderQuotaAccounts({codex:{accounts:[staleAction]}});
 const staleRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='stale-action');
 assert(staleRow.cells[6].textContent.includes('账号操作读数'));
-assert(staleRow.cells[6].textContent.includes('读数可能过期'));
+assert(!staleRow.cells[6].textContent.includes('读数可能过期'));
 Date.now=realNow;
 const original=JSON.stringify(data);
 const rows=()=>table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId);
