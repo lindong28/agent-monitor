@@ -166,7 +166,7 @@ elif [ -e "$BIN_DIR/ip-check" ] || [ -L "$BIN_DIR/ip-check" ]; then
 fi
 
 mkdir -p "$ROOT_DIR/state" "$VENDOR_DIR" "$BIN_DIR"
-chmod +x "$ROOT_DIR/agent-monitor"
+chmod u+x "$ROOT_DIR/agent-monitor"
 
 chart_valid() {
   "$VENV_PY" - "$1" "$CHART_SHA256" <<'PYTHON'
@@ -285,7 +285,7 @@ emit_install_ledger artifact "agent-monitor typefaces" "$font_state" "$font_deta
 
 # --- ip-check sub-feature ---
 IPCHECK_BIN="$ROOT_DIR/ip-check"
-chmod +x "$IPCHECK_BIN"
+chmod u+x "$IPCHECK_BIN"
 ln -sfn "$IPCHECK_BIN" "$BIN_DIR/ip-check"
 
 echo "ip-check installed"

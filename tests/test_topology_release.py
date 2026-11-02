@@ -5,12 +5,31 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from unittest import mock
 
 from agent_monitor.runtime import deploy, rollout, rollout_node
 from agent_monitor.snapshots.machine_config import Machine, MachineConfig
 from agent_monitor.snapshots.machine_config import _config_json
+
+
+class GitPredicateTests(unittest.TestCase):
+    def test_unknown_checks_do_not_trigger_fetch_or_migration(self):
+        for failed_phase in ('objects', 'ancestry'):
+            for failure in (subprocess.TimeoutExpired('git', 30), OSError('unavailable'),
+                            subprocess.CompletedProcess('git', 128)):
+                with self.subTest(phase=failed_phase, failure=type(failure).__name__):
+                    owner = mock.Mock(ROOT=Path('/fixture'), PreflightError=deploy.PreflightError)
+                    owner.git.return_value = 'a' * 40 + '\trefs/heads/main'
+                    owner.check_local.return_value = 'b' * 40
+                    steps = ([] if failed_phase == 'objects' else
+                             [subprocess.CompletedProcess('git', 0)] * 2) + [failure]
+                    with mock.patch.object(rollout_node.subprocess, 'run', side_effect=steps):
+                        with self.assertRaisesRegex(ValueError, 'unverified') as raised:
+                            rollout_node.prepare_source(owner, 'a' * 40)
+                    self.assertNotIn('not an ancestor', str(raised.exception))
+                    self.assertFalse(any(call.args[0] in ('fetch', 'merge') for call in owner.git.call_args_list))
 
 
 class TopologyReleaseTests(unittest.TestCase):

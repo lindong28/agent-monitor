@@ -273,6 +273,48 @@ deployment_guard.run_install(deploy.ROOT, [], preflight=admission)
         self.run_git(self.repo, "commit", "--allow-empty", "-m", "local divergence")
         self.blocked(self.deploy())
 
+    def prepare_node_source(self, revision, *, forbid_fetch=False):
+        code = '''import sys
+from agent_monitor.runtime import deploy, rollout_node
+original = deploy.git
+if sys.argv[2] == 'yes':
+ def no_fetch(*args):
+  if args[0] == 'fetch': raise AssertionError('unnecessary object download')
+  return original(*args)
+ deploy.git = no_fetch
+rollout_node.prepare_source(deploy, sys.argv[1])
+'''
+        return subprocess.run([sys.executable, '-c', code, revision, 'yes' if forbid_fetch else 'no'],
+                              cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=40)
+
+    def test_preloaded_release_still_verifies_live_origin_without_fetch(self):
+        result = self.prepare_node_source(self.head, forbid_fetch=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.run_git(self.repo, 'remote', 'set-url', 'origin', str(self.root / 'sensitive-url-fragment'))
+        result = self.prepare_node_source(self.head, forbid_fetch=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('reading live origin/main', result.stderr)
+        self.assertIn('Git ls-remote exited', result.stderr)
+        self.assertNotIn('sensitive-url-fragment', result.stderr)
+
+    def test_missing_release_objects_are_fetched_before_fast_forward(self):
+        self.advance_remote()
+        published = self.run_git(self.remote, 'rev-parse', 'main')
+        result = self.prepare_node_source(published)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.run_git(self.repo, 'rev-parse', 'HEAD'), published)
+
+    def test_unrelated_history_explains_migration_without_replacing_source(self):
+        unrelated = self.run_git(self.repo, 'commit-tree', self.head + '^{tree}', '-m', 'separate public history')
+        self.run_git(self.repo, 'push', 'origin', unrelated + ':refs/heads/public-history')
+        self.run_git(self.remote, 'update-ref', 'refs/heads/main', unrelated)
+        result = self.prepare_node_source(unrelated, forbid_fetch=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('checking checkout ancestry', result.stderr)
+        self.assertIn('Transition an existing installation', result.stderr)
+        self.assertEqual(self.run_git(self.repo, 'rev-parse', 'HEAD'), self.head)
+        self.assertFalse((self.repo / 'installed').exists())
+
     def test_missing_origin_blocks(self):
         self.run_git(self.repo, "remote", "remove", "origin")
         self.blocked(self.deploy())

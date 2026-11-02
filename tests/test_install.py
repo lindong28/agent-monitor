@@ -146,6 +146,15 @@ else: sys.exit(9)
         self.assertFalse(self.plist.exists())
         self.assertFalse((self.home / "calls").exists())
 
+    def test_private_executable_modes_do_not_change_during_install(self):
+        self.env['TEST_OS'] = 'Linux'
+        for name in ('agent-monitor', 'ip-check'):
+            (self.component / name).chmod(0o700)
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ('agent-monitor', 'ip-check'):
+            self.assertEqual((self.component / name).stat().st_mode & 0o777, 0o700)
+
 
 
     def test_portable_fresh_repeat_ledger_and_runtime_are_independent(self):

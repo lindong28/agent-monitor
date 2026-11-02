@@ -23,11 +23,13 @@ def git(*args):
             stdin=subprocess.DEVNULL, timeout=30,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
-    except (OSError, subprocess.TimeoutExpired):
-        raise PreflightError("Git check unavailable or timed out; inspect Git access and retry.") from None
+    except subprocess.TimeoutExpired:
+        raise PreflightError(f"Git {args[0]} timed out after 30 seconds; inspect repository access before retrying.") from None
+    except OSError:
+        raise PreflightError(f"Git {args[0]} could not start; inspect the installed Git executable.") from None
     if result.returncode:
         # Git diagnostics may contain credentials embedded in a remote URL.
-        raise PreflightError("Git check failed; inspect repository state and origin access, then retry.")
+        raise PreflightError(f"Git {args[0]} exited {result.returncode}; inspect repository state and origin access before retrying.")
     return result.stdout.rstrip("\n")
 
 
