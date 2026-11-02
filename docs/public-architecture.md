@@ -9,7 +9,7 @@ Public shell commands and the documented Python adapters remain at the checkout 
 | Responsibility | Source entry | Regression starting point |
 | --- | --- | --- |
 | Public commands and Python command handlers | `agent-monitor`, `agent_monitor/cli/`, `install.sh`, independent `runtime_rebuild.py` rescue | `tests/test_install.py`, `tests/test_freshness.py`, `tests/test_session_quota_cli.py` |
-| Deployment, process identity and service lifecycle | `agent_monitor/runtime/`; configuration reads in `agent_monitor/hub_config.py` | `tests/test_deployment_guard.py`, `tests/test_deployment_convergence.py`, `tests/test_service_management.py` |
+| Deployment, process identity and service lifecycle | `agent_monitor/runtime/`; `rollout.py` coordinates the configured topology and `rollout_node.py` uses each installed checkout; configuration reads in `agent_monitor/hub_config.py` | `tests/test_deployment_guard.py`, `tests/test_production_deploy.py`, `tests/test_topology_release.py`, `tests/test_deployment_convergence.py`, `tests/test_service_management.py` |
 | Checkout paths and source inventory | `agent_monitor/paths.py`, `agent_monitor/source_inventory.py` | `tests/test_source_inventory.py`, `tests/test_service_signature.py`, `tests/test_freshness.py`, `tests/test_exporter.py` |
 | Parsing, shared models and source identity | `parsers/`, dependency-light `agent_monitor/contracts/` | `tests/test_shared_contracts.py`, `tests/test_managed_codex_profiles.py`, `tests/test_conversation_sessions.py` |
 | Usage loading, identity recovery and retained observations | `agent_monitor/ingestion/` | `tests/test_aggregators.py`, `tests/test_reviewed_identity.py`, `tests/test_usage_archive.py` |
@@ -130,6 +130,8 @@ On the remote connector path, an opener-origin acknowledgement and one-use same-
 ## Persistence and maintenance
 
 Runtime state is under `state/`, which may be an existing deployment-owned symlink. Preserve identity files, locks, archives, account profiles and retirement records during upgrades. `.venv`, `.runtime`, `web/vendor`, local configuration and state are not publication artifacts. Generated caches are not substitutes for authoritative retained history.
+
+The Hub's `state/release.json` is the current topology release receipt and resume authority; it retains the fixed revision, target set, per-node observations and verification time. Node `release-reservation.json` files prevent conflicting versions until the matching release completes. `release.lock` and `deployment.lock` are persistent cooperative locks. Records are atomically replaced, with one latest receipt per Hub and one reservation per node; no database or background service is added. A new release replaces a completed receipt only after its reservation cleanup finishes; incomplete releases and pending cleanup remain recoverable. Cleanup never rewrites the completed verification or repeats installation. Each node's private `release-install.log` contains the latest installation attempt and is replaced on the next attempt. These deployment records never contain account credentials or provider responses, and must not be cleared as disposable collection caches.
 
 Choose storage maintenance by the consumer's task, not by whether a file is called a cache:
 

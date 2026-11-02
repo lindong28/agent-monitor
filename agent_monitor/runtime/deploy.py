@@ -12,7 +12,7 @@ from agent_monitor.paths import PROJECT_ROOT
 ROOT = PROJECT_ROOT
 
 
-class PreflightError(Exception):
+class PreflightError(ValueError):
     pass
 
 
@@ -58,12 +58,25 @@ def check_local():
 
 def preflight(expected=None):
     head = check_local()
+    from agent_monitor.runtime.rollout_node import check_reservation
+    try:
+        check_reservation(ROOT, head)
+    except ValueError as error:
+        raise PreflightError(str(error)) from None
     if expected is not None and expected != head:
         raise PreflightError("Checkout differs from the release SHA; fast-forward to the intended published release.")
     git("remote", "get-url", "origin")
     rows = git("ls-remote", "--exit-code", "origin", "refs/heads/main").splitlines()
-    if len(rows) != 1 or rows[0].split() != [head, "refs/heads/main"]:
-        raise PreflightError("HEAD differs from live origin/main; publish approved work or fetch and fast-forward first.")
+    if len(rows) != 1 or len(rows[0].split()) != 2 or rows[0].split()[1] != "refs/heads/main":
+        raise PreflightError("Live origin/main identity is unverified.")
+    published = rows[0].split()[0]
+    if published != head:
+        if expected is None:
+            raise PreflightError("HEAD differs from live origin/main; publish approved work or fetch and fast-forward first.")
+        try:
+            git("merge-base", "--is-ancestor", head, published)
+        except PreflightError:
+            raise PreflightError("Fixed release is not verified in live origin/main history; fetch origin and verify its ancestry before retrying.") from None
     # Detect a cooperative checkout change during the network round-trip.
     if check_local() != head:
         raise PreflightError("Checkout changed during preflight; coordinate writers and retry.")
@@ -72,27 +85,36 @@ def preflight(expected=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--expect", help="full release commit SHA; must also equal live origin/main")
+    parser.add_argument("--expect", help="full published release SHA; remains fixed if origin/main advances")
     parser.add_argument("--check-only", action="store_true", help="check source identity without installing")
+    parser.add_argument("--local", action="store_true", help="repair only this node; not a complete topology deployment")
+    parser.add_argument("--rollout-id", help=argparse.SUPPRESS)
     parser.add_argument("installer_args", nargs=argparse.REMAINDER, help="arguments after -- go to install.sh")
     args = parser.parse_args()
     installer_args = args.installer_args
     if installer_args[:1] == ["--"]:
         installer_args = installer_args[1:]
     try:
+        from agent_monitor.runtime import rollout
+        if not args.local:
+            return rollout.run(args.expect, check_only=args.check_only, installer_args=installer_args)
+        def admission():
+            head = preflight(args.expect)
+            rollout.check_reservation(ROOT, head, args.rollout_id)
+            return head
         if not args.check_only:
             return deployment_guard.run_install(ROOT, installer_args,
-                                                preflight=lambda: preflight(args.expect))
-        head = preflight(args.expect)
-    except PreflightError as error:
+                                                preflight=admission)
+        head = admission()
+    except (PreflightError, ValueError) as error:
         print(f"{ROOT.name} deployment blocked: {error} Installer was not started.", file=sys.stderr)
         return 1
     except (deployment_guard.GuardError, OSError, subprocess.TimeoutExpired) as error:
         detail = str(error) if isinstance(error, deployment_guard.GuardError) else "Local installation failed or timed out; inspect permissions and service status before retrying."
         print(f"{ROOT.name} deployment failed: {detail}", file=sys.stderr)
         return 1
-    print(f"{ROOT.name} source verified: main = origin/main = {head}", flush=True)
-    print("Source check only; installation and service health were not checked.")
+    print(f"{ROOT.name} local source verified: published release {head}", flush=True)
+    print("Source check only; installation and service health were not checked. Other topology nodes were not deployed.")
     return 0
 
 

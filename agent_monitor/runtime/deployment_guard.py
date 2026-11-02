@@ -218,10 +218,17 @@ def run_install(root, installer_args, *, preflight=None):
     root = Path(root).resolve()
     with deployment_lock(root):
         baseline = source_snapshot(root)
+        reservation = root / 'state' / 'release-reservation.json'
+        if reservation.exists() or reservation.is_symlink():
+            from agent_monitor.runtime.rollout_node import check_reservation
+            try:
+                check_reservation(root, baseline['revision'])
+            except ValueError as error:
+                raise GuardError(str(error)) from None
         if preflight is not None:
             head = preflight()
             verify_source(root, baseline)
-            print(f'{root.name} source verified: main = origin/main = {head}', flush=True)
+            print(f'{root.name} source verified: published release {head}', flush=True)
         source = (root / 'agent_monitor/runtime/install.sh').read_text()
         if source.count(BODY_MARKER) != 1:
             raise GuardError('Installer guard entry is missing or ambiguous; restore agent_monitor/runtime/install.sh before retrying.')

@@ -36,8 +36,10 @@ class ProductionDeploymentTests(unittest.TestCase):
         (self.repo / ".gitignore").write_text("installed\n")
         (self.repo / "agent_monitor/runtime/install.sh").write_text('#!/bin/sh\n# AGENT_MONITOR_INSTALL_BODY\nprintf "%s\\n" "$@" > installed\nexit "${TEST_INSTALL_EXIT:-0}"\n')
         shutil.copy2(SOURCE / "install.sh", self.repo / "install.sh")
+        (self.repo / 'config').mkdir()
+        (self.repo / 'config/machines.json').write_text('{"machines":[{"name":"local","ssh_host":"localhost","self":true}],"retired_names":[]}')
         (self.repo / "source.txt").write_text("published\n")
-        self.run_git(self.repo, "add", "agent-monitor", "agent_monitor", "install.sh", ".gitignore", "source.txt")
+        self.run_git(self.repo, "add", "agent-monitor", "agent_monitor", "install.sh", ".gitignore", "source.txt", "config")
         self.run_git(self.repo, "commit", "-m", "fixture")
         self.run_git(self.repo, "remote", "add", "origin", str(self.remote))
         self.run_git(self.repo, "push", "origin", "main")
@@ -197,6 +199,74 @@ deployment_guard.run_install(deploy.ROOT, [], preflight=admission)
         self.advance_remote()
         self.assertEqual(self.run_git(self.repo, "rev-parse", "origin/main"), self.head)
         self.blocked(self.deploy())
+
+    def test_fixed_release_allows_published_ancestor_after_fetch(self):
+        self.advance_remote()
+        self.run_git(self.repo, 'fetch', 'origin')
+        result = self.deploy('--expect', self.head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(self.head, result.stdout)
+        self.assertNotIn('main = origin/main', result.stdout)
+        self.assertEqual(self.run_git(self.repo, 'rev-parse', 'HEAD'), self.head)
+
+    def test_fixed_release_rejects_unfetched_live_history(self):
+        self.advance_remote()
+        self.blocked(self.deploy('--expect', self.head))
+
+    def test_fixed_release_rejects_unpublished_divergence(self):
+        self.advance_remote()
+        self.run_git(self.repo, 'fetch', 'origin')
+        self.run_git(self.repo, 'commit', '--allow-empty', '-m', 'diverged')
+        self.blocked(self.deploy('--expect', self.run_git(self.repo, 'rev-parse', 'HEAD')))
+
+    def test_active_release_blocks_conflicting_local_deploy_and_installer(self):
+        import json
+        state = self.repo / 'state'
+        state.mkdir()
+        (state / 'release-reservation.json').write_text(json.dumps({'id': 'other', 'revision': '0' * 40}))
+        result = self.deploy('--local', '--expect', self.head)
+        self.blocked(result)
+        self.assertIn('reserves this node', result.stderr)
+        result = subprocess.run(['bash', 'install.sh', '--no-services'], cwd=self.repo,
+                                env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.repo / 'installed').exists())
+
+    def test_same_release_local_repair_is_allowed(self):
+        import json
+        state = self.repo / 'state'
+        state.mkdir()
+        (state / 'release-reservation.json').write_text(json.dumps({'id': 'ongoing', 'revision': self.head}))
+        result = self.deploy('--local', '--expect', self.head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_node_bootstrap_uses_installed_checkout_and_matching_reservation(self):
+        import json
+        script = (SOURCE / 'agent_monitor/runtime/rollout_node.py').read_text()
+        def node(action, **extra):
+            request = {'root': str(self.repo), 'action': action, 'revision': self.head, 'id': 'fixture', **extra}
+            result = subprocess.run([sys.executable, '-c', script, json.dumps(request)],
+                                    cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=40)
+            lines = [line.partition('=')[2] for line in result.stdout.splitlines()
+                     if line.startswith('AGENT_MONITOR_RELEASE_RESULT=')]
+            self.assertEqual(len(lines), 1, result.stderr)
+            return result, json.loads(lines[0])
+        result, receipt = node('inspect')
+        self.assertEqual(result.returncode, 0, receipt)
+        observed = receipt['observed']
+        self.assertEqual(observed['revision'], self.head)
+        result, receipt = node('reserve', observed=observed)
+        self.assertEqual(result.returncode, 0, receipt)
+        result, receipt = node('apply', observed=observed)
+        self.assertEqual(result.returncode, 0, receipt)
+        self.assertTrue((self.repo / 'installed').exists())
+        self.assertNotIn('Starting install.sh', result.stdout)
+        result, receipt = node('release', observed=observed)
+        self.assertEqual(result.returncode, 0, receipt)
+        self.assertFalse((self.repo / 'state/release-reservation.json').exists())
+        # The delete may succeed while its transport receipt is lost.
+        result, receipt = node('release', observed=observed)
+        self.assertEqual(result.returncode, 0, receipt)
 
     def test_diverged_history_blocks(self):
         self.advance_remote()
