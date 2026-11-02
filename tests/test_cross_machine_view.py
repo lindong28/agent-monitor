@@ -881,7 +881,10 @@ class BackgroundSyncTests(unittest.TestCase):
                 return json.load(response)
 
         try:
-            with mock.patch("agent_monitor.http_server.sync.sync_all", side_effect=failing_sync_all), mock.patch(
+            with mock.patch("agent_monitor.collection.hub.enabled", return_value=False), mock.patch(
+                "agent_monitor.http_server.sync.load_machine_config",
+                return_value=MachineConfig((machine,), frozenset()),
+            ), mock.patch("agent_monitor.http_server.sync.sync_all", side_effect=failing_sync_all), mock.patch(
                 "agent_monitor.http_server.generation.generation_admission_snapshot",
                 return_value=contextlib.nullcontext(admission),
             ), mock.patch(
@@ -889,7 +892,8 @@ class BackgroundSyncTests(unittest.TestCase):
                 return_value={"columns": [], "rows": []},
             ), mock.patch("agent_monitor.http_server.rollup.earliest_rollup_date", return_value=None):
                 origin = "http://127.0.0.1:%d" % httpd.server_port
-                request = urllib.request.Request(origin + "/api/refresh", method="POST",
+                token = server.UPSTREAM_APPROVALS.issue("refresh", ["statistics"], None)
+                request = urllib.request.Request(origin + "/api/refresh?ack=1&approval=" + token, method="POST",
                     headers={"Origin": origin, "X-Agent-Monitor": "action"})
                 with opener.open(request, timeout=2) as response:
                     initial = json.load(response)
