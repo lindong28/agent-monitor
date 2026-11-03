@@ -64,6 +64,23 @@ test('DIRECT forwards HTTP bytes without local proxy credentials', async t => {
   assert.equal((await get(proxy.port, `http://127.0.0.1:${port}/`, 'invalid')).status, 407);
 });
 
+test('HTTP and CONNECT challenge unauthenticated clients before resolving routes', async t => {
+  let resolved = 0;
+  const proxy = await bridge(t, async () => { resolved++; return 'DIRECT'; });
+  const response = await get(proxy.port, 'http://example.invalid/', 'invalid');
+  assert.equal(response.status, 407);
+  assert.equal(response.headers['proxy-authenticate'], 'Basic realm="agent-monitor"');
+  const socket = net.connect(proxy.port, '127.0.0.1');
+  t.after(() => socket.destroy());
+  await once(socket, 'connect');
+  socket.write('CONNECT example.invalid:443 HTTP/1.1\r\nHost: example.invalid:443\r\n\r\n');
+  const [data] = await once(socket, 'data');
+  assert.match(data.toString(), /^HTTP\/1.1 407 /);
+  assert.match(data.toString(), /\r\nProxy-Authenticate: Basic realm="agent-monitor"\r\n/i);
+  assert.match(data.toString(), /\r\nConnection: close\r\n/i);
+  assert.equal(resolved, 0);
+});
+
 test('operation diagnostics exclude other operations and URL secrets', async t => {
   const source = http.createServer((_req, res) => res.end('ok'));
   const port = await listen(source); dispose(t, source);

@@ -260,7 +260,7 @@ function createBridge(resolve, token, options) {
   const clients = new Set();
   const server = http.createServer(async (req, res) => {
     const scope = authorizedScope(req, expected);
-    if (scope === null) { res.writeHead(407); res.end(); req.resume(); return; }
+    if (scope === null) { res.writeHead(407, {'Proxy-Authenticate': 'Basic realm="agent-monitor"'}); res.end(); req.resume(); return; }
     if (req.url === '/status' && req.method === 'GET') {
       res.setHeader('content-type', 'application/json');
       const events = router.events.filter(row => scope === 'shared' || row.scope === scope).map(({scope, ...row}) => row);
@@ -295,7 +295,7 @@ function createBridge(resolve, token, options) {
   });
   server.on('connect', async (req, client, head) => {
     const scope = authorizedScope(req, expected);
-    if (scope === null) { client.end('HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n'); return; }
+    if (scope === null) { client.end('HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="agent-monitor"\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return; }
     const controller = new AbortController();
     client.on('close', () => controller.abort()); client.on('error', () => controller.abort());
     try {
