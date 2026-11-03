@@ -211,6 +211,13 @@ try {
     assert.equal(await read(`document.querySelectorAll('${group} input:checked').length`),0);
     assert.equal((await stats()).provider_requests,0);
     await bt('screenshot',path.join(root,'quota-settings.png'));
+    assert.equal(await read(`document.querySelector('${save}').checkVisibility()`),true,'populated settings allow saving');
+    await configure({empty:true});
+    await click(group+' section > button:nth-of-type(2)',`document.querySelectorAll('${group} input').length===0`);
+    assert.equal(await read(`document.querySelector('${save}').checkVisibility()`),false,'empty settings have no save action');
+    assert.equal(await read(`document.querySelector('${group} section > p').checkVisibility()`),false,'empty settings omit enrollment instructions');
+    await bt('screenshot',path.join(root,'quota-settings-empty.png'));
+
     console.log('PASS: full dashboard settings, cancel, exact enrollment persistence, new profile exclusion, polling preservation, disable/reload; no provider execution.');
   } else if (args['dashboard-only']) {
     await until('overview data',()=>read("document.querySelector('#today-cost').textContent.includes('12')"));

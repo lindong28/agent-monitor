@@ -222,12 +222,13 @@
     }
     function render(value) {
       state = value; form.textContent = "";
+      intro.hidden = !value.accounts.length;
       intro.textContent = `原生 Codex 继续按现有采集周期更新。下列额外登录账号可每 ${Math.round(value.interval_seconds / 60)} 分钟查询一次配额；请求通过 ${machine} 的 Agent Monitor 路由桥。不会发送消息。`;
       for (const row of value.accounts) {
         const label = document.createElement("label"), checkbox = document.createElement("input");
         checkbox.type = "checkbox"; checkbox.value = row.key; checkbox.checked = row.enabled;
         label.appendChild(checkbox);
-        label.appendChild(document.createTextNode(` ${row.account_label} · ${row.profile} · ${row.account_id}`));
+        label.appendChild(document.createTextNode(` ${row.account_label} · ${row.profile}`));
         const line = document.createElement("p"); line.appendChild(label); form.appendChild(line);
       }
       if (!value.accounts.length) form.textContent = "这台机器未发现额外登录账号，无需设置。";

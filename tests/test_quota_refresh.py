@@ -41,7 +41,8 @@ class ProviderTests(unittest.TestCase):
         from contextlib import ExitStack
         stack = ExitStack()
         self.addCleanup(stack.close)
-        for target, value in (("HOME", str(self.root)), ("CODEX_HOME", str(self.root / ".codex"))):
+        for target, value in (("HOME", str(self.root)), ("CODEX_HOME", str(self.root / ".codex")),
+                              ("CLAUDE_CONFIG_DIR", str(self.root / ".claude"))):
             stack.enter_context(mock.patch.dict(os.environ, {target: value}))
         stack.enter_context(mock.patch.object(codex_profiles, "discover", return_value=[]))
         stack.enter_context(mock.patch.object(codex_profiles, "session_links", return_value=codex_profiles.SessionLinks()))
