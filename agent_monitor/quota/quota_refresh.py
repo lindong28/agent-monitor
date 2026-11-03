@@ -77,23 +77,42 @@ class NoSubscription(RefreshError):
     """The user confirmed this account has no quota-bearing subscription."""
 
 
-def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None):
+def load_rate_limits(provider, account, *, codex_home=None, **options):
+    if codex_home is None:
+        return _load_rate_limits(provider, account, **options)
+    import fcntl
+    # Preserve the account-action reader's profile-parent operation lock. Keep it through child cleanup, in addition to provider admission.
+    try:
+        lock = (Path(codex_home).parent / ".lock").open("a")
+    except OSError:
+        raise LocalUnavailable("账号目录不可用，未开始查询。") from None
+    with lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise LocalUnavailable("该账号已有操作，未开始查询。") from None
+        return _load_rate_limits(provider, account, codex_home=codex_home, **options)
+
+
+def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None,
+                     codex_home=None, root=None, account_profile=None):
+    root = Path(root) if root is not None else ROOT
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
     if recovery_account_id is not None and (provider != "claude" or recovery_account_id != account.account_id):
         raise RefreshError("恢复检查账号不一致，未发出请求。")
     if (provider == "claude" and probe_pause_id is None and recovery_account_id is None
-            and quota_applicability.unavailable(quota_applicability.Store(ROOT / "state").get(provider, account.account_id))):
+            and quota_applicability.unavailable(quota_applicability.Store(root / "state").get(provider, account.account_id))):
         raise NoSubscription("用户已确认此账号无有效 Claude Code 订阅；未请求配额。")
     try:
         options = {} if probe_pause_id is None else {"probe_pause_id": probe_pause_id}
-        lease = upstream_controls.Controls(ROOT / "state/upstream_controls").acquire(provider, **options)
+        lease = upstream_controls.Controls(root / "state/upstream_controls").acquire(provider, **options)
         if admitted_probe is not None and probe_pause_id is not None:
             admitted_probe.update(lease.state['pause']['probe_attempt'])
     except (upstream_controls.Paused, upstream_controls.Busy) as exc:
         failure = None
         if isinstance(exc, upstream_controls.Paused):
-            state = upstream_controls.Controls(ROOT / "state/upstream_controls").read(provider)
+            state = upstream_controls.Controls(root / "state/upstream_controls").read(provider)
             candidate = diagnostics.safe_failure((state.get("pause") or {}).get("failure"))
             expected = hashlib.sha256(quota_identity(provider, account.account_id, account.label).encode()).hexdigest()
             if candidate and candidate.get("account_fingerprint") == expected:
@@ -120,7 +139,10 @@ def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account
         stage = "child_result"
         try:
             # The lease remains held through the bounded child's cleanup.
-            output, _ = child.communicate(json.dumps(dataclasses.asdict(account)),
+            target = dataclasses.asdict(account)
+            if codex_home is not None:
+                target["codex_home"] = str(Path(codex_home).absolute())
+            output, _ = child.communicate(json.dumps(target),
                                           timeout=max(0, deadline - time.monotonic()) + 2)
         except BaseException:
             try:
@@ -156,6 +178,8 @@ def load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account
                     returncode=child.returncode if child is not None else None)
         facts["account_fingerprint"] = hashlib.sha256(
             quota_identity(provider, account.account_id, account.label).encode()).hexdigest()
+        if account_profile is not None:
+            facts["account_profile"] = account_profile
         try:
             facts["reader_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         except OSError:
@@ -357,6 +381,17 @@ def _codex(account):
         env = network_policy.child_environment(os.environ)
     except network_policy.NetworkPolicyError as exc:
         raise LocalUnavailable(str(exc)) from None
+    if account.get("codex_home"):
+        # A discovered home is already CODEX_HOME, not a Manager operation root.
+        # Preserve Codex's own credential/config storage and do not copy auth.
+        from parsers.accounts import codex_account
+        home = Path(account["codex_home"])
+        current = codex_account(home / "auth.json")
+        if current is None or quota_identity("codex", current.account_id, current.label) != quota_identity(
+                "codex", account["account_id"], account.get("label")):
+            raise LocalUnavailable("此配置的登录身份与账号记录不一致，未发出配额请求。",
+                                   failure={"stage": "account_check", "kind": "account_mismatch"})
+        env["CODEX_HOME"] = str(home)
     # SSH/launchd do not load shell rc files. Supply installed user binary paths
     # to the existing shim as well as to its backend lookup.
     env["PATH"] = os.pathsep.join([str(Path.home() / ".local/bin"),
@@ -423,15 +458,11 @@ def _codex(account):
             # machine is signed in as now, it is not the credential we read.
             raise RefreshError("Codex 当前登录的账号与这台机器的凭据不是同一个。",
                                failure={"stage": "account_check", "kind": "account_mismatch"})
-        limit = select_codex_rate_limit(result) or {}
-        windows = [limit.get(key) or {} for key in ("primary", "secondary")]
+        from agent_monitor.quota.codex_quota import decode
+        reading = decode(result, account["account_id"])
+        return _reading((reading["five_hour_used_pct"], reading["five_hour_resets_at"]),
+                        (reading["seven_day_used_pct"], reading["seven_day_resets_at"]), plan=reading["plan"])
 
-        def window(minutes):
-            value = next((w for w in windows if w.get("windowDurationMins") == minutes), {})
-            return _number(value.get("usedPercent")), _number(value.get("resetsAt"))
-
-        plan = limit.get("planType")
-        return _reading(window(300), window(10080), plan=plan if isinstance(plan, str) else None)
     finally:
         selector.close()
         process.terminate()

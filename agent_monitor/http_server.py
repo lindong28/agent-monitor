@@ -422,7 +422,7 @@ class Handler(BaseHTTPRequestHandler):
         if client_network.handle(self):
             return
         if (parsed.path.startswith("/api/codex-accounts/") or parsed.path in
-                ("/api/account-memory/remove", "/api/restart", "/api/refresh", "/api/network", "/api/quota-recovery")):
+                ("/api/account-memory/remove", "/api/restart", "/api/refresh", "/api/network", "/api/quota-recovery", "/api/quota-settings")):
             header = "codex-accounts" if parsed.path.startswith("/api/codex-accounts/") else "action"
             if not self._check_browser_boundary(header, require_origin=True):
                 return
@@ -431,6 +431,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/account-memory/remove":
             self._handle_account_memory_remove()
+            return
+        if parsed.path == "/api/quota-settings":
+            self._handle_quota_settings(parsed, post=True)
             return
         if parsed.path == "/api/quota-recovery":
             self._handle_quota_recovery()
@@ -464,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
     @staticmethod
     def _hub_action_path(path):
         return path.startswith('/api/codex-accounts') or path in (
-            '/api/account-memory/remove', '/api/quota-recovery', '/api/refresh')
+            '/api/account-memory/remove', '/api/quota-recovery', '/api/quota-settings', '/api/refresh')
 
     def _forward_hub_action(self, parsed, *, post=False, send_body=True):
         method = 'POST' if post else self.command
@@ -565,14 +568,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
             if path == "/api/codex-accounts/egress-preview":
                 approval_action = payload.get("approval_action") or ""
-                local_actions = {"quota-recovery", "refresh"}
+                local_actions = {"quota-recovery", "quota-settings", "refresh"}
                 if approval_action in local_actions and not payload.get("connection"):
                     scope = payload.get("approval_scope")
                     expected = payload.get("approval_expected")
                     if (not isinstance(scope, list) or not scope or
                             any(not isinstance(item, str) or not item for item in scope)):
                         raise codex_accounts.ActionError("预览确认范围无效。")
-                    if approval_action == "quota-recovery":
+                    if approval_action in {"quota-recovery", "quota-settings"}:
                         approval_machine = payload.get("approval_machine")
                         if (not isinstance(approval_machine, str) or
                                 approval_machine != scope[0]):
@@ -691,6 +694,43 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "账号操作失败，请检查服务主机的诊断事件；诊断标识：" + failure_id},
                             status=500, send_body=send_body)
 
+    def _handle_quota_settings(self, parsed, post=False, send_body=True):
+        from agent_monitor.quota import quota_settings
+        if not post and not self._check_browser_boundary("action", send_body=send_body):
+            return
+        try:
+            raw = {}
+            if post:
+                length = int(self.headers.get("Content-Length", "0"))
+                if self.headers.get_content_type() != "application/json" or not 0 < length <= 4096:
+                    raise ValueError("请求格式无效。")
+                raw = json.loads(self.rfile.read(length))
+                if not isinstance(raw, dict):
+                    raise ValueError("请求格式无效。")
+            name = raw.get("machine") if post else _first(parse_qs(parsed.query), "machine", "")
+            machine = sync.load_machine_config().by_name.get(name)
+            if machine is None:
+                raise ValueError("请选择已配置的机器。")
+            current = quota_settings.on_machine(machine)
+            if post:
+                selected = raw.get("selected")
+                if (raw.get("revision") != current["revision"] or not isinstance(selected, list)
+                        or any(not isinstance(key, str) for key in selected) or len(set(selected)) != len(selected)
+                        or not set(selected).issubset({row["key"] for row in current["accounts"]})):
+                    raise ValueError("账号或设置已变化，请更新状态后重新选择。")
+                previous = {row["key"] for row in current["accounts"] if row["enabled"]}
+                if set(selected) - previous:
+                    UPSTREAM_APPROVALS.consume(raw.get("confirmation"), "quota-settings",
+                                              [name, *sorted(selected)], current["revision"])
+                current = quota_settings.on_machine(machine, {"revision": current["revision"], "selected": selected})
+            self._send_json({**current, "machine": machine.name}, send_body=send_body)
+        except (ValueError, UnicodeDecodeError) as exc:
+            self._send_json({"error": str(exc)}, status=400, send_body=send_body)
+        except client_network.NetworkError as exc:
+            self._send_json({"error": str(exc)}, status=exc.status, send_body=send_body)
+        except Exception:
+            self._send_json({"error": "设置回执未取得；请更新状态核对，勿重复提交。"}, status=503, send_body=send_body)
+
     def _handle_quota_recovery(self):
         from agent_monitor.quota import quota_recovery
         try:
@@ -700,11 +740,11 @@ class Handler(BaseHTTPRequestHandler):
             raw = json.loads(self.rfile.read(length))
             if not isinstance(raw, dict):
                 raise ValueError()
-            value = quota_recovery.validate_request({k: raw.get(k) for k in ("machine", "account_id", "account_label", "pause_id")})
+            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile") if k in raw})
             machine = sync.load_machine_config().by_name.get(value["machine"])
             if machine is None:
                 raise ValueError()
-            scope = [value["machine"], value["account_id"]]
+            scope = quota_recovery.approval_scope(value)
             UPSTREAM_APPROVALS.consume(raw.get("confirmation"), "quota-recovery", scope, value["pause_id"])
         except (ValueError, UnicodeDecodeError):
             self._send_json({"error": "恢复目标或请求格式无效。"}, status=400)
@@ -849,6 +889,9 @@ class Handler(BaseHTTPRequestHandler):
                 logger.warning('Hub read failed: %s', type(exc).__name__)
                 self._send_json({'error': '统计服务暂不可用；请稍后重试。网络诊断仍可使用。',
                                  'failure_type': type(exc).__name__}, status=502, send_body=send_body)
+            return
+        if parsed.path == "/api/quota-settings":
+            self._handle_quota_settings(parsed, send_body=send_body)
             return
         if parsed.path == "/api/quota-recovery":
             query = parse_qs(parsed.query)

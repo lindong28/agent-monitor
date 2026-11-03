@@ -56,7 +56,7 @@ class ExporterTests(unittest.TestCase):
                 else:
                     gui_query.assert_not_called()
                     if supplied is None:
-                        direct.assert_called_once_with(refresh=refresh and quota)
+                        direct.assert_called_once_with(refresh=refresh and quota, scheduled=True)
                     else:
                         direct.assert_not_called()
 

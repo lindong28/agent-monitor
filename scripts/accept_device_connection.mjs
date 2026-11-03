@@ -10,10 +10,10 @@ import {promisify} from 'node:util';
 import {parseArgs} from 'node:util';
 const {values:args} = parseArgs({options:{
   'agent-browser':{type:'string'}, browser:{type:'string'}, python:{type:'string'},
-  'dashboard-only':{type:'boolean'}, vendor:{type:'string'}, facade:{type:'boolean'}, 'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
+  'quota-settings-only':{type:'boolean'}, 'dashboard-only':{type:'boolean'}, vendor:{type:'string'}, facade:{type:'boolean'}, 'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
 }});
 if (args.help) {
-  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks passive entry and explicit system diagnostics. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
+  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks passive entry and explicit system diagnostics. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
   process.exit(0);
 }
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -127,7 +127,7 @@ async function click(selector, expect) {
 async function stats() { return (await fetch(url+'/fixture/stats',{signal:AbortSignal.timeout(3000)})).json(); }
 async function configure(value) { const r=await fetch(url+'/fixture/config',{method:'POST',body:JSON.stringify(value),signal:AbortSignal.timeout(3000)}); assert.equal(r.status,200); }
 async function startFixture() {
-  const command=args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
+  const command=args['quota-settings-only'] ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
   fixture=spawn(python,command,{env,cwd:repo,stdio:['ignore','pipe','pipe']});
   children.push(fixture);
   let line='',error='';
@@ -162,7 +162,7 @@ const timer=setTimeout(()=>{
 },acceptanceBudgetMs);
 let failure;
 try {
-  console.log(args['dashboard-only'] ? 'Checking the full dashboard with isolated persisted account records; provider calls are disabled.' : args['network-only'] ? 'Checking synthetic system diagnostics in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
+  console.log(args['quota-settings-only'] ? 'Checking full dashboard quota settings with isolated accounts and provider execution disabled.' : args['dashboard-only'] ? 'Checking the full dashboard with isolated persisted account records; provider calls are disabled.' : args['network-only'] ? 'Checking synthetic system diagnostics in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
   await startFixture();
   assert.equal((await fetch(url,{signal:AbortSignal.timeout(3000)})).status,200,'fixture page reachable');
   browserAttempted=true;
@@ -174,7 +174,45 @@ try {
   await browserCommand(['get','url'],false,false);
   assert.equal((await bt('get','url')).data.url,new URL(url).href,'pinned fixture origin');
   console.log('Isolated browser opened the local fixture.');
-  if (args['dashboard-only']) {
+  if (args['quota-settings-only']) {
+    await until('quota settings entry',()=>read("!!document.querySelector('[data-quota-settings-machine]')"));
+    await click('#quota-auto-settings > summary',"document.querySelector('#quota-auto-settings').open");
+    const group='[data-quota-settings-machine="fixture-machine"]';
+    await click(group+' > summary',`document.querySelector('${group}').open`);
+    await until('profile settings',()=>read(`document.querySelectorAll('${group} input').length===2`));
+    assert.equal(await read(`document.querySelectorAll('${group} input:checked').length`),0);
+    const save=group+' section > button:first-of-type';
+    await click(group+' input',`document.querySelector('${group} input').checked`);
+    await click(save,"!!document.querySelector('dialog[open]')");
+    await until('target bridge preview',()=>read("document.querySelector('dialog.account-egress-dialog').innerText.includes('fixture-machine') && !document.querySelector('dialog.account-egress-dialog .btn-primary').disabled"));
+    assert.match(await read("document.querySelector('dialog.account-egress-dialog').innerText"),/持续.*1 个账号/);
+    await click('dialog.account-egress-dialog button:not(.btn-primary)',"!document.querySelector('dialog.account-egress-dialog')");
+    assert.equal((await stats()).writes,0,'cancel never writes enrollment');
+    await click(save,"!!document.querySelector('dialog[open]')");
+    await until('second preview',()=>read("!document.querySelector('dialog.account-egress-dialog .btn-primary').disabled"));
+    await click('dialog.account-egress-dialog .btn-primary',`document.querySelector('${group} [role="status"]').textContent.includes('设置已保存')`);
+    const stored=JSON.parse(fs.readFileSync(path.join(root,'state/quota-settings.json'),'utf8'));
+    assert.equal(stored.selected.length,1,'owning machine persisted exact selection');
+    assert.equal((await stats()).writes,1);
+    await configure({add:'gamma'});
+    await click(group+' section > button:nth-of-type(2)',`document.querySelectorAll('${group} input').length===3`);
+    assert.equal(await read(`document.querySelectorAll('${group} input:checked').length`),1,'new profile not enrolled');
+    await bt('eval',"window.AgentMonitor.renderQuotaAccounts(window.AgentMonitor.quotaSnapshot())");
+    assert.equal(await read(`document.querySelector('${group}').open && document.querySelectorAll('${group} input:checked').length===1`),true,'polling preserves the open settings and selection');
+    await click(group+' input:checked',`document.querySelectorAll('${group} input:checked').length===0`);
+    await click(save,`document.querySelector('${group} [role="status"]').textContent.includes('设置已保存')`);
+    assert.equal((await stats()).previews,2,'disable does not contact egress preview');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root,'state/quota-settings.json'),'utf8')).selected,[]);
+    await bt('open',url);
+    await until('reload settings',()=>read("!!document.querySelector('[data-quota-settings-machine]')"));
+    await click('#quota-auto-settings > summary',"document.querySelector('#quota-auto-settings').open");
+    await click(group+' > summary',`document.querySelector('${group}').open`);
+    await until('read persisted disable',()=>read(`document.querySelectorAll('${group} input').length===3`));
+    assert.equal(await read(`document.querySelectorAll('${group} input:checked').length`),0);
+    assert.equal((await stats()).provider_requests,0);
+    await bt('screenshot',path.join(root,'quota-settings.png'));
+    console.log('PASS: full dashboard settings, cancel, exact enrollment persistence, new profile exclusion, polling preservation, disable/reload; no provider execution.');
+  } else if (args['dashboard-only']) {
     await until('overview data',()=>read("document.querySelector('#today-cost').textContent.includes('12')"));
     assert.doesNotMatch(await read('document.body.innerText'),/前往 Hub|到 Hub|统计来自 Hub/);
     await click('#codex-account-actions > summary',"document.querySelector('#codex-account-actions').open");
@@ -487,8 +525,8 @@ try {
   failure=error;
   if (browserAttempted && fs.existsSync(pidFile)) {
     try {
-      const observed=await read(`({url:location.href,hidden:document.hidden,pause:document.querySelector('[data-codex-pause-id="fixture-pause"]')?.textContent,dialog:document.querySelector('dialog')?.textContent,buttons:[...document.querySelectorAll('dialog button')].map(e=>({text:e.textContent,disabled:e.disabled,rect:e.getBoundingClientRect().toJSON()}))})`);
-      console.error('Fixture failure evidence: '+JSON.stringify({counts:((s)=>({pairs:s.pair_requests,status:s.status_requests,previews:s.previews,starts:s.starts.length,recoveries:s.recoveries.length,resumes:s.resumes.length}))(await stats()),page:observed}));
+      const observed=await read(`({url:location.href,hidden:document.hidden,pause:document.querySelector('[data-codex-pause-id="fixture-pause"]')?.textContent,dialog:document.querySelector('dialog[open]')?.textContent,buttons:[...document.querySelectorAll('dialog button')].map(e=>({text:e.textContent,disabled:e.disabled,rect:e.getBoundingClientRect().toJSON()}))})`);
+      console.error('Fixture failure evidence: '+JSON.stringify({counts:((s)=>({pairs:s.pair_requests,status:s.status_requests,previews:s.previews,starts:s.starts?.length,recoveries:s.recoveries?.length,resumes:s.resumes?.length,writes:s.writes}))(await stats()),page:observed}));
     } catch { console.error('Fixture page failure evidence unavailable; original error retained.'); }
   }
 }

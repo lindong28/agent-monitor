@@ -97,9 +97,6 @@ TURN_FAILURES = {
     "badRequest": "服务端拒绝了请求参数。",
 }
 
-REACHED_LIMITS = {"rate_limit_reached", "workspace_owner_credits_depleted",
-                  "workspace_member_credits_depleted", "workspace_owner_usage_limit_reached",
-                  "workspace_member_usage_limit_reached"}
 RESTRICTION_DETAILS = {
     "authentication": "认证被拒绝，已暂停此账号操作。请先核对账号状态；清除登录态不会解除暂停。",
     "unknown": "上次操作结果未能安全确认，已暂停此账号。请核对原始结果后明确解除本地暂停；不会自动重发。",
@@ -481,50 +478,11 @@ class Rpc:
 
 
 def quota_reading(result, account_id):
-    if result.get("accountId") is None:
-        raise ActionError("配额响应未提供账号，无法核验读数归属；请稍后重试。", 502)
-    if result.get("accountId") != account_id:
-        raise ActionError("配额响应的账号与所选账号不匹配。", 502)
-    limit = select_codex_rate_limit(result) or {}
-    reading = {"observed_at": now(), "codex_quota_available": bool(limit)}
-    allowed = result.get("ordinaryUsageAllowed")
-    reading["ordinary_usage_allowed"] = allowed if type(allowed) is bool else None
-    spent = limit.get("spendControlReached")
-    reading["spend_control_reached"] = spent if type(spent) is bool else None
-    reached = limit.get("rateLimitReachedType")
-    reading["rate_limit_reached_type"] = (reached if isinstance(reached, str) and reached in REACHED_LIMITS
-                                          else "unrecognized" if reached is not None else None)
-    for minutes, prefix in ((300, "five_hour"), (10080, "seven_day")):
-        window = next((limit[key] for key in ("primary", "secondary")
-                       if isinstance(limit.get(key), dict) and limit[key].get("windowDurationMins") == minutes), {})
-        for source, target in (("usedPercent", "used_pct"), ("resetsAt", "resets_at")):
-            value = window.get(source)
-            reading[prefix + "_" + target] = value if type(value) in (int, float) and math.isfinite(value) else None
-    return reading
-
-
-def read_profile_quota(home, account_id, *, timeout=20, rpc_factory=Rpc):
-    """Read one managed Codex profile through the local Agent Monitor bridge.
-
-    This is the common low-level reader for scheduled managed-profile reads and
-    the interactive account action.  It deliberately does not send a turn,
-    create a Manager operation, or choose another machine/route.
-    """
-    if not isinstance(account_id, str) or not account_id:
-        raise ActionError("账号记录缺少可核验的工作区标识。", 409, "missingAccountId")
-    cancelled = threading.Event()
-    profile_lock = None
-    rpc = None
+    from agent_monitor.quota.codex_quota import decode
     try:
-        profile_lock = lock_file(Path(home).parent / ".lock")
-        rpc = rpc_factory(Path(home), cancelled)
-        rpc.initialize()
-        return quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + timeout), account_id)
-    finally:
-        if rpc is not None:
-            rpc.close()
-        if profile_lock is not None:
-            profile_lock.close()
+        return decode(result, account_id)
+    except ValueError as exc:
+        raise ActionError(str(exc), 502) from None
 
 
 def retain_quota(record):
@@ -970,6 +928,12 @@ class Manager:
         with self.guard:
             record["operation"].update(fields)
             self.save(directory, record)
+            reading = fields.get("after") or fields.get("before")
+            if reading:
+                from agent_monitor.quota import quota_service
+                from parsers.accounts import Account
+                quota_service.record_codex_reading(self.root.parent / "quota_snapshot.json",
+                    Account(record["account_id"], record["email"], None), reading)
 
     def identity(self, rpc, directory, record):
         account = rpc.request("account/read", {"refreshToken": False}, time.monotonic() + 20).get("account")

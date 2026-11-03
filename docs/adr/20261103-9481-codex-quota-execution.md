@@ -1,0 +1,15 @@
+# Shared Codex quota execution
+
+Status: accepted. Scope: native Codex, optional discovered account profiles, quota-only account actions, scheduled and explicit refresh, and their existing dashboard consumers. Independent decision review: one round, seven criteria accepted with the recovery and batch-budget conditions below. Implementation and live acceptance remain separate obligations.
+
+The previous managed reader passed a Codex home to a transport expecting an operation root, bypassed shared provider admission, queried again after GUI receipts and timeouts, and published nested results that the Hub did not merge. Fixing the directory alone or enabling the existing flag does not fix these connected failures.
+
+Use the existing bounded quota executor for native and discovered profiles, passing an explicit credential home and state root. Share the quota protocol and decoding with account actions, retaining their existing RPC and lease when already held. Keep login and message-generation isolation; do not copy native credentials into Monitor profiles or require a personal launcher. Every provider child consumes the owning machine's Monitor bridge. No direct fallback or automatic replay of unknown operations is permitted.
+
+Persist quota observations and attempt outcomes in the existing local quota cache for Hub and standalone installations. Merge each profile by full identity independently of the native reading. Failed attempts retain valid observations without advancing observation timestamps. GUI adapters consume receipts once. Bounded collection batches persist per-account progress and continue unstarted work fairly on normal collection, without replaying completed or unknown work after a caller timeout.
+
+Expose managed automatic-query enrollment in the existing dashboard. Persist the exact source/profile identities on their owning machine, keep the existing quota interval, and reuse the egress-preview and one-time action confirmation for enrollment. Explicit disable overrides configuration fallback. New profiles and changed identities do not inherit another profile's enrollment. No new daemon, account store, or settings page is needed.
+
+Managed failures must be recoverable through the existing recovery flow. Resolve the source selector server-side, bind approval to the machine, source, complete account identity and pause, and recheck identity before and after execution. Save the correct nested result before clearing that pause; never overwrite the native result with a managed recovery. Retain compatibility with native recovery requests.
+
+Alternatives rejected: a separate managed scheduler duplicates protection and result logic; forcing all accounts into the message Manager changes credential ownership and ordinary Codex use; querying on page refresh increases traffic without fixing result authority. Keep existing public configuration and snapshot compatibility, and document the new optional behavior. Synthetic checks do not prove provider acceptance or future account safety.

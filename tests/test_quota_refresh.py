@@ -1,5 +1,8 @@
 from agent_monitor.quota import account_memory; from agent_monitor.quota import quota_view; from agent_monitor.quota import quota_service
 import dataclasses
+import builtins
+import io
+import os
 import json
 import sys
 import tempfile
@@ -27,13 +30,39 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn('pause', Controls(self.root / 'state/upstream_controls').read('codex'))
 
     def setUp(self):
+        real_home = Path.home()
         route = mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9")
         route.start()
         self.addCleanup(route.stop)
         root = tempfile.TemporaryDirectory()
         self.addCleanup(root.cleanup)
         self.root = Path(root.name)
-        for module in (quota_refresh, exporter):
+        from parsers import codex_profiles, codex, claude_status
+        from contextlib import ExitStack
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        for target, value in (("HOME", str(self.root)), ("CODEX_HOME", str(self.root / ".codex"))):
+            stack.enter_context(mock.patch.dict(os.environ, {target: value}))
+        stack.enter_context(mock.patch.object(codex_profiles, "discover", return_value=[]))
+        stack.enter_context(mock.patch.object(codex_profiles, "session_links", return_value=codex_profiles.SessionLinks()))
+        stack.enter_context(mock.patch.object(accounts, "CODEX_AUTH", self.root / ".codex/auth.json"))
+        stack.enter_context(mock.patch.object(codex, "SESSIONS_DIR", str(self.root / ".codex/sessions")))
+        stack.enter_context(mock.patch.object(codex, "STATE_DB", str(self.root / ".codex/state_5.sqlite")))
+        stack.enter_context(mock.patch("parsers.claude._get_claude_dirs", return_value=[]))
+        protected = [(real_home / path).resolve() for path in (".codex", ".claude", ".local/share/codex-accounts")]
+        def guarded(original):
+            def call(path, *args, **kwargs):
+                if isinstance(path, (str, bytes, os.PathLike)):
+                    resolved = Path(os.fsdecode(path)).resolve()
+                    if any(resolved == root or root in resolved.parents for root in protected):
+                        raise AssertionError("test attempted real provider access")
+                return original(path, *args, **kwargs)
+            return call
+        for module, name in ((builtins, "open"), (io, "open"), (os, "scandir"), (os, "listdir")):
+            stack.enter_context(mock.patch.object(module, name, guarded(getattr(module, name))))
+        with self.assertRaisesRegex(AssertionError, "real provider access"):
+            open(real_home / ".codex" / "guard-positive-control")
+        for module in (quota_refresh, exporter, quota_service):
             patcher = mock.patch.object(module, "ROOT", self.root)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -118,7 +147,7 @@ class ProviderTests(unittest.TestCase):
                 cache.write_text(json.dumps({"claude": previous}))
                 calls = {"claude": 0, "codex": 0}
 
-                def live(provider, account):
+                def live(provider, account, **kwargs):
                     calls[provider] += 1
                     if provider == "codex":
                         return fresh
@@ -167,6 +196,40 @@ class ProviderTests(unittest.TestCase):
             with mock.patch("agent_monitor.quota.quota_refresh.Path.home", return_value=home),\
                     mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"):
                 return quota_refresh._codex({"account_id": account_id})
+
+    def test_managed_home_is_passed_exactly_and_identity_checked_before_spawn(self):
+        import base64
+        home = self.root / "registry/alpha/codex"
+        home.mkdir(parents=True)
+        token = "fixture." + base64.urlsafe_b64encode(json.dumps({"email": "alpha@example.test"}).encode()).decode().rstrip("=") + ".fixture"
+        (home / "auth.json").write_text(json.dumps({"tokens": {"account_id": "account-a", "id_token": token}}))
+        script = self.root / "codex-fixture"
+        script.write_text("#!" + sys.executable + "\nimport json,sys\nfor line in sys.stdin:\n m=json.loads(line)\n if 'id' in m: print(json.dumps({'id':m['id'],'result':{} if m['id']==1 else {'accountId':'account-a','rateLimits':{'primary':{'windowDurationMins':10080,'usedPercent':23}}}}),flush=True)\n")
+        script.chmod(0o700)
+        real = quota_refresh.subprocess.Popen
+        with mock.patch.object(quota_refresh.shutil, "which", return_value=str(script)), \
+             mock.patch.object(quota_refresh.subprocess, "Popen", wraps=real) as spawn:
+            value = quota_refresh._codex({"account_id": "account-a", "label": "alpha@example.test", "codex_home": str(home)})
+            self.assertEqual(value.seven_day_pct, 23)
+            env = spawn.call_args.kwargs["env"]
+            self.assertEqual(env["CODEX_HOME"], str(home))
+            self.assertIn("127.0.0.1:9", env["HTTPS_PROXY"])
+            self.assertEqual(spawn.call_args.args[0][1:], ["app-server", "--listen", "stdio://", "-c", 'features.respect_system_proxy=false'])
+            spawn.reset_mock()
+            with self.assertRaises(quota_refresh.LocalUnavailable):
+                quota_refresh._codex({"account_id": "account-a", "label": "other@example.test", "codex_home": str(home)})
+            spawn.assert_not_called()
+
+    def test_managed_profile_lock_prevents_child_and_provider_admission(self):
+        import fcntl
+        home = self.root / "registry/alpha/codex"
+        home.mkdir(parents=True)
+        with (home.parent / ".lock").open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            with mock.patch.object(quota_refresh, "_load_rate_limits") as run:
+                with self.assertRaises(quota_refresh.LocalUnavailable):
+                    quota_refresh.load_rate_limits("codex", accounts.Account("a"), codex_home=home, root=self.root)
+                run.assert_not_called()
 
     def test_codex_uses_window_duration_and_matching_account(self):
         reading = self.codex_cli({"accountId": "account-a", "rateLimits": {
@@ -221,7 +284,7 @@ class ProviderTests(unittest.TestCase):
         old = RateLimits(3, None, 20, None, updated_at="2026-08-01T00:00:00Z")
         fresh = RateLimits(None, None, 55, None, updated_at="2026-09-08T00:00:00Z")
 
-        def live(provider, account):
+        def live(provider, account, **kwargs):
             if provider == "claude":
                 raise quota_refresh.RefreshError("request failed")
             return fresh

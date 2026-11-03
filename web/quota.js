@@ -180,6 +180,96 @@
     return account ? `账号：${account.name} · ${account.email}` : "账号归属未记录或冲突";
   }
 
+  function renderQuotaSettings(rateLimits) {
+    const settings = qs("#quota-auto-settings");
+    if (!settings) return;
+    const machines = [...new Set((rateLimits?.codex?.accounts || []).flatMap(row => row.machines || []))].sort();
+    for (const machine of machines) {
+      if (Array.from(settings.querySelectorAll("[data-quota-settings-machine]")).some(node => node.dataset.quotaSettingsMachine === machine)) continue;
+      const group = document.createElement("details");
+      group.dataset.quotaSettingsMachine = machine;
+      const title = document.createElement("summary");
+      title.textContent = machine;
+      const content = document.createElement("div");
+      group.append(title, content);
+      settings.appendChild(group);
+      group.addEventListener("toggle", () => {
+        if (group.open && !content.childNodes.length) content.appendChild(createQuotaSettingsPanel(machine));
+      });
+    }
+  }
+
+  function createQuotaSettingsPanel(machine) {
+    const panel = document.createElement("section");
+    const intro = document.createElement("p");
+    const form = document.createElement("div");
+    const notice = document.createElement("p");
+    notice.setAttribute("role", "status");
+    const read = document.createElement("button"), save = document.createElement("button");
+    read.type = save.type = "button";
+    read.className = save.className = "btn";
+    read.textContent = "更新设置状态"; save.textContent = "保存自动查询设置";
+    panel.append(intro, form, save, read, notice);
+    let state = null, busy = false;
+    async function request(options) {
+      const response = await fetch(`/api/quota-settings${options ? "" : "?machine=" + encodeURIComponent(machine)}`, {
+        headers: {"Content-Type": "application/json", "X-Agent-Monitor": "action"},
+        signal: AbortSignal.timeout(30000), ...options,
+      });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error || "设置未能确认");
+      return value;
+    }
+    function render(value) {
+      state = value; form.textContent = "";
+      intro.textContent = `原生 Codex 继续按现有采集周期更新。下列额外登录账号可每 ${Math.round(value.interval_seconds / 60)} 分钟查询一次配额；请求通过 ${machine} 的 Agent Monitor 路由桥。不会发送消息。`;
+      for (const row of value.accounts) {
+        const label = document.createElement("label"), checkbox = document.createElement("input");
+        checkbox.type = "checkbox"; checkbox.value = row.key; checkbox.checked = row.enabled;
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(` ${row.account_label} · ${row.profile} · ${row.account_id}`));
+        const line = document.createElement("p"); line.appendChild(label); form.appendChild(line);
+      }
+      if (!value.accounts.length) form.textContent = "这台机器未发现额外登录账号，无需设置。";
+      save.hidden = !value.accounts.length;
+    }
+    async function refresh() {
+      if (busy) return;
+      busy = true; read.disabled = save.disabled = true;
+      notice.textContent = "正在读取设置…";
+      try { render(await request()); notice.textContent = ""; }
+      catch (error) { state = null; notice.textContent = error.message; }
+      finally { busy = false; read.disabled = false; save.disabled = !state; }
+    }
+    read.addEventListener("click", refresh);
+    save.addEventListener("click", async () => {
+      if (busy || !state) return;
+      const selected = Array.from(form.querySelectorAll("input:checked")).map(node => node.value).sort();
+      const previous = state.accounts.filter(row => row.enabled).map(row => row.key).sort();
+      if (JSON.stringify(selected) === JSON.stringify(previous)) { notice.textContent = "设置未变化。"; return; }
+      busy = true; read.disabled = save.disabled = true;
+      let submitted = false;
+      try {
+        let confirmation;
+        if (selected.some(key => !previous.includes(key))) {
+          const rows = state.accounts.filter(row => selected.includes(row.key));
+          confirmation = await window.AgentMonitor.previewUpstream?.(
+            rows.map(row => ({email: row.account_label, account_id: row.account_id})),
+            {approval_action: "quota-settings", approval_scope: [machine, ...selected], approval_expected: state.revision, approval_machine: machine});
+          if (!confirmation) { notice.textContent = "已取消，设置未改变。"; return; }
+        }
+        submitted = true;
+        render(await request({method: "POST", body: JSON.stringify({machine, revision: state.revision, selected, confirmation})}));
+        notice.textContent = "设置已保存；取消勾选会停止后续自动查询，正在进行的查询会完成。新账号需另行选择。";
+      } catch (error) {
+        notice.textContent = submitted ? "保存结果未确认；请先更新设置状态，勿重复提交。" : error.message;
+        if (submitted) state = null;
+      } finally { busy = false; read.disabled = false; save.disabled = !state; }
+    });
+    refresh();
+    return panel;
+  }
+
   function renderQuotaAccounts(rateLimits, options = {}) {
     const table = qs("#quota-accounts");
     const reset = qs("#quota-clear");
@@ -628,7 +718,7 @@
     });
     probe.addEventListener("click", async () => {
       if (busy || probe.disabled || !state) return;
-      const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id};
+      const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id,profile:state.account.quota_profile || ""};
       unrecordedOutcome = false;
       busy = true; read.disabled = probe.disabled = true;
       panel.setAttribute("aria-busy", "true");
@@ -639,7 +729,7 @@
       try {
         const approval = await window.AgentMonitor.previewUpstream?.(
           [{email: request.account_label, account_id: request.account_id}],
-          {approval_action: "quota-recovery", approval_scope: [request.machine, request.account_id], approval_expected: request.pause_id, approval_machine: request.machine},
+          {approval_action: "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native"], approval_expected: request.pause_id, approval_machine: request.machine},
           controller.signal);
         if (!approval) throw new Error("已取消检查；未发出上游请求。");
         attempted = true;
@@ -1473,6 +1563,7 @@
   }
 
   function renderQuotaMachineRecords(rateLimits) {
+    renderQuotaSettings(rateLimits);
     renderQuotaMachineNotice(rateLimits);
     const details = qs("#quota-machine-records");
     if (!details) return;
@@ -1607,5 +1698,5 @@
     renderedQuotaRateLimits = null;
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
-  return { createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
+  return { createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
 });

@@ -285,6 +285,10 @@ case "${1:-}" in
     shift
     exec "${PYTHON_MODULE[@]}" agent_monitor.accounts.upstream_controls "$@"
     ;;
+  quota-settings)
+    shift
+    "${PYTHON_MODULE[@]}" agent_monitor.quota.quota_settings "$@"
+    ;;
   quota-recover)
     shift
     "${PYTHON_MODULE[@]}" agent_monitor.quota.quota_recovery "$@"

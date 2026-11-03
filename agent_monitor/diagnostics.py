@@ -107,6 +107,9 @@ def safe_failure(value):
         item = value.get(key)
         if isinstance(item, str) and len(item) == 64 and all(c in "0123456789abcdef" for c in item):
             result[key] = item
+    profile = value.get("account_profile")
+    if isinstance(profile, str) and re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", profile):
+        result["account_profile"] = profile
     frames = value.get("frames")
     if isinstance(frames, list):
         result["frames"] = [{"file": f["file"], "line": f["line"]} for f in frames[-5:]

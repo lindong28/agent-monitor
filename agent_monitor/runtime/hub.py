@@ -55,7 +55,7 @@ def interval():
     return hub_config.interval()
 
 
-def quota_due(*, root=None, now=None):
+def native_quota_due(*, root=None, now=None):
     root = Path(root) if root is not None else ROOT
     stamp = root / "state" / "quota-collection-at"
     try:
@@ -64,6 +64,31 @@ def quota_due(*, root=None, now=None):
         last = 0
     current = time.time() if now is None else now
     return current - last >= hub_config.quota_interval()
+
+
+def quota_due(*, root=None, now=None):
+    if native_quota_due(root=root, now=now):
+        return True
+    from agent_monitor.quota import quota_settings, quota_service
+    from agent_monitor.accounts.upstream_controls import Controls
+    from datetime import datetime
+    root = Path(root) if root is not None else ROOT
+    if Controls(root / "state/upstream_controls").read("codex").get("pause"):
+        return False
+    cached = quota_service.read_cache(root / "state/quota_snapshot.json").get("codex") or {}
+    rows = cached.get("managed_accounts", [])
+    for item in quota_settings.read(root)["accounts"]:
+        if not item["enabled"]:
+            continue
+        previous = next((row for row in rows if (row.get("account_profile"), row.get("account_id"), row.get("account_label")) == (item["profile"], item["account_id"], item["account_label"])), {})
+        try:
+            age = (time.time() if now is None else now) - datetime.fromisoformat(previous["refresh_attempted_at"]).timestamp()
+            if age < hub_config.quota_interval():
+                continue
+        except (KeyError, ValueError, TypeError):
+            pass
+        return True
+    return False
 
 
 def mark_quota_collected(*, root=None, now=None):
@@ -204,7 +229,7 @@ def collect():
         last = float(stamp.read_text())
     except (FileNotFoundError, ValueError):
         last = 0
-    quota_due_now = time.time() - last >= configuration()["quota_interval_seconds"]
+    quota_due_now = quota_due(root=ROOT)
     stopping = threading.Event()
     queried = threading.Event()
     failures = []
@@ -216,14 +241,16 @@ def collect():
         nonce = request["nonce"] if request else None
         version = request["version"] if request else ""
         exclusions = request["blocked_accounts"] if request else {}
+        native_requested = request is not None or native_quota_due(root=ROOT)
         # Provider refresh has its own deadlines and persists its observed state.
         limits = quota_service.rate_limits(refresh=True, use_cache=enabled(), root=ROOT,
-                                           managed_refresh=hub_config.managed_quota_auto_refresh(),
+                                           managed_refresh=hub_config.managed_quota_auto_refresh(), scheduled=request is None,
                                            **({"blocked_accounts": exclusions} if exclusions else {}))
         if nonce is not None:
             _write_quota_message(ROOT / "state" / ("quota-refresh-receipt" + version + ".json"),
                                  {"nonce": nonce, "rate_limits": limits, **({"blocked_accounts": exclusions} if version else {})})
-        stamp.write_text(str(time.time()))
+        if native_requested:
+            mark_quota_collected(root=ROOT)
         queried.set()
 
     def serve_quota():

@@ -53,6 +53,18 @@ class GuiQuotaTests(unittest.TestCase):
         with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(quota_service, "rate_limits", return_value=self.limits):
             hub.collect()
 
+    def test_managed_only_collector_round_keeps_native_deadline(self):
+        (self.state / "quota-collection-at").write_text("100")
+        with mock.patch.object(hub.time, "time", return_value=200), \
+             mock.patch.object(hub.hub_config, "quota_interval", return_value=300), \
+             mock.patch.object(hub, "quota_due", return_value=True), \
+             mock.patch.object(rollup, "run", side_effect=lambda: time.sleep(.03)), \
+             mock.patch.object(quota_service, "rate_limits", return_value=self.limits):
+            hub.collect()
+        self.assertEqual(float((self.state / "quota-collection-at").read_text()), 100)
+        with mock.patch.object(hub.hub_config, "quota_interval", return_value=300):
+            self.assertTrue(hub.native_quota_due(root=self.root, now=400))
+
     def test_quota_request_is_served_while_statistics_are_blocked(self):
         (self.state / "quota-collection-at").write_text(str(time.time()))
         statistics_started, release = threading.Event(), threading.Event()

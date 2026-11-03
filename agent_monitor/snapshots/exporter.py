@@ -161,7 +161,7 @@ def export_bundle(
             # cannot prove which historical aggregate row came from a path, so v1
             # exports no alias coverage rather than self-declaring it.
             "aliases": [],
-            "rate_limits": _rate_limits(refresh=refresh and quota_refresh) if rate_limits is None else rate_limits,
+            "rate_limits": _rate_limits(refresh=refresh and quota_refresh, scheduled=True) if rate_limits is None else rate_limits,
             "exporter_commit": resolved_exporter_commit,
             "generated_at": generated_at or _timestamp(),
             "transfer_digest": transfer_digest,
@@ -343,13 +343,14 @@ def _gui_rate_limits(*, blocked_accounts=None):
     )
 
 
-def _rate_limits(refresh=False, *, blocked_accounts=None):
+def _rate_limits(refresh=False, *, blocked_accounts=None, scheduled=False):
+    from agent_monitor.runtime import hub
+    native_requested = refresh and (not scheduled or hub.native_quota_due(root=ROOT))
     limits = quota_service.rate_limits(
-        refresh, blocked_accounts=blocked_accounts, use_cache=hub_config.enabled(), root=ROOT,
+        refresh, blocked_accounts=blocked_accounts, use_cache=hub_config.enabled(), root=ROOT, scheduled=scheduled,
         managed_refresh=hub_config.managed_quota_auto_refresh(),
     )
-    if refresh:
-        from agent_monitor.runtime import hub
+    if native_requested:
         hub.mark_quota_collected(root=ROOT)
     return limits
 

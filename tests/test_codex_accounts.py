@@ -245,38 +245,6 @@ class AccountActionsTests(unittest.TestCase):
             choose.assert_not_called()
         self.assertFalse(any(c.get("method") == "turn/start" for c in self.calls(account)))
 
-    def test_managed_profile_reader_only_reads_quota_and_closes_rpc(self):
-        class Peer:
-            def __init__(self):
-                self.closed = False
-            def initialize(self):
-                pass
-            def request(self, method, params, deadline):
-                self.asserted = (method, params)
-                return {"accountId": "workspace-one", "ordinaryUsageAllowed": True,
-                        "rateLimitReachedType": None,
-                        "rateLimits": {"primary": {"windowDurationMins": 300, "usedPercent": 11, "resetsAt": 1900000000},
-                                        "secondary": {"windowDurationMins": 10080, "usedPercent": 22, "resetsAt": 1901000000}}}
-            def close(self):
-                self.closed = True
-        peer = Peer()
-        home = self.root / "managed" / "codex"
-        home.parent.mkdir(parents=True)
-        result = ca.read_profile_quota(home, "workspace-one",
-                                       rpc_factory=lambda home, cancelled: peer)
-        self.assertEqual(result["five_hour_used_pct"], 11)
-        self.assertEqual(result["seven_day_used_pct"], 22)
-        self.assertEqual(peer.asserted[0], "account/rateLimits/read")
-        self.assertTrue(peer.closed)
-
-    def test_managed_profile_reader_respects_existing_profile_operation_lock(self):
-        home = self.root / "managed" / "codex"
-        home.parent.mkdir(parents=True)
-        lock = ca.lock_file(home.parent / ".lock")
-        self.addCleanup(lock.close)
-        with self.assertRaises(ca.ActionError):
-            ca.read_profile_quota(home, "workspace-one", rpc_factory=mock.Mock())
-
     def test_refresh_batch_reads_each_account_without_turn(self):
         accounts = [self.account(email=f"batch-{index}@example.com", account_id=f"batch-workspace-{index}")
                     for index in range(2)]

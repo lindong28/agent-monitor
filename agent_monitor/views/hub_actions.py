@@ -9,8 +9,8 @@ ACCOUNT_ACTIONS = frozenset(('egress-preview', 'network-status', 'add', 'batch-s
                             'batch-retry', 'refresh', 'refresh-all', 'login', 'resume', 'cancel',
                             'forget-login', 'release-rate-limit'))
 POST_PATHS = frozenset('/api/codex-accounts/' + name for name in ACCOUNT_ACTIONS) | {
-    '/api/account-memory/remove', '/api/quota-recovery', '/api/refresh'}
-GET_PATHS = frozenset(('/api/codex-accounts', '/api/quota-recovery'))
+    '/api/account-memory/remove', '/api/quota-recovery', '/api/quota-settings', '/api/refresh'}
+GET_PATHS = frozenset(('/api/codex-accounts', '/api/quota-recovery', '/api/quota-settings'))
 HOP_HEADER = 'X-Agent-Monitor-Action-Hop'
 
 
@@ -28,7 +28,7 @@ def forward(method, path, query, payload, *, target, session_factory=None):
     method = 'GET' if method == 'HEAD' else method
     if not supports(method, path):
         return 404, {'error': '未找到此操作。'}
-    keys = {'ack', 'approval'} if path == '/api/refresh' else {'machine'} if method == 'GET' and path == '/api/quota-recovery' else set()
+    keys = {'ack', 'approval'} if path == '/api/refresh' else {'machine'} if method == 'GET' and path in ('/api/quota-recovery', '/api/quota-settings') else set()
     if set(query) - keys:
         return 400, {'error': '操作参数无效；未发出请求。'}
     headers = {'X-Agent-Monitor': 'codex-accounts' if path.startswith('/api/codex-accounts') else 'action',

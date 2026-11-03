@@ -26,11 +26,18 @@ def validate_exclusions(value):
 
 def validate_request(value):
     fields = {"machine", "account_id", "account_label", "pause_id"}
-    if (not isinstance(value, dict) or set(value) != fields
+    if (not isinstance(value, dict) or set(value) - {"profile"} != fields
             or any(not isinstance(value[k], str) or not value[k] or len(value[k]) > 256 for k in fields)
             or not re.fullmatch(r"[0-9a-f]{32}", value["pause_id"])):
         raise ValueError("请指定机器、完整账号身份和当前暂停标识。")
+    if "profile" in value and (not isinstance(value["profile"], str) or (value["profile"] and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", value["profile"]))):
+        raise ValueError("账号来源无效。")
     return value
+
+
+def approval_scope(value):
+    scope = [value["machine"], value["account_id"]]
+    return scope + [value["account_label"], value["profile"] or "native"] if "profile" in value else scope
 
 
 def local_status():
@@ -39,8 +46,20 @@ def local_status():
     from agent_monitor.accounts.upstream_controls import Controls
     from parsers import accounts
     state = Controls(exporter.ROOT / "state/upstream_controls").read("codex")
-    account = accounts.codex_account()
+    from agent_monitor.quota import quota_service, quota_refresh
+    failure = (state.get("pause") or {}).get("failure") or {}
+    profile = failure.get("account_profile")
     auth = accounts.CODEX_AUTH
+    if profile:
+        try:
+            auth = quota_service.recovery_home(profile) / "auth.json"
+        except quota_refresh.RefreshError:
+            auth = None
+    account = accounts.codex_account(auth) if auth is not None else None
+    fingerprint = failure.get("account_fingerprint")
+    if fingerprint and account and quota_refresh.account_fingerprint("codex", account) != fingerprint:
+        account = None
+    auth = auth or accounts.CODEX_AUTH
     home = auth.parent
     source = "default" if home == Path.home() / ".codex" else "configured"
     if (home.parent / "profile.json").is_file() and home.name == "codex":
@@ -51,7 +70,7 @@ def local_status():
             "account": {"account_id": account.account_id if account else None,
                         "account_label": account.label if account else None,
                         "source": source, "profile": home.parent.name if source == "managed" else None,
-                        "credential_path": str(auth)},
+                        "credential_path": str(auth), "quota_profile": profile or ""},
             "last_recovery": state.get("last_recovery")}
 
 
@@ -145,7 +164,7 @@ def local_recovery(value):
         # Scope observations without choosing a different endpoint or proxy policy.
         route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
         with network_policy.using_route(route):
-            block = quota_service.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"], root=exporter.ROOT, admitted_probe=admitted_probe)
+            block = quota_service.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"], root=exporter.ROOT, admitted_probe=admitted_probe, profile=value.get("profile"))
     except (quota_refresh.RefreshError, OSError, RuntimeError) as exc:
         pause = Controls(exporter.ROOT / "state/upstream_controls").read("codex").get("pause")
         receipt = {"ok": False, "error": "恢复未完成，暂停保留；请查看诊断后再决定下一步。",

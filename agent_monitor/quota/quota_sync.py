@@ -169,7 +169,8 @@ class Manager:
             limits = self.merge(current, machine)
         status = self.recovery_status(machine)
         before = status.get("account") or {}
-        if (before.get("account_id"), before.get("account_label")) != (value["account_id"], value["account_label"]):
+        if (value.get("profile", "") != before.get("quota_profile", "") or
+                (before.get("account_id"), before.get("account_label")) != (value["account_id"], value["account_label"])):
             return {"error": "页面账号已变化，请重新核对。"}, 409
         if (status.get("active") or (status.get("pause") or {}).get("probe_attempt")
                 or (status.get("pause") or {}).get("id") != value["pause_id"]):
@@ -182,7 +183,18 @@ class Manager:
                 raise ValueError("recovery identity mismatch")
             # A signed-in independent provider may have no observation yet.
             recovered_limits = {p: dict(limits.get(p) or {}) for p in ("claude", "codex")}
-            recovered_limits["codex"] = block
+            if value.get("profile"):
+                from agent_monitor.quota.quota_service import _merge_managed_accounts
+                if block.get("account_profile") != value["profile"]:
+                    raise ValueError("recovery source mismatch")
+                recovered_limits["codex"]["managed_accounts"] = _merge_managed_accounts(
+                    recovered_limits["codex"].get("managed_accounts"), [block])
+            else:
+                recovered_limits["codex"] = {**block, "managed_accounts": recovered_limits["codex"].get("managed_accounts", [])}
+            from agent_monitor.quota.quota_service import clear_pause_projection
+            clear_pause_projection(recovered_limits["codex"])
+            for row in recovered_limits["codex"].get("managed_accounts", []):
+                clear_pause_projection(row)
             payload = {"schema_version": 1, "source_host_identity": receipt["source_host_identity"],
                        "exporter_commit": receipt["exporter_commit"], "rate_limits": recovered_limits}
             _validate(payload)
@@ -265,6 +277,9 @@ class Manager:
                         payload = copy.deepcopy(payload)
                         for provider, incoming in payload["rate_limits"].items():
                             before = previous["rate_limits"][provider]
+                            if provider == "codex":
+                                from agent_monitor.quota.quota_service import _merge_managed_accounts
+                                incoming["managed_accounts"] = _merge_managed_accounts(before.get("managed_accounts"), incoming.get("managed_accounts", []))
                             identity = lambda b: quota_identity(provider, b.get("account_id"), b.get("account_label"))
                             if identity(incoming) == identity(before) and _time(before.get("updated_at")) > _time(incoming.get("updated_at")):
                                 for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation"):
@@ -273,8 +288,9 @@ class Manager:
                                           "payload": payload if payload is not None else old.get("payload"),
                                           "attempted_at": datetime.now(timezone.utc).isoformat(),
                                           "error": error}
-                    failures = [b.get("refresh_error") for b in (payload or {}).get("rate_limits", {}).values()
-                                if b.get("refresh_error")]
+                    blocks = list((payload or {}).get("rate_limits", {}).values())
+                    blocks += ((payload or {}).get("rate_limits", {}).get("codex") or {}).get("managed_accounts", [])
+                    failures = [b.get("refresh_error") for b in blocks if b.get("refresh_error")]
                     if error or failures:
                         self.errors[name] = error or "；".join(str(v) for v in failures)
                     self.pending = tuple(n for n in self.pending if n != name)
@@ -321,6 +337,16 @@ class Manager:
             base = result.get(provider)
             if not isinstance(base, dict):
                 base = {}
+            incoming = (payload or {}).get("rate_limits", {}).get(provider)
+            if provider == "codex" and incoming is not None:
+                from agent_monitor.quota.quota_service import _merge_managed_accounts
+                existing = base.get("managed_accounts", [])
+                identities = {(row.get("account_profile"), quota_identity("codex", row.get("account_id"), row.get("account_label")))
+                              for row in existing}
+                admitted = [row for row in incoming.get("managed_accounts", [])
+                            if (row.get("account_profile"), quota_identity("codex", row.get("account_id"), row.get("account_label"))) in identities]
+                base["managed_accounts"] = _merge_managed_accounts(existing, admitted)
+                result[provider] = base
             if _time(base.get("updated_at")) > _time(record["attempted_at"]):
                 continue
             # Publication is not a query timestamp: passive snapshots may carry
@@ -415,8 +441,10 @@ def accumulate_exclusions(blocked, result):
     if result["error"]:
         blocked.update(claude=["*"], codex=["*"])
         return
-    for provider, block in result["payload"]["rate_limits"].items():
-        if not block.get("refresh_error") or block.get("query_state") in {"local_unavailable", "blocked"}:
+    blocks = list(result["payload"]["rate_limits"].items())
+    blocks.extend(("codex", row) for row in (result["payload"]["rate_limits"].get("codex") or {}).get("managed_accounts", []))
+    for provider, block in blocks:
+        if not block.get("refresh_error") or block.get("query_state") in {"local_unavailable", "blocked", "pending"}:
             continue
         failure = diagnostics.safe_failure(block.get("refresh_failure"))
         identity = failure.get("account_fingerprint") if block.get("query_state") != "unknown" else None
