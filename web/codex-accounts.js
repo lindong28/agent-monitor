@@ -19,6 +19,16 @@ export function sameSuccessfulBatchOperation(op, batchOp) {
     && op.message_status === "succeeded" && batchOp.message_status === "succeeded");
 }
 
+export function accountNeedsLogin(account) {
+  return Boolean(account?.login_required || account?.has_credentials === false
+    || account?.operation?.failure?.category === "needsLogin");
+}
+
+function accountRefreshBlocked(account) {
+  return accountNeedsLogin(account) || ["authentication", "unknown", "rate_limit", "login_rate_limit"]
+    .some(key => account.restrictions?.[key]);
+}
+
 function element(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -196,8 +206,10 @@ export function init({ autoLoad = true } = {}) {
   function updateRefreshAllButton() {
     if (!refreshAllButton) return;
     const targets = accounts.filter(account => account.eligible !== false);
-    refreshAllButton.disabled = refreshingAll || !targets.length || accounts.some(account => account.busy);
+    const available = targets.filter(account => !accountRefreshBlocked(account));
+    refreshAllButton.disabled = refreshingAll || !available.length || Boolean(upstreamPause) || accounts.some(account => account.busy);
     refreshAllButton.textContent = refreshingAll ? "正在刷新全部配额…"
+      : available.length < targets.length ? `刷新可查询账号配额（${available.length}/${targets.length}）`
       : `刷新全部账号配额${targets.length ? `（${targets.length}）` : ""}`;
   }
 
@@ -226,8 +238,9 @@ export function init({ autoLoad = true } = {}) {
 
   async function refreshAllQuotas() {
     if (!refreshAllButton || refreshingAll) return;
-    const targets = accounts.filter(account => account.eligible !== false);
-    if (!targets.length || accounts.some(account => account.busy)) return;
+    const eligible = accounts.filter(account => account.eligible !== false);
+    const targets = eligible.filter(account => !accountRefreshBlocked(account));
+    if (!targets.length || upstreamPause || accounts.some(account => account.busy)) return;
     refreshingAll = true;
     updateRefreshAllButton();
     try {
@@ -243,7 +256,8 @@ export function init({ autoLoad = true } = {}) {
         approval_expected: null,
       });
       await load();
-      if (current()) notice.textContent = "已提交全部账号配额查询；账号会逐个显示结果。";
+      if (current()) notice.textContent = `已提交 ${targets.length} 个账号的配额查询；账号会逐个显示结果。`
+        + (targets.length < eligible.length ? `另有 ${eligible.length - targets.length} 个账号需先登录或处理限制，未纳入本次查询。` : "");
     } catch (error) {
       if (current() && error.name !== "AbortError") notice.textContent = error.message;
     } finally {
@@ -398,13 +412,16 @@ export function init({ autoLoad = true } = {}) {
       card.dataset.id = account.id;
       card.dataset.signature = signature;
       const op = account.operation;
+      const loginRequired = accountNeedsLogin(account);
       const sharedSuccess = sameSuccessfulBatchOperation(op, batchItem?.operation);
       const heading = element("div", undefined, "codex-account-heading");
       const tone = op?.stage === "succeeded" ? "ok"
         : ["failed", "interrupted"].includes(op?.stage) ? "bad"
         : ["partial", "login", "login_queued"].includes(op?.stage) ? "warn"
         : account.busy ? "info" : "identity";
-      const operationLabel = sharedSuccess ? "本批发送成功" : op?.stage === "succeeded"
+      const operationLabel = !account.busy && loginRequired && account.has_credentials
+        ? "需要重新登录" : sharedSuccess ? "本批发送成功" : op?.failure?.category === "needsLogin"
+        ? "需要重新登录" : op?.stage === "succeeded"
         ? (op.login_only ? "最近登录完成" : op.refresh_only ? "最近查询完成" : "最近发送完成")
         : op ? STAGES[op.stage] || op.stage : "尚未操作";
       heading.append(element("strong", account.email), element("span", operationLabel, "status-pill " + tone));
@@ -434,7 +451,7 @@ export function init({ autoLoad = true } = {}) {
       if (account.eligible === false) card.append(element("p", "已不在当前登录记录中；保留本轮结果，不纳入下一轮或继续发送。", "quota-scope"));
       const duplicateEmail = accounts.some((other) => other.id !== account.id && other.email.toLowerCase() === account.email.toLowerCase());
       if (account.account_id) (duplicateEmail ? card : managementDetail).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
-      managementDetail.append(element("p", account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
+      managementDetail.append(element("p", account.login_required && account.has_credentials ? "登录态：不可用，需要重新登录" : account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
       if (batchItem && !sharedSuccess) heading.append(element("span", `本批：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
       const retained = account.batch_result;
       if (retained && retained.batch_id !== batch?.id) historyDetail.append(element("p", `保留的批次结果：${MESSAGE_STATUS[retained.message_status] || "状态未知"} · 开始于 ${timestamp(retained.started_at)}`, "quota-scope"));
@@ -446,7 +463,7 @@ export function init({ autoLoad = true } = {}) {
         }
       }
       if (op) {
-        if (op.stage !== "succeeded" && !(account.restriction_details || []).includes(op.detail)) card.append(element("p", op.detail));
+        if (op.stage !== "succeeded" && !(account.restriction_details || []).includes(op.detail)) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送操作"}（${timestamp(op.started_at)}）：${op.detail}`));
         currentDetail.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
         if (op.message) currentDetail.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
         if (op.failure) technicalDetail.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
@@ -479,15 +496,15 @@ export function init({ autoLoad = true } = {}) {
       if (account.eligible !== false) {
         const send = element("button", "向此账号发送一条消息", "btn");
         send.type = "button";
-        send.disabled = actions.busy || accounts.some(a => a.busy) || Boolean(upstreamPause) || !account.has_credentials || Object.keys(account.restrictions || {}).length > 0;
+        send.disabled = actions.busy || accounts.some(a => a.busy) || Boolean(upstreamPause) || loginRequired || Object.keys(account.restrictions || {}).length > 0;
         send.addEventListener("click", () => actions.performBatch("batch-start", [account.id]));
         controls.append(send);
       }
       const refresh = button("仅刷新配额", "refresh", account);
       const restrictions = account.restrictions || {};
-      refresh.disabled ||= !account.has_credentials || Boolean(upstreamPause || restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit);
+      refresh.disabled ||= accountRefreshBlocked(account) || Boolean(upstreamPause);
       controls.append(refresh);
-      if (!account.has_credentials) {
+      if (loginRequired) {
         const login = button("单独登录", "login", account);
         login.disabled ||= Boolean(upstreamPause || restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit);
         controls.append(login);
@@ -626,18 +643,20 @@ export function renderAccountBatch(state, controls) {
     const busy = accounts.some((account) => account.busy);
     const eligible = accounts.filter((account) => account.eligible !== false);
     const count = eligible.filter(account => selectedIds?.has(account.id)).length;
+    const selectedLoginRequired = eligible.filter(account => selectedIds?.has(account.id) && accountNeedsLogin(account)).length;
     const selectionCount = root.querySelector("#codex-selection-count");
     if (selectionCount) selectionCount.textContent = `已选 ${count} / ${eligible.length} 个可纳入账号；实际发送前另查登录与限制`;
     batchStart.hidden = Boolean(batch);
     batchStart.textContent = `给所选 ${count} 个账号发送`;
-    batchStart.disabled = submittingBatch || busy || !count || Boolean(upstreamPause);
+    batchStart.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || Boolean(upstreamPause);
     batchNext.hidden = !batch;
     batchNext.textContent = `开始新一轮 · 所选 ${count} 个账号`;
-    batchNext.disabled = submittingBatch || busy || !count || Boolean(upstreamPause);
+    batchNext.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || Boolean(upstreamPause);
     if (blockedReason) {
       blockedReason.textContent = upstreamPause ? ""
         : submittingBatch ? "正在连接、确认或提交本次操作，请等待完成。"
         : busy ? "有账号操作正在进行；完成或取消后才能开始新一轮。"
+        : selectedLoginRequired ? `所选账号中有 ${selectedLoginRequired} 个需要登录，请先「单独登录」，或取消勾选这些账号后发送。`
         : !count ? "请至少选择一个账号。" : "";
       blockedReason.hidden = !blockedReason.textContent;
     }
@@ -649,7 +668,7 @@ export function renderAccountBatch(state, controls) {
       if (upstreamPause) batchStatus.textContent += " · 本机 Codex 通道已暂停，暂不能发送";
       batchHelp.replaceChildren(
         element("p", "账号来自当前及历史登录记录，无需手动添加。"),
-        element("p", "按邮箱顺序逐个完成账号操作，前一个结束并清理后才处理下一个。缺登录态的账号跳过，请单独登录后再发起操作。"),
+        element("p", "按邮箱顺序逐个完成账号操作，前一个结束并清理后才处理下一个。登录态不可用的账号会明确要求单独登录，完成后再发起操作。"),
         element("p", upstreamPause ? "本机 Codex 请求已暂停；请从按钮旁的恢复入口查看原因、当前可做的操作与检查后的接续。检查配额需要单独确认。" : "仅刷新配额不会发送消息。发送会实际使用额度，不保证固定或重置窗口；异常会停止后续账号。")
       );
       return;
@@ -685,8 +704,17 @@ export function renderAccountBatch(state, controls) {
       const account = accounts.find(value => value.id === item.profile_id);
       return account && account.eligible !== false && (!item.operation || item.operation.message_status === "not_sent") && account.restrictions?.quota ? [account] : [];
     });
+    const loginUnsent = batch.items.flatMap(item => {
+      const account = accounts.find(value => value.id === item.profile_id);
+      return account && account.eligible !== false && (!item.operation || item.operation.message_status === "not_sent") && accountNeedsLogin(account) ? [account] : [];
+    });
+    if (loginUnsent.length) batchRetry.disabled = true;
+    if (blockedReason && loginUnsent.length && !submittingBatch && !busy && !upstreamPause) {
+      blockedReason.textContent = `未发送账号中有 ${loginUnsent.length} 个登录态不可用，请先单独登录后再继续未发送账号。`;
+      blockedReason.hidden = false;
+    }
     if (blockedReason && quotaUnsent.length && !submittingBatch && !busy && !upstreamPause) {
-      const prerequisites = quotaUnsent.filter(account => !account.has_credentials || ["authentication", "unknown", "rate_limit", "login_rate_limit"].some(key => account.restrictions[key])).length;
+      const prerequisites = quotaUnsent.filter(account => accountRefreshBlocked(account)).length;
       const nextStep = prerequisites
         ? `其中 ${prerequisites} 个需先完成登录或处理其他限制，再「仅刷新配额」。${prerequisites < quotaUnsent.length ? "其余可在对应账号「仅刷新配额」。" : ""}`
         : "请先在对应账号「仅刷新配额」。";
@@ -694,7 +722,7 @@ export function renderAccountBatch(state, controls) {
       blockedReason.hidden = false;
     }
     const help = [
-      "顺序：按邮箱逐个完成账号操作，包含子进程清理；不会同时发送。缺登录态时跳过，单独登录完成后需重新发起操作。",
+      "顺序：按邮箱逐个完成账号操作，包含子进程清理；不会同时发送。登录态不可用时会要求单独登录，完成后需重新发起操作。",
       statuses.unsent
         ? `继续发送：先处理缺登录或暂停原因，再点击「${batchRetry.textContent}」。系统只处理仍在登录记录中且确定未发送的账号。`
         : "继续发送：本轮没有可以继续发送的账号。",

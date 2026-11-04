@@ -657,6 +657,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = manager.start(account_id, refresh_only=True, network_route=route)
             elif path == "/api/codex-accounts/refresh-all":
                 ids, unavailable = manager.discover(QUOTA_VIEW.action_catalog())
+                ids = {account["id"] for account in manager.list(ids)["accounts"]
+                       if account["id"] in ids and not account["login_required"]
+                       and not any(key in account.get("restrictions", {})
+                                   for key in ("authentication", "unknown", "rate_limit", "login_rate_limit"))}
                 requested = payload.get("profile_ids")
                 if (not isinstance(requested, list) or not requested
                         or any(not isinstance(pid, str) or not pid for pid in requested)

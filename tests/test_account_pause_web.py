@@ -19,7 +19,7 @@ global.window = {AgentMonitor: {formatDate: x => x, latestCodexQuotaReading: () 
 const {renderAccountBatch} = require("./web/codex-accounts.js");
 const controls = {root: {querySelector: () => null}, batchHelp: {replaceChildren() {}}};
 for (const key of ["batchStart", "batchNext", "batchRetry", "batchStatus", "blockedReason"]) controls[key] = {};
-const state = {accounts: [{id: "a", eligible: true, busy: false}], selectedIds: new Set(["a"]),
+const state = {accounts: [{id: "a", eligible: true, busy: false, has_credentials: true}], selectedIds: new Set(["a"]),
   batch: {id: "b", created_at: "2026-10-26T06:10:09Z", items: [{profile_id: "a", operation: {message_status: "succeeded"}}]},
   upstreamPause: {id: "pause-a"}, busy: false};
 const render = () => renderAccountBatch(state, controls);
@@ -60,6 +60,10 @@ assert.doesNotMatch(controls.blockedReason.textContent, /额度/);
 state.batch = null; state.busy = false; state.upstreamPause = {id: "pause-b"}; render();
 assert.equal(controls.batchStart.disabled, true);
 assert.match(controls.batchStatus.textContent, /暂停/);
+state.upstreamPause = null; state.accounts[0].login_required = true; render();
+state.selectedIds.add("a"); render();
+assert.equal(controls.batchStart.disabled, true);
+assert.match(controls.blockedReason.textContent, /单独登录/);
 ''')
 
     def test_pause_fallback_preserves_context_and_local_recovery_entry(self):

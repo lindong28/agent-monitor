@@ -488,6 +488,62 @@ class AccountActionsTests(unittest.TestCase):
             result = self.wait(account["id"])
             self.assertEqual(result["operation"]["failure"]["category"], "needsLogin")
             self.assertEqual(result["operation"]["message_status"], "not_sent")
+            self.assertTrue(result["login_required"])
+        self.assertEqual(self.spawned, [])
+
+    def test_invalid_saved_login_is_marked_for_reauthentication(self):
+        account = self.account()
+        directory = self.manager.directory(account["id"])
+        record = self.manager.read(directory)
+        record["operation"] = {"id": "stale-login", "stage": "failed", "started_at": "2026-11-02T00:00:00Z",
+                                "refresh_only": True, "message_status": "not_sent", "quota_status": "not_read",
+                                "detail": "登录态不可用，请单独登录；本次未发送消息。",
+                                "failure": {"stage": "checking", "category": "needsLogin"}}
+        self.manager.save(directory, record)
+        result = self.manager.view(directory)
+        self.assertTrue(result["has_credentials"])
+        self.assertEqual(result["operation"]["failure"]["category"], "needsLogin")
+        self.assertTrue(result["login_required"])
+        self.assertEqual(result["operation"]["message_status"], "not_sent")
+        self.manager.start(account["id"], refresh_only=True)
+        self.assertTrue(self.wait(account["id"])["login_required"])
+        self.assertEqual(self.spawned, [], "known invalid credentials must be rejected locally")
+
+    def test_relogin_clears_requirement_without_sending_or_querying(self):
+        self.scenario = "expired_login"
+        account = self.account()
+        self.manager.start(account["id"], refresh_only=True)
+        failed = self.wait(account["id"])
+        self.assertTrue(failed["has_credentials"])
+        self.assertTrue(failed["login_required"])
+        self.manager.start(account["id"], login_only=True)
+        finished = self.wait(account["id"])
+        self.assertEqual(finished["operation"]["stage"], "succeeded")
+        self.assertFalse(finished["login_required"])
+        self.assertEqual(finished["last_failure"]["failure"]["category"], "needsLogin")
+        methods = [c.get("method") for c in self.calls(finished)]
+        self.assertEqual(methods.count("account/login/start"), 1)
+        self.assertNotIn("account/rateLimits/read", methods)
+        self.assertNotIn("turn/start", methods)
+        self.scenario = "success"
+        self.manager.start(account["id"], refresh_only=True)
+        self.assertFalse(self.wait(account["id"])["login_required"])
+
+    def test_cancelled_relogin_keeps_login_requirement_across_restart(self):
+        account = self.account()
+        directory = self.manager.directory(account["id"])
+        record = self.manager.read(directory)
+        record["operation"] = {"id": "old", "stage": "failed", "message_status": "not_sent",
+                               "failure": {"category": "needsLogin"}}
+        self.manager.save(directory, record)
+        prepared = self.manager.prepare(account["id"], login_only=True)
+        prepared[2]["cancelled"].set()
+        self.manager.launch(prepared)
+        result = self.wait(account["id"])
+        self.assertEqual(result["operation"]["stage"], "cancelled")
+        observer = ca.Manager(self.manager.root)
+        self.addCleanup(observer.close)
+        self.assertTrue(observer.view(directory)["login_required"])
         self.assertEqual(self.spawned, [])
 
     def test_restart_is_visible_without_new_work(self):

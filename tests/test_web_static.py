@@ -429,7 +429,7 @@ class Node {
   remove() {this.parent.children.splice(this.parent.children.indexOf(this), 1);}
   insertBefore(n, ref) {if (n.parent) n.remove(); const index = ref ? this.children.indexOf(ref) : this.children.length; this.children.splice(index, 0, n); n.parent = this;}
 }
-const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count"].map(id => [id, new Node()]));
+const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count", "#codex-refresh-all"].map(id => [id, new Node()]));
 const root = new Node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag), createTextNode: text => {const n=new Node();n.textContent=text;return n;}};
 global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x, latestCodexQuotaReading: () => null}};
@@ -438,7 +438,7 @@ const renderAccounts = (accounts, batch = null) => controller.update({accounts, 
 const oldTime = "2026-10-08T02:00:00.000Z";
 const values = [
   {id: "a", email: "a@example.test", has_credentials: true, operation: {id: "send-a", stage: "succeeded", message: "现在几点了？", message_status: "succeeded", started_at: oldTime, after: {seven_day_used_pct: 8, observed_at: oldTime}}},
-  {id: "b", email: "b@example.test", has_credentials: true, operation: {stage: "failed", message_status: "unknown", detail: "失败；结果未知", started_at: oldTime, after: {seven_day_used_pct: null, observed_at: oldTime}}},
+  {id: "b", email: "b@example.test", has_credentials: true, login_required: true, operation: {stage: "failed", message_status: "not_sent", detail: "登录态不可用，请单独登录；本次未发送消息。", failure: {stage: "checking", category: "needsLogin"}, started_at: oldTime, after: {seven_day_used_pct: null, observed_at: oldTime}}},
 ];
 const text = n => n.textContent + n.children.map(text).join(" ");
 const visible = n => n.tag === "details" && !n.open ? text(n.children[0]) : n.textContent + n.children.map(visible).join(" ");
@@ -448,8 +448,33 @@ assert(!visible(card).includes("7 天"), "quota comparison belongs in the table"
 assert(text(card.querySelector("details")).includes(oldTime), "operation observation time remains in details");
 assert(text(card.querySelector("details")).includes("本次抽取的消息：现在几点了？"));
 assert(!text(list.children[1].querySelector("details")).includes("抽取的消息"), "legacy records must not invent selected text");
-assert(visible(list.children[1]).includes("失败；结果未知"));
+assert(visible(list.children[1]).includes("登录态不可用"));
 assert(text(list.children[1].querySelector("details")).includes("服务端未返回"));
+const cardButtons = n => {
+  const result = [];
+  if (n.tag === "button") result.push(n);
+  for (const child of n.children) result.push(...cardButtons(child));
+  return result;
+};
+const loginButtons = cardButtons(list.children[1]);
+assert(loginButtons.some(button => button.textContent === "单独登录"), "invalid saved login must expose re-login");
+assert(loginButtons.filter(button => ["向此账号发送一条消息", "仅刷新配额"].includes(button.textContent)).every(button => button.disabled), "invalid saved login must block upstream actions");
+assert(visible(list.children[1]).includes("需要重新登录"), "invalid saved login must be visible in the account status");
+assert(visible(list.children[1]).includes("最近配额查询") || visible(list.children[1]).includes("最近发送操作"));
+assert.equal(nodes["#codex-refresh-all"].textContent, "刷新可查询账号配额（1/2）");
+assert.equal(loginButtons.find(button => button.textContent === "单独登录").disabled, false);
+values[1].restrictions = {authentication: true}; renderAccounts(values);
+assert(cardButtons(list.children[1]).find(button => button.textContent === "单独登录").disabled);
+assert(cardButtons(list.children[1]).find(button => button.textContent === "仅刷新配额").disabled);
+delete values[1].restrictions;
+values[1].has_credentials = false; renderAccounts(values);
+assert(text(list.children[1]).includes("登录态：需要官方授权"));
+values[1].has_credentials = true; values[1].login_required = false;
+values[1].operation = {stage: "succeeded", login_only: true, message_status: "not_sent", started_at: oldTime};
+renderAccounts(values);
+assert(!cardButtons(list.children[1]).some(button => button.textContent === "单独登录"));
+assert(!cardButtons(list.children[1]).find(button => button.textContent === "仅刷新配额").disabled);
+assert.equal(nodes["#codex-refresh-all"].textContent, "刷新全部账号配额（2）");
 assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
 card.querySelector("details").open = true;
 renderAccounts(values);

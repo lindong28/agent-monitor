@@ -190,6 +190,8 @@ class DiscoveryTests(unittest.TestCase):
         self.source("two-workspace", "two@example.com")
         status, data = self.request()
         self.assertEqual(status, 200)
+        for account in data["accounts"]:
+            seed_auth(self.manager, account)
         ids = [account["id"] for account in data["accounts"]]
         expected = {"accounts": [], "message": "fixture"}
         with mock.patch.object(self.manager, "start_refresh_batch", return_value=expected) as start:
@@ -199,6 +201,31 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(result, {**expected, "unavailable_accounts": []})
         start.assert_called_once_with(sorted(ids), network_route=self.route)
+
+    def test_refresh_all_uses_current_login_ready_scope_and_rejects_stale_selection(self):
+        self.source("ready-workspace", "ready@example.com")
+        self.source("expired-workspace", "expired@example.com")
+        accounts = self.request()[1]["accounts"]
+        for account in accounts:
+            seed_auth(self.manager, account)
+        expired = next(account for account in accounts if account["email"] == "expired@example.com")
+        ready = next(account for account in accounts if account["email"] == "ready@example.com")
+        directory = self.manager.directory(expired["id"])
+        record = self.manager.read(directory)
+        record["login_required"] = True
+        self.manager.save(directory, record)
+        payload = {"profile_ids": [ready["id"]], "connection": self.connection, "approval_expected": None,
+                   "confirmation": self.route.issue([ready["id"]], None, "refresh-all")}
+        with mock.patch.object(self.manager, "start_refresh_batch", return_value={}) as start:
+            self.assertEqual(self.request("/refresh-all", payload)[0], 200)
+            start.assert_called_once_with([ready["id"]], network_route=self.route)
+        record.pop("login_required")
+        self.manager.save(directory, record)
+        payload["confirmation"] = self.route.issue([ready["id"]], None, "refresh-all")
+        with mock.patch.object(self.manager, "start_refresh_batch") as start:
+            self.assertEqual(self.request("/refresh-all", payload)[0], 409)
+            start.assert_not_called()
+        self.assertTrue(all(not self.methods(account) for account in accounts))
 
     def test_removal_excludes_next_round_and_retry_but_keeps_results(self):
         self.source("live", "live@example.com")

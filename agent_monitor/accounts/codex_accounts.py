@@ -624,6 +624,11 @@ class Manager:
         result["restriction_details"] = [text for key, text in RESTRICTION_DETAILS.items()
                                          if key in record.get("restrictions", {})]
         result["has_credentials"] = (directory / "codex/auth.json").is_file()
+        result["login_required"] = bool(
+            not result["has_credentials"]
+            or record.get("login_required")
+            or (operation and (operation.get("failure") or {}).get("category") == "needsLogin")
+        )
         result["busy"] = bool(job) or bool(operation and operation["stage"] in ACTIVE)
         if job and operation and operation["stage"] == "login":
             result["operation"].update(job.get("authorization", {}))
@@ -694,6 +699,8 @@ class Manager:
             record = self.read(directory)
             retain_quota(record)
             previous = record.get("operation")
+            if previous and (previous.get("failure") or {}).get("category") == "needsLogin":
+                record["login_required"] = True
             if previous and previous.get("failure") and previous["failure"].get("category") != "locallyPaused":
                 record.setdefault("last_failure", copy.deepcopy(previous))
             if (previous and previous.get("message_status") == "unknown"
@@ -938,6 +945,7 @@ class Manager:
     def identity(self, rpc, directory, record):
         account = rpc.request("account/read", {"refreshToken": False}, time.monotonic() + 20).get("account")
         if account is None:
+            record["login_required"] = True
             return False
         credential = codex_account(directory / "codex/auth.json")
         if (not isinstance(account, dict) or account.get("type") != "chatgpt" or not credential
@@ -946,6 +954,7 @@ class Manager:
                 or (record.get("account_id") and record["account_id"] != credential.account_id)):
             raise ActionError("登录的邮箱或工作区与所选账号不一致，未发送消息。请清除登录态后登录正确账号。", 409)
         record["account_id"] = credential.account_id
+        record.pop("login_required", None)
         (directory / "codex/auth.json").chmod(0o600)
         self.save(directory, record)
         return True
@@ -988,6 +997,8 @@ class Manager:
             self.check_restrictions(record)
             if not record["operation"].get("login_only") and not (directory / "codex/auth.json").is_file():
                 raise ActionError("本页尚未保存登录态。请单独登录；授权完成后需重新点击发送或刷新。", 409, "needsLogin")
+            if not record["operation"].get("login_only") and record.get("login_required"):
+                raise ActionError("最近检查未取得可用登录态，请单独登录后再操作；本次未发出上游请求。", 409, "needsLogin")
             acquire_slot()
             slot = True
             try:

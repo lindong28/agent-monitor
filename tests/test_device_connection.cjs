@@ -87,7 +87,7 @@ function fixture({blocked = false, statusError = false, holdStatus = false, acco
         confirmation: 'receipt', checked_host: 'fixture-device',
         targets: [{host: 'chatgpt.com', ip: '192.0.2.1', country_code: 'US', observed_at: 1, retry_after_seconds: 0}],
       };
-      else if (action === 'batch-start' || action === 'batch-retry') data = {};
+      else if (action === 'batch-start' || action === 'batch-retry' || action === 'refresh-all') data = {};
       else assert.fail('unexpected action: ' + action);
     }
     return {ok: true, json: async () => data};
@@ -125,6 +125,20 @@ function fixture({blocked = false, statusError = false, holdStatus = false, acco
   };
 }
 const account = id => ({id, email: id + '@example.test', account_id: 'workspace-' + id, has_credentials: true});
+
+test('refresh all previews and submits only login-ready accounts through the paired route', async () => {
+  const f = fixture({accounts: [account('ready'), {...account('expired'), login_required: true}]});
+  const pending = f.node('#codex-refresh-all').emit('click');
+  f.message(); await f.preview(true); await pending;
+  for (const action of ['egress-preview', 'refresh-all']) {
+    const call = f.calls.find(call => call.action === action);
+    assert.deepEqual(call.payload.profile_ids, ['ready']);
+    assert.equal(call.payload.connection.id, 'route');
+  }
+  assert.equal(f.calls.find(call => call.action === 'refresh-all').payload.confirmation, 'receipt');
+  assert.match(f.error(), /另有 1 个账号.*未纳入/);
+  f.cleanup();
+});
 
 test('main action with no prior pairing opens synchronously and waits for validated device', async () => {
   const f = fixture(), pending = f.connect();

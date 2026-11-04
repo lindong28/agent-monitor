@@ -12,6 +12,7 @@ email = os.environ.get("FAKE_EMAIL", "one@example.com")
 account_id = os.environ.get("FAKE_ACCOUNT", "workspace-one")
 calls = home.parent / "calls.jsonl"
 quota_reads = 0
+authorized = False
 recovery = calls.exists() and any(json.loads(line).get("method") == "turn/start" for line in calls.read_text().splitlines())
 
 
@@ -20,6 +21,8 @@ def emit(value):
 
 
 def authorize():
+    global authorized
+    authorized = True
     claims = {"email": "wrong@example.com" if scenario == "wrong_email" else email,
               "https://api.openai.com/auth": {"chatgpt_account_id": "wrong-workspace" if scenario == "wrong_workspace" else account_id}}
     token = "fixture." + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=") + ".fixture"
@@ -50,7 +53,7 @@ for line in sys.stdin:
             emit({"id": message["id"], "error": error})
             continue
         result = {"account": {"type": "chatgpt", "email": "wrong@example.com" if scenario == "wrong_email" or (recovery and scenario == "recovery_identity") else email}
-                  if (home / "auth.json").exists() else None}
+                  if (home / "auth.json").exists() and (scenario != "expired_login" or authorized) else None}
     elif method == "account/login/start":
         if scenario == "login_start_rate_limit":
             emit({"id": message["id"], "error": {"code": -32603, "message":
