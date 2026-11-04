@@ -296,7 +296,7 @@ export function init({ autoLoad = true } = {}) {
       });
       await load();
       if (current()) notice.textContent = `已提交 ${targets.length} 个账号的配额查询；账号会逐个显示结果。`
-        + (targets.length < eligible.length ? `另有 ${eligible.length - targets.length} 个账号需先登录或处理限制，未纳入本次查询。` : "");
+        + (targets.length < eligible.length ? `其余 ${eligible.length - targets.length} 个账号未纳入本次查询。` : "");
     } catch (error) {
       if (current() && error.name !== "AbortError") notice.textContent = error.message;
     } finally {
@@ -561,7 +561,7 @@ export function init({ autoLoad = true } = {}) {
         controls.append(login);
       }
       if (restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("核对后解除此账号限制", "resume", account));
-      if (account.last_failure && account.last_failure.id !== op?.id) historyDetail.append(element("p", `保留的失败摘要：${account.last_failure.detail}`, "quota-scope"));
+      if (account.last_failure && (account.last_failure.id !== op?.id || op?.recovery_pause_id)) historyDetail.append(element("p", `保留的失败摘要：${account.last_failure.detail}`, "quota-scope"));
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials || restrictions.authentication) {
         const maintenance = element("div", undefined, "codex-account-controls");
