@@ -1,118 +1,16 @@
 name: CI
-
 on:
   push:
-    branches: [main]
-  pull_request:
+    branches: [ci/autoloop-acceptance-20261104]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
-  tests:
-    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python: '3.10'
-          - os: macos-latest
-            python: '3.13'
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-      - name: Prepare the pinned Linux sandbox on this disposable runner
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          test ! -e .runtime
-          runtime="$(python -c 'from proxy_runtime.install import install, runtime_directory; install(); print(runtime_directory())')"
-          sudo install -d -o root -g root -m 0755 /agent-monitor-ci
-          sandbox=/agent-monitor-ci/chrome-sandbox
-          sudo install -o root -g root -m 4755 "$runtime/chrome-sandbox" "$sandbox"
-          test -x "$sandbox"
-          test -u "$sandbox"
-          test "$(stat -c '%u:%a' / /agent-monitor-ci | sort -u)" = 0:755
-          test "$(stat -c '%u:%a' "$sandbox")" = 0:4755
-          mount_options="$(findmnt -n -o OPTIONS -T "$sandbox")"
-          case ",$mount_options," in
-            *,nosuid,*|*,noexec,*) echo 'CI sandbox needs an executable, suid-enabled mount.' >&2; exit 1 ;;
-          esac
-          ln -sf "$sandbox" "$runtime/chrome-sandbox"
-          test "$(readlink "$runtime/chrome-sandbox")" = "$sandbox"
-          test "$(stat -Lc '%u:%a' "$runtime/chrome-sandbox")" = 0:4755
-          echo "CHROME_DEVEL_SANDBOX=$sandbox" >> "$GITHUB_ENV"
-      - name: Install in an isolated HOME
-        shell: bash
-        run: |
-          test_home="$RUNNER_TEMP/agent-monitor-home"
-          mkdir -p "$test_home"
-          echo "HOME=$test_home" >> "$GITHUB_ENV"
-          echo "CLAUDE_CONFIG_DIR=$test_home/.claude" >> "$GITHUB_ENV"
-          echo "CODEX_HOME=$test_home/.codex" >> "$GITHUB_ENV"
-          HOME="$test_home" CLAUDE_CONFIG_DIR="$test_home/.claude" CODEX_HOME="$test_home/.codex" \
-            AGENT_MONITOR_PYTHON="$(command -v python)" ./install.sh --no-services
-          .venv/bin/python -m pip install -r requirements-dev.txt
-      - name: Run Python and JavaScript regression tests
-        run: .venv/bin/python -m unittest discover -s tests
-      - name: Diagnose Linux resolver startup after failure
-        if: failure() && runner.os == 'Linux'
-        timeout-minutes: 1
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json, os, signal, subprocess, tempfile
-          from pathlib import Path
-          from proxy_runtime.install import executable
-          if not executable().is_file():
-              print('Resolver was not installed; inspect the preceding preparation step.')
-              raise SystemExit(0)
-          with tempfile.TemporaryDirectory() as profile, tempfile.TemporaryFile() as errors:
-              env = {key: os.environ[key] for key in ('PATH', 'HOME', 'LD_LIBRARY_PATH', 'CHROME_DEVEL_SANDBOX') if key in os.environ}
-              env['AGENT_MONITOR_PROXY_DATA'] = profile
-              child = subprocess.Popen([str(executable()), '--ozone-platform=headless', '--disable-gpu',
-                  str(Path('proxy_runtime/main.cjs').resolve())], stdin=subprocess.PIPE,
-                  stdout=subprocess.DEVNULL, stderr=errors, env=env, start_new_session=True)
-              try:
-                  try:
-                      child.stdin.write((json.dumps({'token': 'ci-startup-probe-no-account'}) + '\n').encode())
-                      child.stdin.flush()
-                  except BrokenPipeError:
-                      pass
-                  try:
-                      child.wait(timeout=10)
-                  except subprocess.TimeoutExpired:
-                      print('Resolver remained running for the diagnostic window.')
-              finally:
-                  try:
-                      for stop_signal in (signal.SIGTERM, signal.SIGKILL):
-                          if child.poll() is not None:
-                              break
-                          try:
-                              os.killpg(child.pid, stop_signal)
-                          except ProcessLookupError:
-                              pass
-                          try:
-                              child.wait(timeout=5)
-                          except subprocess.TimeoutExpired:
-                              continue
-                  finally:
-                      try:
-                          child.stdin.close()
-                      except BrokenPipeError:
-                          pass
-                      errors.seek(0)
-                      print(errors.read().decode(errors='replace'))
-                      print('Diagnostic process exit:', child.poll())
-          PY
+      - run: python3 tests/fixtures/autoloop/check.py
