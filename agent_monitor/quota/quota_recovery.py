@@ -52,7 +52,7 @@ def local_status():
     auth = accounts.CODEX_AUTH
     if profile:
         try:
-            auth = quota_service.recovery_home(profile) / "auth.json"
+            auth = quota_service.recovery_home(profile, exporter.ROOT) / "auth.json"
         except quota_refresh.RefreshError:
             auth = None
     account = accounts.codex_account(auth) if auth is not None else None
@@ -64,12 +64,15 @@ def local_status():
     source = "default" if home == Path.home() / ".codex" else "configured"
     if (home.parent / "profile.json").is_file() and home.name == "codex":
         source = "managed"
+    from agent_monitor.accounts import account_holds
+    blocked_reason = account_holds.blocked(exporter.ROOT / "state", account.account_id, account.label) if account else None
     return {"source_host_identity": generation.self_certified_host_identity(),
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "pause": state.get("pause"), "active": state.get("active"),
             "account": {"account_id": account.account_id if account else None,
                         "account_label": account.label if account else None,
                         "source": source, "profile": home.parent.name if source == "managed" else None,
+                        "blocked_reason": blocked_reason,
                         "credential_path": str(auth), "quota_profile": profile or ""},
             "last_recovery": state.get("last_recovery")}
 

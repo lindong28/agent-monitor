@@ -28,6 +28,9 @@ class DiscoveryTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
+        home_patch = mock.patch.object(ca.Path, "home", return_value=self.root / "home")
+        home_patch.start()
+        self.addCleanup(home_patch.stop)
         self.manager = ca.Manager(self.root / "profiles")
         self.hub = client_network.Hub()
         self.addCleanup(self.hub.close)
@@ -185,6 +188,33 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertTrue(all(not self.methods(account) for account in accounts))
 
+    def test_quota_subset_and_retry_bind_scope_revision_and_disabled_state(self):
+        for i in range(3):
+            self.source(f"workspace-{i}", f"account{i}@example.test")
+        rows = sorted(self.request()[1]["accounts"], key=lambda a: a["id"])
+        for row in rows:
+            seed_auth(self.manager, row)
+        ids = [row["id"] for row in rows]
+        self.scenarios[rows[1]["email"]] = "account_read_timeout"
+        payload = {"profile_ids": ids, "connection": self.connection, "approval_expected": None,
+                   "confirmation": self.route.issue(ids, None, "refresh-selected")}
+        self.assertEqual(self.request("/refresh-selected", payload)[0], 200)
+        self.wait()
+        data = self.request()[1]
+        failed = next(a for a in data["accounts"] if a["id"] == ids[1])
+        local = {"id": ids[1], "operation_id": failed["operation"]["id"], "disabled": True}
+        self.assertEqual(self.request("/set-disabled", local)[0], 200)
+        self.assertEqual(self.request("/attribute-account-pause", {**local, "pause_id": data["upstream_pause"]["id"]})[0], 200)
+        revision = data["quota_batch"]["revision"]
+        retry = {"profile_ids": ids[2:], "connection": self.connection, "approval_expected": revision,
+                 "confirmation": self.route.issue(ids[2:], revision, "refresh-retry")}
+        self.assertEqual(self.request("/refresh-retry", {**retry, "profile_ids": ids})[0], 409)
+        self.assertEqual(self.request("/refresh-retry", retry)[0], 200)
+        self.wait()
+        self.assertEqual(self.request("/refresh-retry", retry)[0], 409)
+        methods = [self.methods(row) for row in rows]
+        self.assertEqual([m.count("account/rateLimits/read") for m in methods], [1, 0, 1])
+        self.assertTrue(all("turn/start" not in m for m in methods))
     def test_refresh_all_http_action_consumes_route_and_dispatches_current_scope(self):
         self.source("one-workspace", "one@example.com")
         self.source("two-workspace", "two@example.com")
@@ -200,7 +230,7 @@ class DiscoveryTests(unittest.TestCase):
             status, result = self.request("/refresh-all", payload)
         self.assertEqual(status, 200)
         self.assertEqual(result, {**expected, "unavailable_accounts": []})
-        start.assert_called_once_with(sorted(ids), network_route=self.route)
+        start.assert_called_once_with(sorted(ids), network_route=self.route, retry_revision=None, expected_revision=None)
 
     def test_refresh_all_uses_current_login_ready_scope_and_rejects_stale_selection(self):
         self.source("ready-workspace", "ready@example.com")
@@ -218,7 +248,7 @@ class DiscoveryTests(unittest.TestCase):
                    "confirmation": self.route.issue([ready["id"]], None, "refresh-all")}
         with mock.patch.object(self.manager, "start_refresh_batch", return_value={}) as start:
             self.assertEqual(self.request("/refresh-all", payload)[0], 200)
-            start.assert_called_once_with([ready["id"]], network_route=self.route)
+            start.assert_called_once_with([ready["id"]], network_route=self.route, retry_revision=None, expected_revision=None)
         record.pop("login_required")
         self.manager.save(directory, record)
         payload["confirmation"] = self.route.issue([ready["id"]], None, "refresh-all")

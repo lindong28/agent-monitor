@@ -104,6 +104,11 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
     if (provider == "claude" and probe_pause_id is None and recovery_account_id is None
             and quota_applicability.unavailable(quota_applicability.Store(root / "state").get(provider, account.account_id))):
         raise NoSubscription("用户已确认此账号无有效 Claude Code 订阅；未请求配额。")
+    if provider == "codex":
+        from agent_monitor.accounts import account_holds
+        reason = account_holds.blocked(root / "state", account.account_id, account.label)
+        if reason:
+            raise LocalUnavailable(reason)
     try:
         options = {} if probe_pause_id is None else {"probe_pause_id": probe_pause_id}
         lease = upstream_controls.Controls(root / "state/upstream_controls").acquire(provider, **options)
@@ -126,6 +131,11 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
     failure = None
     stage = "child_start"
     try:
+        if provider == "codex":
+            from agent_monitor.accounts import account_holds
+            reason = account_holds.blocked(root / "state", account.account_id, account.label)
+            if reason:
+                raise LocalUnavailable(reason)
         deadline = time.monotonic() + TIMEOUT
         parent_read, parent_write = os.pipe()
         child = subprocess.Popen(

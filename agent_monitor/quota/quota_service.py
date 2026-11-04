@@ -484,9 +484,19 @@ def record_codex_reading(cache_path, account, reading):
         save_cache(cache_path, {"codex": result}, session_links=SessionLinks())
 
 
-def recovery_home(profile):
+def recovery_home(profile, root=None):
     if not profile:
         return None
+    if profile.startswith("monitor-"):
+        import uuid
+        try:
+            identity = str(uuid.UUID(profile.removeprefix("monitor-")))
+        except ValueError:
+            raise quota_refresh.LocalUnavailable("账号来源无效。") from None
+        home = (Path(root) if root is not None else ROOT) / "state/codex-accounts" / identity
+        if home.is_symlink() or not (home / "profile.json").is_file():
+            raise quota_refresh.LocalUnavailable("所选账号目录已变化或不可用，请更新状态。")
+        return home / "codex"
     from parsers import codex_profiles
     match = next((p for p in codex_profiles.discover() if p.account and p.account["name"] == profile), None)
     if match is None:
@@ -498,7 +508,7 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     """One operator-approved probe; retain the pause until its reading is saved."""
     root = Path(root) if root is not None else ROOT
     from agent_monitor.accounts.upstream_controls import Controls
-    home = recovery_home(profile)
+    home = recovery_home(profile, root)
     account = accounts.codex_account(home / "auth.json") if home else accounts.codex_account()
     if (not expected_label or account is None or account.label != expected_label
             or (expected_id is not None and account.account_id != expected_id)):
@@ -526,6 +536,19 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     if profile:
         block["account_profile"] = profile
     save_cache(root / "state/quota_snapshot.json", {"codex": {"managed_accounts": [block]} if profile else block})
+    if profile and profile.startswith("monitor-") and (pause.get("source") or {}).get("action") == "quota":
+        from agent_monitor.accounts.codex_accounts import ActionError, Manager
+        from agent_monitor.accounts.upstream_controls import Busy
+        source = pause.get("source") or {}
+        reading = dict(five_hour_used_pct=value.five_hour_pct, five_hour_resets_at=value.five_hour_resets_at,
+                       seven_day_used_pct=value.seven_day_pct, seven_day_resets_at=value.seven_day_resets_at)
+        reading["plan"] = value.plan
+        reading.update(observed_at=value.updated_at, codex_quota_available=True)
+        try:
+            Manager(root / "state/codex-accounts").record_quota_recovery(
+                profile.removeprefix("monitor-"), source.get("operation_id"), pause_id, reading)
+        except (ActionError, Busy) as exc:
+            raise quota_refresh.LocalUnavailable(str(exc)) from None
     Controls(root / "state/upstream_controls").resume("codex", pause_id)
     return block
 

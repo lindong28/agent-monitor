@@ -551,6 +551,8 @@ class Manager:
 
     @staticmethod
     def check_restrictions(record):
+        if record.get("disabled"):
+            raise ActionError("此账号已由用户停用，未发出上游请求。", 409, "accountDisabled")
         restrictions = record.get("restrictions", {})
         for key in RESTRICTION_DETAILS:
             if key in restrictions and not (key == "quota" and (record["operation"]["refresh_only"] or record["operation"].get("login_only"))):
@@ -575,6 +577,9 @@ class Manager:
 
     def save(self, directory, record):
         retain_quota(record)
+        operation = record.get("operation")
+        if operation and operation.get("quota_batch_id"):
+            record["quota_batch_result"] = copy.deepcopy(operation)
         write_record(directory / "profile.json", record)
 
     def add(self, email, account_id=None):
@@ -630,6 +635,9 @@ class Manager:
             or (operation and (operation.get("failure") or {}).get("category") == "needsLogin")
         )
         result["busy"] = bool(job) or bool(operation and operation["stage"] in ACTIVE)
+        result["quota_query_allowed"] = not (result["login_required"] or result.get("disabled")
+            or any(key in record.get("restrictions", {})
+                   for key in ("authentication", "unknown", "rate_limit", "login_rate_limit")))
         if job and operation and operation["stage"] == "login":
             result["operation"].update(job.get("authorization", {}))
         return result
@@ -669,7 +677,38 @@ class Manager:
                 for account in accounts:
                     account["eligible"] = account["id"] in eligible_ids
             return {"accounts": accounts, "message": MESSAGE, "batch": batch,
+                    "quota_batch": self.quota_batch_view(),
                     "upstream_pause": self.controls.read("codex").get("pause")}
+
+    def read_quota_batch(self):
+        try:
+            return json.loads((self.root / "quota-batch.json").read_text())
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            raise ActionError("配额批次记录无法读取，请检查服务主机状态。", 500) from None
+
+    def quota_batch_view(self):
+        batch = self.read_quota_batch()
+        if batch is None:
+            return None
+        items = []
+        for pid in batch.pop("profile_ids"):
+            account = self.view(self.directory(pid))
+            op = account.get("quota_batch_result")
+            if not op or op.get("quota_batch_id") != batch["id"]:
+                op = None
+            items.append({"profile_id": pid, "operation": op,
+                          "query_allowed": account["quota_query_allowed"],
+                          "disabled": bool(account.get("disabled"))})
+        batch["items"] = items
+        return batch
+
+    def quota_pending(self, eligible_ids):
+        batch = self.quota_batch_view()
+        return [item["profile_id"] for item in (batch or {}).get("items", [])
+                if item["profile_id"] in eligible_ids and item["query_allowed"]
+                and (item.get("operation") or {}).get("stage") != "succeeded"]
 
     def read_batch(self):
         path = self.root / "batch.json"
@@ -757,7 +796,7 @@ class Manager:
                 self.launch(prepared)
                 return self.view(directory)
 
-    def start_refresh_batch(self, profile_ids, *, network_route=None):
+    def start_refresh_batch(self, profile_ids, *, network_route=None, retry_revision=None, expected_revision=...):
         """Queue one quota-only operation for every current account serially."""
         if not isinstance(profile_ids, (list, tuple, set)):
             raise ActionError("账号选择无效。")
@@ -767,25 +806,51 @@ class Manager:
         with self.guard:
             private_dir(self.root)
             with lock_file(self.root / ".catalog.lock"):
+                previous = self.read_quota_batch()
+                if expected_revision is not ... and (previous or {}).get("revision") != expected_revision:
+                    raise ActionError("配额批次已变化，请重新查看出口并确认。", 409)
+                if any(self.view(path.parent)["busy"] for path in self.root.glob("*/profile.json")):
+                    raise ActionError("还有账号正在操作，请等待完成后再查询配额。", 409)
+                if retry_revision is not None and (previous or {}).get("revision") != retry_revision:
+                    raise ActionError("配额批次已变化，请重新查看出口并确认。", 409)
                 if network_route:
                     network_route.require()
+                if retry_revision is not None and network_route and previous.get("network_device", {}).get("id") != network_route.id:
+                    raise ActionError("请连接此配额批次的原设备；未开始新的请求。", 409)
+                quota_batch = copy.deepcopy(previous) if retry_revision else {
+                    "id": str(uuid.uuid4()), "created_at": now(), "profile_ids": selected}
+                quota_batch["revision"] = str(uuid.uuid4())
+                if network_route:
+                    quota_batch["network_device"] = {"id": network_route.id, "label": network_route.label}
                 accounts = []
                 for profile_id in selected:
                     directory = self.directory(profile_id)
                     account = self.view(directory)
                     if account["busy"]:
                         raise ActionError("还有账号正在操作，请等待完成后再刷新全部配额。", 409)
+                    if retry_revision and (profile_id not in self.quota_pending(set(selected))):
+                        raise ActionError("待查询账号已变化，请重新确认。", 409)
                     accounts.append((directory, account))
                 prepared = []
+                originals = {directory: self.read(directory) for directory, _ in accounts}
+                sending = self.read_batch()
                 try:
                     for directory, _ in accounts:
-                        item = self.prepare(directory.name, refresh_only=True)
+                        item = self.prepare(directory.name, refresh_only=True,
+                                            published_id=sending["id"] if sending else None)
+                        prepared.append(item)
+                        item[1]["operation"]["quota_batch_id"] = quota_batch["id"]
+                        self.save(directory, item[1])
                         if network_route:
                             item[2]["network_route"] = network_route
-                        prepared.append(item)
+                    write_record(self.root / "quota-batch.json", quota_batch)
                 except Exception:
-                    for *_, lock in prepared:
-                        lock.close()
+                    try:
+                        for directory, *_ in prepared:
+                            write_record(directory / "profile.json", originals[directory])
+                    finally:
+                        for *_, lock in prepared:
+                            lock.close()
                     raise
                 self.launch_sequence(prepared)
                 return self.list(set(selected))
@@ -931,6 +996,84 @@ class Manager:
                 self.save(directory, record)
                 return self.view(directory)
 
+    def set_disabled(self, profile_id, disabled, operation_id):
+        """Local operator decision, serialized against all provider admission."""
+        if type(disabled) is not bool:
+            raise ActionError("账号停用状态无效。")
+        with self.guard:
+            directory = self.directory(profile_id)
+            with lock_file(directory / ".lock"):
+                record = self.read(directory)
+                if (record.get("operation") or {}).get("id") != operation_id:
+                    raise ActionError("账号结果已变化，请刷新后重新核对。", 409)
+                try:
+                    handle = self.controls._lock("codex", threading.Event(), 0)
+                except Busy as exc:
+                    raise ActionError(str(exc), 409) from None
+                with handle:
+                    if self.controls.read("codex").get("active"):
+                        raise ActionError("仍有未结束的 Codex 操作，请先核对。", 409)
+                    if disabled:
+                        record["disabled"] = {"at": now(), "reason": "operatorConfirmedUnavailable"}
+                    elif record.get("disabled"):
+                        record["last_disabled"] = record.pop("disabled")
+                    self.save(directory, record)
+                return self.view(directory)
+
+    def attribute_account_pause(self, profile_id, operation_id, pause_id):
+        """Explicit scope attribution, never a provider recovery or a retry."""
+        with self.guard:
+            directory = self.directory(profile_id)
+            with lock_file(directory / ".lock"):
+                record = self.read(directory)
+                op = record.get("operation") or {}
+                if (not record.get("disabled") or op.get("id") != operation_id
+                        or not op.get("refresh_only") or op.get("login_only")
+                        or op.get("stage") != "failed" or op.get("message_status") != "not_sent"
+                        or (op.get("failure") or {}).get("category") in ("locallyPaused", "loginRateLimited", "rateLimitExceeded", "clientNetworkDisconnected", "networkPolicyUnavailable", "missingCli")
+                        or (op.get("diagnostics") or {}).get("last_request") not in ("account/read", "account/rateLimits/read")
+                        or any(k in record.get("restrictions", {}) for k in ("unknown", "rate_limit", "login_rate_limit"))):
+                    raise ActionError("只能将已尝试的配额查询失败归属到已停用账号；未解除暂停。", 409)
+                try:
+                    handle = self.controls._lock("codex", threading.Event(), 0)
+                except Busy as exc:
+                    raise ActionError(str(exc), 409) from None
+                with handle:
+                    state = self.controls.read("codex")
+                    pause = state.get("pause") or {}
+                    source = pause.get("source")
+                    expected = {"profile_id": profile_id, "operation_id": operation_id, "action": "quota"}
+                    if (pause.get("id") != pause_id or pause.get("reason") != "operationFailed"
+                            or state.get("active") or pause.get("probe_attempt")
+                            or source is not None and source != expected):
+                        raise ActionError("暂停已变化、存在其他来源或恢复操作；未解除暂停。", 409)
+                    state["last_pause"] = pause
+                    state["account_attribution"] = {"pause_id": pause_id, **expected,
+                        "at": now(), "basis": "operatorConfirmedAccountScope"}
+                    state.pop("pause")
+                    self.controls._save("codex", state)
+                return self.view(directory)
+
+    def record_quota_recovery(self, profile_id, operation_id, pause_id, reading):
+        """Attach a successful recovery observation to its exact failed query."""
+        with self.guard:
+            directory = self.directory(profile_id)
+            with lock_file(directory / ".lock"):
+                record = self.read(directory)
+                operation = record.get("operation") or {}
+                if (operation.get("id") != operation_id or not operation.get("refresh_only")
+                        or operation.get("login_only") or operation.get("message_status") != "not_sent"):
+                    raise ActionError("恢复目标操作已变化；暂停保留，请重新核对。", 409)
+                with self.controls._lock("codex", threading.Event(), 0):
+                    state = self.controls.read("codex")
+                    if (state.get("pause") or {}).get("id") != pause_id or state.get("active"):
+                        raise ActionError("恢复暂停已变化；未更新原操作。", 409)
+                    record["last_failure"] = copy.deepcopy(operation)
+                    operation.update(stage="succeeded", quota_status="observed", after=reading,
+                                     recovery_pause_id=pause_id, detail="恢复检查已取得配额，本次未发送消息。")
+                    operation.pop("failure", None)
+                    self.save(directory, record)
+
     def update(self, directory, record, **fields):
         with self.guard:
             record["operation"].update(fields)
@@ -983,7 +1126,7 @@ class Manager:
                     raise Cancelled("操作已取消。")
             if job.get("batch_stopped") and job["batch_stopped"].is_set():
                 raise ActionError("本轮前序账号出现异常，已停止后续账号；本账号未发出请求。", 409, "locallyPaused")
-            if any(key in record.get("restrictions", {}) for key in ("unknown", "authentication", "rate_limit", "login_rate_limit")):
+            if any(key in record.get("restrictions", {}) for key in ("unknown", "rate_limit", "login_rate_limit")):
                 # Migrate pre-control account holds without any provider call.
                 try:
                     migration = self.controls.acquire("codex")
@@ -1128,7 +1271,9 @@ class Manager:
             self.restrict(directory, record, failure)
             if record["operation"]["message_status"] == "unknown":
                 record.setdefault("restrictions", {})["unknown"] = {"category": failure["category"], "created_at": now()}
-            benign = failure["category"] in ("needsLogin", "missingCli", "networkPolicyUnavailable", "usageLimitExceeded", "quotaAtCapacity", "locallyPaused")
+            benign = failure["category"] in ("needsLogin", "accountDisabled", "unauthorized", "missingCli", "networkPolicyUnavailable", "usageLimitExceeded", "quotaAtCapacity", "locallyPaused")
+            if record["operation"]["message_status"] == "unknown":
+                benign = False
             if failure["category"] == "clientNetworkDisconnected" and rpc is None:
                 # A missing device before RPC creation is a local prerequisite,
                 # not evidence of an upstream failure. Stop only this batch.
@@ -1137,7 +1282,16 @@ class Manager:
                     job["batch_stopped"].set()
             if not benign:
                 if lease:
-                    lease.pause("operationFailed")
+                    op = record["operation"]
+                    facts = copy.deepcopy(getattr(rpc, "diagnostics", {}))
+                    from parsers.accounts import Account
+                    from agent_monitor.quota.quota_refresh import account_fingerprint
+                    lease.pause("operationFailed", failure={"stage": "account_check" if op["stage"] == "checking" else "quota_read",
+                        "rpc_code": facts.get("rpc_error_code"), "upstream_code": facts.get("rpc_error_reason"),
+                        "account_profile": "monitor-" + record["id"],
+                        "account_fingerprint": account_fingerprint("codex", Account(record["account_id"], record["email"], None)),
+                        "kind": "rpc_error"}, source={"profile_id": record["id"], "operation_id": op["id"],
+                        "action": "quota" if op["refresh_only"] else "login" if op.get("login_only") else "send"})
                 if job.get("batch_stopped") is not None:
                     job["batch_stopped"].set()
             diagnostics = copy.deepcopy(getattr(rpc, "diagnostics", {}))
@@ -1147,7 +1301,7 @@ class Manager:
             rejections = rpc.rejections(thread_id, turn_id) if rpc else []
             for rejection in rejections:
                 self.restrict(directory, record, rejection)
-                if restriction_key(rejection) != "quota":
+                if restriction_key(rejection) != "quota" and rejection.get("category") != "unauthorized":
                     if lease:
                         lease.pause("upstreamRejected")
                     if job.get("batch_stopped") is not None:

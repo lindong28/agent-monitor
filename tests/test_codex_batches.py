@@ -1,5 +1,6 @@
 """Real manager/stdio with synthetic accounts; no provider credentials or network."""
 import concurrent.futures
+import copy
 from contextlib import contextmanager
 import json
 from pathlib import Path
@@ -26,6 +27,9 @@ class BatchTests(unittest.TestCase):
             self.addCleanup(patch.stop)
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
+        home_patch = mock.patch.object(ca.Path, "home", return_value=Path(temp.name) / "home")
+        home_patch.start()
+        self.addCleanup(home_patch.stop)
         self.manager = ca.Manager(Path(temp.name) / "profiles")
         self.scenarios = {}
         real_popen = subprocess.Popen
@@ -206,6 +210,106 @@ class BatchTests(unittest.TestCase):
             self.assertEqual(self.calls(pid, "initialize"), 0)
         self.assertEqual(self.calls(good), 1)
         self.assertIsNone(data["upstream_pause"])
+
+    def test_account_authentication_hold_does_not_pause_other_quota_queries(self):
+        held, good = self.add(1), self.add(2)
+        directory = self.manager.directory(held)
+        record = self.manager.read(directory)
+        record["restrictions"] = {"authentication": {"category": "unauthorized", "created_at": ca.now()}}
+        self.manager.save(directory, record)
+        self.manager.start_refresh_batch([held, good])
+        data = self.wait()
+        self.assertEqual(self.calls(held, "account/read"), 0)
+        self.assertEqual(self.calls(good, "account/rateLimits/read"), 1)
+        self.assertIsNone(data["upstream_pause"])
+        self.assertEqual(self.calls(good), 0)
+
+    def test_quota_partial_failure_disabled_attribution_and_remaining_resume(self):
+        ids = [self.add(i, "account_read_timeout" if i == 3 else "success") for i in range(9)]
+        self.manager.start_refresh_batch(ids)
+        data = self.wait()
+        batch = data["quota_batch"]
+        self.assertEqual([item["operation"]["stage"] for item in batch["items"]], ["succeeded"] * 3 + ["failed"] * 6)
+        self.assertEqual([self.calls(pid, "account/read") for pid in ids], [1] * 4 + [0] * 5)
+        self.assertEqual([self.calls(pid, "account/rateLimits/read") for pid in ids], [1] * 3 + [0] * 6)
+        failed = next(a for a in data["accounts"] if a["id"] == ids[3])
+        pause = data["upstream_pause"]
+        self.assertEqual(pause["source"], {"profile_id": ids[3], "operation_id": failed["operation"]["id"], "action": "quota"})
+        self.assertEqual(pause["failure"]["upstream_code"], "discoveryTimeout")
+        first_readings = [item["operation"]["after"] for item in batch["items"][:3]]
+        self.manager.set_disabled(ids[3], True, failed["operation"]["id"])
+        with self.assertRaises(ca.ActionError):
+            self.manager.attribute_account_pause(ids[3], failed["operation"]["id"], "stale")
+        directory = self.manager.directory(ids[3])
+        original = self.manager.read(directory)
+        for fields in ({"message_status": "unknown"}, {"stage": "succeeded"}, {"login_only": True},
+                       {"failure": {"category": "clientNetworkDisconnected"}},
+                       {"diagnostics": {"last_request": "turn/start"}}):
+            with self.subTest(fields=fields):
+                changed = copy.deepcopy(original)
+                changed["operation"].update(fields)
+                self.manager.save(directory, changed)
+                with self.assertRaises(ca.ActionError):
+                    self.manager.attribute_account_pause(ids[3], failed["operation"]["id"], pause["id"])
+                self.assertEqual(self.manager.controls.read("codex")["pause"], pause)
+        self.manager.save(directory, original)
+        self.manager.attribute_account_pause(ids[3], failed["operation"]["id"], pause["id"])
+        restarted = ca.Manager(self.manager.root)
+        self.addCleanup(restarted.close)
+        self.assertEqual(restarted.quota_pending(set(ids)), ids[4:])
+        self.assertEqual(restarted.list()["quota_batch"]["id"], batch["id"])
+        self.manager.start_refresh_batch(ids[4:], retry_revision=batch["revision"])
+        result = self.wait()
+        self.assertEqual([self.calls(pid, "account/rateLimits/read") for pid in ids], [1] * 3 + [0] + [1] * 5)
+        self.assertEqual([self.calls(pid) for pid in ids], [0] * 9)
+        self.assertEqual([item["operation"]["after"] for item in result["quota_batch"]["items"][:3]], first_readings)
+        self.assertIsNone(result["upstream_pause"])
+        self.assertEqual(self.manager.controls.read("codex")["last_pause"], pause)
+
+    def test_quota_batch_preserves_send_results_and_retry_never_resends(self):
+        ids = [self.add(i) for i in range(2)]
+        send_id = self.manager.start_batch(None)["batch"]["id"]
+        sent = self.wait()["batch"]
+        self.manager.start_refresh_batch(ids)
+        data = self.wait()
+        self.assertEqual(data["batch"], sent)
+        self.manager.retry_batch(send_id)
+        self.wait()
+        self.assertEqual([self.calls(pid) for pid in ids], [1, 1])
+        self.assertEqual([self.calls(pid, "account/rateLimits/read") for pid in ids], [3, 3])
+
+    def test_disabled_account_blocks_all_manager_modes_but_not_peer(self):
+        disabled, good = self.add(1), self.add(2)
+        self.manager.set_disabled(disabled, True, None)
+        for options in ({}, {"refresh_only": True}, {"login_only": True}):
+            self.manager.start(disabled, **options)
+            self.wait()
+        self.manager.start_refresh_batch([disabled, good])
+        result = self.wait()
+        self.assertEqual(self.calls(disabled, "initialize"), 0)
+        self.assertEqual(self.calls(good, "account/rateLimits/read"), 1)
+        self.assertIsNone(result["upstream_pause"])
+        self.assertTrue(next(a for a in result["accounts"] if a["id"] == disabled)["disabled"])
+
+    def test_quota_only_hold_remains_queryable_and_batch_survives_single_refresh(self):
+        first, second = self.add(1, "quota_denied"), self.add(2)
+        self.manager.start_refresh_batch([first, second])
+        result = self.wait()
+        account = next(a for a in result["accounts"] if a["id"] == first)
+        self.assertIn("quota", account["restrictions"])
+        self.assertTrue(account["quota_query_allowed"])
+        batch = result["quota_batch"]
+        self.manager.start(first, refresh_only=True)
+        self.wait()
+        self.assertEqual(self.manager.list()["quota_batch"], batch)
+
+    def test_explicit_account_refusal_does_not_stop_independent_accounts(self):
+        denied, good = self.add(1, "unauthorized"), self.add(2)
+        self.manager.start_batch(None, [denied, good])
+        data = self.wait()
+        self.assertEqual(self.calls(good), 1)
+        self.assertIsNone(data["upstream_pause"])
+        self.assertIn("authentication", next(a for a in data["accounts"] if a["id"] == denied)["restrictions"])
 
     def test_explicit_login_rate_limit_pauses_other_saved_accounts(self):
         for scenario in ("login_start_rate_limit", "login_poll_rate_limit"):

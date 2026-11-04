@@ -601,7 +601,7 @@ class Handler(BaseHTTPRequestHandler):
                         raise codex_accounts.ActionError("预览账号选择无效。")
                     result = account_egress.preview(route)
                     if approval_action:
-                        if approval_action not in {"batch-start", "batch-retry", "refresh", "refresh-all", "login"}:
+                        if approval_action not in {"batch-start", "batch-retry", "refresh", "refresh-all", "refresh-selected", "refresh-retry", "login"}:
                             raise codex_accounts.ActionError("预览操作类型无效。")
                         result["confirmation"] = route.issue(selected, payload.get("approval_expected"), approval_action)
                         result["approval_action"] = approval_action
@@ -655,22 +655,30 @@ class Handler(BaseHTTPRequestHandler):
                     raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
                 route.consume(payload.get("confirmation"), [account_id], batch_id, "refresh")
                 result = manager.start(account_id, refresh_only=True, network_route=route)
-            elif path == "/api/codex-accounts/refresh-all":
+            elif path in {"/api/codex-accounts/refresh-all", "/api/codex-accounts/refresh-selected", "/api/codex-accounts/refresh-retry"}:
+                action = path.rsplit("/", 1)[1]
                 ids, unavailable = manager.discover(QUOTA_VIEW.action_catalog())
                 ids = {account["id"] for account in manager.list(ids)["accounts"]
-                       if account["id"] in ids and not account["login_required"]
-                       and not any(key in account.get("restrictions", {})
-                                   for key in ("authentication", "unknown", "rate_limit", "login_rate_limit"))}
+                       if account["id"] in ids and account["quota_query_allowed"]}
+                revision = (manager.read_quota_batch() or {}).get("revision")
+                if payload.get("approval_expected") != revision:
+                    raise codex_accounts.ActionError("配额批次已变化，请重新查看出口并确认。", 409)
+                if action == "refresh-retry":
+                    if revision is None:
+                        raise codex_accounts.ActionError("没有可继续的配额批次。", 409)
+                    ids = set(manager.quota_pending(ids))
                 requested = payload.get("profile_ids")
                 if (not isinstance(requested, list) or not requested
                         or any(not isinstance(pid, str) or not pid for pid in requested)
                         or len(set(requested)) != len(requested)):
                     raise codex_accounts.ActionError("请选择一个或多个不同的账号。")
-                if set(requested) != ids:
+                if (not set(requested).issubset(ids) or action != "refresh-selected" and set(requested) != ids):
                     raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
+                ids = set(requested)
                 route = client_network.hub.browser_route(payload.get("connection"))
-                route.consume(payload.get("confirmation"), ids, payload.get("approval_expected"), "refresh-all")
-                result = manager.start_refresh_batch(sorted(ids), network_route=route)
+                route.consume(payload.get("confirmation"), ids, revision, action)
+                result = manager.start_refresh_batch(sorted(ids), network_route=route,
+                    retry_revision=revision if action == "refresh-retry" else None, expected_revision=revision)
                 result["unavailable_accounts"] = unavailable
             elif path == "/api/codex-accounts/login":
                 account_id = payload.get("id")
@@ -688,6 +696,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = manager.forget_login(payload.get("id"))
             elif path == "/api/codex-accounts/release-rate-limit":
                 result = manager.release_rate_limit(payload.get("id"))
+            elif path == "/api/codex-accounts/set-disabled":
+                result = manager.set_disabled(payload.get("id"), payload.get("disabled"), payload.get("operation_id"))
+            elif path == "/api/codex-accounts/attribute-account-pause":
+                result = manager.attribute_account_pause(payload.get("id"), payload.get("operation_id"), payload.get("pause_id"))
             else:
                 raise codex_accounts.ActionError("未找到此接口。", 404)
             self._send_json(result)

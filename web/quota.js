@@ -528,7 +528,7 @@
     const read = make("button", "更新状态");
     const probe = make("button", "重新检查配额");
     const help = make("button", "查看排查步骤");
-    const resume = make("button", "返回发送操作");
+    const resume = make("button", "返回账号操作");
     const copy = make("button", "复制诊断信息", "btn");
     for (const [button, action] of [[read,"read"],[probe,"probe"],[help,"help"],[resume,"continue"],[copy,"copy"]]) {
       button.type = "button";
@@ -586,6 +586,7 @@
       const mode = !value ? "unknown" : value.active ? "active"
         : pendingPauseId ? "unknown-outcome" : !pause ? "ready"
         : pause.id === "unreadable" ? "unreadable" : pause.probe_attempt ? "used"
+        : a.blocked_reason ? "account-blocked"
         : !a.account_id || !a.account_label ? "identity"
         : sourceMismatch ? "source-mismatch"
         : failureGuidance?.key === "identity" ? "identity"
@@ -596,7 +597,8 @@
         unknown: ["暂时无法确认恢复状态", "先更新状态。读取失败期间不能检查配额；下方技术详情可能是此前的记录。"],
         "unknown-outcome": ["本次检查结果尚未确认", "先更新状态核对本次检查的结果，暂不再次提交，避免重复检查。"],
         active: ["已有操作正在进行", "等待当前操作结束后更新状态。已有发送结果和账号选择保留，请勿重复提交。"],
-        ready: ["当前没有通道暂停", onContinue ? "可以返回发送操作，核对账号登录及限制后继续。已有结果和选择保留，不会自动发送消息。" : "该机器的通道暂停已解除或当前不存在；其他机器和账号的可用性需分别查看。不会自动发送消息。"],
+        ready: ["当前没有通道暂停", onContinue ? "可以返回账号操作，核对待完成的查询或发送。已有结果和选择保留，不会自动发起请求。" : "该机器的通道暂停已解除或当前不存在；其他机器和账号的可用性需分别查看。不会自动发送消息。"],
+        "account-blocked": ["此账号有本地限制，不执行恢复查询", a.blocked_reason || "请在账号卡片核对状态；已停用账号不应作为其他账号继续查询的前置条件。"],
         unreadable: ["暂停记录无法读取", "发送仍暂停。先按排查步骤修复状态记录，再更新状态；不能直接清除暂停。"],
         used: ["本次暂停的检查机会已使用", "先更新状态查看已有结果。若仍未结束，按下方排查步骤处理；此处不能重复检查或重置机会。"],
         identity: ["查询账号身份需要确认", "发送仍暂停。先在目标机器确认当前登录的是这个账号；页面不能替你切换机器账号。确认后更新状态。"],
@@ -604,7 +606,7 @@
         "upstream-auth": ["上游认证响应需要核对", `已记录${authEvidence}；这条读数不能区分凭据、权限或服务端原因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
         "read-error": ["配额读取失败，需要一次受控检查", "已记录读取阶段失败，但原因未核实。先通过目标机器的 Agent Monitor 路由桥只检查一次；仍失败时复制诊断交由管理员排查。"],
         failed: ["配额检查未成功，发送仍暂停", "具体原因尚未确认。先查看排查步骤，处理后可再次检查；已有发送结果和账号选择保留。"],
-        paused: ["发送已暂停，需要先检查配额", "Monitor 在此前请求异常后暂停了此机器的 Codex 发送、登录和配额查询。这是本地保护，不表示所有账号均不可用。"],
+        paused: ["Codex 请求已暂停", "此前请求异常触发本机通道保护，不表示所有账号不可用。已确认仅某账号异常时，可在账号卡片停用该账号并核对暂停归属；其他情况先检查下面的目标与诊断。"],
       };
       [title.textContent, guidance.textContent] = copyText[mode];
       if (!["failed","unreadable","identity","source-mismatch","upstream-auth","read-error","used"].includes(mode)) {
@@ -614,6 +616,7 @@
       result.textContent = value ? (last
         ? `最近检查：${when(last.observed_at)} · ${last.ok ? "当次成功" : "未成功"}。当前状态以本卡片为准。`
         : `暂停记录：${when(pause?.at ? pause.at * 1000 : null)}。`) : "";
+      if (last && pause?.at && Date.parse(last.observed_at) < pause.at * 1000) result.textContent += " 该检查早于本次暂停，不能证明本次故障已恢复。";
       if (value && !pause && !last) result.textContent = `状态更新：${when(value.observed_at)}。`;
       if (value && unrecordedOutcome) result.textContent = "最近检查：未取得该次结果记录。当前是否暂停以上方状态为准。";
       probe.hidden = !["paused", "failed", "source-mismatch", "upstream-auth", "read-error"].includes(mode);

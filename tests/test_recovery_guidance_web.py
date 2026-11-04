@@ -173,7 +173,7 @@ async function render(changes={}, error=false) {
   assert.doesNotMatch(visibleText(p),/HTTP 401/);
   p=await render({pause:{id:'new-pause'},last_recovery:{ok:false,request:{pause_id:'old-pause',machine:'fixture-host',account_id:'fixture-id'},failure:{upstream_code:'token_revoked',http_status:401}}});
   assert.doesNotMatch(visibleText(p),/上游认证响应需要核对/);
-  assert.match(visibleText(p),/发送已暂停，需要先检查配额/);
+  assert.match(visibleText(p),/Codex 请求已暂停/);
   const only401=ui.quotaFailureDetails(provider,[{machine:'only-401',reason:'上游拒绝，http_status=401',query_state:'paused',failure:{http_status:401}}]);
   assert.match(only401.quotaDiagnostics.entries[0].note.textContent,/上游返回 HTTP 401，原因未核实/);
   assert.doesNotMatch(only401.quotaDiagnostics.entries[0].note.textContent,/token_revoked/);

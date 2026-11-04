@@ -79,18 +79,18 @@ const render = (p, t) => renderAccountPause(p, t, controls);
 render(pause, target);
 assert.equal(controls.pausePanel.hidden, false);
 assert.match(controls.pauseSummary.textContent, /暂停/);
-assert.match(controls.pauseDetail.textContent, /选择.*结果保留/);
+assert.match(controls.pauseDetail.textContent, /已有结果保留/);
 assert.doesNotMatch(controls.pauseDetail.textContent, /原始失败/);
 assert.match(controls.pauseDetail.textContent, /2026-10-26/);
 assert.equal(controls.pauseRecovery.disabled, false);
 for (const wrong of [null, {...target, pause: {id: "old"}}, {...target, account_id: ""}]) {
   render(pause, wrong);
   assert.equal(controls.pauseRecovery.disabled, false, "local status remains readable even when overview is stale");
-  assert.match(controls.pauseSummary.textContent, /准备恢复操作/);
+  assert.match(controls.pauseSummary.textContent, /核对原因后继续/);
 }
 render({...pause, id: "unreadable"}, null);
 assert.equal(controls.pauseRecovery.disabled, false, "local status remains readable even when overview is stale");
-assert.match(controls.pauseSummary.textContent, /准备恢复操作/);
+assert.match(controls.pauseSummary.textContent, /核对原因后继续/);
 render(pause, {...target, pause: {id: "p1", probe_attempt: {id: "used"}}});
 assert.equal(controls.pauseRecovery.disabled, false, "used probe still has a readable recovery record");
 render(null, null);

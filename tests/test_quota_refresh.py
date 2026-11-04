@@ -19,6 +19,82 @@ from parsers import RateLimits, accounts
 
 
 class ProviderTests(unittest.TestCase):
+    def test_disabled_identity_blocks_native_managed_and_recovery_without_probe(self):
+        from agent_monitor.accounts import codex_accounts as ca
+        manager = ca.Manager(self.root / "state/codex-accounts")
+        self.addCleanup(manager.close)
+        profile = manager.add("blocked@example.test", "blocked-workspace")
+        manager.set_disabled(profile["id"], True, None)
+        account = accounts.Account("blocked-workspace", "blocked@example.test")
+        lease = manager.controls.acquire("codex")
+        lease.pause("quotaRefreshFailed")
+        pause = lease.state["pause"]
+        lease.close()
+        home = manager.directory(profile["id"]) / "codex"
+        home.mkdir()
+        with mock.patch.object(quota_refresh.subprocess, "Popen") as spawn:
+            for options in ({}, {"codex_home": home}, {"probe_pause_id": pause["id"]}):
+                with self.assertRaisesRegex(quota_refresh.LocalUnavailable, "停用"):
+                    quota_refresh.load_rate_limits("codex", account, root=self.root, **options)
+        spawn.assert_not_called()
+        self.assertEqual(manager.controls.read("codex")["pause"], pause)
+        from agent_monitor.accounts import account_holds
+        self.assertIsNone(account_holds.blocked(self.root / "state", "other-workspace", account.label))
+        manager.set_disabled(profile["id"], False, None)
+        self.assertIsNone(account_holds.blocked(self.root / "state", account.account_id, account.label))
+
+    def test_monitor_recovery_selector_uses_owning_profile_without_native_fallback(self):
+        from agent_monitor.accounts import codex_accounts as ca
+        manager = ca.Manager(self.root / "state/codex-accounts")
+        self.addCleanup(manager.close)
+        profile = manager.add("managed@example.test", "managed-workspace")
+        home = manager.directory(profile["id"]) / "codex"
+        self.assertEqual(quota_service.recovery_home("monitor-" + profile["id"], self.root), home)
+        with self.assertRaises(quota_refresh.LocalUnavailable):
+            quota_service.recovery_home("monitor-invalid", self.root)
+
+    def test_monitor_recovery_completes_only_original_quota_operation(self):
+        for action in ("quota", "send", "login"):
+            with self.subTest(action=action):
+                self.check_monitor_recovery(action)
+
+    def check_monitor_recovery(self, action):
+        from agent_monitor.accounts import codex_accounts as ca
+        manager = ca.Manager(self.root / "state/codex-accounts")
+        self.addCleanup(manager.close)
+        profile = manager.add(action + "@example.test", "workspace")
+        pid = profile["id"]
+        directory = manager.directory(pid)
+        record = manager.read(directory)
+        op = dict(id="12345678-1111-4111-8111-123456789012", quota_batch_id="quota-batch", stage="failed", refresh_only=action == "quota",
+                  message_status="not_sent", failure={"category": "rpcError"})
+        record["operation"] = op
+        manager.save(directory, record)
+        ca.write_record(manager.root / "quota-batch.json", dict(id="quota-batch", revision="revision", profile_ids=[pid]))
+        account = accounts.Account("workspace", action + "@example.test")
+        lease = manager.controls.acquire("codex")
+        lease.pause("operationFailed", failure=dict(account_profile="monitor-" + pid,
+                    account_fingerprint=quota_refresh.account_fingerprint("codex", account)),
+                    source=dict(profile_id=pid, operation_id=op["id"], action=action))
+        pause_id = lease.state["pause"]["id"]
+        lease.close()
+        reading = RateLimits(5, 4102444800, 20, 4102444800, updated_at="2026-11-04T00:00:00Z")
+        with mock.patch.object(quota_service.accounts, "codex_account", return_value=account), \
+                mock.patch.object(quota_refresh, "load_rate_limits", return_value=reading) as query:
+            quota_service.recover_codex_quota(account.label, pause_id, root=self.root, profile="monitor-" + pid)
+        query.assert_called_once()
+        result = manager.read(directory)
+        if action == "quota":
+            self.assertEqual(manager.quota_pending({pid}), [])
+            self.assertEqual(result["last_failure"], op)
+            self.assertEqual(result["quota_batch_result"]["stage"], "succeeded")
+            self.assertEqual(result["quota_batch_result"]["after"]["five_hour_used_pct"], 5)
+        else:
+            self.assertEqual(result["operation"], op)
+        self.assertNotIn("pause", manager.controls.read("codex"))
+        with self.assertRaises(ca.ActionError):
+            manager.record_quota_recovery(pid, "stale-operation", pause_id, {})
+
     def test_network_prerequisite_failure_is_local_and_never_starts_child(self):
         from agent_monitor.accounts.upstream_controls import Controls
         account = accounts.Account('workspace', 'fixture@example.invalid')

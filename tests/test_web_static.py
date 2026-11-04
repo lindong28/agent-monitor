@@ -555,8 +555,8 @@ assert(!text(list.children[0].querySelector("details")).includes("保留的批�
         accounts = (ROOT / "web/codex-accounts.js").read_text()
         egress = (ROOT / "web/account-egress.js").read_text()
         self.assertIn('id="codex-refresh-all"', index)
-        self.assertIn('refreshAllButton?.addEventListener("click", refreshAllQuotas)', accounts)
-        self.assertIn('approval_action: "refresh-all"', accounts)
+        self.assertIn('refreshAllButton?.addEventListener("click", () => refreshAllQuotas("refresh-all"))', accounts)
+        self.assertIn('approval_action: action', accounts)
         self.assertIn('"refresh-all":"刷新全部账号配额"', egress)
 
     def test_session_detail_preserves_refresh_collection_and_page_watch(self):

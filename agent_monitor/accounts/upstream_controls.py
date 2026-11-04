@@ -157,13 +157,19 @@ class Lease:
     def __init__(self, controls, provider, handle, state):
         self.controls, self.provider, self.handle, self.state = controls, provider, handle, state
 
-    def pause(self, reason="unknown", *, failure=None):
+    def pause(self, reason="unknown", *, failure=None, source=None):
         # Only fixed internal categories belong here; never upstream bodies/tokens.
         if self.state.get("pause"):
             self.state["last_pause"] = self.state["pause"]
         self.state["pause"] = {"id": uuid.uuid4().hex, "reason": reason, "at": time.time()}
         if failure:
             self.state["pause"]["failure"] = diagnostics.safe_failure(failure)
+        if source:
+            self.state["pause"]["source"] = {
+                "profile_id": str(uuid.UUID(source["profile_id"])),
+                "operation_id": str(uuid.UUID(source["operation_id"])),
+                "action": source["action"] if source["action"] in ("quota", "login", "send") else "unknown",
+            }
         self.controls._save(self.provider, self.state)
 
     def close(self, *, completed=True):
