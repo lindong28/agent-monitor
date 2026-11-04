@@ -297,7 +297,10 @@ class GuiQuotaTests(unittest.TestCase):
                 mock.patch.object(quota_view, "quota_unavailable_reason", return_value="No reading"):
             projected = server.QUOTA_VIEW.live_from_admission(admission)
         for provider in ("claude", "codex"):
-            self.assertEqual(projected[provider]["refresh_errors"], [{"machine": "fixture", "reason": "GUI unavailable"}])
+            self.assertEqual(projected[provider]["refresh_errors"], [{
+                "machine": "fixture", "reason": "GUI unavailable", "account_id": "a",
+                "account_profile": "", "query_state": "unknown",
+            }])
 
 
 if __name__ == "__main__":

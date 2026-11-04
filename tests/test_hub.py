@@ -384,7 +384,10 @@ class HubTests(unittest.TestCase):
                 admission = SimpleNamespace(admitted=[SimpleNamespace(host="node-c", meta={"rate_limits": cached})])
                 result = server.QUOTA_VIEW.live_from_admission(admission)
                 for provider in ("claude", "codex"):
-                    self.assertEqual(result[provider]["refresh_errors"], [{"machine": "node-c", "reason": "offline"}])
+                    self.assertEqual(result[provider]["refresh_errors"], [{
+                        "machine": "node-c", "reason": "offline", "account_id": "fixture-account",
+                        "account_label": "Fixture", "account_profile": "",
+                    }])
                     self.assertEqual(cached[provider]["updated_at"], later.updated_at)
                 self.assertEqual(live.call_count, active_calls)
 

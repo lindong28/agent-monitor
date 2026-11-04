@@ -720,7 +720,8 @@ class SignedOutMachinesAreNotFailuresTests(unittest.TestCase):
 
         self.assertEqual(
             limits["claude"]["refresh_errors"],
-            [{"machine": "node-c", "reason": "Quota request timed out; retry Refresh."}],
+            [{"machine": "node-c", "reason": "Quota request timed out; retry Refresh.",
+              "account_id": "acct-lapsed", "account_label": "acct-lapsed@example.com", "account_profile": ""}],
         )
         self.assertEqual(limits["claude"]["signed_out_machines"], [])
 
