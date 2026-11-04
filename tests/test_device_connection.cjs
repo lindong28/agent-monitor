@@ -136,7 +136,7 @@ test('refresh all previews and submits only login-ready accounts through the pai
     assert.equal(call.payload.connection.id, 'route');
   }
   assert.equal(f.calls.find(call => call.action === 'refresh-all').payload.confirmation, 'receipt');
-  assert.match(f.error(), /另有 1 个账号.*未纳入/);
+  assert.match(f.error(), /其余 1 个账号.*未纳入/);
   f.cleanup();
 });
 

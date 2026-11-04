@@ -491,7 +491,7 @@ def retain_quota(record):
     readings.append(record.get("last_quota"))
     readings = [reading for reading in readings if reading is not None]
     if readings:
-        record["last_quota"] = max(readings, key=lambda reading: datetime.fromisoformat(reading["observed_at"]))
+        record["last_quota"] = max(readings, key=lambda reading: datetime.fromisoformat(reading["observed_at"].replace("Z", "+00:00")))
 
 
 class Manager:
