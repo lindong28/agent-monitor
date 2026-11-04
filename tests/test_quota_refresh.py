@@ -571,6 +571,20 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result["claude"]["refresh_errors"], [{"machine": "node-d", "reason": "failed"}])
         self.assertIn("无法确认", result["codex"]["refresh_errors"][0]["reason"])
 
+    def test_failure_projection_keeps_identity_profile_and_query_state_without_diagnostics(self):
+        block = {"account_id": "workspace", "account_label": "fixture@example.test",
+                 "account_profile": "fixture-profile", "query_state": "blocked",
+                 "refresh_error": "shared pause", "signed_out": False}
+        admission = SimpleNamespace(admitted=[SimpleNamespace(host="node-a", meta={
+            "rate_limits": {"codex": {"signed_out": True, "managed_accounts": [block]}}})])
+        with mock.patch("agent_monitor.quota.quota_view.hub.enabled", return_value=False), \
+                mock.patch("agent_monitor.quota.quota_view.self_machine_name", return_value="node-a"):
+            result = server.QUOTA_VIEW.live_from_admission(admission)
+        error = result["codex"]["refresh_errors"][0]
+        for key in ("account_id", "account_label", "account_profile", "query_state"):
+            self.assertEqual(error[key], block[key])
+        self.assertNotIn("failure", error)
+
     def test_a_just_switched_account_is_not_reported_as_an_old_exporter(self):
         """The bug this closes: switching accounts blamed the exporter.
 

@@ -371,9 +371,11 @@
     if (!pauseId || pauseId === "unreadable") return null;
     const matches = (renderedQuotaRateLimits?.codex?.refresh_errors || [])
       .filter((failure) => failure.pause?.id === pauseId);
-    if (matches.length !== 1) return null;
-    const target = matches[0];
-    return target.machine && target.account_id && target.account_label ? target : null;
+    const machines = new Set(matches.map(failure => failure.machine));
+    if (!matches.length || machines.size !== 1 || !matches[0].machine) return null;
+    // The destination is the machine-wide pause card. Its read-only status
+    // resolves the recovery account; affected accounts are not probe targets.
+    return matches[0];
   }
 
   function showCodexPauseRecovery(pauseId) {
@@ -702,6 +704,7 @@
       }
     }
     panel.refresh = refresh;
+    panel.updateSourceFailure = failure => { sourceFailure = failure; if (state) render(state); };
     read.addEventListener("click", refresh);
     help.addEventListener("click", () => { steps.hidden = !steps.hidden; help.textContent = steps.hidden ? "查看排查步骤" : "收起排查步骤"; });
     resume.addEventListener("click", () => onContinue?.());
@@ -750,6 +753,26 @@
     return panel;
   }
 
+  function failureAccountKey(provider, failure) {
+    if (typeof failure.account_id !== "string" || !failure.account_id.trim()) return null;
+    if (provider.key !== "codex") return failure.account_id;
+    if (typeof failure.account_label !== "string" || !failure.account_label.trim()) return null;
+    return JSON.stringify([failure.account_id, failure.account_label.trim().toLowerCase()]);
+  }
+
+  function quotaFailureGroups(provider, failures) {
+    const groups = new Map();
+    failures.forEach((failure, index) => {
+      const kind = failure.pause?.id ? "paused" : quotaFailureKind(failure.reason, failure.query_state);
+      const key = JSON.stringify([failure.machine, kind, kind === "paused"
+        ? failure.pause?.id || null
+        : failureAccountKey(provider, failure) || failure.account_profile || index]);
+      if (!groups.has(key)) groups.set(key, {key, machine:failure.machine, kind, failures:[]});
+      groups.get(key).failures.push(failure);
+    });
+    return [...groups.values()];
+  }
+
   function quotaFailureDetails(provider, failures, previous) {
     const body = previous || document.createElement("tbody");
     if (!body.quotaDiagnostics) {
@@ -762,35 +785,38 @@
       body.quotaDiagnostics = {provider:provider.key, details, summary, entries:[]};
     }
     const saved = body.quotaDiagnostics;
-    const counts = {paused:0, skipped:0, busy:0, error:0};
-    failures.forEach(({reason,query_state}) => { counts[quotaFailureKind(reason,query_state)]++; });
+    const groups = quotaFailureGroups(provider, failures);
+    const counts = {paused:new Set(), skipped:new Set(), busy:new Set(), error:new Set()};
+    groups.forEach(group => { if (group.machine) counts[group.kind].add(group.machine); });
     const labels = [["paused","暂停"],["skipped","本轮未尝试"],["busy","通道占用未查询"],["error","查询异常"]];
-    const status = labels.filter(([key]) => counts[key]).map(([key,label]) => `${counts[key]} 台${label}`).join("，");
-    saved.summary.textContent = failures.length ? `${provider.label} 采集详情（${status}）` : `${provider.label} 最近恢复记录`;
-    const guidanceCounts = new Map();
-    failures.forEach((failure) => {
-      const guidance = quotaFailureGuidance(failure);
-      guidanceCounts.set(guidance.label, (guidanceCounts.get(guidance.label) || 0) + 1);
-    });
-    const guidanceText = [...guidanceCounts.entries()].map(([label, count]) => label + " " + count).join("、");
-    if (failures.length && guidanceText) {
-      saved.summary.textContent = saved.summary.textContent.replace(/）$/, "；" + guidanceText + "）");
-    }
+    const status = labels.filter(([key]) => counts[key].size).map(([key,label]) => `${counts[key].size} 台${label}`).join("，");
+    const identities = new Set(failures.map(f => failureAccountKey(provider, f)).filter(Boolean));
+    const unknown = failures.some(failure => !failureAccountKey(provider, failure));
+    const accountsText = identities.size ? `；涉及 ${identities.size} 个账号${unknown ? "，另有账号身份未确认" : ""}` : "；账号身份未确认";
+    saved.summary.textContent = failures.length ? `${provider.label} 采集详情（配额查询：${status || "机器未确认"}${accountsText}）` : `${provider.label} 最近恢复记录`;
     const remaining = [...saved.entries], next = [];
-    for (const failure of failures) {
-      const index = remaining.findIndex(record => record.machine === failure.machine);
+    const currentKeys = new Set(groups.map(group => group.key));
+    for (const group of groups) {
+      // Keep recorded failure context without counting affected observations
+      // as attempts or inferring which account triggered the shared pause.
+      const failure = group.failures.find(f => f.failure && Object.keys(f.failure).length) || group.failures[0];
+      let index = remaining.findIndex(record => record.key === group.key);
+      if (index < 0 && group.kind === "paused") index = remaining.findIndex(record =>
+        record.machine === group.machine && record.kind === "paused" && !currentKeys.has(record.key));
       let record = index < 0 ? null : remaining.splice(index,1)[0];
       if (!record) {
         const entry = document.createElement("div"), note = document.createElement("p");
         entry.appendChild(note);
         record = {machine:failure.machine, entry, note, panel:null, pauseId:failure.pause?.id};
+        record.accounts = document.createElement("ul");
+        entry.appendChild(record.accounts);
         if (provider.key === "codex" && failure.machine) {
           const open = document.createElement("button");
           open.type = "button"; open.textContent = "查看当前状态与恢复";
           open.addEventListener("click", () => {
             if (record.panel) return;
             open.disabled = true;
-            record.panel = createRecoveryPanel(record.machine, {sourceFailure: failure});
+            record.panel = createRecoveryPanel(record.machine, {sourceFailure: record.failure});
             entry.appendChild(record.panel);
           });
           entry.appendChild(open);
@@ -802,14 +828,34 @@
           entry.appendChild(sourceDetails);
         }
       }
+      record.key = group.key; record.kind = group.kind; record.failure = failure;
+      record.accounts.textContent = "";
+      const accountGroups = new Map();
+      group.failures.forEach((item, index) => {
+        const key = failureAccountKey(provider, item) || JSON.stringify([item.account_profile, index]);
+        if (!accountGroups.has(key)) accountGroups.set(key, []);
+        accountGroups.get(key).push(item);
+      });
+      for (const items of accountGroups.values()) {
+        const item = items[0], row = document.createElement("li");
+        const sources = [...new Set(items.map(f => f.account_profile ? `托管账号 ${f.account_profile}`
+          : f.account_profile === "" ? "默认来源" : "来源未记录"))];
+        const label = typeof item.account_label === "string" && item.account_label.trim()
+          ? item.account_label : failureAccountKey(provider, item) ? item.account_id : "账号身份未确认";
+        const states = [...new Set(items.map(f => ({paused:"受暂停影响", skipped:"未执行", busy:"通道占用", error:"查询未完成"})[quotaFailureKind(f.reason, f.query_state)]))];
+        row.textContent = `${label}${provider.key === "codex" && typeof item.account_id === "string" ? " · 工作区 " + item.account_id : ""} · ${sources.join("、")} · ${states.join("、")}`;
+        record.accounts.appendChild(row);
+      }
+      record.panel?.updateSourceFailure(failure);
       if (record.sourceText) {
-        const statusText = {paused:"已暂停", skipped:"未执行", busy:"通道占用", error:"未完成"}[quotaFailureKind(failure.reason, failure.query_state)];
-        record.sourceText.textContent = failure.reason || "未记录错误详情";
+        const statusText = {paused:"已暂停", skipped:"未执行", busy:"通道占用", error:"未完成"}[group.kind];
+        record.sourceText.textContent = group.failures.length === 1 ? failure.reason || "未记录错误详情"
+          : group.failures.map(f => `${f.account_label || "账号身份未确认"}${f.account_profile ? " · " + f.account_profile : ""}：${f.reason || "未记录错误详情"}`).join("\n\n");
         const guidance = quotaFailureGuidance(failure);
         record.note.dataset.failureCategory = guidance.key;
         record.note.textContent = failure.machine + "：上次配额采集" + statusText + "；"
-          + guidance.summary + "。" + guidance.action;
-      } else record.note.textContent = `${failure.machine}：${failure.reason}`;
+          + (group.kind === "paused" ? "下列账号受该机器暂停影响，不代表每个账号均查询失败。暂停关联的采集记录：" : "") + guidance.summary + "。" + guidance.action;
+      } else record.note.textContent = `${failure.machine}：${[...new Set(group.failures.map(f => f.reason))].join("；")}`;
       if (provider.key === "codex" && failure.pause?.id) {
         record.entry.dataset.codexPauseId = failure.pause.id; record.entry.tabIndex = -1;
       } else delete record.entry.dataset.codexPauseId;

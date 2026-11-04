@@ -100,6 +100,53 @@ async function render(changes={}, error=false) {
   assert(!source.note.textContent.includes(failure.reason));
   assert.equal(source.sourceText.textContent,failure.reason);
   assert(!source.sourceText.parentNode.open,'raw collection error is closed by default');
+  // Several observations share one machine-wide pause, not independent failures.
+  const own = {machine:'alpha',account_id:'workspace-a',account_label:'a@example.test',
+    query_state:'paused',pause:{id:'pause-a'},reason:'stage=quota_read; kind=rpc_error',
+    failure:{stage:'quota_read',kind:'rpc_error'}};
+  const affected = {...own,account_id:'workspace-b',account_label:'b@example.test',
+    account_profile:'profile-b',failure:null};
+  const second = {...own,machine:'beta',pause:{id:'pause-b'}};
+  const grouped = ui.quotaFailureDetails(provider,[own,{...own,account_profile:'profile-a'},affected,second]);
+  assert.match(grouped.quotaDiagnostics.summary.textContent,/2 台暂停/);
+  assert.match(grouped.quotaDiagnostics.summary.textContent,/涉及 2 个账号/);
+  assert.doesNotMatch(grouped.quotaDiagnostics.summary.textContent,/读取失败 [234]/);
+  assert.equal(grouped.quotaDiagnostics.entries.length,2,'one card per machine pause');
+  assert.equal(all(grouped).filter(n=>n.tag==='button' && n.textContent==='查看当前状态与恢复').length,2);
+  const alpha = grouped.quotaDiagnostics.entries.find(e=>e.machine==='alpha');
+  assert.match(alpha.entry.textContent,/a@example.test/);
+  assert.match(alpha.entry.textContent,/b@example.test/);
+  assert.match(alpha.entry.textContent,/受.*暂停影响/);
+  assert.match(alpha.entry.textContent,/profile-a/);
+  assert.match(alpha.entry.textContent,/profile-b/);
+  assert.equal(alpha.accounts.children.length,2,'native and managed observations of the same identity are one account');
+  value={...base,machine:'alpha',pause:{id:'pause-a',failure:own.failure}};
+  await all(alpha.entry).find(n=>n.tag==='button').click(); await new Promise(r=>setImmediate(r));
+  const alphaPanel=alpha.panel, readCount=calls.length;
+  ui.quotaFailureDetails(provider,[second,affected,own],grouped);
+  assert.strictEqual(grouped.quotaDiagnostics.entries.find(e=>e.machine==='alpha').panel,alphaPanel);
+  assert.equal(calls.length,readCount,'reordering and source aliases do not cause remote polling');
+  const changed={...affected,account_id:'workspace-c',account_label:'c@example.test'};
+  ui.quotaFailureDetails(provider,[second,changed],grouped);
+  assert.doesNotMatch(alpha.accounts.textContent,/a@example.test|b@example.test/);
+  assert.match(alpha.accounts.textContent,/c@example.test/);
+  const partial=ui.quotaFailureDetails(provider,[{...own,account_id:null,account_label:null},second]);
+  assert.match(partial.quotaDiagnostics.summary.textContent,/另有账号身份未确认/);
+  for (const label of [42,{email:'invalid'},null]) {
+    const malformed=ui.quotaFailureDetails(provider,[{...own,account_label:label}]);
+    assert.match(malformed.quotaDiagnostics.summary.textContent,/账号身份未确认/);
+  }
+  const shared=ui.quotaFailureDetails(provider,[{...own,query_state:'failed'},affected]);
+  assert.equal(shared.quotaDiagnostics.entries.length,1,'failed trigger and affected accounts share one pause card');
+  assert.match(shared.quotaDiagnostics.summary.textContent,/1 台暂停/);
+  assert.match(shared.quotaDiagnostics.entries[0].accounts.textContent,/查询未完成/);
+  assert.match(shared.quotaDiagnostics.entries[0].accounts.textContent,/受暂停影响/);
+  for (const labels of [['old@example.test','new@example.test'],[null,null]]) {
+    const claude=ui.quotaFailureDetails({key:'claude',label:'Claude'},[
+      {...own,account_label:labels[0]}, {...second,account_label:labels[1]}]);
+    assert.match(claude.quotaDiagnostics.summary.textContent,/涉及 1 个账号/);
+    assert.doesNotMatch(claude.quotaDiagnostics.summary.textContent,/身份未确认/);
+  }
   const classified = ui.quotaFailureDetails(provider, [
     {machine:'macbook',reason:'登录账号已变化，等待统计同步确认',query_state:'paused'},
     {machine:'macmini',reason:'配额读取失败，stage=quota_read，kind=rpc_error',query_state:'paused',
@@ -107,7 +154,8 @@ async function render(changes={}, error=false) {
     {machine:'macstudio',reason:'凭据失败，upstream_code=token_revoked，http_status=401',query_state:'paused',
       failure:{upstream_code:'token_revoked',http_status:401}},
   ]);
-  assert.match(classified.quotaDiagnostics.summary.textContent,/3 台暂停；身份变化 1、读取失败 1、上游认证响应 1/);
+  assert.match(classified.quotaDiagnostics.summary.textContent,/3 台暂停；账号身份未确认/);
+  assert.doesNotMatch(classified.quotaDiagnostics.summary.textContent,/读取失败 \d/);
   assert.match(classified.quotaDiagnostics.entries[0].note.textContent,/账号身份变化.*确认这台机器当前登录的是目标账号/);
   assert.match(classified.quotaDiagnostics.entries[1].note.textContent,/配额读取失败，原因未核实.*目标机器的 Agent Monitor 路由桥/);
   assert.match(classified.quotaDiagnostics.entries[2].note.textContent,/上游返回 401\/token_revoked，原因未核实.*目标机器的 Agent Monitor 路由桥/);

@@ -340,6 +340,14 @@ class QuotaView:
                     refresh_error = value if isinstance(value, str) and value.strip() else "配额刷新状态无效，请更新这台机器的 agent-monitor exporter 后重试。"
                 if refresh_error is not None:
                     failure_entry = {"machine": current.host, "reason": refresh_error}
+                    if isinstance(block, dict):
+                        # Identity and outcome do not depend on diagnostic availability.
+                        for key in ("account_id", "account_label", "account_profile", "query_state"):
+                            value = identity_id(block) if key == "account_id" else block.get(key)
+                            if value is not None:
+                                failure_entry[key] = value
+                        if identity_id(block):
+                            failure_entry["account_profile"] = block.get("account_profile") or ""
                     if isinstance(block, dict) and (diagnostics.safe_failure(block.get("refresh_failure")) or block.get("refresh_pause")):
                         failure_entry.update(account_id=identity_id(block), account_label=block.get("account_label"),
                             failure=diagnostics.safe_failure(block.get("refresh_failure")),
