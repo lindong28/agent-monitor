@@ -601,7 +601,7 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
   margin: 16px 0 8px;
 }
 
-#quota-clear[hidden] { display: none; }
+#quota-clear[hidden], #quota-window-control[hidden] { display: none; }
 
 .quota-provider-filter {
   display: inline-flex;

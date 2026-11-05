@@ -89,10 +89,11 @@ export function init({ autoLoad = true } = {}) {
   const batchRetry = root.querySelector("#codex-batch-retry");
   const batchStatus = root.querySelector("#codex-batch-status");
   const batchHelp = root.querySelector("#codex-batch-help");
-  const refreshAllButton = root.querySelector("#codex-refresh-all");
   const refreshSelected = root.querySelector("#codex-refresh-selected");
   const quotaRetry = root.querySelector("#codex-quota-retry");
   const quotaStatus = root.querySelector("#codex-quota-batch-status");
+  const quotaProgress = root.querySelector("#codex-quota-progress");
+  const operationHistory = root.querySelector("#codex-operation-history");
   const egressPreview = root.querySelector("#codex-egress-preview");
   const blockedReason = root.querySelector("#codex-batch-blocked");
   const pauseControls = {
@@ -111,6 +112,7 @@ export function init({ autoLoad = true } = {}) {
   let unavailable = [];
   let selectedIds = null;
   let lastBatchStatus = "";
+  let hasSnapshot = false;
   let refreshingAll = false;
   const controller = new AbortController();
   let deviceConnection = null;
@@ -123,7 +125,10 @@ export function init({ autoLoad = true } = {}) {
   let pairing = null;
   function deviceFeedback(message, failed = false) {
     if (!current()) return;
-    if (deviceStatus) deviceStatus.textContent = message;
+    if (deviceStatus) {
+      deviceStatus.textContent = message;
+      deviceStatus.hidden = !message;
+    }
     if (failed && deviceHelp) deviceHelp.open = true;
   }
   controller.signal.addEventListener("abort", () => pairing?.finish(new DOMException("页面已离开", "AbortError")), { once: true });
@@ -241,28 +246,33 @@ export function init({ autoLoad = true } = {}) {
       render();
       updateRefreshAllButton();
       lastBatchStatus = batchStatus.textContent;
+      hasSnapshot = true;
   }
 
   function updateRefreshAllButton() {
-    if (!refreshAllButton) return;
     const targets = accounts.filter(account => account.eligible !== false);
-    const available = targets.filter(account => !accountRefreshBlocked(account));
-    refreshAllButton.disabled = refreshingAll || !available.length || Boolean(upstreamPause) || accounts.some(account => account.busy);
-    refreshAllButton.textContent = refreshingAll ? "正在刷新全部配额…"
-      : available.length < targets.length ? `刷新可查询账号配额（${available.length}/${targets.length}）`
-      : `刷新全部账号配额${targets.length ? `（${targets.length}）` : ""}`;
-    if (refreshSelected) refreshSelected.disabled = refreshAllButton.disabled || !available.some(a => selectedIds?.has(a.id));
+    const available = targets.filter(account => selectedIds?.has(account.id) && !accountRefreshBlocked(account));
+    if (refreshSelected) {
+      refreshSelected.disabled = refreshingAll || actions.busy || !available.length || Boolean(upstreamPause) || accounts.some(account => account.busy);
+      refreshSelected.textContent = refreshingAll ? "正在提交配额查询…" : `查询所选配额（${available.length}）`;
+    }
     const pending = pendingQuotaAccounts();
     if (quotaRetry) {
       quotaRetry.hidden = !quotaBatch || !pending.length;
-      quotaRetry.disabled = refreshingAll || Boolean(upstreamPause) || accounts.some(a => a.busy);
+      quotaRetry.disabled = refreshingAll || actions.busy || Boolean(upstreamPause) || accounts.some(a => a.busy);
       quotaRetry.textContent = `继续未完成的 ${pending.length} 个账号配额查询`;
     }
     if (quotaStatus) {
       quotaStatus.hidden = !quotaBatch;
       quotaStatus.textContent = quotaBatch ? `${quotaBatchSummary(quotaBatch)} · 开始于 ${timestamp(quotaBatch.created_at)}。查询不会发送消息。` : "";
     }
-    if (quotaBatch && !batch) batchStatus.textContent = quotaBatchSummary(quotaBatch) + (upstreamPause ? " · 查询已暂停" : "");
+    if (operationHistory) operationHistory.hidden = !quotaBatch && !batch;
+    if (quotaProgress) {
+      const active = accounts.some(account => account.busy && account.operation?.refresh_only);
+      quotaProgress.hidden = !refreshingAll && !active;
+      quotaProgress.textContent = refreshingAll ? "正在连接、确认或提交所选配额查询…"
+        : active ? quotaBatchSummary(quotaBatch) || "正在查询配额…" : "";
+    }
   }
 
   function pendingQuotaAccounts() {
@@ -282,8 +292,8 @@ export function init({ autoLoad = true } = {}) {
     } catch (error) {
       if (current() && error.name !== "AbortError") {
         notice.textContent = error.message + " 可重新展开此面板刷新。";
-        batchStatus.textContent = lastBatchStatus
-          ? lastBatchStatus + " · 刷新失败，以上为上次结果；重新展开可重试。"
+        batchStatus.textContent = hasSnapshot
+          ? (lastBatchStatus ? lastBatchStatus + " · " : "") + "刷新失败，当前展示为上次记录；重新展开可重试。"
           : "账号读取失败；重新展开此面板可重试。";
       }
     } finally {
@@ -293,8 +303,8 @@ export function init({ autoLoad = true } = {}) {
     }
   }
 
-  async function refreshAllQuotas(action = "refresh-all") {
-    if (!refreshAllButton || refreshingAll) return;
+  async function refreshAllQuotas(action = "refresh-selected") {
+    if (refreshingAll || actions.busy) return;
     const eligible = accounts.filter(account => account.eligible !== false);
     const targets = action === "refresh-retry" ? pendingQuotaAccounts()
       : eligible.filter(account => !accountRefreshBlocked(account) && (action !== "refresh-selected" || selectedIds.has(account.id)));
@@ -309,7 +319,7 @@ export function init({ autoLoad = true } = {}) {
         approval_expected: expected,
       });
       if (!approval) return;
-      notice.textContent = "正在提交全部账号配额查询…";
+      notice.textContent = "正在提交所选账号配额查询…";
       await request(action, {
         profile_ids: targets.map(account => account.id), connection, confirmation: approval,
         approval_expected: expected,
@@ -410,7 +420,7 @@ export function init({ autoLoad = true } = {}) {
     if (!panel) {
       panel = window.AgentMonitor.createRecoveryPanel?.("self", {onContinue: async () => {
         await load();
-        const next = quotaBatch ? (quotaRetry && !quotaRetry.hidden ? quotaRetry : refreshAllButton)
+        const next = quotaBatch ? (quotaRetry && !quotaRetry.hidden ? quotaRetry : refreshSelected)
           : !batchRetry.hidden && !batchRetry.disabled ? batchRetry : batch ? batchNext : batchStart;
         next.scrollIntoView({block: "center"});
         if (!next.disabled) next.focus({preventScroll: true});
@@ -443,7 +453,6 @@ export function init({ autoLoad = true } = {}) {
     selectedIds.clear();
     render();
   });
-  refreshAllButton?.addEventListener("click", () => refreshAllQuotas("refresh-all"));
   refreshSelected?.addEventListener("click", () => refreshAllQuotas("refresh-selected"));
   quotaRetry?.addEventListener("click", () => refreshAllQuotas("refresh-retry"));
 
@@ -482,20 +491,19 @@ export function init({ autoLoad = true } = {}) {
       card.dataset.signature = signature;
       const op = account.operation;
       const loginRequired = accountNeedsLogin(account);
-      const sharedSuccess = sameSuccessfulBatchOperation(op, batchItem?.operation);
       const heading = element("div", undefined, "codex-account-heading");
       const tone = op?.stage === "succeeded" ? "ok"
         : ["failed", "interrupted"].includes(op?.stage) ? "bad"
         : ["partial", "login", "login_queued"].includes(op?.stage) ? "warn"
         : account.busy ? "info" : "identity";
       const operationLabel = account.disabled ? "已停用" : !account.busy && loginRequired && account.has_credentials
-        ? "需要重新登录" : sharedSuccess ? "本批发送成功" : op?.failure?.category === "needsLogin"
-        ? "需要重新登录" : op?.stage === "succeeded"
-        ? (op.login_only ? "最近登录完成" : op.refresh_only ? "最近查询完成" : "最近发送完成")
+        ? "需要重新登录" : op?.failure?.category === "needsLogin"
+        ? "需要重新登录" : op?.stage === "succeeded" ? ""
         : op?.refresh_only && op.stage === "failed"
         ? (op.failure?.category === "locallyPaused" ? "配额查询未执行" : "配额查询失败")
-        : op ? STAGES[op.stage] || op.stage : "尚未操作";
-      heading.append(element("strong", account.email), element("span", operationLabel, "status-pill " + tone));
+        : op ? STAGES[op.stage] || op.stage : "";
+      heading.append(element("strong", account.email));
+      if (operationLabel) heading.append(element("span", operationLabel, "status-pill " + tone));
       if (account.eligible !== false) {
         const label = element("label", undefined, "codex-select-account");
         const checkbox = element("input");
@@ -529,7 +537,11 @@ export function init({ autoLoad = true } = {}) {
       const duplicateEmail = accounts.some((other) => other.id !== account.id && other.email.toLowerCase() === account.email.toLowerCase());
       if (account.account_id) (duplicateEmail ? card : managementDetail).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
       managementDetail.append(element("p", account.login_required && account.has_credentials ? "登录态：不可用，需要重新登录" : account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
-      if (batchItem && !sharedSuccess) heading.append(element("span", `本批：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result"));
+      if (batchItem) {
+        const result = element("span", `本批：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result");
+        const attention = account.busy || ["unknown", "failed"].includes(batchItem.operation?.message_status);
+        (attention ? heading : historyDetail).append(result);
+      }
       const retained = account.batch_result;
       if (retained && retained.batch_id !== batch?.id) historyDetail.append(element("p", `保留的批次结果：${MESSAGE_STATUS[retained.message_status] || "状态未知"} · 开始于 ${timestamp(retained.started_at)}`, "quota-scope"));
       const shownMessageIds = new Set([op?.id]);
@@ -540,6 +552,7 @@ export function init({ autoLoad = true } = {}) {
         }
       }
       if (op) {
+        if (op.stage === "succeeded") currentDetail.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "查询" : "发送"}已完成：${op.detail || "操作完成"}`, "quota-scope"));
         if (op.stage !== "succeeded" && !(account.restriction_details || []).includes(op.detail)) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送操作"}（${timestamp(op.started_at)}）：${op.detail}`));
         currentDetail.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
         if (op.message) currentDetail.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
@@ -620,12 +633,23 @@ export function init({ autoLoad = true } = {}) {
     for (const node of existing.values()) node.remove();
   }
 
+  function openAccount(id) {
+    const card = Array.from(list.children).find(node => node.dataset.id === id);
+    if (!current() || !card) return false;
+    root.open = true;
+    card.tabIndex = -1;
+    card.scrollIntoView({ block: "center" });
+    card.focus({ preventScroll: true });
+    return true;
+  }
+  window.AgentMonitor.openCodexAccount = openAccount;
   function visibility() { if (!document.hidden) load(); }
   document.addEventListener("visibilitychange", visibility);
   root.addEventListener("toggle", () => { if (root.open) load(); });
   window.AgentMonitor.onPageCleanup(() => {
     clearTimeout(timer);
     controller.abort();
+    if (window.AgentMonitor.openCodexAccount === openAccount) delete window.AgentMonitor.openCodexAccount;
     document.removeEventListener("visibilitychange", visibility);
     document.removeEventListener("agent-monitor:quota-rendered", renderPause);
     document.removeEventListener("agent-monitor:recovery-state", load);
@@ -726,13 +750,15 @@ export function renderAccountBatch(state, controls) {
   const { accounts, batch, selectedIds, unavailable, busy: submittingBatch, upstreamPause } = state;
   const { root, batchStart, batchNext, batchRetry, batchStatus, batchHelp, egressPreview, deviceConnect, blockedReason } = controls;
     const observation = root.querySelector("#codex-batch-observation");
+    const receipt = root.querySelector("#codex-send-receipt");
+    if (receipt) { receipt.textContent = ""; receipt.hidden = !batch; }
     if (observation) { observation.textContent = ""; observation.hidden = !batch; }
     const busy = accounts.some((account) => account.busy);
     const eligible = accounts.filter((account) => account.eligible !== false);
     const count = eligible.filter(account => selectedIds?.has(account.id)).length;
     const selectedLoginRequired = eligible.filter(account => selectedIds?.has(account.id) && accountNeedsLogin(account)).length;
     const selectionCount = root.querySelector("#codex-selection-count");
-    if (selectionCount) selectionCount.textContent = `已选 ${count} / ${eligible.length} 个可纳入账号；实际发送前另查登录与限制`;
+    if (selectionCount) selectionCount.textContent = `已选 ${count} / ${eligible.length} 个账号`;
     batchStart.hidden = Boolean(batch);
     batchStart.textContent = `给所选 ${count} 个账号发送`;
     batchStart.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || Boolean(upstreamPause);
@@ -751,10 +777,11 @@ export function renderAccountBatch(state, controls) {
     if (deviceConnect) deviceConnect.disabled = submittingBatch;
     batchRetry.hidden = true;
     if (!batch) {
-      batchStatus.textContent = eligible.length ? `${eligible.length} 个可操作账号；发送前会检查登录状态。` : "尚未发现可发送的 Codex 登录账号。";
-      if (upstreamPause) batchStatus.textContent += " · 本机 Codex 通道已暂停，暂不能发送";
+      batchStatus.textContent = upstreamPause ? "本机 Codex 通道已暂停，暂不能查询或发送"
+        : busy ? "账号操作进行中" : eligible.length ? "" : "尚未发现可操作的 Codex 账号。";
       batchHelp.replaceChildren(
         element("p", "账号来自当前及历史登录记录，无需手动添加。"),
+        element("p", "发送时为每个账号从 100 条预设消息中随机抽取一条；发送前会检查登录与账号限制。"),
         element("p", "按邮箱顺序逐个完成账号操作，前一个结束并清理后才处理下一个。登录态不可用的账号会明确要求单独登录，完成后再发起操作。"),
         element("p", upstreamPause ? "本机 Codex 请求已暂停；请从按钮旁的恢复入口查看原因、当前可做的操作与检查后的接续。检查配额需要单独确认。" : "仅刷新配额不会发送消息。发送会实际使用额度，不保证固定或重置窗口；异常会停止后续账号。")
       );
@@ -781,8 +808,16 @@ export function renderAccountBatch(state, controls) {
     for (const [key, label] of Object.entries({ waiting: "等待授权", queued: "授权排队", running: "处理中", unsent: "未发送", unknown: "结果未知", failed: "发送失败" })) {
       if (statuses[key]) parts.push(`${label} ${statuses[key]}`);
     }
-    if (upstreamPause) parts.push("本机 Codex 通道已暂停，暂不能发送");
-    batchStatus.textContent = parts.join(" · ");
+    if (receipt) receipt.textContent = `${parts.join(" · ")} · 开始于 ${timestamp(batch.created_at)}`;
+    const currentParts = [];
+    if (upstreamPause) currentParts.push("本机 Codex 通道已暂停，暂不能查询或发送");
+    if (submittingBatch) currentParts.push("正在连接、确认或提交发送");
+    else if (busy) currentParts.push("账号操作进行中");
+    for (const [key, label] of Object.entries({ waiting: "等待授权", queued: "授权排队", running: "处理中", unknown: "结果未知", failed: "发送失败" })) {
+      if (statuses[key]) currentParts.push(`${label} ${statuses[key]}`);
+    }
+    if (statuses.unknown || statuses.failed) currentParts.push("可能已消耗额度，不会自动重试");
+    batchStatus.textContent = currentParts.join(" · ");
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch || busy || Boolean(upstreamPause);
     batchRetry.textContent = `继续 ${statuses.unsent} 个未发送账号`;
@@ -809,6 +844,7 @@ export function renderAccountBatch(state, controls) {
       blockedReason.hidden = false;
     }
     const help = [
+      "发送时为每个账号从 100 条预设消息中随机抽取一条；发送前会检查登录与账号限制。",
       "顺序：按邮箱逐个完成账号操作，包含子进程清理；不会同时发送。登录态不可用时会要求单独登录，完成后需重新发起操作。",
       statuses.unsent
         ? `继续发送：先处理缺登录或暂停原因，再点击「${batchRetry.textContent}」。系统只处理仍在登录记录中且确定未发送的账号。`

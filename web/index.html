@@ -53,7 +53,7 @@
       </aside>
       <main class="main overview-main">
         <div class="page-toolbar">
-          <div class="page-location"><span class="workspace-label">控制台</span><span class="breadcrumb-separator" aria-hidden="true">/</span><h1 class="page-title">总览</h1></div>
+          <div class="page-location"><h1 class="page-title">总览</h1></div>
           <div class="toolbar">
             <select id="range" aria-label="时间范围">
               <option value="7d">近 7 天</option>
@@ -71,16 +71,17 @@
         <div class="kpi-sections">
           <section class="panel kpi-group overview-cost" aria-labelledby="kpi-spend-title">
             <h2 id="kpi-spend-title" class="kpi-group-title">成本概况</h2>
+            <p class="quota-scope">估算费用，非服务商账单。日期按 GMT+8；今日与本周不随时间范围改变。</p>
             <p id="spend-coverage" class="quota-scope" hidden></p>
             <div class="kpi-grid">
               <article class="kpi-card">
-                <div class="kpi-label">今日成本 <span class="scope-tag">固定窗口 · GMT+8</span></div>
+                <div class="kpi-label">今日成本</div>
                 <div id="today-cost" class="kpi-value">—</div>
               </article>
               <article class="kpi-card">
-                <div class="kpi-label">本周成本 <span class="scope-tag">固定窗口</span></div>
+                <div class="kpi-label">本周成本</div>
                 <div id="week-cost" class="kpi-value">—</div>
-                <div id="week-context" class="kpi-sub">自周一 00:00 · GMT+8</div>
+                <div id="week-context" class="kpi-sub">自周一 00:00</div>
               </article>
               <!-- The third figure is the one the range selector controls, so the
                    label names the window rather than saying "区间": a card headed
@@ -146,6 +147,7 @@
           <section class="kpi-group panel" aria-labelledby="kpi-quota-title">
             <h2 id="kpi-quota-title" class="kpi-group-title">配额用量</h2>
             <p class="quota-scope">配额按账号计量，不跨账号求和。5 小时与 7 天窗口不受页面日期影响。</p>
+            <p class="quota-scope">套餐优先采用配额记录；其他来源在行内标注。原始记录见“配额更新”。</p>
             <div id="quota-explorer" class="quota-explorer">
               <div class="quota-provider-filter" role="group" aria-label="配额服务商">
                 <button type="button" class="btn" data-quota-provider="all" aria-pressed="true">全部</button>
@@ -155,8 +157,8 @@
               <label class="quota-search-label" for="quota-search">搜索账号、套餐或机器
                 <input id="quota-search" type="search" autocomplete="off" placeholder="邮箱、Pro、机器名…">
               </label>
-              <label for="quota-window">排序窗口 <select id="quota-window"><option value="five_hour">5 小时配额窗口</option><option value="seven_day">7 天配额窗口</option></select></label>
               <label for="quota-sort">排序 <select id="quota-sort"><option value="default">默认顺序</option><option value="remaining_desc">剩余额度多优先</option><option value="remaining">剩余额度少优先</option><option value="reset">即将重置优先</option><option value="observed">最近观测优先</option></select></label>
+              <label id="quota-window-control" for="quota-window" hidden>排序窗口 <select id="quota-window"><option value="five_hour">5 小时配额窗口</option><option value="seven_day">7 天配额窗口</option></select></label>
               <button id="quota-clear" type="button" class="btn" hidden>重置筛选与排序</button>
             </div>
             <p id="quota-match-count" class="quota-scope" role="status" aria-live="polite"></p>
@@ -185,11 +187,12 @@
               <summary>Codex 账号操作<span id="codex-batch-status" role="status" aria-live="polite">正在读取账号…</span></summary>
               <div class="codex-batch-summary">
                 <div id="codex-device-network" class="quota-scope">
-                  <p id="codex-device-status" role="status">开始操作时会自动连接当前设备的网络，无需先单独连接。发送前会展示出口 IP 与地区。</p>
+                  <p id="codex-device-status" role="status" hidden></p>
                   <button id="codex-device-cancel" type="button" class="btn" hidden>取消连接</button>
                   <details id="codex-device-help" class="note-disclosure">
                     <summary>首次启用、连接与授权帮助</summary>
                     <div class="disclosure-body">
+                    <p>操作时自动连接当前设备；发送前展示出口 IP 与地区，无需先单独连接。</p>
                     <p>首次使用：在打开此页面的设备安装 agent-monitor，然后执行以下命令启用连接服务。服务会在登录后自动启动，无需保持终端打开。</p>
                     <p><code id="codex-device-command"></code></p>
                     <p>连接异常时运行 <code>agent-monitor connect status</code> 查看状态；修复后直接重试原操作。需要停用时运行 <code>agent-monitor connect stop</code>。</p>
@@ -200,18 +203,29 @@
                     </div>
                   </details>
                 </div>
-                <p class="quota-scope">这里的选择独立于上方配额筛选。从 100 条日常短消息中为每个选中账号独立随机抽取并发送一条，可能重复；会使用账号额度。抽取的内容可在账号与操作详情中查看。</p>
+                <p class="quota-scope">选择下方账号用于查询或发送；上方配额筛选不改变选择。</p>
                 <div class="codex-account-controls">
-                  <button id="codex-refresh-all" type="button" class="btn" disabled>刷新全部账号配额</button>
+                  <strong>配额查询</strong>
                   <button id="codex-refresh-selected" type="button" class="btn" disabled>查询所选账号配额</button>
                   <button id="codex-quota-retry" type="button" class="btn" hidden>继续未完成的配额查询</button>
+                  <span class="quota-scope">只查询，不发送消息</span>
+                </div>
+                <p id="codex-quota-progress" class="quota-scope" role="status" hidden></p>
+                <div class="codex-account-controls">
+                  <strong>消息发送</strong>
                   <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
                   <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
                   <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
                 </div>
-                <p class="quota-scope">“刷新全部账号配额”只查询每个账号的当前配额，不发送消息；账号会通过所属机器的 Agent Monitor 路由桥逐个执行。</p>
+                <p class="quota-scope">每账号发送一条，会消耗额度；发送前需确认出口与账号。</p>
+                <details id="codex-operation-history" class="note-disclosure" hidden>
+                  <summary>最近操作记录</summary>
+                  <div class="disclosure-body supplementary-body">
+                <p id="codex-send-receipt" class="quota-scope" hidden></p>
                 <p id="codex-quota-batch-status" class="quota-scope" role="status" hidden></p>
                 <p id="codex-batch-observation" class="quota-scope" hidden></p>
+                  </div>
+                </details>
                 <p id="codex-batch-blocked" class="quota-scope" role="status" hidden></p>
                 <div id="codex-upstream-pause" class="quota-scope" hidden>
                   <p><strong id="codex-pause-summary"></strong></p>

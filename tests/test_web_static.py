@@ -46,7 +46,7 @@ for (const value of ['toString', '__proto__', 'constructor']) {
 const cell = quota.quotaPlanCell(known, codex);
 assert.equal(cell.children[0].textContent, 'Pro (Max)');
 assert.ok(!cell.children.some(child => child.tagName === 'DETAILS'));
-assert.ok(cell.textContent.includes('配额观测'));
+assert.ok(cell.textContent.includes('记录不同'));
 const detailText = account => quota.quotaUpdatedCell(codex, account, false, null).textContent;
 const details = quota.quotaUpdatedCell(codex, known, false, null).children[0];
 assert.ok(details && !details.open);
@@ -88,7 +88,7 @@ assert.equal(after.credential_plan, 'pro');
 assert.ok(detailText(after).includes('更新时间未知'));
 for (const presence of ['in_use', 'remembered']) {
   const fresh = quota.quotaDisplayReading(codex, {...before, presence});
-  assert.ok(quota.quotaPlanCell(fresh, codex).textContent.includes('配额观测'));
+  assert.ok(quota.quotaPlanCell(fresh, codex).textContent.includes('记录不同'));
   assert.ok(!quota.quotaPlanCell(fresh, codex).textContent.includes('历史记录'));
   assert.ok(detailText(fresh).includes('原始值：promax'));
   assert.ok(detailText(fresh).includes('原始值：pro'));
@@ -389,7 +389,7 @@ assert.strictEqual(ui.chartReading(null, "USD"), "未知");
         script = r'''
 const fs = require("fs"), assert = require("assert");
 function node() {return {dataset: {}, children: [], textContent: "", addEventListener() {}, replaceChildren(...children) {this.children = children;}};}
-const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count"].map(id => [id, node()]));
+const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count", "#codex-send-receipt"].map(id => [id, node()]));
 nodes["#codex-batch-status"].textContent = "正在读取账号…";
 const root = node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: node};
@@ -407,7 +407,8 @@ const controller = require("./web/codex-accounts.js").init({autoLoad: false});
   assert(!nodes["#codex-batch-status"].textContent.includes("正在读取"));
   failure = false; await controller.load();
   const good = nodes["#codex-batch-status"].textContent;
-  assert(good.includes("本轮发送成功 1/1"));
+  assert.equal(good, "");
+  assert(nodes["#codex-send-receipt"].textContent.includes("本轮发送成功 1/1"));
   assert(!good.includes("读取失败"));
   failure = true; await controller.load();
   const stale = nodes["#codex-batch-status"].textContent;
@@ -521,7 +522,7 @@ class Node {
   remove() {this.parent.children.splice(this.parent.children.indexOf(this), 1);}
   insertBefore(n, ref) {if (n.parent) n.remove(); const index = ref ? this.children.indexOf(ref) : this.children.length; this.children.splice(index, 0, n); n.parent = this;}
 }
-const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count", "#codex-refresh-all"].map(id => [id, new Node()]));
+const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count", "#codex-refresh-selected"].map(id => [id, new Node()]));
 const root = new Node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag), createTextNode: text => {const n=new Node();n.textContent=text;return n;}};
 global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x, latestCodexQuotaReading: () => null}};
@@ -553,7 +554,7 @@ assert(loginButtons.some(button => button.textContent === "单独登录"), "inva
 assert(loginButtons.filter(button => ["向此账号发送一条消息", "仅刷新配额"].includes(button.textContent)).every(button => button.disabled), "invalid saved login must block upstream actions");
 assert(visible(list.children[1]).includes("需要重新登录"), "invalid saved login must be visible in the account status");
 assert(visible(list.children[1]).includes("最近配额查询") || visible(list.children[1]).includes("最近发送操作"));
-assert.equal(nodes["#codex-refresh-all"].textContent, "刷新可查询账号配额（1/2）");
+assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（1）");
 assert.equal(loginButtons.find(button => button.textContent === "单独登录").disabled, false);
 values[1].restrictions = {authentication: true}; renderAccounts(values);
 assert(cardButtons(list.children[1]).find(button => button.textContent === "单独登录").disabled);
@@ -566,7 +567,7 @@ values[1].operation = {stage: "succeeded", login_only: true, message_status: "no
 renderAccounts(values);
 assert(!cardButtons(list.children[1]).some(button => button.textContent === "单独登录"));
 assert(!cardButtons(list.children[1]).find(button => button.textContent === "仅刷新配额").disabled);
-assert.equal(nodes["#codex-refresh-all"].textContent, "刷新全部账号配额（2）");
+assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（2）");
 assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
 card.querySelector("details").open = true;
 renderAccounts(values);
@@ -635,7 +636,8 @@ values[0].last_failure = {...values[0].operation, stage: "failed"};
 values[0].operation.recovery_pause_id = "pause";
 delete values[0].operation.failure;
 renderAccounts(values);
-assert(visible(list.children[0]).includes("最近查询完成"));
+assert(!visible(list.children[0]).includes("最近查询完成"));
+assert(text(list.children[0]).includes("最近查询已完成"));
 assert(visible(list.children[0]).includes("发送仍因此前额度限制暂停"), "successful query does not imply send permission");
 const sections = list.children[0].querySelector("details").querySelector("div").children;
 assert(sections.find(s=>text(s.children[0]) === "历史记录") && text(sections.find(s=>text(s.children[0]) === "历史记录")).includes("历史请求错误摘要（已脱敏）：session expired"));
@@ -682,8 +684,9 @@ assert(cardButtons(list.children[0]).find(button => button.textContent === "向�
         index = (ROOT / "web/index.html").read_text()
         accounts = (ROOT / "web/codex-accounts.js").read_text()
         egress = (ROOT / "web/account-egress.js").read_text()
-        self.assertIn('id="codex-refresh-all"', index)
-        self.assertIn('refreshAllButton?.addEventListener("click", () => refreshAllQuotas("refresh-all"))', accounts)
+        self.assertNotIn('id="codex-refresh-all"', index)
+        self.assertIn('id="codex-refresh-selected"', index)
+        self.assertIn('refreshSelected?.addEventListener("click", () => refreshAllQuotas("refresh-selected"))', accounts)
         self.assertIn('approval_action: action', accounts)
         self.assertIn('"refresh-all":"刷新全部账号配额"', egress)
 
@@ -980,7 +983,8 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(payload["legacyPayload"]["context"], "此服务未提供")
 
         js = app_source()
-        self.assertIn('自周一 00:00 · GMT+8', js)
+        self.assertIn('自周一 00:00', js)
+        self.assertIn('日期按 GMT+8', (ROOT / 'web/index.html').read_text())
 
     def test_overview_quota_is_a_table_with_a_column_per_window(self):
         """Alignment across rows is what the reader compares on. A table gives
@@ -1316,7 +1320,7 @@ function reading(row) {
       .map((node) => node.textContent)
       .filter((text) => text === "余量偏低" || text === "即将用尽"),
     staleWarningCount: descendants(row)
-      .filter((node) => node.textContent === "可能早于一次登录变更").length,
+      .filter((node) => node.textContent === "读数过期").length,
     historyMarkerCount: descendants(row).filter((node) => node.textContent === "已登出").length,
     historyNoteCount: descendants(row)
       .filter((node) => node.className === "quota-history-note" && node.textContent === "历史读数，不代表当前状态").length,

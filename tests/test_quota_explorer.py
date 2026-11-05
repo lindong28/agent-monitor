@@ -33,7 +33,7 @@ function node(tag = 'div') {
   });
   return n;
 }
-const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quota-window','quota-sort','quota-match-count','quota-signed-out','quota-machine-records','quota-machine-notice'];
+const ids = ['quota-accounts','quota-explorer','quota-search','quota-clear','quota-window','quota-window-control','quota-sort','quota-match-count','quota-signed-out','quota-machine-records','quota-machine-notice'];
 const nodes = Object.fromEntries(ids.map(id=>['#'+id,node(id==='quota-accounts'?'table':'div')]));
 const buttons = ['all','claude','codex'].map(p=> {const b=node('button'); b.dataset.quotaProvider=p; return b;});
 nodes['#quota-explorer'].children=buttons;
@@ -197,11 +197,11 @@ const fixedNow=Date.parse('2026-10-16T12:00:00Z'), realNow=Date.now;
 Date.now=()=>fixedNow;
 for (const [machines, source, expected] of [
   [['alpha'], 'alpha', 'alpha'],
-  [['alpha','beta'], 'beta', 'alpha · beta（配额来源）'],
-  [['alpha','alpha','beta'], 'beta', 'alpha · beta（配额来源）'],
+  [['alpha','beta'], 'beta', 'alpha · beta（读数）'],
+  [['alpha','alpha','beta'], 'beta', 'alpha · beta（读数）'],
   [['alpha','alpha'], 'alpha', 'alpha'],
-  [['alpha'], 'beta', 'alpha · 配额来源：beta'],
-  [[], 'beta', '— · 配额来源：beta'],
+  [['alpha'], 'beta', 'alpha · 读数：beta'],
+  [[], 'beta', '— · 读数：beta'],
   [['alpha'], null, 'alpha'],
 ]) {
   const sample={...account('source-context'), machines, reading_from:source, updated_at:'2026-10-16T11:57:00Z'};
@@ -244,7 +244,8 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
       assert(inline.includes('账号操作读数'));
     }
     if (affected) {
-      assert.equal(inline, '来源机器未登录');
+      assert(inline.endsWith('来源机器未登录'));
+      assert.equal(inline.includes('读数过期'), ui.quotaIsStale(sample.updated_at));
       for (const text of ['alpha',label,'最后一次','登录此账号','更新统计与配额'])
         assert(detail.textContent.includes(text),text);
       assert.equal(sample.five_hour_used_pct,91,'copy must not alter the reading');
@@ -347,7 +348,8 @@ for (const source of ['operation','batch_result']) {
   assert(rows()[0].cells[4].textContent.includes('重置时间未知'),'new null reset is preserved');
 }
 ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:observed,seven_day_used_pct:null,seven_day_resets_at:null}}} ]);
-assert.equal(rows()[0].cells[4].textContent,'用量与重置时间未知');
+assert.equal(rows()[0].cells[4].textContent,'未知');
+assert.equal(rows()[0].cells[4].children[0].attributes['aria-label'],'用量与重置时间未知');
 assert.equal(descendants(rows()[0]).filter(n=>n.className.includes('quota-account-observation')).length,0);
 assert(rows()[0].cells[6].textContent.includes(ui.formatDate(observed)), 'exact observation time is available in update details');
 assert(!rows()[0].cells[4].textContent.includes('91%'),'unknown new reading never borrows old percentage');
@@ -360,7 +362,7 @@ assert(!document.querySelector('#quota-past-accounts').hidden,'new action observ
 descendants(table).find(n=>n.className.includes('quota-past-toggle')).click();
 ui.updateCodexQuotaReadings([]);
 ui.renderQuotaAccounts(data);
-assert(count().includes('匹配 3 / 3')); assert(count().includes('机器关联 2')); assert(count().includes('历史账号 1')); assert(!count().includes('机器记录'));
+assert(!count().includes('匹配')); assert(count().includes('机器关联 2')); assert(count().includes('历史账号 1')); assert(!count().includes('机器记录'));
 assert(!table.tBodies.some(b=>b.className==='quota-unknown')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
 assert(table.tBodies.find(b=>b.className==='quota-history').hidden);
 buttons[2].click();
@@ -369,7 +371,7 @@ assert(table.textContent.includes('fixture failure')); assert(nodes['#quota-sign
 assert(!table.textContent.includes('账号操作')); assert(!table.textContent.includes('查询配额')); assert(table.textContent.includes('37%'));
 ui.renderQuotaAccounts(data); assert.equal(rows().length,1); assert.equal(buttons[2].attributes['aria-pressed'],'true');
 search('nobody'); assert(table.textContent.includes('没有匹配的配额记录')); assert(table.textContent.includes('fixture failure'));
-nodes['#quota-clear'].click(); assert.equal(nodes['#quota-search'].value,''); assert(count().includes('匹配 3 / 3'));
+nodes['#quota-clear'].click(); assert.equal(nodes['#quota-search'].value,''); assert(!count().includes('匹配'));
 search('PRO alice'); assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'alice');
 search('old-b'); assert(count().includes('匹配 0 / 3')); assert(count().includes('机器关联 0')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
 search('past'); assert(table.textContent.includes('移除')); assert.strictEqual(ui.quotaSnapshot(),data);
@@ -379,7 +381,7 @@ nodes['#quota-window'].value='seven_day'; nodes['#quota-window'].listeners.chang
 nodes['#quota-sort'].value='remaining_desc'; nodes['#quota-sort'].listeners.change();
 assert.equal(nodes['#quota-clear'].hidden,false);
 ui.removeRenderedAccount('claude','past','2026-01-01T00:00:00Z');
-nodes['#quota-clear'].click(); assert(count().includes('匹配 2 / 2')); assert(table.textContent.includes('bob@example.test')); assert(table.textContent.includes('alice@example.test'));
+nodes['#quota-clear'].click(); assert(!count().includes('匹配')); assert(table.textContent.includes('bob@example.test')); assert(table.textContent.includes('alice@example.test'));
 assert.equal(nodes['#quota-window'].value,'five_hour','reset restores the contracted default window');
 assert.equal(nodes['#quota-sort'].value,'default','reset restores the contracted default order');
 assert.equal(nodes['#quota-clear'].hidden,true,'no active filter needs no reset action');
@@ -394,12 +396,30 @@ ui.renderQuotaAccounts(data);
 assert.equal(nodes['#quota-search'].value,'bob');
 assert.equal(rows().length,1);
 replacementButtons[1].click(); assert.equal(rows().length,0);
-nodes['#quota-clear'].click(); assert(count().includes('匹配 3 / 3'));
+nodes['#quota-clear'].click(); assert(!count().includes('匹配'));
 ui.renderQuotaAccounts({claude:{accounts:[],unavailable_reason:'fixture unavailable'},codex:{accounts:[]}});
 assert(table.textContent.includes('fixture unavailable')); assert(!table.textContent.includes('没有匹配'));
 replacementButtons[2].click();
 assert(table.textContent.includes('fixture unavailable'));
 console.log('quota explorer: filters, counters, notices, polling, full snapshot removal, unavailable passed');
+
+// Navigation must bind the workspace and email together, independent of table filters.
+let opened = [];
+window.AgentMonitor = {openCodexAccount: id => opened.push(id)};
+ui.quotaFilter.search=''; ui.quotaFilter.provider='all';
+ui.updateCodexQuotaReadings([
+ {id:'profile-one',account_id:'one',email:'same@example.test'},
+ {id:'profile-two',account_id:'two',email:'same@example.test'},
+ {id:'profile-wrong-email',account_id:'three',email:'different@example.test'},
+]);
+ui.renderQuotaAccounts({codex:{accounts:['one','two','three'].map(id=>({...account(id),account_label:'same@example.test'}))}});
+const actionButtons=descendants(table).filter(n=>n.tagName==='BUTTON' && n.textContent==='账号操作');
+assert.equal(actionButtons.length,2,'no link for email mismatch');
+actionButtons.forEach(n=>n.click());assert.deepEqual(opened,['profile-one','profile-two']);
+for (const [sort,hidden] of [['default',true],['remaining',false],['reset',false],['remaining_desc',false],['observed',true]]) {
+ ui.quotaFilter.sort=sort;ui.renderQuotaAccounts(ui.quotaSnapshot());
+ assert.equal(nodes['#quota-window-control'].hidden,hidden,sort);
+}
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)

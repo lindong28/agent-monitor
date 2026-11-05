@@ -52,7 +52,7 @@
 
   function updateCodexQuotaReadings(accounts) {
     const signature = (profiles) => JSON.stringify(profiles.map((account) => [
-      account.account_id, account.email.toLowerCase(), latestCodexQuotaReading(account),
+      account.id, account.account_id, account.email.toLowerCase(), latestCodexQuotaReading(account),
     ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
     const changed = signature(accounts) !== signature(codexQuotaReadings);
     codexQuotaReadings = accounts;
@@ -279,6 +279,8 @@
   function renderQuotaAccounts(rateLimits, options = {}) {
     const table = qs("#quota-accounts");
     const reset = qs("#quota-clear");
+    const windowControl = qs("#quota-window-control");
+    if (windowControl) windowControl.hidden = !["remaining", "remaining_desc", "reset"].includes(quotaFilter.sort);
     if (reset) reset.hidden = quotaFilter.provider === "all" && !quotaFilter.search
       && quotaFilter.window === "five_hour" && quotaFilter.sort === "default";
     if (!table) {
@@ -312,7 +314,9 @@
       const known = matches.filter(({ account }) => account.account_state === "known");
       const current = known.filter(({ account }) => quotaPresence(account) === "in_use").length;
       const history = known.filter(({ account }) => quotaPresence(account) === "remembered").length;
-      count.textContent = `匹配 ${matches.length} / ${allEntries.length} 个账号 · 机器关联 ${current} · 历史账号 ${history}`;
+      const filtered = quotaFilter.provider !== "all" || quotaFilter.search.trim();
+      count.textContent = (filtered ? `匹配 ${matches.length} / ${allEntries.length} 个账号 · ` : "")
+        + `机器关联 ${current} · 历史账号 ${history}`;
     }
     QUOTA_PROVIDERS.forEach((provider) => {
       const block = rateLimits?.[provider.key];
@@ -885,7 +889,7 @@
     return body;
   }
 
-  function quotaRefreshNotice(provider, account) {
+  function quotaRefreshNotice(provider, account, concise = false) {
     if (account.quota_status_reason) return account.quota_status_reason;
     const block = renderedQuotaRateLimits?.[provider.key];
     const failures = (block?.refresh_errors || []).filter((failure) => quotaFailureMatchesAccount(
@@ -903,10 +907,12 @@
     const state = kinds.has("paused") ? "查询已暂停" : kinds.has("skipped") ? "上次查询未执行"
       : kinds.has("busy") ? "查询通道占用" : null;
     if (state) {
+      if (concise) return `主动${state}`;
       const reading = hasValue ? (fresh ? (account.quota_observation?.source === "codex_session" ? "当前读数来自会话日志" : "当前读数仍在更新时限内") : "读数已过期，保留上次读数") : "暂无读数";
       const machines = [...new Set(failures.map((failure) => failure.machine).filter(Boolean))].join("、");
       return `${reading}；${machines} 的主动${state}，请展开“${provider.label} 采集详情”核对原因`;
     }
+    if (concise) return hasValue ? "更新延迟" : "查询失败，暂无读数";
     return hasValue ? "更新延迟，保留上次读数；可点击刷新重试" : "暂不可用，可点击刷新重试";
   }
 
@@ -1079,10 +1085,11 @@
       source.className = "quota-history-note";
       source.textContent = (quotaPresence(account) === "remembered" && account.quota_source !== "account_action")
         || (account.quota_status && account.quota_status !== "current") ? "历史记录"
-        : typeof account.reading_plan === "string" && account.reading_plan ? "配额观测"
+        : quotaPlanSourcesDisagree(account) ? "记录不同"
+        : typeof account.reading_plan === "string" && account.reading_plan ? ""
         : typeof account.credential_plan === "string" && account.credential_plan ? "登录信息"
         : "来源未记录";
-      cell.appendChild(source);
+      if (source.textContent) cell.appendChild(source);
     }
     return cell;
   }
@@ -1159,6 +1166,18 @@
     }
     const actions = document.createElement("div");
     actions.className = "quota-account-links";
+    const profiles = provider.key === "codex" && account.account_state === "known"
+      ? codexQuotaReadings.filter(profile => profile.account_id === account.account_id
+        && profile.email.toLowerCase() === account.account_label?.toLowerCase()) : [];
+    if (profiles.length === 1 && typeof profiles[0].id === "string" && profiles[0].id) {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "quota-account-remove";
+      open.textContent = "账号操作";
+      open.setAttribute("aria-label", `${quotaAccountName(account)}（${account.account_id}）的账号操作`);
+      open.addEventListener("click", () => window.AgentMonitor?.openCodexAccount?.(profiles[0].id));
+      actions.appendChild(open);
+    }
 
     if (quotaPresence(account) === "remembered") {
       const remove = document.createElement("button");
@@ -1360,7 +1379,9 @@
     if (!known && resetState === "unknown") {
       const missing = document.createElement("span");
       missing.className = "quota-window-reason";
-      missing.textContent = "用量与重置时间未知";
+      missing.textContent = "未知";
+      missing.setAttribute("aria-label", "用量与重置时间未知");
+      missing.title = "用量与重置时间未知";
       cell.appendChild(missing);
       return cell;
     }
@@ -1467,15 +1488,13 @@
       node.textContent = name;
       if (name === account.this_machine) {
         node.className = "quota-machine-self";
-        node.appendChild(document.createTextNode("（本机）"));
       }
-      if (names.length > 1 && name === source) {
-        node.appendChild(document.createTextNode("（配额来源）"));
-      }
+      const tags = [name === account.this_machine ? "本机" : "", names.length > 1 && name === source ? "读数" : ""].filter(Boolean);
+      if (tags.length) node.appendChild(document.createTextNode(`（${tags.join("·")}）`));
       cell.appendChild(node);
     });
     if (source && !names.includes(source)) {
-      cell.appendChild(document.createTextNode(` · 配额来源：${source}`));
+      cell.appendChild(document.createTextNode(` · 读数：${source}`));
     }
     return cell;
   }
@@ -1556,6 +1575,13 @@
       node.textContent = text;
       cell.appendChild(node);
     };
+    if (stale && (quotaPresence(account) !== "remembered" || account.quota_source === "account_action")) {
+      note("读数过期");
+      const age = document.createElement("span");
+      age.className = "quota-history-note";
+      age.textContent = "读数已超过更新时限，可能早于一次登录变更；不代表当前剩余额度。";
+      details.appendChild(age);
+    }
     const sourceUnavailable = (renderedQuotaRateLimits?.[provider.key]?.signed_out_machines || [])
       .includes(account.reading_from);
     if (account.quota_source === "account_action") {
@@ -1583,8 +1609,13 @@
         recovery.textContent = `当前显示来自 ${account.reading_from} 的最后一次配额读数。该机器未登录 ${provider.label}；如需继续从此机器更新，请在该机器登录此账号，再点击“更新统计与配额”。`;
         details.appendChild(recovery);
       }
-      if (refreshNotice) note(refreshNotice);
-      if (stale && !sourceUnavailable) note("可能早于一次登录变更");
+      if (refreshNotice) {
+        note(quotaRefreshNotice(provider, account, true));
+        const cause = document.createElement("span");
+        cause.className = "quota-history-note";
+        cause.textContent = refreshNotice;
+        details.appendChild(cause);
+      }
     }
 
     return cell;

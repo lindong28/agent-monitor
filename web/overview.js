@@ -21,7 +21,7 @@
     const weekContext = qs("#week-context");
     if (weekContext) {
       weekContext.textContent = data.week.window && data.week.window.start
-        ? "自周一 00:00 · GMT+8"
+        ? "自周一 00:00"
         : "本周";
     }
     renderQuotaAccounts(data.rate_limits);

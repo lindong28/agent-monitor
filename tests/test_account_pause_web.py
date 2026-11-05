@@ -17,7 +17,8 @@ const assert = require("assert");
 global.document = {createElement: () => ({})};
 global.window = {AgentMonitor: {formatDate: x => x, latestCodexQuotaReading: () => null}};
 const {renderAccountBatch} = require("./web/codex-accounts.js");
-const controls = {root: {querySelector: () => null}, batchHelp: {replaceChildren() {}}};
+const receipt = {};
+const controls = {root: {querySelector: id => id === "#codex-send-receipt" ? receipt : null}, batchHelp: {replaceChildren() {}}};
 for (const key of ["batchStart", "batchNext", "batchRetry", "batchStatus", "blockedReason"]) controls[key] = {};
 const state = {accounts: [{id: "a", eligible: true, busy: false, has_credentials: true}], selectedIds: new Set(["a"]),
   batch: {id: "b", created_at: "2026-10-26T06:10:09Z", items: [{profile_id: "a", operation: {message_status: "succeeded"}}]},
@@ -27,7 +28,9 @@ render();
 assert.equal(controls.batchNext.disabled, true);
 assert.equal(controls.blockedReason.hidden, true, "recovery card owns the pause explanation");
 assert.match(controls.batchStatus.textContent, /暂停/);
-assert.match(controls.batchStatus.textContent, /发送成功 1\/1/);
+assert.doesNotMatch(controls.batchStatus.textContent, /发送成功/);
+assert.match(receipt.textContent, /发送成功 1\/1/);
+assert.match(receipt.textContent, /2026-10-26/);
 state.upstreamPause = null; render();
 assert.equal(controls.batchNext.disabled, false);
 assert.equal(controls.blockedReason.textContent, "");
