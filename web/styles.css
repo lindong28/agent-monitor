@@ -1932,6 +1932,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 
 @media (min-width: 901px) {
   #quota-accounts .quota-window-cell { width: 18%; }
+  .quota-plan-details[open] { min-width: 240px; }
 }
 
 .session-back { display: inline-flex; align-items: center; gap: 8px; }
