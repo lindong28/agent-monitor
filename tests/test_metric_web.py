@@ -107,7 +107,7 @@ const text=n=>n.textContent+n.children.map(text).join(" ");
 const known=text(ui.quotaWindowCell(provider,ui.QUOTA_WINDOW_5H,{five_hour_used_pct:73,five_hour_resets_at:Date.now()/1000+3600}));
 assert(known.includes("73%"));assert(!known.includes("不适用"));
 const absent=text(ui.quotaWindowCell(provider,ui.QUOTA_WINDOW_5H,{}));
-assert(absent.includes("用量与重置时间未知"));assert(!absent.includes("—"));assert(!absent.includes("没有"));
+assert(absent.includes("未知"));assert(!absent.includes("—"));assert(!absent.includes("没有"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

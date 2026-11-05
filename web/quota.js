@@ -1172,7 +1172,7 @@
     if (profiles.length === 1 && typeof profiles[0].id === "string" && profiles[0].id) {
       const open = document.createElement("button");
       open.type = "button";
-      open.className = "quota-account-remove";
+      open.className = "btn";
       open.textContent = "账号操作";
       open.setAttribute("aria-label", `${quotaAccountName(account)}（${account.account_id}）的账号操作`);
       open.addEventListener("click", () => window.AgentMonitor?.openCodexAccount?.(profiles[0].id));

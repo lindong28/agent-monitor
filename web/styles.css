@@ -701,7 +701,7 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
   gap: var(--sp-3);
 }
 
-.quota-account-cell { align-items: center; flex-wrap: nowrap; gap: 8px; }
+.quota-account-cell { align-items: center; flex-wrap: wrap; gap: 8px; }
 .quota-account-cell > .quota-account-label { flex: 1; }
 .quota-account-cell > .quota-account-links { flex: 0 0 auto; }
 .quota-account-cell > .quota-history-note { flex-basis: 100%; }
@@ -1924,6 +1924,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 
 @media (min-width: 901px) {
   #quota-accounts .quota-window-cell { width: 18%; }
+  #quota-accounts td:nth-child(6) { min-width: 130px; }
   .quota-updated-cell .quota-observation-details[open] { min-width: 320px; }
 }
 

@@ -87,7 +87,7 @@ function fixture({blocked = false, statusError = false, holdStatus = false, acco
         confirmation: 'receipt', checked_host: 'fixture-device',
         targets: [{host: 'chatgpt.com', ip: '192.0.2.1', country_code: 'US', observed_at: 1, retry_after_seconds: 0}],
       };
-      else if (action === 'batch-start' || action === 'batch-retry' || action === 'refresh-all') data = {};
+      else if (action === 'batch-start' || action === 'batch-retry' || action === 'refresh-selected') data = {};
       else assert.fail('unexpected action: ' + action);
     }
     return {ok: true, json: async () => data};
@@ -126,16 +126,16 @@ function fixture({blocked = false, statusError = false, holdStatus = false, acco
 }
 const account = id => ({id, email: id + '@example.test', account_id: 'workspace-' + id, has_credentials: true});
 
-test('refresh all previews and submits only login-ready accounts through the paired route', async () => {
+test('selected quota queries preview and submits only login-ready accounts through the paired route', async () => {
   const f = fixture({accounts: [account('ready'), {...account('expired'), login_required: true}]});
-  const pending = f.node('#codex-refresh-all').emit('click');
+  const pending = f.node('#codex-refresh-selected').emit('click');
   f.message(); await f.preview(true); await pending;
-  for (const action of ['egress-preview', 'refresh-all']) {
+  for (const action of ['egress-preview', 'refresh-selected']) {
     const call = f.calls.find(call => call.action === action);
     assert.deepEqual(call.payload.profile_ids, ['ready']);
     assert.equal(call.payload.connection.id, 'route');
   }
-  assert.equal(f.calls.find(call => call.action === 'refresh-all').payload.confirmation, 'receipt');
+  assert.equal(f.calls.find(call => call.action === 'refresh-selected').payload.confirmation, 'receipt');
   assert.match(f.error(), /其余 1 个账号.*未纳入/);
   f.cleanup();
 });
