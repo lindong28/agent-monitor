@@ -57,6 +57,12 @@ class RateLimits:
     # docs/references/metrics.md#account-attribution-and-quota-plans.
     plan: Optional[str] = None
     quota_observation: Optional[dict] = None
+    # Active Codex response permissions; absent in legacy/passive readings.
+    # Percentages and elapsed reset times never substitute for these facts.
+    codex_quota_available: Optional[bool] = None
+    ordinary_usage_allowed: Optional[bool] = None
+    spend_control_reached: Optional[bool] = None
+    rate_limit_reached_type: Optional[str] = None
 
 
 USAGE_QUALITIES = frozenset(("unknown", "incomplete", "observed"))

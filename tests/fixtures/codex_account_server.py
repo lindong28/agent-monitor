@@ -86,8 +86,13 @@ for line in sys.stdin:
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
     elif method == "account/rateLimits/read":
         quota_reads += 1
+        if scenario == "quota_rpc_diagnostic":
+            emit({"id": message["id"], "error": {"code": -32603, "message":
+                'failed to fetch codex rate limits: body=' + json.dumps({"status": 401,
+                    "error": {"code": "token_revoked", "message": "session expired access_token=SECRET_FIXTURE_TOKEN"}})}})
+            continue
         if scenario == "prequota_failure" or (scenario == "quota_failure" and quota_reads == 2) or (recovery and scenario == "recovery_failure"):
-            emit({"id": message["id"], "error": {"message": "SECRET_FIXTURE_TOKEN"}})
+            emit({"id": message["id"], "error": {"message": "access_token=SECRET_FIXTURE_TOKEN"}})
             continue
         result = {"accountId": account_id, "rateLimits": {"secondary": {"windowDurationMins": 10080, "usedPercent": 0,
                   "resetsAt": None if scenario == "no_reset" else 1900000000 + quota_reads}}}

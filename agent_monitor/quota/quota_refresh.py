@@ -359,25 +359,8 @@ def _codex_rpc_error(error, request_id):
 
 
 def _rpc_failure(error, request_id):
-    facts = {"stage": "initialize" if request_id == 1 else "quota_read", "kind": "rpc_error"}
-    if isinstance(error, dict):
-        facts["rpc_code"] = error.get("code")
-        message = error.get("message")
-        if isinstance(message, str):
-            try:
-                body = json.loads(message.partition("body=")[2])
-            except ValueError:
-                body = None
-            if isinstance(body, dict):
-                facts["http_status"] = body.get("status")
-                reason = body.get("error")
-                if isinstance(reason, dict):
-                    facts["upstream_code"] = reason.get("code")
-                    facts["detail"] = reason.get("message")
-            else:
-                # Do not retain an unparsed response body or arbitrary headers.
-                facts["detail"] = message.partition("body=")[0]
-    return diagnostics.safe_failure(facts)
+    from agent_monitor.quota.codex_quota import rpc_failure
+    return rpc_failure(error, stage="initialize" if request_id == 1 else "quota_read")
 
 
 def account_fingerprint(provider, account):
@@ -470,8 +453,10 @@ def _codex(account):
                                failure={"stage": "account_check", "kind": "account_mismatch"})
         from agent_monitor.quota.codex_quota import decode
         reading = decode(result, account["account_id"])
-        return _reading((reading["five_hour_used_pct"], reading["five_hour_resets_at"]),
-                        (reading["seven_day_used_pct"], reading["seven_day_resets_at"]), plan=reading["plan"])
+        value = _reading((reading["five_hour_used_pct"], reading["five_hour_resets_at"]),
+                         (reading["seven_day_used_pct"], reading["seven_day_resets_at"]), plan=reading["plan"])
+        return dataclasses.replace(value, **{key: reading[key] for key in (
+            "codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type")})
 
     finally:
         selector.close()

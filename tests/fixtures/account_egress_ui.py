@@ -41,10 +41,11 @@ def main():
     args = parser.parse_args()
     accounts = [dict(id=str(i), email=f'fixture{i}@example.test', account_id=f'workspace-{i}',
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
-    state = dict(disclosure=False, mode='mixed', delay=0, starts=[], previews=0, paused=False,
+    state = dict(disclosure=False, quota_failure=False, mode='mixed', delay=0, starts=[], previews=0, paused=False,
                  pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
                  pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause', recovery_state='ready')
     state.update(process_reads=0, server_reads=0, process_probes=0, process_probe_kinds=[], process_mode="ready")
+    recovery_approvals = client_network.ApprovalStore()
     from agent_monitor.network import process_network
     def process_report():
         state['process_reads'] += 1
@@ -107,6 +108,11 @@ def main():
               latestCodexQuotaReading:()=>null};
             </script><script src="/web/quota.js"></script><script type="module">
             import {init} from '/web/codex-accounts.js';
+            import {previewEgress} from '/web/account-egress.js';
+            window.AgentMonitor.previewUpstream=(targets,payload,signal)=>previewEgress(async(action,body)=>{
+              const r=await fetch('/api/codex-accounts/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});
+              const value=await r.json(); if(!r.ok) throw new Error(value.error); return value;
+            },targets,signal,payload);
             const quota=window.AgentMonitorModules.quota({platform:{window,document,fetch:(...args)=>fetch(...args)},
               qs:s=>document.querySelector(s),fmtAbs:String,formatDate:String,updateSyncOverviewLink:()=>{}});
             Object.assign(window.AgentMonitor,quota);
@@ -161,6 +167,16 @@ def main():
                         account.update(operation=op, restrictions={'quota': {'reason': 'quota'}} if blocked else {},
                                        restriction_details=[warning] if blocked else [])
                         items.append(dict(profile_id=account['id'], operation=op))
+                if state['quota_failure']:
+                    visible[0].update(restrictions={'quota': {'created_at': '2026-10-31T05:16:40Z'}},
+                        restriction_messages={'quota': '旧额度限制'}, restriction_details=['旧额度限制'],
+                        last_quota=dict(observed_at='2026-11-04T06:53:30Z', seven_day_used_pct=100, seven_day_resets_at=1,
+                            ordinary_usage_allowed=False, rate_limit_reached_type='workspace_member_credits_depleted'),
+                        operation=dict(id='failed-quota', stage='failed', refresh_only=True, message_status='not_sent',
+                            started_at='2026-11-05T08:27:21Z', detail='本次未取得新读数，请查看技术详情中的错误摘要。',
+                            failure=dict(stage='reading', category='unknown'),
+                            diagnostics=dict(last_request='account/rateLimits/read', rpc_failure=dict(rpc_code=-32603,
+                                http_status=401, upstream_code='token_revoked', detail='session expired'))))
                 self.send(dict(accounts=visible, batch=dict(id='fixture-old', items=items, created_at='2026-10-23T01:00:00Z'),
                                upstream_pause=pause() if state['paused'] else None))
             elif self.path.startswith('/api/quota-recovery?'):
@@ -187,7 +203,12 @@ def main():
                 self.send(dict(checked_host='fixture-server-device', error='Synthetic server unavailable', verdict='unknown'))
             elif self.path == '/api/codex-accounts/egress-preview':
                 try:
-                    route = client_network.hub.browser_route(payload.get('connection'))
+                    recovery = payload.get('approval_action') == 'quota-recovery'
+                    if recovery:
+                        confirmation = recovery_approvals.issue('quota-recovery', payload['approval_scope'], payload['approval_expected'])
+                    else:
+                        route = client_network.hub.browser_route(payload.get('connection'))
+                        confirmation = route.issue(payload.get('profile_ids', []), payload.get('expected_batch_id'))
                 except client_network.NetworkError as exc:
                     self.send(dict(error=str(exc)), status=exc.status)
                     return
@@ -202,7 +223,7 @@ def main():
                 if state['mode'] == 'partial':
                     targets[1].update(ip=None, country_code=None, error='合成超时')
                 self.send(dict(checked_host='fixture-browser-device', targets=targets,
-                               confirmation=route.issue(payload.get('profile_ids', []), payload.get('expected_batch_id'))))
+                               confirmation=confirmation))
             elif self.path == '/api/codex-accounts/network-status':
                 state['status_requests'] += 1
                 if state['status_mode'] == 'failure':
@@ -219,11 +240,17 @@ def main():
                 state['starts'].append(payload)
                 self.send({})
             elif self.path == '/fixture/config':
-                for key in ('disclosure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state', 'process_mode'):
+                for key in ('disclosure', 'quota_failure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state', 'process_mode'):
                     if key in payload:
                         state[key] = payload[key]
                 self.send(state)
             elif self.path == '/api/quota-recovery':
+                try:
+                    recovery_approvals.consume(payload.get('confirmation'), 'quota-recovery',
+                        [payload['machine'], payload['account_id'], payload['account_label'], payload.get('profile') or 'native'], payload['pause_id'])
+                except client_network.NetworkError as exc:
+                    self.send(dict(error=str(exc)), status=exc.status)
+                    return
                 state['recoveries'].append(payload)
                 state['pause_id'] = 'pause-after-' + str(len(state['recoveries']))
                 receipt = dict(ok=state['recovery_mode']=='success', request=payload,

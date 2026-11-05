@@ -515,6 +515,42 @@ values[0].batch_result = values[0].operation;
 renderAccounts(values, {id: "new-batch", created_at: oldTime, items: [{profile_id: "a", operation: values[0].operation}]});
 assert(!text(list.children[0].querySelector("details")).includes("保留的批次消息"), "the same operation is shown only once");
 
+values[0].restrictions = {quota: {created_at: oldTime}};
+values[0].restriction_messages = {quota: "旧的额度限制说明"};
+values[0].restriction_details = ["旧的额度限制说明"];
+values[0].last_quota = {observed_at: oldTime, seven_day_used_pct: 100, seven_day_resets_at: 1,
+  ordinary_usage_allowed: false, rate_limit_reached_type: "workspace_member_credits_depleted"};
+values[0].operation = {id: "failed-query", refresh_only: true, stage: "failed", started_at: "2026-11-05T08:27:21Z",
+  detail: "本次未取得新读数", message_status: "not_sent", failure: {category: "unknown", stage: "reading"},
+  diagnostics: {last_request: "account/rateLimits/read", rpc_failure: {rpc_code: -32603, http_status: 401,
+    upstream_code: "token_revoked", detail: "session expired"}}};
+controller.update({accounts: values, upstream_pause: {id: "pause"}});
+let failed = list.children[0];
+assert(visible(failed).includes("配额查询失败"));
+assert(visible(failed).includes("发送仍因此前额度限制暂停"));
+assert(visible(failed).includes("工作区成员额度已耗尽") && visible(failed).includes(oldTime));
+assert(visible(failed).includes("通道暂停与检查"));
+assert(!visible(failed).includes("可仅刷新配额"), "paused channel must not recommend a disabled refresh action");
+assert(text(failed).includes("最近成功配额观测") && text(failed).includes("100%"), "failed read retains dated last successful quota");
+assert(text(failed).includes("RPC -32603 · 上游 HTTP 401 · 上游代码 token_revoked"));
+assert(text(failed).includes("session expired"));
+assert(cardButtons(failed).find(button => button.textContent === "仅刷新配额").disabled);
+values[0].operation.failure.category = "locallyPaused";
+renderAccounts(values);
+assert(visible(list.children[0]).includes("配额查询未执行"));
+values[0].operation.stage = "succeeded";
+values[0].last_failure = {...values[0].operation, stage: "failed"};
+values[0].operation.recovery_pause_id = "pause";
+delete values[0].operation.failure;
+renderAccounts(values);
+assert(visible(list.children[0]).includes("最近查询完成"));
+assert(visible(list.children[0]).includes("发送仍因此前额度限制暂停"), "successful query does not imply send permission");
+const sections = list.children[0].querySelector("details").querySelector("div").children;
+assert(sections.find(s=>text(s.children[0]) === "历史记录") && text(sections.find(s=>text(s.children[0]) === "历史记录")).includes("历史请求错误摘要（已脱敏）：session expired"));
+assert(!sections.find(s=>text(s.children[0]) === "技术细节"), "recovered operation must not show stale failure as current diagnostics");
+assert(!cardButtons(list.children[0]).find(button => button.textContent === "仅刷新配额").disabled);
+assert(cardButtons(list.children[0]).find(button => button.textContent === "向此账号发送一条消息").disabled);
+
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)

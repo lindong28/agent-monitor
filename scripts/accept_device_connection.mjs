@@ -320,6 +320,26 @@ try {
   assert.match(await read(`document.querySelector('${pausedCard} .account-detail-section:nth-child(4)').innerText`),/quota_exhausted.*HTTP 429/,'current failure category and status remain in technical details');
   assert.equal(await read(`(() => {const sections=[...document.querySelectorAll('${pausedCard} .account-detail-section')];return sections.every(s=>s.checkVisibility() && s.getBoundingClientRect().right<=innerWidth)})()`),true,'groups remain readable without extra disclosure steps');
   await bt('set','viewport','1440','1000');
+  await configure({disclosure:false,quota_failure:true,paused:true});
+  await bt('open',url);
+  await until('failed quota account',()=>read("document.querySelector('#codex-account-list > :first-child')?.innerText.includes('配额查询失败')"));
+  const failedCard='#codex-account-list > :first-child';
+  const failureText=await read(`document.querySelector('${failedCard}').innerText`);
+  for (const field of ['配额查询失败','发送仍因此前额度限制暂停','工作区成员额度已耗尽','通道暂停与检查','本次未取得新读数']) assert(failureText.includes(field),'quota failure explanation: '+field);
+  assert(!failureText.includes('可仅刷新配额'),'do not recommend disabled refresh');
+  await click(failedCard+' details > summary',`document.querySelector('${failedCard} details').open`);
+  const quotaFailureDetails=await read(`document.querySelector('${failedCard} .disclosure-body').innerText`);
+  for (const field of ['最近成功配额观测','100%','RPC -32603','上游 HTTP 401','token_revoked','session expired']) assert(quotaFailureDetails.includes(field),'quota failure evidence: '+field);
+  assert.equal(await read(`Array.from(document.querySelectorAll('${failedCard} button')).find(b=>b.innerText==='仅刷新配额').disabled`),true);
+  fs.writeFileSync(path.join(root,'quota-failure-reading.txt'),failureText+'\n'+quotaFailureDetails);
+  await bt('scrollintoview',failedCard);
+  await bt('screenshot',path.join(root,'quota-failure-1440.png'));
+  await bt('set','viewport','390','844');
+  await bt('scrollintoview',failedCard+' .disclosure-body');
+  assert.equal(await read(`document.querySelector('${failedCard} .disclosure-body').getBoundingClientRect().right<=innerWidth`),true);
+  await bt('screenshot',path.join(root,'quota-failure-390.png'));
+  await bt('set','viewport','1440','1000');
+  await configure({quota_failure:false,paused:false});
   await configure({disclosure:false});
   await bt('open',url);
   await until('ordinary account list',()=>read(ready));
@@ -380,7 +400,7 @@ try {
   await until('visible recovery card',()=>read(focused));
   assert.equal(await read(`document.querySelector('${probe}').disabled`),true);
   assert.match(await read(`document.querySelector('${panel}').innerText`),/检查机会已使用/);
-  for(const [recovery_state, explanation] of [['active','已有操作正在进行'],['identity','查询账号身份不完整'],['unreadable','暂停记录无法读取'],['unavailable','暂时无法确认恢复状态']]) {
+  for(const [recovery_state, explanation] of [['active','已有操作正在进行'],['identity','查询账号身份需要确认'],['unreadable','暂停记录无法读取'],['unavailable','暂时无法确认恢复状态']]) {
     await configure({recovery_state,probe_used:false});
     await bt('open',url);
     await until('pause',()=>read(paused));
@@ -391,7 +411,7 @@ try {
   await bt('open',url);
   await until('pause',()=>read(paused));
   await until('visible recovery card',()=>read(focused));
-  assert.match(await read(`document.querySelector('${panel}').innerText`),/发送已暂停，需要先检查配额[\s\S]*检查配额并尝试恢复/);
+  assert.match(await read(`document.querySelector('${panel}').innerText`),/配额读取失败，需要一次受控检查[\s\S]*通过目标机器路由桥检查配额/);
   assert.equal(await read(`document.querySelector('${panel} .recovery-technical').open`),false);
   assert.doesNotMatch(await read(`document.querySelector('${panel}').innerText`),/workspace-0|凭据位置|RPC/);
   await bt('screenshot',path.join(root,'recovery-paused.png'));
@@ -407,13 +427,13 @@ try {
   assert.equal(await read(`document.querySelector('${panel} textarea').clientWidth > 400`),true,'manual copy has readable width');
   await bt('screenshot',path.join(root,'recovery-guidance.png'));
   console.log('PASS: local status stays readable with stale/incomplete/ambiguous snapshots; used probe stays disabled; no provider request.');
-  // Browser dialogs remain native: verify the exact target before accepting.
+  // Recovery uses the shared egress confirmation, naming the execution machine.
   async function confirmControl(selector, accept=true) {
     await bt('scrollintoview',selector);
     await bt('click',selector);
-    const status=await bt('dialog','status');
-    assert.ok(JSON.stringify(status).includes('fixture'),'confirmation names the synthetic target');
-    await bt('dialog',accept?'accept':'dismiss');
+    await until('recovery egress preview',()=>read(`document.querySelector('${dialog}')?.innerText.includes('fixture-hub') && !document.querySelector('${dialog} .btn-primary').disabled`));
+    await click(dialog+(accept?' .btn-primary':' button:not(.btn-primary)'),`!document.querySelector('${dialog}')`);
+    await until('recovery control ready',()=>read(`!document.querySelector('${panel}').hasAttribute('aria-busy') || document.querySelector('${panel}').getAttribute('aria-busy')==='false'`));
   }
   await configure({probe_used:false,restricted:true});
   await bt('open',url);
@@ -439,7 +459,9 @@ try {
     assert.equal((await stats()).recoveries.length,before);
     await confirmControl(probe);
     await until('recovery receipt',async()=>(await stats()).recoveries.length===before+1);
-    assert.deepEqual((await stats()).recoveries.at(-1),{machine:'fixture-hub',account_id:'workspace-0',account_label:'fixture0@example.test',pause_id:pauseId});
+    const {confirmation, ...request}=(await stats()).recoveries.at(-1);
+    assert.ok(confirmation,'recovery submits the preview receipt');
+    assert.deepEqual(request,{machine:'fixture-hub',account_id:'workspace-0',account_label:'fixture0@example.test',pause_id:pauseId,profile:''});
     await until('selection preserved after recovery',()=>read("document.querySelector('#codex-selection-count').textContent.includes('已选 5 / 6')"));
     if(recovery_mode==='success') {
       await until('unpaused readback',()=>read(`!document.hidden && !document.querySelector('${primary}').disabled && document.querySelector('${primary}').textContent.includes('所选 5')`));
@@ -461,9 +483,9 @@ try {
     else {
       await until('new pause readback',()=>read(`document.querySelector('${panel}').textContent.includes('pause-after-${before+1}')`));
       assert.equal(await read(paused),true);
-      await until('failed check guidance',()=>read(`document.querySelector('${panel} h3').innerText==='配额检查未成功，发送仍暂停'`));
+      await until('failed check guidance',()=>read(`document.querySelector('${panel} h3').innerText==='配额读取失败，需要一次受控检查'`));
       await click(panel+' [data-recovery-action="help"]',`!document.querySelector('${panel} .recovery-steps').hidden`);
-      assert.match(await read(`document.querySelector('${panel} .recovery-steps').innerText`),/fixture-hub[\s\S]*保持原来的出口/);
+      assert.match(await read(`document.querySelector('${panel} .recovery-steps').innerText`),/fixture-hub[\s\S]*不要重复盲试/);
       if(recovery_mode==='failure') await bt('screenshot',path.join(root,'recovery-failed.png'));
       assert.match(await read(`document.querySelector('${panel}').textContent`),/-32603/,'automatic readback retains stored diagnostics even for a JSON unknown receipt');
       await bt('open',url);
@@ -497,8 +519,8 @@ try {
     const card=${expression};
     return !!card && [...card.querySelectorAll('[hidden]')].every(e => getComputedStyle(e).display==='none' && e.getClientRects().length===0);
   })()`);
-  await click('#quota-accounts [data-codex-pause-id]:nth-child(3) > button',`document.querySelector('${quotaPanel}')?.innerText.includes('检查配额并尝试恢复')`);
-  assert.match(await read(`document.querySelector('${quotaPanel}').innerText`),/发送已暂停[\s\S]*不会发送消息/);
+  await click('#quota-accounts [data-codex-pause-id]:nth-child(3) > button',`document.querySelector('${quotaPanel}')?.innerText.includes('通过目标机器路由桥检查配额')`);
+  assert.match(await read(`document.querySelector('${quotaPanel}').innerText`),/配额读取失败，需要一次受控检查[\s\S]*不会发送消息/);
   assert.equal((await stats()).recoveries.length,beforeQuota,'quota consumer reads without probing');
   assert.equal(await hiddenRecoveryControlsHaveNoLayout(`document.querySelector('${quotaPanel}')`),true,'paused quota card hides unavailable actions in actual layout');
   assert.equal((await stats()).starts.length,1);

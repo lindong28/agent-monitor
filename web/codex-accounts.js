@@ -29,6 +29,20 @@ function accountRefreshBlocked(account) {
     .some(key => account.restrictions?.[key]);
 }
 
+function quotaHoldMessage(account, pause) {
+  const reading = account.last_quota;
+  const since = account.restrictions?.quota?.created_at;
+  const reason = reading?.rate_limit_reached_type;
+  const explanation = reason === "workspace_member_credits_depleted" ? "工作区成员额度已耗尽"
+    : reading?.spend_control_reached === true ? "已达到支出限制"
+    : reason ? `额度限制（${reason}）` : "服务端限制了额度使用";
+  const evidence = reading && (reading.ordinary_usage_allowed === false || reading.spend_control_reached === true || reason)
+    ? `最近成功观测（${timestamp(reading.observed_at)}）：${explanation}。` : "";
+  const next = pause ? "请先查看本页的通道暂停与检查。"
+    : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "可仅刷新配额。";
+  return `发送仍因此前额度限制暂停${since ? `（记录于 ${timestamp(since)}）` : ""}。${evidence}${next}只有服务端明确允许使用后才解除额度暂停，0% 或重置时间经过不代表恢复。`;
+}
+
 export function quotaBatchSummary(batch) {
   if (!batch) return "";
   const counts = { succeeded: 0, failed: 0, unattempted: 0, skipped: 0, active: 0 };
@@ -49,6 +63,12 @@ function element(tag, text, className) {
   if (text !== undefined) node.textContent = text;
   if (className) node.className = className;
   return node;
+}
+
+function appendRpcFailure(section, diag, label = "请求错误") {
+  const rpc = diag?.rpc_failure;
+  if (rpc || diag?.rpc_error_code != null) section.append(element("p", `${label}：RPC ${rpc?.rpc_code ?? diag?.rpc_error_code ?? "未返回"}${rpc?.http_status ? " · 上游 HTTP " + rpc.http_status : ""}${rpc?.upstream_code ? " · 上游代码 " + rpc.upstream_code : ""}`, "quota-scope"));
+  if (rpc?.detail) section.append(element("p", `${label}摘要（已脱敏）：${rpc.detail}`, "quota-scope"));
 }
 
 export function timestamp(value, seconds = false) {
@@ -445,7 +465,8 @@ export function init({ autoLoad = true } = {}) {
     const ordered = [...accounts].sort((a, b) => priority(a) - priority(b));
     for (const [index, account] of ordered.entries()) {
       const batchItem = batch?.items.find((item) => item.profile_id === account.id);
-      const latestReading = operationReading(account);
+      const ownReading = operationReading(account);
+      const latestReading = ownReading || account.last_quota;
       const resetLabel = window.AgentMonitor.formatQuotaReset?.(latestReading?.seven_day_resets_at);
       const signature = JSON.stringify([account, batchItem, resetLabel, actions.busy, upstreamPause, accounts.some(a => a.busy)]);
       const old = existing.get(account.id);
@@ -471,6 +492,8 @@ export function init({ autoLoad = true } = {}) {
         ? "需要重新登录" : sharedSuccess ? "本批发送成功" : op?.failure?.category === "needsLogin"
         ? "需要重新登录" : op?.stage === "succeeded"
         ? (op.login_only ? "最近登录完成" : op.refresh_only ? "最近查询完成" : "最近发送完成")
+        : op?.refresh_only && op.stage === "failed"
+        ? (op.failure?.category === "locallyPaused" ? "配额查询未执行" : "配额查询失败")
         : op ? STAGES[op.stage] || op.stage : "尚未操作";
       heading.append(element("strong", account.email), element("span", operationLabel, "status-pill " + tone));
       if (account.eligible !== false) {
@@ -490,7 +513,10 @@ export function init({ autoLoad = true } = {}) {
       }
       card.append(heading);
       if (account.disabled) card.append(element("p", "用户已确认此账号不可用；本机 Monitor 已跳过查询、登录和发送，历史记录保留。", "quota-scope"));
-      for (const detail of account.restriction_details || []) card.append(element("p", detail, "quota-scope"));
+      const restrictionDetails = account.restriction_messages
+        ? Object.entries(account.restriction_messages).map(([key, detail]) => key === "quota" ? quotaHoldMessage(account, upstreamPause) : detail)
+        : account.restriction_details || [];
+      for (const detail of restrictionDetails) card.append(element("p", detail, "quota-scope"));
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "账号与操作详情"));
       const detailBody = element("div", undefined, "disclosure-body");
@@ -518,7 +544,8 @@ export function init({ autoLoad = true } = {}) {
         currentDetail.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
         if (op.message) currentDetail.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
         if (op.failure) technicalDetail.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
-        const diag = op.diagnostics;
+        const diag = op.recovery_pause_id && op.stage === "succeeded" ? null : op.diagnostics;
+        appendRpcFailure(technicalDetail, diag);
         if (diag?.last_request) technicalDetail.append(element("p", `最后请求：${diag.last_request} · ${timestamp(diag.last_request_at)}`, "quota-scope"));
         if (diag?.last_event) technicalDetail.append(element("p", `最后进度：${diag.last_event} · ${timestamp(diag.last_event_at)}`, "quota-scope"));
         if (diag?.thread_id) technicalDetail.append(element("p", `Thread：${diag.thread_id}${diag.turn_id ? " · Turn：" + diag.turn_id : ""}`, "quota-scope"));
@@ -537,10 +564,10 @@ export function init({ autoLoad = true } = {}) {
           reading.append(element("dt", "7 天配额窗口重置"), element("dd", `${resetLabel || "重置时间未知"} · ${timestamp(latestReading.seven_day_resets_at, true)}`));
           const used = latestReading.seven_day_used_pct;
           reading.append(element("dt", "7 天窗口已用"), element("dd", used == null ? "服务端未返回" : `${used}%`));
-          reading.append(element("dt", "本次操作的最近观测"), element("dd", timestamp(latestReading.observed_at)));
+          reading.append(element("dt", ownReading ? "本次操作的最近观测" : "最近成功配额观测"), element("dd", timestamp(latestReading.observed_at)));
           if (op.before?.seven_day_resets_at != null) quotaDetail.append(element("p", `${op.refresh_only ? "查询前" : "发送前"}的重置时间：${timestamp(op.before.seven_day_resets_at, true)}`, "quota-scope"));
           quotaDetail.append(reading);
-          if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) quotaDetail.append(element("p", "这份重置时间已过去，请仅刷新配额获取当前读数。", "quota-scope"));
+          if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) quotaDetail.append(element("p", `这份重置时间已过去，不代表额度已恢复。${upstreamPause ? "请先查看本页的通道暂停与检查。" : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "请仅刷新配额获取当前读数。"}`, "quota-scope"));
         }
       }
       const controls = element("div", undefined, "codex-account-controls");
@@ -561,7 +588,10 @@ export function init({ autoLoad = true } = {}) {
         controls.append(login);
       }
       if (restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("核对后解除此账号限制", "resume", account));
-      if (account.last_failure && (account.last_failure.id !== op?.id || op?.recovery_pause_id)) historyDetail.append(element("p", `保留的失败摘要：${account.last_failure.detail}`, "quota-scope"));
+      if (account.last_failure && (account.last_failure.id !== op?.id || op?.recovery_pause_id)) {
+        historyDetail.append(element("p", `保留的失败摘要（${timestamp(account.last_failure.started_at)}）：${account.last_failure.detail}`, "quota-scope"));
+        appendRpcFailure(historyDetail, account.last_failure.diagnostics, "历史请求错误");
+      }
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials || restrictions.authentication) {
         const maintenance = element("div", undefined, "codex-account-controls");

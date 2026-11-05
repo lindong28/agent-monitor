@@ -1,11 +1,36 @@
 """Codex quota response semantics shared by native and account-action readers."""
 import math
+import json
 from datetime import datetime, timezone
 from parsers.codex import select_codex_rate_limit
+from agent_monitor import diagnostics
 
 REACHED_LIMITS = {"rate_limit_reached", "workspace_owner_credits_depleted",
                   "workspace_member_credits_depleted", "workspace_owner_usage_limit_reached",
                   "workspace_member_usage_limit_reached"}
+
+
+def rpc_failure(error, *, stage="quota_read"):
+    """Bounded diagnostic facts, never an admission or account-scope classifier."""
+    facts = {"stage": stage, "kind": "rpc_error"}
+    if isinstance(error, dict):
+        facts["rpc_code"] = error.get("code")
+        message = error.get("message")
+        if isinstance(message, str):
+            # Codex's quota transport wraps an upstream JSON body after body=.
+            try:
+                body = json.loads(message.partition("body=")[2])
+            except ValueError:
+                body = None
+            if isinstance(body, dict):
+                facts["http_status"] = body.get("status")
+                reason = body.get("error")
+                if isinstance(reason, dict):
+                    facts["upstream_code"] = reason.get("code")
+                    facts["detail"] = reason.get("message")
+            else:
+                facts["detail"] = message.partition("body=")[0]
+    return diagnostics.safe_failure(facts)
 
 def decode(result, account_id):
     if result.get("accountId") is None:

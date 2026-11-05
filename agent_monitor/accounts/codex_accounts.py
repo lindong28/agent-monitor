@@ -394,9 +394,15 @@ class Rpc:
                         self.diagnostics["rpc_error_reason"] = reason
                         suffix = "（错误码 %s）" % code if type(code) is int else "（错误码未知）"
                         raise ActionError("Codex 身份读取失败（account/read）%s：%s" % (suffix, detail), 502)
-                    code = error.get("code")
+                    code = error.get("code") if isinstance(error, dict) else None
                     if type(code) is int:
                         self.diagnostics["rpc_error_code"] = code
+                    if method == "account/rateLimits/read":
+                        from agent_monitor.quota.codex_quota import rpc_failure
+                        self.diagnostics["rpc_failure"] = rpc_failure(error)
+                        detail = ("当前 Codex 不支持配额查询接口，请核对 CLI 版本。" if code == -32601 else
+                                  "Codex 配额查询失败，本次未取得新读数；请查看技术详情中的错误摘要。")
+                        raise ActionError(detail, 502)
                     # Upstream messages can contain tokens, URLs or configuration.
                     if (method == "account/login/start" and value["error"].get("message") ==
                             "failed to request device code: device code request failed with status 429 Too Many Requests"):
@@ -626,8 +632,9 @@ class Manager:
                 if exc.status != 409:
                     raise
         result = copy.deepcopy(record)
-        result["restriction_details"] = [text for key, text in RESTRICTION_DETAILS.items()
-                                         if key in record.get("restrictions", {})]
+        result["restriction_messages"] = {key: text for key, text in RESTRICTION_DETAILS.items()
+                                          if key in record.get("restrictions", {})}
+        result["restriction_details"] = list(result["restriction_messages"].values())
         result["has_credentials"] = (directory / "codex/auth.json").is_file()
         result["login_required"] = bool(
             not result["has_credentials"]
@@ -1072,6 +1079,8 @@ class Manager:
                     operation.update(stage="succeeded", quota_status="observed", after=reading,
                                      recovery_pause_id=pause_id, detail="恢复检查已取得配额，本次未发送消息。")
                     operation.pop("failure", None)
+                    operation.pop("diagnostics", None)  # Preserved above in last_failure.
+                    self.observe_permission(directory, record, reading, explicit=True)
                     self.save(directory, record)
 
     def update(self, directory, record, **fields):
@@ -1288,6 +1297,7 @@ class Manager:
                     from agent_monitor.quota.quota_refresh import account_fingerprint
                     lease.pause("operationFailed", failure={"stage": "account_check" if op["stage"] == "checking" else "quota_read",
                         "rpc_code": facts.get("rpc_error_code"), "upstream_code": facts.get("rpc_error_reason"),
+                        **facts.get("rpc_failure", {}),
                         "account_profile": "monitor-" + record["id"],
                         "account_fingerprint": account_fingerprint("codex", Account(record["account_id"], record["email"], None)),
                         "kind": "rpc_error"}, source={"profile_id": record["id"], "operation_id": op["id"],

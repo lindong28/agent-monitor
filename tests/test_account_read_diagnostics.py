@@ -18,6 +18,27 @@ class AccountReadDiagnosticsTests(unittest.TestCase):
     run_case = actions.AccountActionsTests.run_case
     acknowledge = actions.AccountActionsTests.acknowledge
 
+    def test_quota_rpc_failure_retains_safe_facts_without_widening_attribution(self):
+        self.scenario = "quota_rpc_diagnostic"
+        account = self.account()
+        self.manager.start(account["id"], refresh_only=True)
+        result = self.wait(account["id"])
+        facts = result["operation"]["diagnostics"].get("rpc_failure", {})
+        self.assertEqual(facts.get("rpc_code"), -32603)
+        self.assertEqual(facts.get("http_status"), 401)
+        self.assertEqual(facts.get("upstream_code"), "token_revoked")
+        self.assertIn("session expired", facts.get("detail", ""))
+        self.assertNotIn("SECRET_FIXTURE_TOKEN", json.dumps(result))
+        self.assertNotIn("CLI 版本", result["operation"]["detail"])
+        pause = self.manager.list()["upstream_pause"]
+        self.assertEqual(pause["failure"].get("upstream_code"), "token_revoked")
+        self.assertNotIn("authentication", result.get("restrictions", {}))
+        self.assertNotIn("turn/start", [c.get("method") for c in self.calls(result)])
+        self.manager.close()
+        self.manager = ca.Manager(self.manager.root)
+        self.addCleanup(self.manager.close)
+        self.assertEqual(self.manager.view(self.manager.directory(account["id"]))["last_failure"]["diagnostics"]["rpc_failure"], facts)
+
     def test_local_network_failure_does_not_pause_provider_or_start_cli(self):
         with mock.patch.object(ca.network_policy, 'endpoint', side_effect=ca.network_policy.NetworkPolicyError('runtime_missing')):
             result = self.run_case('success')

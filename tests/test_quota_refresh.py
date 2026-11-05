@@ -58,6 +58,61 @@ class ProviderTests(unittest.TestCase):
             with self.subTest(action=action):
                 self.check_monitor_recovery(action)
 
+    def test_monitor_recovery_applies_explicit_permission_and_preserves_other_holds(self):
+        from agent_monitor.accounts import codex_accounts as ca
+        for allowed, reached, spend, expect_quota in ((True, None, False, False), (False, "workspace_member_credits_depleted", False, True),
+                (None, None, None, True), (True, "rate_limit_reached", False, True), (True, None, True, True)):
+            with self.subTest(allowed=allowed, reached=reached, spend=spend):
+                manager = ca.Manager(self.root / "state/codex-accounts")
+                self.addCleanup(manager.close)
+                profile = manager.add("recovery@example.test", "account-a")
+                directory = manager.directory(profile["id"])
+                record = manager.read(directory)
+                record["restrictions"] = {"quota": {"category": "usageLimitExceeded"}, "rate_limit": {"category": "rateLimitExceeded"}}
+                operation_id = "12345678-1111-4111-8111-123456789012"
+                old_diagnostics = {"rpc_failure": {"rpc_code": -32603, "detail": "previous failure"}}
+                record["operation"] = dict(id=operation_id, stage="failed", refresh_only=True, message_status="not_sent",
+                                           diagnostics=old_diagnostics)
+                manager.save(directory, record)
+                account = accounts.Account("account-a", "recovery@example.test")
+                lease = manager.controls.acquire("codex")
+                lease.pause("operationFailed", failure=dict(account_profile="monitor-" + profile["id"],
+                    account_fingerprint=quota_refresh.account_fingerprint("codex", account)),
+                    source=dict(profile_id=profile["id"], operation_id=operation_id, action="quota"))
+                pause_id = lease.state["pause"]["id"]
+                lease.close()
+                response = {"accountId": "account-a", "ordinaryUsageAllowed": allowed,
+                    "rateLimits": {"limitId": "codex", "rateLimitReachedType": reached, "spendControlReached": spend,
+                        "secondary": {"usedPercent": 0, "windowDurationMins": 10080, "resetsAt": 4102444800}}}
+                reading = self.codex_cli(response)
+                with mock.patch.object(quota_service.accounts, "codex_account", return_value=account), \
+                        mock.patch.object(quota_refresh, "load_rate_limits", return_value=reading):
+                    quota_service.recover_codex_quota(account.label, pause_id, root=self.root, profile="monitor-" + profile["id"])
+                result = manager.read(directory)
+                self.assertEqual(result["operation"]["stage"], "succeeded")
+                self.assertNotIn("diagnostics", result["operation"])
+                self.assertEqual(result["last_failure"]["diagnostics"], old_diagnostics)
+                self.assertEqual("quota" in result["restrictions"], expect_quota)
+                self.assertIn("rate_limit", result["restrictions"])
+                self.assertEqual(result["last_quota"].get("ordinary_usage_allowed"), allowed)
+                self.assertEqual(result["last_quota"].get("rate_limit_reached_type"), reached)
+                self.assertEqual(result["last_quota"].get("spend_control_reached"), spend)
+                self.assertNotIn("pause", manager.controls.read("codex"))
+
+    def test_codex_permissions_survive_child_result(self):
+        account = accounts.Account("account-a", "fixture@example.test")
+        for allowed in (True, False, None):
+            with self.subTest(allowed=allowed):
+                reading = self.codex_cli({"accountId": account.account_id, "ordinaryUsageAllowed": allowed,
+                    "rateLimits": {"limitId": "codex", "spendControlReached": False,
+                        "secondary": {"usedPercent": 0, "windowDurationMins": 10080, "resetsAt": 4102444800}}})
+                payload = json.dumps({"reading": dataclasses.asdict(reading)})
+                child = SimpleNamespace(pid=0, returncode=0, communicate=lambda *a, **k: (payload, ""))
+                with mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child):
+                    restored = quota_refresh.load_rate_limits("codex", account, root=self.root)
+                for field in ("codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type"):
+                    self.assertEqual(getattr(restored, field), getattr(reading, field))
+
     def check_monitor_recovery(self, action):
         from agent_monitor.accounts import codex_accounts as ca
         manager = ca.Manager(self.root / "state/codex-accounts")

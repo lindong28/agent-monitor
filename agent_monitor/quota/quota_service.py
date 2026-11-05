@@ -573,7 +573,9 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
         reading = dict(five_hour_used_pct=value.five_hour_pct, five_hour_resets_at=value.five_hour_resets_at,
                        seven_day_used_pct=value.seven_day_pct, seven_day_resets_at=value.seven_day_resets_at)
         reading["plan"] = value.plan
-        reading.update(observed_at=value.updated_at, codex_quota_available=True)
+        reading.update(observed_at=value.updated_at,
+                       **{key: getattr(value, key, None) for key in (
+                           "codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type")})
         try:
             Manager(root / "state/codex-accounts").record_quota_recovery(
                 profile.removeprefix("monitor-"), source.get("operation_id"), pause_id, reading)
