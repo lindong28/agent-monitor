@@ -750,14 +750,6 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
 
 .quota-plan-status { white-space: nowrap; }
 
-/* Source provenance uses the shared keyboard-accessible disclosure. */
-.quota-plan-details {
-  display: block;
-  margin-top: var(--sp-2);
-  color: var(--ink-muted);
-  font: 400 12px/16px var(--font-sans);
-}
-
 .quota-history-note {
   display: block;
   margin-top: var(--sp-2);
@@ -1932,7 +1924,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 
 @media (min-width: 901px) {
   #quota-accounts .quota-window-cell { width: 18%; }
-  .quota-plan-details[open] { min-width: 240px; }
+  .quota-updated-cell .quota-observation-details[open] { min-width: 320px; }
 }
 
 .session-back { display: inline-flex; align-items: center; gap: 8px; }

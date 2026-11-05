@@ -1040,7 +1040,7 @@
     row.appendChild(quotaUpdatedCell(provider, display, stale, display.quota_source === "account_action"
       ? null : quotaRefreshNotice(provider, account)));
     Array.from(row.children).forEach((cell, index) => {
-      cell.dataset.label = ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "配额更新"][index];
+      cell.dataset.label = ["账号", "服务商", "套餐记录", "5 小时已用", "7 天已用", "机器", "配额更新"][index];
     });
     return row;
   }
@@ -1074,41 +1074,41 @@
     plan.className = "status-pill identity";
     plan.textContent = quotaPlanLabel(account.account_plan, provider);
     cell.appendChild(plan);
-    if (account.account_state === "known" && account.presence !== "remembered"
-        && (provider.key === "codex" || quotaPlanSourcesDisagree(account))) {
-      const details = document.createElement("details");
-      details.className = "quota-observation-details quota-plan-details";
-      details.dataset.observationKey = JSON.stringify(["plan", provider.key, account.account_id, account.account_label]);
-      const summary = document.createElement("summary");
-      summary.textContent = "套餐来源";
-      details.appendChild(summary);
-      const note = (text) => {
-        const item = document.createElement("span");
-        item.className = "quota-history-note";
-        item.textContent = text;
-        details.appendChild(item);
-      };
-      const rawPlan = (value) => typeof value === "string" && value ? value : null;
-      const reading = rawPlan(account.reading_plan), credential = rawPlan(account.credential_plan);
-      const describe = (value) => `${quotaPlanLabel(value, provider)}（原始值：${value}）`;
-      if (reading) {
-        const source = account.quota_source === "account_action" ? "账号操作中的配额查询"
-          : {active_query: "主动查询", codex_session: "会话日志", claude_statusline: "状态栏"}[account.quota_observation?.source];
-        const time = typeof account.updated_at === "string" && Number.isFinite(Date.parse(account.updated_at))
-          ? `记录时间：${formatDate(account.updated_at)}` : "记录时间未知";
-        note(`配额记录：${describe(reading)}；${source || "来源未记录"}；${time}。`);
-      } else {
-        note("配额记录中的套餐未取得。");
-      }
-      if (credential) note(`本地登录信息：${describe(credential)}；更新时间未知。`);
-      else note("本地登录信息中的套餐未取得。");
-      if (!reading && !credential) note("保存的套餐来源未记录，不代表当前订阅。");
-      if (quotaPlanSourcesDisagree(account)) {
-        note("两份套餐记录不同，原因尚未核实；不能据此判断升级失败或需要重新登录。");
-      }
-      cell.appendChild(details);
+    if (account.account_state === "known") {
+      const source = document.createElement("span");
+      source.className = "quota-history-note";
+      source.textContent = (quotaPresence(account) === "remembered" && account.quota_source !== "account_action")
+        || (account.quota_status && account.quota_status !== "current") ? "历史记录"
+        : typeof account.reading_plan === "string" && account.reading_plan ? "配额观测"
+        : typeof account.credential_plan === "string" && account.credential_plan ? "登录信息"
+        : "来源未记录";
+      cell.appendChild(source);
     }
     return cell;
+  }
+
+  function appendQuotaPlanSources(details, account, provider) {
+    if (account.account_state !== "known"
+        || (quotaPresence(account) === "remembered" && account.quota_source !== "account_action")
+        || !account.account_plan || account.quota_status === "no_subscription"
+        || account.plan_verification === "unverified"
+        || (provider.key !== "codex" && !quotaPlanSourcesDisagree(account))) return;
+    const note = (text) => {
+      const item = document.createElement("span");
+      item.className = "quota-history-note";
+      item.textContent = text;
+      details.appendChild(item);
+    };
+    const rawPlan = (value) => typeof value === "string" && value ? value : null;
+    const reading = rawPlan(account.reading_plan), credential = rawPlan(account.credential_plan);
+    const describe = (value) => `${quotaPlanLabel(value, provider)}（原始值：${value}）`;
+    // Observation time and source are already shown by this disclosure.
+    note(reading ? `配额记录中的套餐：${describe(reading)}。` : "配额记录中的套餐未取得。");
+    note(credential ? `本地登录信息：${describe(credential)}；更新时间未知。` : "本地登录信息中的套餐未取得。");
+    if (!reading && !credential) note("保存的套餐来源未记录，不代表当前订阅。");
+    if (quotaPlanSourcesDisagree(account)) {
+      note("两份套餐记录不同，原因尚未核实；不能据此判断升级失败或需要重新登录。");
+    }
   }
 
   // Whether the row's two plan facts are both present and disagree.
@@ -1501,7 +1501,7 @@
     const summary = document.createElement("summary");
     const historicalOnly = account.quota_status && account.quota_status !== "current";
     summary.textContent = historicalOnly ? "历史配额与状态" : quotaObservationAge(account.updated_at);
-    summary.setAttribute("aria-label", `配额更新：${summary.textContent}，查看时间与来源`);
+    summary.setAttribute("aria-label", `配额更新：${summary.textContent}，查看观测与套餐详情`);
     details.appendChild(summary);
     const exact = document.createElement("span");
     exact.className = "quota-history-note";
@@ -1512,6 +1512,7 @@
       : {codex_session: "会话日志", active_query: "主动查询", claude_statusline: "状态栏"}[account.quota_observation?.source];
     exact.textContent += `；读数来源：${sourceLabel || "旧记录未注明"}`;
     details.appendChild(exact);
+    appendQuotaPlanSources(details, account, provider);
     if (account.account_profile) {
       const profile = document.createElement("span");
       profile.className = "quota-history-note";

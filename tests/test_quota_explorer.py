@@ -57,11 +57,13 @@ assert.deepEqual(displayed.quota_observation,{source:'active_query',observed_at:
 assert.equal(ui.quotaPlanCell(displayed,{key:'codex'}).children[0].textContent,'Pro (Max)');
 ui.renderQuotaAccounts({codex:{accounts:[missingPlan]}});
 assert(table.textContent.includes('Pro (Max)'));
-const planDetails = descendants(table).find(n => n.className.includes('quota-plan-details'));
+assert(!descendants(table).some(n => n.className.includes('quota-plan-details')));
+const planDetails = descendants(table).find(n => n.className === 'quota-observation-details');
+assert.equal(descendants(table).filter(n => n.className === 'quota-observation-details').length, 1);
 planDetails.open = true;
 ui.renderQuotaAccounts({codex:{accounts:[missingPlan]}});
 assert(descendants(table).find(n => n.dataset.observationKey === planDetails.dataset.observationKey).open);
-assert(!descendants(table).find(n => n.className === 'quota-observation-details').open);
+assert(descendants(table).find(n => n.className === 'quota-observation-details').open);
 assert(!table.textContent.includes('套餐未核实'));
 assert(table.textContent.includes('配额与读数套餐来自此次账号操作查询'));
 ui.quotaFilter.search='Pro (Max)';

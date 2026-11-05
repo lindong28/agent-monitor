@@ -45,9 +45,14 @@ for (const value of ['toString', '__proto__', 'constructor']) {
 }
 const cell = quota.quotaPlanCell(known, codex);
 assert.equal(cell.children[0].textContent, 'Pro (Max)');
-const details = cell.children.find(child => child.tagName === 'DETAILS');
+assert.ok(!cell.children.some(child => child.tagName === 'DETAILS'));
+assert.ok(cell.textContent.includes('配额观测'));
+const detailText = account => quota.quotaUpdatedCell(codex, account, false, null).textContent;
+const details = quota.quotaUpdatedCell(codex, known, false, null).children[0];
 assert.ok(details && !details.open);
-assert.equal(details.children[0].textContent, '套餐来源');
+assert.ok(!details.textContent.includes('套餐来源'));
+assert.equal(details.textContent.split(known.updated_at).length - 1, 1);
+assert.equal(details.textContent.split('主动查询').length - 1, 1);
 assert.ok(details.textContent.includes('promax'));
 assert.ok(details.textContent.includes('本地登录信息'));
 assert.ok(details.textContent.includes('更新时间未知'));
@@ -55,15 +60,19 @@ assert.ok(details.textContent.includes(known.updated_at));
 assert.ok(details.textContent.includes('原因尚未核实'));
 assert.ok(!cell.textContent.includes('plan 不一致'));
 for (const reading_plan of ['pro', null]) {
-  const text = quota.quotaPlanCell({...known, account_plan: 'pro', reading_plan}, codex).textContent;
+  const text = detailText({...known, account_plan: 'pro', reading_plan});
   assert.ok(!text.includes('原因尚未核实'));
 }
-const missingTime = quota.quotaPlanCell({...known, updated_at: 'invalid'}, codex).textContent;
-assert.ok(missingTime.includes('记录时间未知'));
-const passive = quota.quotaPlanCell({...known, quota_observation: {source: 'codex_session'}}, codex).textContent;
+const missingTime = detailText({...known, updated_at: 'invalid'});
+assert.ok(missingTime.includes('未取得观测时间'));
+const passive = detailText({...known, quota_observation: {source: 'codex_session'}});
 assert.ok(passive.includes('会话日志'));
 assert.ok(!passive.includes('主动查询'));
-const legacy = quota.quotaPlanCell({account_state: 'known', account_plan: 'pro'}, codex).textContent;
+const legacyAccount = {account_state: 'known', account_plan: 'pro'};
+const legacy = detailText(legacyAccount);
+assert.ok(quota.quotaPlanCell(legacyAccount, codex).textContent.includes('来源未记录'));
+assert.ok(quota.quotaPlanCell({...known, reading_plan:null}, codex).textContent.includes('登录信息'));
+assert.ok(quota.quotaPlanCell({...known, presence:'remembered'}, codex).textContent.includes('历史记录'));
 assert.ok(legacy.includes('来源未记录'));
 assert.ok(legacy.includes('配额记录中的套餐未取得'));
 assert.ok(!legacy.includes('未提供套餐'));
@@ -76,7 +85,16 @@ assert.equal(after.account_plan, 'promax');
 assert.equal(after.seven_day_used_pct, 1);
 assert.equal(after.updated_at, '2026-11-05T11:00:00Z');
 assert.equal(after.credential_plan, 'pro');
-assert.ok(quota.quotaPlanCell(after, codex).textContent.includes('更新时间未知'));
+assert.ok(detailText(after).includes('更新时间未知'));
+for (const presence of ['in_use', 'remembered']) {
+  const fresh = quota.quotaDisplayReading(codex, {...before, presence});
+  assert.ok(quota.quotaPlanCell(fresh, codex).textContent.includes('配额观测'));
+  assert.ok(!quota.quotaPlanCell(fresh, codex).textContent.includes('历史记录'));
+  assert.ok(detailText(fresh).includes('原始值：promax'));
+  assert.ok(detailText(fresh).includes('原始值：pro'));
+  const loginOnly = {...fresh, reading_plan:null, account_plan:'pro'};
+  assert.ok(quota.quotaPlanCell(loginOnly, codex).textContent.includes('登录信息'));
+}
 const newer = {...before, updated_at: '2026-11-05T12:00:00Z'};
 assert.strictEqual(quota.quotaDisplayReading(codex, newer), newer);
 quota.quotaFilter.search = 'Pro (Max)';
@@ -976,7 +994,7 @@ process.stdout.write(JSON.stringify({
         header = re.search(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", prose).group(1)
         self.assertEqual(
             re.findall(r">([^<]+)</th>", header),
-            ["账号", "服务商", "套餐", "5 小时已用", "7 天已用", "机器", "配额更新"],
+            ["账号", "服务商", "套餐记录", "5 小时已用", "7 天已用", "机器", "配额更新"],
         )
         # Two files decide one thing. The header row is static markup; the cells
         # under it are emitted in QUOTA_COLUMNS order. Reorder one and every
@@ -1078,12 +1096,13 @@ global.document = {
 require("./web/app.js")();
 
 function reading(account) {
-  const cell = window.AgentMonitor.quotaPlanCell(account);
+  const cell = window.AgentMonitor.quotaUpdatedCell({}, account, false, null);
   const marker = descendants(cell)
     .find((node) => node.tagName === "SPAN" && node.textContent.includes("两份套餐记录不同"));
   return {
     text: cell.textContent,
     marker: marker ? { text: marker.textContent, title: marker.title || "" } : null,
+    planText: window.AgentMonitor.quotaPlanCell(account).textContent,
   };
 }
 
@@ -1179,7 +1198,7 @@ process.stdout.write(JSON.stringify({
 
         # No plan at all keeps the existing placeholder (ux-contract G4c);
         # a credential-side plan does not get promoted into the empty slot.
-        self.assertEqual(payload["planless"]["text"], "—")
+        self.assertEqual(payload["planless"]["planText"], "—")
 
     def test_remembered_quota_rows_are_historical_without_changing_live_alerts(self):
         """A frozen reading is historical context, not a present-tense alarm.
@@ -1422,7 +1441,7 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(future["cellCount"], 7)
         self.assertEqual(future["providerText"], "Claude")
         self.assertIn("agent-claude-code", future["providerPillClass"])
-        self.assertEqual(future["planText"], "Max 20×")
+        self.assertEqual(future["planText"], "Max 20×历史记录")
         self.assertIn("history@example.test", future["accountText"])
         self.assertEqual(payload["planless"]["planText"], "—")
 
@@ -1477,7 +1496,7 @@ process.stdout.write(JSON.stringify({
         self.assertNotIn("remembered", live["rowClass"])
         self.assertIn("stale", live["rowClass"])
         self.assertEqual(live["providerText"], "Claude")
-        self.assertEqual(live["planText"], "Max 20×")
+        self.assertEqual(live["planText"], "Max 20×来源未记录")
         self.assertEqual(live["warningTexts"], [])
         self.assertEqual(live["staleWarningCount"], 1)
         self.assertEqual(live["historyMarkerCount"], 0)
