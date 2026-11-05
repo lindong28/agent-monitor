@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parsers import codex
+from parsers import codex, codex_profiles
 
 
 class CodexRateLimitsTests(unittest.TestCase):
@@ -124,7 +124,7 @@ class CodexRateLimitsTests(unittest.TestCase):
             os.utime(older, (2000, 2000))
             os.utime(newer, (1000, 1000))
 
-            limits = codex.load_rate_limits(root, state_db="/nonexistent")
+            limits = codex.load_rate_limits(root, state_db="/nonexistent", session_links=codex_profiles.SessionLinks())
 
         self.assertEqual(limits.seven_day_pct, 22.0)
         self.assertEqual(limits.updated_at, "2026-07-14T12:00:00Z")
@@ -147,7 +147,7 @@ class CodexRateLimitsTests(unittest.TestCase):
                 None,
             )
 
-            limits = codex.load_rate_limits(root, state_db="/nonexistent")
+            limits = codex.load_rate_limits(root, state_db="/nonexistent", session_links=codex_profiles.SessionLinks())
 
         self.assertEqual(limits.seven_day_pct, 33.0)
 
@@ -179,7 +179,7 @@ class ReadingPlanTests(unittest.TestCase):
             (root / "session.jsonl").write_text(
                 "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
             )
-            return codex.load_rate_limits(root, state_db="/nonexistent")
+            return codex.load_rate_limits(root, state_db="/nonexistent", session_links=codex_profiles.SessionLinks())
 
     window = {"used_percent": 0.0, "window_minutes": 10080, "resets_at": 4102444800}
 

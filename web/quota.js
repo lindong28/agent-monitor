@@ -64,13 +64,17 @@
     const profile = codexQuotaReadings.find((item) => item.account_id === account.account_id
       && item.email.toLowerCase() === account.account_label.toLowerCase());
     const reading = profile && latestCodexQuotaReading(profile);
-    if (!reading || Date.parse(reading.observed_at) <= Date.parse(account.updated_at)) return account;
-    const display = { ...account, updated_at: reading.observed_at, quota_source: "account_action" };
+    if (!reading || (Number.isFinite(Date.parse(account.updated_at)) && Date.parse(reading.observed_at) <= Date.parse(account.updated_at))) return account;
+    const display = { ...account, updated_at: reading.observed_at, quota_source: "account_action",
+      quota_observation: {source: "active_query", observed_at: reading.observed_at} };
     for (const spec of QUOTA_COLUMNS) {
       for (const key of [spec.used, spec.reset]) {
         display[key] = typeof reading[key] === "number" && Number.isFinite(reading[key]) ? reading[key] : null;
       }
     }
+    display.reading_plan = typeof reading.plan === "string" && reading.plan ? reading.plan : null;
+    display.account_plan = display.reading_plan || display.credential_plan || null;
+    display.plan_verification = display.account_plan ? null : "unverified";
     return display;
   }
 
@@ -100,6 +104,7 @@
   function quotaMatches(provider, account) {
     if (quotaFilter.provider !== "all" && quotaFilter.provider !== provider.key) return false;
     const terms = quotaFilter.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    account = quotaDisplayReading(provider, account);
     const text = [account.account_label, account.account_id, account.account_profile, quotaAccountName(account),
       account.account_plan, quotaPlanLabel(account.account_plan),
       account.reading_plan, account.credential_plan, ...(account.machines || [])]
@@ -1029,7 +1034,7 @@
 
     row.appendChild(quotaAccountCell(provider, account));
     row.appendChild(quotaProviderCell(provider));
-    row.appendChild(quotaPlanCell(account));
+    row.appendChild(quotaPlanCell(display));
     QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell(provider, spec, display)));
     row.appendChild(quotaMachinesCell(account, display));
     row.appendChild(quotaUpdatedCell(provider, display, stale, display.quota_source === "account_action"
@@ -1052,10 +1057,12 @@
   function quotaPlanCell(account) {
     const cell = document.createElement("td");
     if (account.quota_status === "no_subscription") {
+      cell.className = "quota-plan-status";
       cell.textContent = "无有效订阅";
       return cell;
     }
     if (account.plan_verification === "unverified") {
+      cell.className = "quota-plan-status";
       cell.textContent = "套餐未核实";
       return cell;
     }
@@ -1533,7 +1540,9 @@
     if (account.quota_source === "account_action") {
       const context = document.createElement("span");
       context.className = "quota-history-note";
-      context.textContent = "配额来自账号操作中的配额查询；机器归属与套餐来自机器采集";
+      context.textContent = account.reading_plan
+        ? "配额与读数套餐来自此次账号操作查询；机器归属与凭据套餐来自机器采集。套餐信息不代表当前订阅权益。"
+        : "配额来自此次账号操作查询；机器归属与可用的凭据套餐来自机器采集。套餐信息不代表当前订阅权益。";
       details.appendChild(context);
       note("账号操作读数");
       return cell;

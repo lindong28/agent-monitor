@@ -284,6 +284,11 @@ class Manager:
                             if identity(incoming) == identity(before) and _time(before.get("updated_at")) > _time(incoming.get("updated_at")):
                                 for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation"):
                                     incoming[field] = before.get(field)
+                                if provider == "codex":
+                                    # A legacy observation without a plan cannot
+                                    # inherit the discarded observation's plan.
+                                    incoming["reading_plan"] = before.get("reading_plan")
+                                    incoming["account_plan"] = incoming["reading_plan"] or incoming.get("credential_plan")
                     self.records[name] = {"ssh_host": by_name[name].ssh_host,
                                           "payload": payload if payload is not None else old.get("payload"),
                                           "attempted_at": datetime.now(timezone.utc).isoformat(),
@@ -345,7 +350,8 @@ class Manager:
                               for row in existing}
                 admitted = [row for row in incoming.get("managed_accounts", [])
                             if (row.get("account_profile"), quota_identity("codex", row.get("account_id"), row.get("account_label"))) in identities]
-                base["managed_accounts"] = _merge_managed_accounts(existing, admitted)
+                base["managed_accounts"] = _merge_managed_accounts(existing, admitted,
+                    incoming_metadata=_time(record["attempted_at"]) >= _time(current.meta.get("generated_at")))
                 result[provider] = base
             if _time(base.get("updated_at")) > _time(record["attempted_at"]):
                 continue
@@ -368,9 +374,17 @@ class Manager:
                     incoming_evidence = quota_applicability.observation(incoming.get("quota_observation"))
                     base_evidence = quota_applicability.observation(base.get("quota_observation"))
                     if (bool(provider == "claude" and incoming_evidence and incoming_evidence["observed_at"]), _time(incoming_evidence["observed_at"] if incoming_evidence and incoming_evidence["observed_at"] else incoming.get("updated_at"))) >= (bool(provider == "claude" and base_evidence and base_evidence["observed_at"]), _time(base_evidence["observed_at"] if base_evidence and base_evidence["observed_at"] else base.get("updated_at"))):
-                        # Only the observation moves; membership/plan come from admission.
+                        # Reading plan belongs to the selected observation; identity
+                        # stays with the admitted snapshot.
                         for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation"):
                             base[field] = incoming.get(field)
+                        if provider == "codex" and "reading_plan" in incoming:
+                            base["reading_plan"] = incoming["reading_plan"]
+                    if provider == "codex":
+                        from agent_monitor.quota.quota_service import _with_credential_plan
+                        metadata = incoming if _time(record["attempted_at"]) >= _time(current.meta.get("generated_at")) else base
+                        base = _with_credential_plan(base, metadata)
+                        result[provider] = base
                     incoming_note = quota_applicability.confirmation(incoming.get("subscription_confirmation"))
                     base_note = quota_applicability.confirmation(base.get("subscription_confirmation"))
                     if incoming_note and (not base_note or quota_applicability.confirmation_time(incoming_note) > quota_applicability.confirmation_time(base_note)):

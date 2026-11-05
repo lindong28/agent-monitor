@@ -75,6 +75,72 @@ class ManagedCodexTests(unittest.TestCase):
             (codex_home / "auth.json").write_text(json.dumps({"tokens": {"account_id": "shared-workspace", "id_token": "fixture." + claim + ".fixture"}}))
         return codex_home
 
+    def test_credential_plan_survives_newer_cached_reading_and_native_home(self):
+        home = self.profile("alpha")
+        cached = dict(account_profile="alpha", account_id="shared-workspace",
+                      account_label="alpha@example.test", updated_at="2026-11-01T00:00:00Z",
+                      reading_plan=None, credential_plan=None, account_plan=None,
+                      five_hour_pct=17, refresh_attempted_at="2026-11-01T00:00:00Z")
+        path = self.root / "state/quota_snapshot.json"
+        path.parent.mkdir()
+        for plan in ("prolite", "self_serve_business_prolite", None):
+            claim = {"email": "alpha@example.test", "https://api.openai.com/auth": {"chatgpt_plan_type": plan}}
+            token = base64.urlsafe_b64encode(json.dumps(claim).encode()).decode().rstrip("=")
+            (home / "auth.json").write_text(json.dumps({"tokens": {"account_id": "shared-workspace", "id_token": "fixture." + token + ".fixture"}}))
+            for native in (False, True):
+                path.write_text(json.dumps({"codex": dict(cached, managed_accounts=[cached])}))
+                with mock.patch("parsers.accounts.CODEX_AUTH", home / "auth.json" if native else self.default / "auth.json"):
+                    row = quota_service.managed_codex_rate_limits(root=self.root)[0]
+                self.assertEqual(row["credential_plan"], plan)
+                self.assertEqual(row["account_plan"], plan)
+                self.assertEqual(row["five_hour_pct"], 17)
+                current = SimpleNamespace(host="fixture", meta={"rate_limits": {"codex": {"managed_accounts": [row]}}})
+                with mock.patch("agent_monitor.http_server.hub.enabled", return_value=False), mock.patch("agent_monitor.quota.quota_view.self_machine_name", return_value="fixture"):
+                    visible = server.QUOTA_VIEW.live_from_admission(SimpleNamespace(admitted=[current]))["codex"]["accounts"][0]
+                self.assertEqual(visible["account_plan"], plan)
+                self.assertEqual(visible["five_hour_used_pct"], 17)
+        # Neither a shared workspace nor a matching email alone admits metadata.
+        for account_id, email in (("other-workspace", "alpha@example.test"), ("shared-workspace", "other@example.test")):
+            claim = {"email": email, "https://api.openai.com/auth": {"chatgpt_plan_type": "pro"}}
+            token = base64.urlsafe_b64encode(json.dumps(claim).encode()).decode().rstrip("=")
+            (home / "auth.json").write_text(json.dumps({"tokens": {"account_id": account_id, "id_token": "fixture." + token + ".fixture"}}))
+            self.assertIsNone(quota_service.managed_codex_rate_limits(root=self.root)[0]["credential_plan"])
+
+    def test_cache_merges_metadata_independently_from_quota_clock(self):
+        old = dict(account_profile="alpha", account_id="workspace", account_label="alpha@example.test",
+                   updated_at="2026-11-01T00:00:00Z", reading_plan="plus", credential_plan=None,
+                   account_plan="plus", five_hour_pct=17, refresh_error=None)
+        fresh_metadata = dict(old, updated_at="2026-10-01T00:00:00Z", reading_plan=None,
+                              credential_plan="pro", account_plan="pro", five_hour_pct=5)
+        merged = quota_service._merge_managed_accounts([old], [fresh_metadata])[0]
+        self.assertEqual((merged["reading_plan"], merged["credential_plan"], merged["account_plan"], merged["five_hour_pct"]), ("plus", "pro", "plus", 17))
+        path = self.root / "state/quota_snapshot.json"
+        quota_service.save_cache(path, {"codex": old})
+        quota_service.save_cache(path, {"codex": fresh_metadata})
+        self.assertEqual(quota_service.read_cache(path)["codex"]["credential_plan"], "pro")
+        legacy = dict(old, updated_at="2026-12-01T00:00:00Z")
+        del legacy["credential_plan"]
+        self.assertEqual(quota_service._merge_managed_accounts([fresh_metadata], [legacy])[0]["credential_plan"], "pro")
+        quota_service.save_cache(path, {"codex": legacy})
+        self.assertEqual(quota_service.read_cache(path)["codex"]["credential_plan"], "pro")
+        cleared = dict(fresh_metadata, credential_plan=None)
+        self.assertIsNone(quota_service._merge_managed_accounts([old], [cleared])[0]["credential_plan"])
+
+    def test_retained_native_reading_does_not_cross_workspace_members(self):
+        from parsers import accounts
+        old = dict(account_id="workspace", account_label="other@example.test", credential_plan="plus",
+                   reading_plan=None, account_plan="plus", updated_at="2099-01-01T00:00:00Z")
+        with mock.patch.object(quota_service, "read_cache", return_value={"codex":old}), \
+             mock.patch.object(accounts, "codex_account", return_value=accounts.Account("workspace", "alpha@example.test", "pro")), \
+             mock.patch.object(accounts, "claude_account", return_value=None), \
+             mock.patch("agent_monitor.quota.quota_applicability.unavailable", return_value=True), \
+             mock.patch.object(codex, "load_rate_limits", return_value=None):
+            result = quota_service.rate_limits(root=self.root)["codex"]
+        self.assertEqual(result["account_label"], "alpha@example.test")
+        self.assertEqual(result["credential_plan"], "pro")
+        self.assertNotEqual(result["updated_at"], old["updated_at"])
+
+
     def session(self, home, sid, tokens, used, model="gpt-5", archived=False):
         folder = home / ("archived_sessions" if archived else "sessions")
         folder.mkdir(parents=True, exist_ok=True)
@@ -478,6 +544,67 @@ class ManagedCodexTests(unittest.TestCase):
         result = manager.merge(current, SimpleNamespace(ssh_host="fixture"))["codex"]
         self.assertEqual(result["seven_day_pct"], 3)
         self.assertEqual(result["managed_accounts"][0]["seven_day_pct"], 7)
+
+    def test_sync_plan_sources_follow_their_independent_clocks(self):
+        import threading
+        from agent_monitor.quota import quota_sync
+        manager = object.__new__(quota_sync.Manager)
+        manager.condition = threading.Condition()
+        old = dict(account_id="workspace", account_label="alpha@example.test", reading_plan="plus",
+                   credential_plan="pro", account_plan="plus", updated_at="2026-11-01T00:00:00Z")
+        incoming = dict(old, reading_plan="prolite", credential_plan=None, updated_at="2026-11-03T00:00:00Z")
+        for generated, expected in (("2026-11-02T00:00:00Z", None), ("2026-11-04T00:00:00Z", "pro")):
+            manager.records = {"fixture": {"ssh_host": "fixture", "payload": {
+                "source_host_identity": "fixture-id", "rate_limits": {"codex": incoming}},
+                "error": None, "attempted_at": "2026-11-03T00:00:00Z"}}
+            current = SimpleNamespace(host="fixture", meta={"source_host_identity": "fixture-id",
+                "generated_at": generated, "rate_limits": {"codex": old}})
+            row = manager.merge(current, SimpleNamespace(ssh_host="fixture"))["codex"]
+            self.assertEqual(row["reading_plan"], "prolite")
+            self.assertEqual(row["credential_plan"], expected)
+            self.assertEqual(row["account_plan"], "prolite")
+
+    def test_sync_receipt_keeps_plan_with_selected_observation(self):
+        import copy
+        import threading
+        from agent_monitor.quota import quota_sync, quota_view
+        old = dict(account_id="workspace", account_label="alpha@example.test",
+                   updated_at="2026-11-03T00:00:00Z", reading_plan="prolite",
+                   credential_plan=None, account_plan="prolite", five_hour_pct=42)
+        for stamp, expected_plan, expected_pct in (
+                ("2026-11-01T00:00:00Z", "prolite", 42),
+                ("2026-11-04T00:00:00Z", "plus", 7)):
+            with self.subTest(stamp=stamp):
+                manager = object.__new__(quota_sync.Manager)
+                manager.condition = threading.Condition()
+                manager.requested = 1
+                manager.pending = ()
+                manager.errors = {}
+                manager.revision = 0
+                manager.stopping = False
+                manager.on_complete = None
+                manager.path = self.root / "receipt.json"
+                manager.running = True
+                machine = SimpleNamespace(name="fixture", ssh_host="fixture")
+                manager.machines = (machine,)
+                payload = lambda row: {"source_host_identity": "fixture-id",
+                                       "rate_limits": {"codex": copy.deepcopy(row)}}
+                manager.records = {"fixture": {"ssh_host": "fixture", "payload": payload(old),
+                    "attempted_at": old["updated_at"], "error": None}}
+                incoming = dict(old, updated_at=stamp, reading_plan="plus",
+                                account_plan="plus", five_hour_pct=7)
+                with mock.patch.object(quota_sync, "write_message"), mock.patch.object(
+                        quota_sync, "run_queries", side_effect=lambda machines, complete:
+                        complete("fixture", payload(incoming), None)):
+                    manager._run()
+                receipt = manager.records["fixture"]["payload"]["rate_limits"]["codex"]
+                self.assertEqual(receipt["reading_plan"], expected_plan)
+                self.assertEqual(receipt["account_plan"], expected_plan)
+                current = SimpleNamespace(host="fixture", meta={"source_host_identity": "fixture-id",
+                    "generated_at": old["updated_at"], "rate_limits": {"codex": old}})
+                row = manager.merge(current, machine)["codex"]
+                self.assertEqual((quota_view.plan_to_show(row), row["five_hour_pct"]),
+                                 (expected_plan, expected_pct))
 
     def test_active_managed_reading_survives_unrelated_session_link_error(self):
         self.session(self.profile("alpha"), "alpha", 10, 21)

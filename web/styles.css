@@ -748,6 +748,8 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
   color: var(--ink-muted);
 }
 
+.quota-plan-status { white-space: nowrap; }
+
 /* The credential-side plan, shown only when it contradicts the one above it.
    Muted and secondary: it is context for the plan, not a second plan. */
 .quota-plan-mismatch {

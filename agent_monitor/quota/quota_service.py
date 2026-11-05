@@ -127,9 +127,11 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
             value = passive() or RateLimits(None, None, None, None)
             block = rate_limit_block(value, account)
             previous = cached.get(provider)
-            if previous and previous.get("account_id") == account.account_id and quota_time(previous, provider) > quota_time(block, provider):
+            if previous and accounts.quota_identity(provider, previous.get("account_id"), previous.get("account_label")) == accounts.quota_identity(provider, account.account_id, account.label) and quota_time(previous, provider) > quota_time(block, provider):
                 block = dict(previous)
             block.update(subscription_confirmation=note, refresh_error=None, signed_out=False)
+            if provider == "codex" and account:
+                block = _with_credential_plan(block, {"credential_plan": account.plan})
             return provider, query_state(provider, account, block)
         from agent_monitor.runtime import hub as runtime_hub
         if not refresh or (scheduled and not runtime_hub.native_quota_due(root=root)):
@@ -169,6 +171,8 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
                 # credential looks signed in from here, and saying otherwise
                 # would be a claim this path cannot support.
                 block.setdefault("signed_out", account is None)
+            if provider == "codex" and account and block is not None:
+                block = _with_credential_plan(block, {"credential_plan": account.plan})
             block = query_state(provider, account, block)
             return provider, block
         error = None
@@ -218,6 +222,8 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
         previous = cached.get(provider)
         if previous and account and accounts.quota_identity(provider, previous.get("account_id"), previous.get("account_label")) == accounts.quota_identity(provider, account.account_id, account.label) and quota_time(previous, provider) > quota_time(block, provider):
             block = {**previous, **{key: block.get(key) for key in ("refresh_error", "refresh_failure", "signed_out", "query_state", "refresh_attempted_at")}}
+        if provider == "codex" and account:
+            block = _with_credential_plan(block, {"credential_plan": account.plan})
         return provider, query_state(provider, account, block)
 
     # There are two independent provider endpoints, each with one bounded child.
@@ -268,6 +274,9 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
         if profile.account is None:
             continue
         account = accounts.Account(profile.account["account_id"], profile.account["email"], None)
+        credential = accounts.codex_account(profile.home / "auth.json")
+        if credential and accounts.quota_identity("codex", credential.account_id, credential.label) == accounts.quota_identity("codex", account.account_id, account.label):
+            account = dataclasses.replace(account, plan=credential.plan)
         values = [codex.load_rate_limits(profile.home / child, profile.home / "state_5.sqlite", session_links=links)
                   for child in ("sessions", "archived_sessions")
                   if not codex_profiles.shared_source(profile.home / child)]
@@ -299,6 +308,7 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
             block.pop("managed_accounts", None)
             block["account_profile"] = profile.account["name"]
             do_refresh = False
+        block = _with_credential_plan(block, {"credential_plan": account.plan})
         pause = Controls(root / "state/upstream_controls").read("codex").get("pause")
         if not pause:
             clear_pause_projection(block)
@@ -367,6 +377,10 @@ def save_cache(cache_path, result, *, session_links=None):
                     provider, old.get("account_id"), old.get("account_label"))
                                       or quota_time(block, provider) >= quota_time(old, provider)):
                 previous[provider] = block
+                if provider == "codex" and old and "credential_plan" not in block and accounts.quota_identity(
+                        provider, block.get("account_id"), block.get("account_label")) == accounts.quota_identity(
+                        provider, old.get("account_id"), old.get("account_label")):
+                    previous[provider] = _with_credential_plan(block, old)
             elif block is not None:
                 # Keep the newer reading, but report this query's outcome —
                 # both halves of it. `{**old, ...}` alone carried the old
@@ -374,7 +388,7 @@ def save_cache(cache_path, result, *, session_links=None):
                 # that timed out once went on being republished as "not
                 # signed in" every round while its error was dropped.
                 previous[provider] = {
-                    **old,
+                    **(_with_credential_plan(old, block) if provider == "codex" else old),
                     "refresh_error": block["refresh_error"],
                     "signed_out": block.get("signed_out", False),
                     "refresh_failure": block.get("refresh_failure"),
@@ -401,7 +415,21 @@ def save_cache(cache_path, result, *, session_links=None):
             staging.unlink(missing_ok=True)
 
 
-def _merge_managed_accounts(old_rows, new_rows):
+def _with_credential_plan(reading, metadata):
+    """Retain the quota observation while updating independently read metadata.
+
+    Callers admit the account identity first. Key absence supports older
+    exporters; explicit null clears a previously known credential plan.
+    """
+    result = dict(reading)
+    if "credential_plan" in metadata:
+        result.setdefault("reading_plan", None)
+        result["credential_plan"] = _text(metadata["credential_plan"])
+        result["account_plan"] = _text(result.get("reading_plan")) or result["credential_plan"]
+    return result
+
+
+def _merge_managed_accounts(old_rows, new_rows, *, incoming_metadata=True):
     """Merge managed rows without losing nested reads or crossing identities."""
     if not isinstance(new_rows, list):
         return old_rows if isinstance(old_rows, list) else []
@@ -423,7 +451,9 @@ def _merge_managed_accounts(old_rows, new_rows):
         if not same_identity:
             merged[profile] = row
             continue
-        newest = dict(row if quota_time(row, "codex") >= quota_time(previous, "codex") else previous)
+        newest = _with_credential_plan(
+            row if quota_time(row, "codex") >= quota_time(previous, "codex") else previous,
+            row if incoming_metadata and "credential_plan" in row else previous)
         # A failed attempt has no newer quota observation, but its outcome must
         # remain visible beside the retained reading.
         attempt = max((row, previous), key=lambda r: r.get("refresh_attempted_at") or "")
