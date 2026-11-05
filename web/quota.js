@@ -106,7 +106,7 @@
     const terms = quotaFilter.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
     account = quotaDisplayReading(provider, account);
     const text = [account.account_label, account.account_id, account.account_profile, quotaAccountName(account),
-      account.account_plan, quotaPlanLabel(account.account_plan),
+      account.account_plan, quotaPlanLabel(account.account_plan, provider),
       account.reading_plan, account.credential_plan, ...(account.machines || [])]
       .filter(Boolean).join(" ").toLowerCase();
     return terms.every((term) => text.includes(term));
@@ -1034,7 +1034,7 @@
 
     row.appendChild(quotaAccountCell(provider, account));
     row.appendChild(quotaProviderCell(provider));
-    row.appendChild(quotaPlanCell(display));
+    row.appendChild(quotaPlanCell(display, provider));
     QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell(provider, spec, display)));
     row.appendChild(quotaMachinesCell(account, display));
     row.appendChild(quotaUpdatedCell(provider, display, stale, display.quota_source === "account_action"
@@ -1054,7 +1054,7 @@
     return cell;
   }
 
-  function quotaPlanCell(account) {
+  function quotaPlanCell(account, provider = {}) {
     const cell = document.createElement("td");
     if (account.quota_status === "no_subscription") {
       cell.className = "quota-plan-status";
@@ -1072,20 +1072,41 @@
     }
     const plan = document.createElement("span");
     plan.className = "status-pill identity";
-    plan.textContent = quotaPlanLabel(account.account_plan);
+    plan.textContent = quotaPlanLabel(account.account_plan, provider);
     cell.appendChild(plan);
-    if (quotaPlanSourcesDisagree(account)) {
-      // The whole claim in visible text, not in a title. A hover is not a
-      // channel on touch or from the keyboard, and the reader who needs this
-      // is precisely the one who would otherwise read the row as a single
-      // observation — so the words "不一致" and both sources are in the cell.
-      const mismatch = document.createElement("span");
-      mismatch.className = "quota-plan-mismatch";
-      mismatch.textContent =
-        `plan 不一致 · 配额读数 ${quotaPlanLabel(account.reading_plan)}` +
-        ` / 机器凭据 ${quotaPlanLabel(account.credential_plan)}`;
-      mismatch.title = "两者取自不同来源，无法判断哪一个更旧。";
-      cell.appendChild(mismatch);
+    if (account.account_state === "known" && account.presence !== "remembered"
+        && (provider.key === "codex" || quotaPlanSourcesDisagree(account))) {
+      const details = document.createElement("details");
+      details.className = "quota-observation-details quota-plan-details";
+      details.dataset.observationKey = JSON.stringify(["plan", provider.key, account.account_id, account.account_label]);
+      const summary = document.createElement("summary");
+      summary.textContent = "套餐来源";
+      details.appendChild(summary);
+      const note = (text) => {
+        const item = document.createElement("span");
+        item.className = "quota-history-note";
+        item.textContent = text;
+        details.appendChild(item);
+      };
+      const rawPlan = (value) => typeof value === "string" && value ? value : null;
+      const reading = rawPlan(account.reading_plan), credential = rawPlan(account.credential_plan);
+      const describe = (value) => `${quotaPlanLabel(value, provider)}（原始值：${value}）`;
+      if (reading) {
+        const source = account.quota_source === "account_action" ? "账号操作中的配额查询"
+          : {active_query: "主动查询", codex_session: "会话日志", claude_statusline: "状态栏"}[account.quota_observation?.source];
+        const time = typeof account.updated_at === "string" && Number.isFinite(Date.parse(account.updated_at))
+          ? `记录时间：${formatDate(account.updated_at)}` : "记录时间未知";
+        note(`配额记录：${describe(reading)}；${source || "来源未记录"}；${time}。`);
+      } else {
+        note("配额记录中的套餐未取得。");
+      }
+      if (credential) note(`本地登录信息：${describe(credential)}；更新时间未知。`);
+      else note("本地登录信息中的套餐未取得。");
+      if (!reading && !credential) note("保存的套餐来源未记录，不代表当前订阅。");
+      if (quotaPlanSourcesDisagree(account)) {
+        note("两份套餐记录不同，原因尚未核实；不能据此判断升级失败或需要重新登录。");
+      }
+      cell.appendChild(details);
     }
     return cell;
   }
@@ -1101,9 +1122,8 @@
   // than this field leave none. Fewer than two either way, so nothing is
   // compared.
   //
-  // The page stays silent for it, as it does for agreement — but silence here
-  // is the absence of a claim, not a claim of agreement, and the two states
-  // remain distinguishable in the payload for anyone who needs them apart.
+  // This is a raw-record difference, not a subscription or login failure.
+  // Missing sources are stated separately in the accessible source details.
   // See docs/references/metrics.md#account-attribution-and-quota-plans.
   function quotaPlanSourcesDisagree(account) {
     if (account.account_state !== "known") {
@@ -1506,7 +1526,7 @@
       retained.textContent = `历史配额：5 小时已用 ${percent(history.five_hour_used_pct)}；7 天已用 ${percent(history.seven_day_used_pct)}。`
         + (history.observed_at ? `原始观测：${formatDate(history.observed_at)}。` : "原始观测时间未核实。")
         + (history.reading_from ? `来源机器：${history.reading_from}。` : "来源机器未记录。")
-        + (history.account_plan ? `保存的套餐信息：${quotaPlanLabel(history.account_plan)}（不代表当前订阅）。` : "");
+        + (history.account_plan ? `保存的套餐信息：${quotaPlanLabel(history.account_plan, provider)}（不代表当前订阅）。` : "");
       details.appendChild(retained);
       if (account.subscription_confirmation && !account.subscription_confirmation.restored_at) {
         const confirmation = document.createElement("span");
@@ -1569,8 +1589,8 @@
     return cell;
   }
 
-  // Plan tiers arrive as the provider's own identifiers. Known ones get the name
-  // the provider bills them under; anything unrecognised is shown as it came,
+  // Plan tiers arrive as the provider's own identifiers. Known ones use display
+  // names; anything unrecognised is shown as it came,
   // because inventing a label for a tier we do not know is worse than a raw one.
   const QUOTA_PLAN_LABELS = {
     default_claude_max_20x: "Max 20×",
@@ -1584,8 +1604,14 @@
     enterprise: "Enterprise",
   };
 
-  function quotaPlanLabel(plan) {
-    return QUOTA_PLAN_LABELS[plan] || plan;
+  // Codex auth.rs e7f32cf1928a35a9232a633a51c2a03b5a7e2c72;
+  // these are distinct plan identifiers, not price or entitlement guarantees.
+  const CODEX_PLAN_LABELS = {pro: "Pro (More)", prolite: "Pro", promax: "Pro (Max)"};
+
+  function quotaPlanLabel(plan, provider = {}) {
+    const labels = provider.key === "codex" && Object.hasOwn(CODEX_PLAN_LABELS, plan)
+      ? CODEX_PLAN_LABELS : QUOTA_PLAN_LABELS;
+    return Object.hasOwn(labels, plan) ? labels[plan] : plan;
   }
 
   function quotaAccountName(account) {
@@ -1660,7 +1686,7 @@
       const historical = account.last_observation || account;
       const observedAt = account.last_observation ? historical.observed_at : account.updated_at;
       const values = [observedAt ? `观测于 ${formatDate(observedAt)}` : "观测时间未知"];
-      if (account.account_plan) values.push(`采集时套餐：${quotaPlanLabel(account.account_plan)}`);
+      if (account.account_plan) values.push(`采集时套餐：${quotaPlanLabel(account.account_plan, provider)}`);
       provider.windows.forEach((spec) => {
         const reading = quotaUsage(historical[spec.used]);
         const reset = historical[spec.reset];

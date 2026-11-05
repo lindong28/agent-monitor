@@ -21,7 +21,7 @@ function node(tag = 'div') {
     addEventListener(k,f) { this.listeners[k] = f; }, click() { this.listeners.click?.(); },
     querySelectorAll(selector) {
       if (selector.startsWith('.quota-observation-details')) return descendants(this).filter(c =>
-        c !== this && c.className === 'quota-observation-details' && (!selector.endsWith('[open]') || c.open));
+        c !== this && c.className.split(/\s+/).includes('quota-observation-details') && (!selector.endsWith('[open]') || c.open));
       return this.children;
     }
   };
@@ -50,16 +50,21 @@ function account(id,state='known',presence='in_use',machine='alpha') {
 }
 // The selected action reading carries its own plan to the final cell.
 const missingPlan={...account('plan'), account_plan:null, reading_plan:null, credential_plan:null, plan_verification:'unverified'};
-ui.updateCodexQuotaReadings([{account_id:'plan',email:'plan@example.test',last_quota:{observed_at:'2026-02-01T00:00:00Z',plan:'prolite',seven_day_used_pct:42}}]);
+ui.updateCodexQuotaReadings([{account_id:'plan',email:'plan@example.test',last_quota:{observed_at:'2026-02-01T00:00:00Z',plan:'promax',seven_day_used_pct:42}}]);
 const displayed=ui.quotaDisplayReading({key:'codex'},missingPlan);
-assert.equal(displayed.account_plan,'prolite');
+assert.equal(displayed.account_plan,'promax');
 assert.deepEqual(displayed.quota_observation,{source:'active_query',observed_at:'2026-02-01T00:00:00Z'});
-assert.equal(ui.quotaPlanCell(displayed).textContent,'Pro Lite');
+assert.equal(ui.quotaPlanCell(displayed,{key:'codex'}).children[0].textContent,'Pro (Max)');
 ui.renderQuotaAccounts({codex:{accounts:[missingPlan]}});
-assert(table.textContent.includes('Pro Lite'));
+assert(table.textContent.includes('Pro (Max)'));
+const planDetails = descendants(table).find(n => n.className.includes('quota-plan-details'));
+planDetails.open = true;
+ui.renderQuotaAccounts({codex:{accounts:[missingPlan]}});
+assert(descendants(table).find(n => n.dataset.observationKey === planDetails.dataset.observationKey).open);
+assert(!descendants(table).find(n => n.className === 'quota-observation-details').open);
 assert(!table.textContent.includes('套餐未核实'));
 assert(table.textContent.includes('配额与读数套餐来自此次账号操作查询'));
-ui.quotaFilter.search='Pro Lite';
+ui.quotaFilter.search='Pro (Max)';
 assert(ui.quotaMatches({key:'codex'},missingPlan));
 ui.quotaFilter.search='';
 assert.equal(ui.quotaDisplayReading({key:'codex'},{...missingPlan,updated_at:'2026-03-01T00:00:00Z'}).account_plan,null);
@@ -138,10 +143,10 @@ for (const state of ['unstamped', 'signed_out', 'known']) {
       assert.equal(table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId).length,size);
       assert(machineRecords.hidden);
       assert(nodes['#quota-machine-notice'].hidden);
-      let details=table.querySelectorAll('.quota-observation-details');
+      let details=table.querySelectorAll('.quota-observation-details').filter(d=>d.className==='quota-observation-details');
       details[0].open=true;
       ui.renderQuotaAccounts(readings);
-      details=table.querySelectorAll('.quota-observation-details');
+      details=table.querySelectorAll('.quota-observation-details').filter(d=>d.className==='quota-observation-details');
       assert.deepEqual(details.map(d=>d.open),size===1?[true]:[true,false]);
     } else {
       assert(!table.textContent.includes('old-a'),'unidentified machine must leave account comparison');

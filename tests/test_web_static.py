@@ -13,6 +13,80 @@ def app_source():
 
 
 class WebStaticTests(unittest.TestCase):
+    def test_codex_plan_sources_keep_tiers_and_observation_clocks_separate(self):
+        script = r'''
+const assert = require('assert');
+function node(tag) {
+  let ownText = '';
+  const item = {tagName: tag.toUpperCase(), children: [], dataset: {}, className: '',
+    appendChild(child) { this.children.push(child); return child; },
+    setAttribute() {}};
+  Object.defineProperty(item, 'textContent', {
+    get() { return ownText + this.children.map(child => child.textContent).join(''); },
+    set(value) { ownText = String(value); this.children = []; }
+  });
+  return item;
+}
+const quota = require('./web/quota.js')({
+  platform: {window: {}, document: {createElement: node}}, formatDate: value => value,
+});
+const codex = {key: 'codex'}, claude = {key: 'claude'};
+const known = {account_id: 'acct', account_label: 'fixture@example.test', account_state: 'known',
+  account_plan: 'promax', reading_plan: 'promax', credential_plan: 'pro',
+  updated_at: '2026-11-05T10:01:42Z', quota_observation: {source: 'active_query'}};
+for (const [raw, label] of [['pro', 'Pro (More)'], ['prolite', 'Pro'], ['promax', 'Pro (Max)']]) {
+  assert.equal(quota.quotaPlanLabel(raw, codex), label);
+}
+assert.equal(quota.quotaPlanLabel('pro', claude), 'Pro');
+assert.equal(quota.quotaPlanLabel('default_claude_pro', claude), 'Pro');
+assert.equal(quota.quotaPlanLabel('future_tier', codex), 'future_tier');
+for (const value of ['toString', '__proto__', 'constructor']) {
+  assert.equal(quota.quotaPlanLabel(value, codex), value);
+}
+const cell = quota.quotaPlanCell(known, codex);
+assert.equal(cell.children[0].textContent, 'Pro (Max)');
+const details = cell.children.find(child => child.tagName === 'DETAILS');
+assert.ok(details && !details.open);
+assert.equal(details.children[0].textContent, '套餐来源');
+assert.ok(details.textContent.includes('promax'));
+assert.ok(details.textContent.includes('本地登录信息'));
+assert.ok(details.textContent.includes('更新时间未知'));
+assert.ok(details.textContent.includes(known.updated_at));
+assert.ok(details.textContent.includes('原因尚未核实'));
+assert.ok(!cell.textContent.includes('plan 不一致'));
+for (const reading_plan of ['pro', null]) {
+  const text = quota.quotaPlanCell({...known, account_plan: 'pro', reading_plan}, codex).textContent;
+  assert.ok(!text.includes('原因尚未核实'));
+}
+const missingTime = quota.quotaPlanCell({...known, updated_at: 'invalid'}, codex).textContent;
+assert.ok(missingTime.includes('记录时间未知'));
+const passive = quota.quotaPlanCell({...known, quota_observation: {source: 'codex_session'}}, codex).textContent;
+assert.ok(passive.includes('会话日志'));
+assert.ok(!passive.includes('主动查询'));
+const legacy = quota.quotaPlanCell({account_state: 'known', account_plan: 'pro'}, codex).textContent;
+assert.ok(legacy.includes('来源未记录'));
+assert.ok(legacy.includes('配额记录中的套餐未取得'));
+assert.ok(!legacy.includes('未提供套餐'));
+// A newer account-action observation replaces the plan and numbers together.
+quota.updateCodexQuotaReadings([{account_id: 'acct', email: 'fixture@example.test',
+  last_quota: {observed_at: '2026-11-05T11:00:00Z', plan: 'promax', seven_day_used_pct: 1}}]);
+const before = {...known, account_plan: 'pro', reading_plan: 'pro', seven_day_used_pct: 80};
+const after = quota.quotaDisplayReading(codex, before);
+assert.equal(after.account_plan, 'promax');
+assert.equal(after.seven_day_used_pct, 1);
+assert.equal(after.updated_at, '2026-11-05T11:00:00Z');
+assert.equal(after.credential_plan, 'pro');
+assert.ok(quota.quotaPlanCell(after, codex).textContent.includes('更新时间未知'));
+const newer = {...before, updated_at: '2026-11-05T12:00:00Z'};
+assert.strictEqual(quota.quotaDisplayReading(codex, newer), newer);
+quota.quotaFilter.search = 'Pro (Max)';
+assert.ok(quota.quotaMatches(codex, before));
+quota.quotaFilter.search = 'Pro (More)';
+assert.ok(!quota.quotaMatches(codex, before));
+'''
+        result = subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_reader_state_survives_explicit_asset_refresh(self):
         script = r'''
 const assert = require('assert');
@@ -948,30 +1022,8 @@ process.stdout.write(JSON.stringify({
         self.assertNotIn("quotaBandPill", cell)
         self.assertIn('line.appendChild(reset)', cell)
 
-    def test_the_plan_cell_states_a_disagreement_and_stays_silent_otherwise(self):
-        """Three states, and only one of them is ever asserted on the page.
-
-        The row's plan and its quota figures come from one event; the
-        credential file is a separate clock. One event, not one
-        observation — a figure whose window has since reset is rewritten
-        to zero while the plan keeps what the event reported. When the two plans disagree the cell says so
-        — in words, in the cell, not only in a hover — because otherwise the
-        row reads as one observation and the reader has no way to tell.
-
-        Having nothing to compare against renders the same as agreement — the
-        page asserts nothing in either case, and putting a permanent caveat on
-        every Claude row (whose reading never carries a plan) would be noise,
-        not information. What must not collapse is the payload: the two states
-        stay tellable apart there, which `test_account_identity` pins. Here
-        the fixtures only have to prove the marker itself does not misfire on
-        any of them — signed out, an unreadable credential file, an API-key
-        machine, a remembered row, an exporter older than the field.
-
-        The comparison reads the two raw plans, never the derived one: with
-        `account_plan` on the left the credential-only case would compare the
-        credential against itself and could never disagree, which looks
-        identical to working correctly.
-        """
+    def test_plan_source_details_explain_only_actual_raw_record_differences(self):
+        """Missing, historical and equal sources must not imply a conflict."""
         script = r'''
 const fs = require("fs");
 
@@ -1028,7 +1080,7 @@ require("./web/app.js")();
 function reading(account) {
   const cell = window.AgentMonitor.quotaPlanCell(account);
   const marker = descendants(cell)
-    .filter((node) => node.className.split(/\s+/).includes("quota-plan-mismatch"))[0];
+    .find((node) => node.tagName === "SPAN" && node.textContent.includes("两份套餐记录不同"));
   return {
     text: cell.textContent,
     marker: marker ? { text: marker.textContent, title: marker.title || "" } : null,
@@ -1094,21 +1146,16 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
 
-        # Disagreement is stated, with both values, and both are named in
-        # readable text rather than left to the reader to infer from a badge.
+        # The raw difference remains accessible, without prescribing recovery.
         disagree = payload["disagree"]
         self.assertIsNotNone(disagree["marker"])
-        visible = disagree["marker"]["text"]
-        # The claim itself, not two values left side by side for the reader to
-        # draw the conclusion from — and in the cell, because a title is not a
-        # channel on touch or from the keyboard.
-        self.assertIn("不一致", visible)
-        # Both sources named where they are read, so the visible text stands on
-        # its own: which value came from the reading, which from the machine.
+        visible = disagree["text"]
+        self.assertIn("原因尚未核实", visible)
         self.assertIn("Pro Lite", visible)
         self.assertIn("Pro", visible)
-        self.assertIn("读数", visible)
-        self.assertIn("凭据", visible)
+        self.assertIn("配额记录", visible)
+        self.assertIn("本地登录信息", visible)
+        self.assertNotIn("plan 不一致", visible)
         # The claim is that they differ, not that one of them is stale: which
         # is older is not knowable from the pair, and the sample that prompted
         # this had the reading newer than the credential file.
