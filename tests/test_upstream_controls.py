@@ -187,8 +187,8 @@ class UpstreamControlsTests(unittest.TestCase):
         self.addCleanup(manager.close)
         account = manager.add("cancel@example.test", "cancel-workspace")
         directory = manager.directory(account["id"])
-        (directory / "codex").mkdir(exist_ok=True)
-        (directory / "codex/auth.json").write_text("synthetic local prerequisite")
+        from tests.test_codex_accounts import seed_auth
+        seed_auth(manager, account)
         prepared = manager.prepare(account["id"], refresh_only=True)
         operation_id = prepared[1]["operation"]["id"]
         manager.run(*prepared)

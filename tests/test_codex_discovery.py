@@ -195,7 +195,7 @@ class DiscoveryTests(unittest.TestCase):
         for row in rows:
             seed_auth(self.manager, row)
         ids = [row["id"] for row in rows]
-        self.scenarios[rows[1]["email"]] = "account_read_timeout"
+        self.scenarios[rows[1]["email"]] = "quota_rpc_diagnostic"
         payload = {"profile_ids": ids, "connection": self.connection, "approval_expected": None,
                    "confirmation": self.route.issue(ids, None, "refresh-selected")}
         self.assertEqual(self.request("/refresh-selected", payload)[0], 200)
@@ -213,7 +213,8 @@ class DiscoveryTests(unittest.TestCase):
         self.wait()
         self.assertEqual(self.request("/refresh-retry", retry)[0], 409)
         methods = [self.methods(row) for row in rows]
-        self.assertEqual([m.count("account/rateLimits/read") for m in methods], [1, 0, 1])
+        self.assertEqual([m.count("account/rateLimits/read") for m in methods], [1, 1, 1])
+        self.assertTrue(all("account/read" not in m for m in methods))
         self.assertTrue(all("turn/start" not in m for m in methods))
     def test_refresh_all_http_action_consumes_route_and_dispatches_current_scope(self):
         self.source("one-workspace", "one@example.com")
