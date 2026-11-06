@@ -28,7 +28,7 @@ Earlier source comments cited `ADR-024` and `20260822-586a`, whose records are n
 
 ## Account-read diagnostics
 
-[codex_accounts.py](../../agent_monitor/accounts/codex_accounts.py) maps a fixed set of `account/read` error messages with JSON-RPC code `-32603` to bounded diagnostic reasons. Unrecognized messages keep the generic reason and are not retained verbatim. The mapping explains a failed request; it does not decide admission, retry or recovery. [test_account_read_diagnostics.py](../../tests/test_account_read_diagnostics.py) covers this local mapping with synthetic responses.
+[codex_accounts.py](../../agent_monitor/accounts/codex_accounts.py) maps a fixed set of `account/read` error messages with JSON-RPC code `-32603` to bounded diagnostic reasons. Unrecognized messages keep the generic reason and a bounded redacted summary in `rpc_failure`. Known credential values from before and after the request are removed before syntax redaction and truncation; this is not a guarantee for arbitrary secret text. The summary persists with the operation, saved failure and pause, including post-send quota failures. The mapping explains a failed request; it does not decide admission, retry or recovery. [test_account_read_diagnostics.py](../../tests/test_account_read_diagnostics.py) covers this local mapping with synthetic responses.
 
 The implementation records Codex 0.162.1 commit `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d` as its source pin. That existing pin is not a fresh upstream verification here. The former `20261023-b72e` ADR pointer has no included record; it is not required to find or maintain this implementation boundary.
 
@@ -56,3 +56,12 @@ Source repository: [openai/codex](https://github.com/openai/codex). At each pinn
 Run the affected modules with the isolated HOME procedure in [CONTRIBUTING](../../CONTRIBUTING.md): `test_metric_accounting.py`, `test_source_metric_repairs.py`, `test_codex_forks.py`, `test_history_contracts.py` and `test_token_cost.py`. Include repeated observations, unresolved ancestry, known-zero and unknown-price cases as relevant. Snapshot schema admission establishes identity/retention, not completeness of every provider call.
 
 Quota is a timestamped account observation, not usage or a current permission to send. An elapsed reset timestamp does not prove recovery. Existing account applicability, pauses and uncertain-send outcomes survive restarts; do not clear them as part of an accounting change. For operational diagnostics, see [service diagnostics](../operations/services.md).
+
+
+## Codex quota-only request contract
+
+Pure quota queries use `codex_quota.read_bound` in both the account-action RPC and bounded native/discovered-profile reader. It checks the same local `(account_id, email)` before and after one `account/rateLimits/read`, rejects a missing or different response account and requires a usable five-hour or seven-day percentage. The credential home is the exact one passed to the child. Existing admission, cancellation, route bridge and pause ownership remain with each caller. Missing windows do not replace a previous valid reading.
+
+The fixed upstream [account processor at e7f32cf](https://github.com/openai/codex/blob/e7f32cf1928a35a9232a633a51c2a03b5a7e2c72/codex-rs/app-server/src/request_processors/account_processor.rs#L1177) authenticates the quota method independently; its [rate-limit test](https://github.com/openai/codex/blob/e7f32cf1928a35a9232a633a51c2a03b5a7e2c72/codex-rs/app-server/tests/suite/v2/rate_limits.rs#L243) initializes then requests quota without `account/read`. That supports removing the extra identity RPC from pure quota queries. Login and sending retain it. This is not proof of an old `account/read` failure's root cause or that the installed binary equals this source pin. One quota RPC may include multiple upstream HTTP calls, including reset-credit metadata.
+
+Unknown RPC errors retain protection and are not automatically replayed. `-32603` is an envelope, and an observed `401/token_revoked` response alone does not establish why it happened or authorize replacing credentials. Existing human-confirmed pause recovery is unchanged; successful quota reads do not authorize sending without the existing explicit provider permission conditions. See [the recurrence decision](../adr/20261106-quota-recurrence.md).

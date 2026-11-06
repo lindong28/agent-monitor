@@ -340,7 +340,7 @@ def _claude(account):
 
 
 def _codex_rpc_error(error, request_id):
-    # Never expose upstream free text: it can contain URLs and credentials.
+    # User guidance is separate from the bounded, redacted diagnostic summary.
     if isinstance(error, dict):
         if error.get("code") == -32601:
             return "Codex CLI 不支持配额查询接口，请更新这台机器上的 CLI 后重试。"
@@ -354,13 +354,13 @@ def _codex_rpc_error(error, request_id):
             if isinstance(body, dict) and body.get("status") == 401:
                 detail = body.get("error")
                 if isinstance(detail, dict) and detail.get("code") == "token_revoked":
-                    return "Codex 登录凭据已被撤销，无法刷新配额；请在这台机器上运行 codex login 重新登录后重试。"
-    return "Codex 配额请求失败，请检查这台机器的网络与登录状态后重试。"
+                    return "上游返回 401/token_revoked，本次未取得配额；原因尚未核实，请保留诊断信息并排查目标机器。"
+    return "Codex 配额请求失败，本次未取得新读数；请查看诊断信息后处理。"
 
 
-def _rpc_failure(error, request_id):
+def _rpc_failure(error, request_id, secrets=()):
     from agent_monitor.quota.codex_quota import rpc_failure
-    return rpc_failure(error, stage="initialize" if request_id == 1 else "quota_read")
+    return rpc_failure(error, stage="initialize" if request_id == 1 else "quota_read", secrets=secrets)
 
 
 def account_fingerprint(provider, account):
@@ -370,21 +370,20 @@ def account_fingerprint(provider, account):
 
 
 def _codex(account):
+    from agent_monitor.quota import codex_quota
     try:
         env = network_policy.child_environment(os.environ)
     except network_policy.NetworkPolicyError as exc:
         raise LocalUnavailable(str(exc)) from None
-    if account.get("codex_home"):
-        # A discovered home is already CODEX_HOME, not a Manager operation root.
-        # Preserve Codex's own credential/config storage and do not copy auth.
-        from parsers.accounts import codex_account
-        home = Path(account["codex_home"])
-        current = codex_account(home / "auth.json")
-        if current is None or quota_identity("codex", current.account_id, current.label) != quota_identity(
-                "codex", account["account_id"], account.get("label")):
-            raise LocalUnavailable("此配置的登录身份与账号记录不一致，未发出配额请求。",
-                                   failure={"stage": "account_check", "kind": "account_mismatch"})
-        env["CODEX_HOME"] = str(home)
+    # Bind the exact home consumed by the child, including the native default.
+    home = Path(account.get("codex_home") or env.get("CODEX_HOME") or Path.home() / ".codex")
+    auth_path = home / "auth.json"
+    try:
+        codex_quota.check_identity(auth_path, account["account_id"], account.get("label"))
+    except codex_quota.ReadingError as exc:
+        raise LocalUnavailable(str(exc), failure=exc.failure) from None
+    env["CODEX_HOME"] = str(home)
+    redactions = codex_quota.credential_secrets(auth_path)
     # SSH/launchd do not load shell rc files. Supply installed user binary paths
     # to the existing shim as well as to its backend lookup.
     env["PATH"] = os.pathsep.join([str(Path.home() / ".local/bin"),
@@ -420,7 +419,8 @@ def _codex(account):
                     if "error" in message:
                         # Keep failures visible and preserve the prior reading.
                         raise RefreshError(_codex_rpc_error(message["error"], request_id),
-                                           failure=_rpc_failure(message["error"], request_id))
+                                           failure=_rpc_failure(message["error"], request_id,
+                                               redactions + codex_quota.credential_secrets(auth_path)))
                     return message["result"]
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not selector.select(remaining):
@@ -439,20 +439,15 @@ def _codex(account):
             receive(1)
         with _failure_stage("quota_read"):
             send({"method": "initialized"})
-            send({"id": 2, "method": "account/rateLimits/read"})
-            result = receive(2)
-        reported_account = result.get("accountId")
-        if reported_account is None:
-            # A null accountId is permitted by the current protocol.
-            raise RefreshError("Codex 配额响应未提供账号，无法核验读数归属；请稍后重试。",
-                               failure={"stage": "account_check", "kind": "account_missing"})
-        if reported_account != account["account_id"]:
-            # A different account really is a sign-in mismatch: whatever this
-            # machine is signed in as now, it is not the credential we read.
-            raise RefreshError("Codex 当前登录的账号与这台机器的凭据不是同一个。",
-                               failure={"stage": "account_check", "kind": "account_mismatch"})
-        from agent_monitor.quota.codex_quota import decode
-        reading = decode(result, account["account_id"])
+            def request(method, params):
+                nonlocal redactions
+                redactions += codex_quota.credential_secrets(auth_path)
+                send({"id": 2, "method": method, "params": params})
+                return receive(2)
+            try:
+                reading = codex_quota.read_bound(request, auth_path, account["account_id"], account.get("label"))
+            except codex_quota.ReadingError as exc:
+                raise RefreshError(str(exc), failure=exc.failure) from None
         value = _reading((reading["five_hour_used_pct"], reading["five_hour_resets_at"]),
                          (reading["seven_day_used_pct"], reading["seven_day_resets_at"]), plan=reading["plan"])
         return dataclasses.replace(value, **{key: reading[key] for key in (

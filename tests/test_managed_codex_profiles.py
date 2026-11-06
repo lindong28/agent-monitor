@@ -37,6 +37,7 @@ class ManagedCodexTests(unittest.TestCase):
         self.stack.enter_context(mock.patch("parsers.accounts.CODEX_AUTH", self.default / "auth.json"))
         for target, value in (("parsers.codex.SESSIONS_DIR", str(self.default / "sessions")),
                               ("parsers.codex.STATE_DB", str(self.default / "state_5.sqlite")),
+                              ("parsers.claude_status.STATUS_FILE", str(self.root / ".claude/tt-status.json")),
                               ("parsers.claude._get_claude_dirs", None)):
             self.stack.enter_context(mock.patch(target, return_value=[]) if value is None else mock.patch(target, value))
         self.registry = self.root / ".local/share/codex-accounts"

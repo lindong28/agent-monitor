@@ -45,8 +45,13 @@ for line in sys.stdin:
             "account_read_transport": "workspace routing discovery failed",
             "account_read_timeout": "workspace routing discovery timed out",
             "account_read_unsafe": "workspace routing discovery failed SECRET_FIXTURE_TOKEN https://secret.example/path",
+            "account_read_rotated": "rotation failed SECRET_FIXTURE_TOKEN NEXT_FIXTURE_TOKEN",
         }
         if scenario in read_errors or scenario == "account_read_malformed":
+            if scenario == "account_read_rotated":
+                auth = json.loads((home / "auth.json").read_text())
+                auth["tokens"]["access_token"] = "NEXT_FIXTURE_TOKEN"
+                (home / "auth.json").write_text(json.dumps(auth))
             error = {"code": -32603, "message": read_errors.get(scenario)}
             if scenario == "account_read_malformed":
                 error = ["SECRET_FIXTURE_TOKEN"]
@@ -86,7 +91,7 @@ for line in sys.stdin:
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
     elif method == "account/rateLimits/read":
         quota_reads += 1
-        if scenario == "quota_rpc_diagnostic":
+        if scenario == "quota_rpc_diagnostic" or (scenario == "post_quota_diagnostic" and quota_reads > 1):
             emit({"id": message["id"], "error": {"code": -32603, "message":
                 'failed to fetch codex rate limits: body=' + json.dumps({"status": 401,
                     "error": {"code": "token_revoked", "message": "session expired access_token=SECRET_FIXTURE_TOKEN"}})}})
@@ -104,6 +109,8 @@ for line in sys.stdin:
             result["rateLimits"]["rateLimitReachedType"] = "rate_limit_reached"
         if scenario == "rounded_full":
             result["rateLimits"]["secondary"]["usedPercent"] = 100
+        if scenario == "missing_windows":
+            result["rateLimits"] = {"limitId": "codex", "ordinaryUsageAllowed": True}
     elif method == "config/read":
         # Producer-shaped fixture, frozen to the audited 0.162.1 feature names.
         flags = "apps code_mode code_mode_only code_mode_host context_management current_time_reminder deferred_executor enable_fanout goals hooks image_generation memories multi_agent multi_agent_v2 plugins request_permissions_tool shell_snapshot shell_tool standalone_web_search token_budget tool_suggest unified_exec view_image sleep_tool stable_environment_tools send_message_to_user_async".split()

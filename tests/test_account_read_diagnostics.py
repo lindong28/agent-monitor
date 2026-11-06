@@ -102,8 +102,10 @@ class AccountReadDiagnosticsTests(unittest.TestCase):
                 self.assertIn("具体原因未识别", op["detail"])
                 self.assertNotIn("CLI 版本", op["detail"])
                 persisted = (self.manager.directory(result["id"]) / "profile.json").read_text()
-                for secret in ("SECRET_FIXTURE_TOKEN", "secret.example"):
-                    self.assertNotIn(secret, persisted + json.dumps(self.manager.list()))
+                self.assertNotIn("SECRET_FIXTURE_TOKEN", persisted + json.dumps(self.manager.list()))
+                if scenario == "account_read_unsafe":
+                    # A URL without credentials is useful diagnostic context.
+                    self.assertIn("https://secret.example/path", op["diagnostics"]["rpc_failure"]["detail"])
 
     def test_failure_reason_is_readable_through_account_http_api(self):
         result = self.run_case("account_read_workspace")
@@ -141,12 +143,40 @@ class AccountReadDiagnosticsTests(unittest.TestCase):
             with self.subTest(error=error):
                 rpc = ca.Rpc.__new__(ca.Rpc)
                 rpc.sequence, rpc.pending, rpc.diagnostics = 0, [], {}
+                rpc.auth_path = self.root / "synthetic-auth-not-present.json"
+                rpc.redaction_values = ("SECRET_FIXTURE_TOKEN",)
                 rpc.send = mock.Mock()
                 rpc.receive = mock.Mock(return_value={"id": 1, "error": error})
                 with self.assertRaises(ca.ActionError) as raised:
                     rpc.request("account/read", {"refreshToken": False}, 0)
                 self.assertEqual(rpc.diagnostics["rpc_error_reason"], "unrecognized")
                 self.assertNotIn("SECRET_FIXTURE_TOKEN", str(raised.exception) + json.dumps(rpc.diagnostics))
+
+    def test_decoded_errors_redact_old_and_rotated_credentials(self):
+        old, new = "SECRET_FIXTURE_TOKEN", "NEXT_FIXTURE_TOKEN"
+        for method in ("account/read", "account/rateLimits/read"):
+            for encoded in (False, True):
+                with self.subTest(method=method, encoded=encoded):
+                    body = json.dumps({"status": 401, "error": {
+                        "code": old, "message": "rotation failed " + old + " " + new}})
+                    if encoded:
+                        for secret in (old, new):
+                            body = body.replace(secret, "".join("\\u%04x" % ord(c) for c in secret))
+                    rpc = ca.Rpc.__new__(ca.Rpc)
+                    rpc.sequence, rpc.pending, rpc.diagnostics = 0, [], {}
+                    rpc.auth_path = self.root / "synthetic-auth-not-present.json"
+                    rpc.redaction_values = (old,)
+                    rpc.send = mock.Mock()
+                    rpc.receive = mock.Mock(return_value={"id": 1, "error": {
+                        "code": -32603, "message": "request failed body=" + body}})
+                    with mock.patch.object(ca.codex_quota, "credential_secrets", return_value=(new,)):
+                        with self.assertRaises(ca.ActionError):
+                            rpc.request(method, {}, 0)
+                    rpc.send.assert_called_once()
+                    facts = rpc.diagnostics["rpc_failure"]
+                    self.assertIn("rotation failed", facts["detail"])
+                    for secret in (old, new):
+                        self.assertNotIn(secret, json.dumps(facts))
 
 
 if __name__ == "__main__":

@@ -512,7 +512,8 @@ class AccountActionsTests(unittest.TestCase):
     def test_relogin_clears_requirement_without_sending_or_querying(self):
         self.scenario = "expired_login"
         account = self.account()
-        self.manager.start(account["id"], refresh_only=True)
+        # Sending still checks the remote identity; quota-only reads do not.
+        self.manager.start(account["id"])
         failed = self.wait(account["id"])
         self.assertTrue(failed["has_credentials"])
         self.assertTrue(failed["login_required"])

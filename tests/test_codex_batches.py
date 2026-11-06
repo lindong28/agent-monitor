@@ -225,17 +225,17 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(self.calls(good), 0)
 
     def test_quota_partial_failure_disabled_attribution_and_remaining_resume(self):
-        ids = [self.add(i, "account_read_timeout" if i == 3 else "success") for i in range(9)]
+        ids = [self.add(i, "quota_rpc_diagnostic" if i == 3 else "success") for i in range(9)]
         self.manager.start_refresh_batch(ids)
         data = self.wait()
         batch = data["quota_batch"]
         self.assertEqual([item["operation"]["stage"] for item in batch["items"]], ["succeeded"] * 3 + ["failed"] * 6)
-        self.assertEqual([self.calls(pid, "account/read") for pid in ids], [1] * 4 + [0] * 5)
-        self.assertEqual([self.calls(pid, "account/rateLimits/read") for pid in ids], [1] * 3 + [0] * 6)
+        self.assertEqual([self.calls(pid, "account/read") for pid in ids], [0] * 9)
+        self.assertEqual([self.calls(pid, "account/rateLimits/read") for pid in ids], [1] * 4 + [0] * 5)
         failed = next(a for a in data["accounts"] if a["id"] == ids[3])
         pause = data["upstream_pause"]
         self.assertEqual(pause["source"], {"profile_id": ids[3], "operation_id": failed["operation"]["id"], "action": "quota"})
-        self.assertEqual(pause["failure"]["upstream_code"], "discoveryTimeout")
+        self.assertEqual(pause["failure"]["upstream_code"], "token_revoked")
         first_readings = [item["operation"]["after"] for item in batch["items"][:3]]
         self.manager.set_disabled(ids[3], True, failed["operation"]["id"])
         with self.assertRaises(ca.ActionError):
@@ -260,7 +260,7 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(restarted.list()["quota_batch"]["id"], batch["id"])
         self.manager.start_refresh_batch(ids[4:], retry_revision=batch["revision"])
         result = self.wait()
-        self.assertEqual([self.calls(pid, "account/rateLimits/read") for pid in ids], [1] * 3 + [0] + [1] * 5)
+        self.assertEqual([self.calls(pid, "account/rateLimits/read") for pid in ids], [1] * 9)
         self.assertEqual([self.calls(pid) for pid in ids], [0] * 9)
         self.assertEqual([item["operation"]["after"] for item in result["quota_batch"]["items"][:3]], first_readings)
         self.assertIsNone(result["upstream_pause"])

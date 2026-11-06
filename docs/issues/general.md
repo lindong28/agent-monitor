@@ -12,8 +12,10 @@ Follow-up: inventory legitimate resume callers and decide the compatibility poli
 
 ## ISSUE-DIAGNOSTICS-20261028-b731 — Post-send quota failure loses detailed cause
 
-Status: open. Owner: agent-monitor account operations. Priority: diagnostic follow-up.
+Status: resolved in the 2026-11-06 quota recurrence repair. Owner: agent-monitor account operations.
 
 At baseline 82b8219, the post-send quota `except ActionError` in `accounts/codex_accounts.py:Manager.run` saves category/stage and calls `lease.pause("quotaReadFailed")` without the failure details. A successful message is correctly retained, but this path cannot supply the same detailed receipt as quota recovery. The original incident has not been attributed to this path.
 
 Follow-up: preserve a bounded redacted cause through the post-send failure path with an isolated RPC failure case; keep successful message state and prevent replay. This is a producer-side change outside the current shared recovery UI presentation scope; the UI explicitly reports when old diagnostic details were not recorded.
+
+The recurrence repair shares pause-failure construction with the normal action failure path, persists the safe RPC cause and operation identity, and preserves `message_status=succeeded` without replay. `tests/test_quota_recurrence.py` exercises this through an isolated stdio peer and saved account state. Historical missing fields are not backfilled.

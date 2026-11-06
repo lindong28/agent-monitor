@@ -24,6 +24,7 @@ from agent_monitor.accounts.upstream_controls import Controls; from agent_monito
 from agent_monitor.accounts.codex_messages import MESSAGES
 from agent_monitor.network import network_policy
 from agent_monitor.network import client_network
+from agent_monitor.quota import codex_quota
 
 
 MESSAGE = f"从 {len(MESSAGES)} 条日常短消息中独立随机抽取一条，可能重复。"
@@ -293,6 +294,8 @@ class Rpc:
         self.process_guard = threading.Lock()
         for name in ("home", "codex", "work"):
             private_dir(home / name)
+        self.auth_path = home / "codex/auth.json"
+        self.redaction_values = codex_quota.credential_secrets(self.auth_path)
         try:
             env = child_environment(home, scope=uuid.uuid4().hex)
         except network_policy.NetworkPolicyError as exc:
@@ -373,6 +376,7 @@ class Rpc:
             self.buffer += chunk
 
     def request(self, method, params, deadline):
+        redactions = self.redaction_values + codex_quota.credential_secrets(self.auth_path)
         if method != "turn/interrupt":
             self.diagnostics.update(last_request=method, last_request_at=now())
         self.sequence += 1
@@ -383,12 +387,16 @@ class Rpc:
             if value.get("id") == request_id:
                 if "error" in value:
                     error = value["error"]
+                    if method in ("account/read", "account/rateLimits/read"):
+                        self.diagnostics["rpc_failure"] = codex_quota.rpc_failure(
+                            error, stage="account_check" if method == "account/read" else "quota_read",
+                            secrets=redactions + codex_quota.credential_secrets(self.auth_path))
                     if method == "account/read":
                         code = error.get("code") if isinstance(error, dict) else None
                         message = error.get("message") if isinstance(error, dict) else None
                         if type(code) is int:
                             self.diagnostics["rpc_error_code"] = code
-                        reason, detail = "unrecognized", "具体原因未识别；上游原文未保存，以免泄露凭据。请保留本次诊断记录再排查。"
+                        reason, detail = "unrecognized", "具体原因未识别；请查看技术详情中的脱敏错误摘要。"
                         if type(code) is int and code == -32603 and isinstance(message, str):
                             reason, detail = ACCOUNT_READ_ERRORS.get(message, (reason, detail))
                         self.diagnostics["rpc_error_reason"] = reason
@@ -398,8 +406,6 @@ class Rpc:
                     if type(code) is int:
                         self.diagnostics["rpc_error_code"] = code
                     if method == "account/rateLimits/read":
-                        from agent_monitor.quota.codex_quota import rpc_failure
-                        self.diagnostics["rpc_failure"] = rpc_failure(error)
                         detail = ("当前 Codex 不支持配额查询接口，请核对 CLI 版本。" if code == -32601 else
                                   "Codex 配额查询失败，本次未取得新读数；请查看技术详情中的错误摘要。")
                         raise ActionError(detail, 502)
@@ -1111,6 +1117,19 @@ class Manager:
         self.save(directory, record)
         return True
 
+    def pause_operation(self, lease, record, rpc, reason):
+        from parsers.accounts import Account
+        from agent_monitor.quota.quota_refresh import account_fingerprint
+        op = record["operation"]
+        facts = getattr(rpc, "diagnostics", {})
+        lease.pause(reason, failure={"stage": "account_check" if op["stage"] == "checking" else "quota_read",
+            "rpc_code": facts.get("rpc_error_code"), "upstream_code": facts.get("rpc_error_reason"),
+            "kind": "rpc_error", **facts.get("rpc_failure", {}),
+            "account_profile": "monitor-" + record["id"],
+            "account_fingerprint": account_fingerprint("codex", Account(record["account_id"], record["email"], None))},
+            source={"profile_id": record["id"], "operation_id": op["id"],
+                    "action": "quota" if op["refresh_only"] else "login" if op.get("login_only") else "send"})
+
     def run(self, directory, record, job, lock):
         rpc = None
         lease = None
@@ -1151,6 +1170,16 @@ class Manager:
                 raise ActionError("本页尚未保存登录态。请单独登录；授权完成后需重新点击发送或刷新。", 409, "needsLogin")
             if not record["operation"].get("login_only") and record.get("login_required"):
                 raise ActionError("最近检查未取得可用登录态，请单独登录后再操作；本次未发出上游请求。", 409, "needsLogin")
+            if record["operation"]["refresh_only"]:
+                credential = codex_account(directory / "codex/auth.json")
+                account_id = record.get("account_id") or (credential.account_id if credential else None)
+                try:
+                    codex_quota.check_identity(directory / "codex/auth.json", account_id, record["email"])
+                except ValueError as exc:
+                    raise ActionError(str(exc), 409) from None
+                record["account_id"] = account_id
+                (directory / "codex/auth.json").chmod(0o600)
+                self.save(directory, record)
             acquire_slot()
             slot = True
             try:
@@ -1163,6 +1192,19 @@ class Manager:
             self.update(directory, record, stage="checking", detail="正在检查登录状态。")
             rpc = self.open_rpc(directory, job)
             rpc.initialize()
+            if record["operation"]["refresh_only"]:
+                self.update(directory, record, stage="reading", detail="正在查询配额，本次不发送消息。")
+                try:
+                    after = codex_quota.read_bound(
+                        lambda method, params: rpc.request(method, params, time.monotonic() + 20),
+                        directory / "codex/auth.json", record["account_id"], record["email"])
+                except ValueError as exc:
+                    rpc.diagnostics["rpc_failure"] = getattr(exc, "failure", {})
+                    raise ActionError(str(exc), 502) from None
+                self.observe_permission(directory, record, after, explicit=True)
+                self.update(directory, record, stage="succeeded", quota_status="observed", after=after,
+                            detail="已读取服务端配额，本次未发送消息。")
+                return
             if not self.identity(rpc, directory, record):
                 if not record["operation"].get("login_only"):
                     raise ActionError("登录态不可用，请单独登录；本次未发送消息。", 409, "needsLogin")
@@ -1191,13 +1233,6 @@ class Manager:
                     raise ActionError("授权后仍未取得登录态，请重试。", 502)
             if record["operation"].get("login_only"):
                 self.update(directory, record, stage="succeeded", detail="已完成登录，本次未发送消息或查询配额。请重新选择后续操作。")
-                return
-            if record["operation"]["refresh_only"]:
-                self.update(directory, record, stage="reading", detail="正在查询配额，本次不发送消息。")
-                after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
-                self.observe_permission(directory, record, after, explicit=True)
-                self.update(directory, record, stage="succeeded", quota_status="observed", after=after,
-                            detail="已读取服务端配额，本次未发送消息。")
                 return
             deadline = time.monotonic() + SEND_SECONDS
             before = quota_reading(rpc.request("account/rateLimits/read", {}, min(deadline, time.monotonic() + 15)), record["account_id"])
@@ -1248,10 +1283,11 @@ class Manager:
                 failure = {"category": exc.category, "stage": "reading"}
                 self.restrict(directory, record, failure)
                 if lease:
-                    lease.pause("quotaReadFailed")
+                    self.pause_operation(lease, record, rpc, "quotaReadFailed")
                 if job.get("batch_stopped") is not None:
                     job["batch_stopped"].set()
                 self.update(directory, record, stage="partial", quota_status="failed", failure=failure,
+                            diagnostics={**record["operation"].get("diagnostics", {}), **copy.deepcopy(rpc.diagnostics)},
                             detail="消息已完成，但配额查询未成功，已暂停后续请求。不要为了查询结果重复发送。")
                 record["last_failure"] = copy.deepcopy(record["operation"])
                 self.save(directory, record)
@@ -1291,17 +1327,7 @@ class Manager:
                     job["batch_stopped"].set()
             if not benign:
                 if lease:
-                    op = record["operation"]
-                    facts = copy.deepcopy(getattr(rpc, "diagnostics", {}))
-                    from parsers.accounts import Account
-                    from agent_monitor.quota.quota_refresh import account_fingerprint
-                    lease.pause("operationFailed", failure={"stage": "account_check" if op["stage"] == "checking" else "quota_read",
-                        "rpc_code": facts.get("rpc_error_code"), "upstream_code": facts.get("rpc_error_reason"),
-                        **facts.get("rpc_failure", {}),
-                        "account_profile": "monitor-" + record["id"],
-                        "account_fingerprint": account_fingerprint("codex", Account(record["account_id"], record["email"], None)),
-                        "kind": "rpc_error"}, source={"profile_id": record["id"], "operation_id": op["id"],
-                        "action": "quota" if op["refresh_only"] else "login" if op.get("login_only") else "send"})
+                    self.pause_operation(lease, record, rpc, "operationFailed")
                 if job.get("batch_stopped") is not None:
                     job["batch_stopped"].set()
             diagnostics = copy.deepcopy(getattr(rpc, "diagnostics", {}))

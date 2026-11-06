@@ -314,20 +314,41 @@ class ProviderTests(unittest.TestCase):
                     self.assertEqual(result["signed_out"], signed_out)
                     self.assertEqual(result["refresh_error"], None if signed_out else "still offline")
 
-    def codex_cli(self, response, account_id="account-a", error=None, error_id=2):
+    def codex_cli(self, response, account_id="account-a", error=None, error_id=2, changed_account=None, explicit_home=False):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
+            import base64
+            auth = home / ".codex/auth.json"
+            auth.parent.mkdir()
+            token = "fixture." + base64.urlsafe_b64encode(json.dumps({"email": "fixture@example.com"}).encode()).decode().rstrip("=") + ".fixture"
+            auth.write_text(json.dumps({"tokens": {"account_id": account_id, "id_token": token}}))
             shim = home / ".local/libexec/agent-shims/codex"
             shim.parent.mkdir(parents=True)
-            shim.write_text("#!%s\nimport sys,json\nresponse=%r\nerror=%r\nerror_id=%r\n" %
-                            (sys.executable, response, error, error_id) +
+            shim.write_text("#!%s\nimport sys,json,os,pathlib\nresponse=%r\nerror=%r\nerror_id=%r\nchanged_account=%r\n" %
+                            (sys.executable, response, error, error_id, changed_account) +
                             "for line in sys.stdin:\n m=json.loads(line)\n if 'id' in m:\n"
+                            "  if m['id']==2 and changed_account:\n"
+                            "   p=pathlib.Path(os.environ['CODEX_HOME'])/'auth.json'\n"
+                            "   a=json.loads(p.read_text());a['tokens']['account_id']=changed_account;p.write_text(json.dumps(a))\n"
                             "  reply={'error':error} if error is not None and m['id']==error_id else {'result':{} if m['id']==1 else response}\n"
                             "  print(json.dumps({'id':m['id'],**reply}),flush=True)\n")
             shim.chmod(0o700)
             with mock.patch("agent_monitor.quota.quota_refresh.Path.home", return_value=home),\
+                    mock.patch.dict(os.environ, {"CODEX_HOME": str(auth.parent)}),\
                     mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:synthetic-test-capability@127.0.0.1:9"):
-                return quota_refresh._codex({"account_id": account_id})
+                target = {"account_id": account_id, "label": "fixture@example.com"}
+                if explicit_home:
+                    target["codex_home"] = str(auth.parent)
+                return quota_refresh._codex(target)
+
+    def test_native_and_explicit_home_reject_identity_changed_during_read(self):
+        for explicit in (False, True):
+            with self.subTest(explicit_home=explicit):
+                with self.assertRaises(quota_refresh.RefreshError) as caught:
+                    self.codex_cli({"accountId": "account-a", "rateLimits": {"primary": {
+                        "usedPercent": 12, "windowDurationMins": 300}}},
+                        changed_account="another-workspace", explicit_home=explicit)
+                self.assertEqual(caught.exception.failure["kind"], "account_mismatch")
 
     def test_managed_home_is_passed_exactly_and_identity_checked_before_spawn(self):
         import base64
@@ -372,7 +393,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(reading.plan, "pro")
         self.assertTrue(reading.updated_at)
 
-    def test_codex_revoked_token_requires_login_without_exposing_upstream_text(self):
+    def test_codex_auth_response_retains_uncertainty_without_exposing_upstream_text(self):
         # Shape captured from the node-c CLI's failed quota RPC, with no secrets.
         error = {"code": -32603, "message":
                  'failed to fetch codex rate limits: GET https://example.test/private failed: '
@@ -382,7 +403,8 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaises(quota_refresh.RefreshError) as caught:
             self.codex_cli({}, error=error)
         message = str(caught.exception)
-        self.assertIn("重新登录", message)
+        self.assertIn("401/token_revoked", message)
+        self.assertNotIn("重新登录", message)
         self.assertNotIn("更新", message)
         self.assertNotIn("private", message)
         self.assertNotIn("example.test", message)
