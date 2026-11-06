@@ -569,6 +569,23 @@ values[1] = {...previousAccount, login_required:false, operation:{stage:"succeed
 renderAccounts(values);
 assert(visible(list.children[1]).includes(recoveredTime), "recovery summary uses the new quota observation time");
 values[1] = previousAccount; renderAccounts(values);
+const priorOp=values[1].operation;
+const bCard=()=>list.children.find(n=>n.dataset.id==='b');
+values[1].operation={stage:'login',login_only:true,message_status:'not_sent',verification_url:'https://auth.openai.com/codex/device',user_code:'SYNTHETIC',started_at:oldTime};
+renderAccounts(values);
+assert(text(bCard()).includes('仅保存登录态，不自动发送或查询'));
+values[1].operation.recovery={pause_id:'synthetic'};renderAccounts(values);
+assert(text(bCard()).includes('将复验一次配额'));
+assert(!text(bCard()).includes('仅保存登录态，不自动发送或查询'));
+values[1].operation={stage:'failed',login_only:true,message_status:'not_sent',started_at:oldTime,
+  diagnostics:{login_completion:{success:false,detail:'synthetic completion failure'}}};renderAccounts(values);
+assert(text(bCard()).includes('synthetic completion failure'));
+assert(text(bCard()).includes('回执失败可能已保存凭据'));
+values[1].last_failure={id:'historical-auth',stage:'failed',started_at:oldTime,detail:'fixture historical auth failure',diagnostics:{login_completion:{success:false,detail:'synthetic historical completion'}}};
+renderAccounts(values);
+assert(text(bCard()).includes('历史官方授权完成回执：synthetic historical completion'));
+delete values[1].last_failure;
+values[1].operation=priorOp;renderAccounts(values);
 values[1].restrictions = {authentication: true}; renderAccounts(values);
 assert(cardButtons(list.children[1]).find(button => button.textContent === "单独登录").disabled);
 assert(cardButtons(list.children[1]).find(button => button.textContent === "仅刷新配额").disabled);

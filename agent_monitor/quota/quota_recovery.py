@@ -26,25 +26,34 @@ def validate_exclusions(value):
 
 def validate_request(value):
     fields = {"machine", "account_id", "account_label", "pause_id"}
-    if (not isinstance(value, dict) or set(value) - {"profile", "mode"} != fields
+    if (not isinstance(value, dict) or set(value) - {"profile", "mode", "operation_id"} != fields
             or any(not isinstance(value[k], str) or not value[k] or len(value[k]) > 256 for k in fields)
             or not re.fullmatch(r"[0-9a-f]{32}", value["pause_id"])):
         raise ValueError("请指定机器、完整账号身份和当前暂停标识。")
     if "profile" in value and (not isinstance(value["profile"], str) or (value["profile"] and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", value["profile"]))):
         raise ValueError("账号来源无效。")
-    if "mode" in value and (value["mode"] != "renew_auth" or not value.get("profile", "").startswith("monitor-")):
+    if "mode" in value and (not isinstance(value["mode"], str) or value["mode"] not in {"renew_auth", "reauthorize"} or not value.get("profile", "").startswith("monitor-")):
         raise ValueError("认证修复模式或账号来源无效。")
+    if value.get("mode") == "reauthorize":
+        try:
+            if str(uuid.UUID(value["operation_id"])) != value["operation_id"]:
+                raise ValueError()
+        except (KeyError, ValueError, TypeError):
+            raise ValueError("重新授权必须绑定原配额任务。") from None
+    elif "operation_id" in value:
+        raise ValueError("原配额任务只适用于重新授权。")
     return value
 
 
 def approval_scope(value):
     scope = [value["machine"], value["account_id"]]
     scope = scope + [value["account_label"], value["profile"] or "native"] if "profile" in value else scope
-    return scope + [value["mode"]] if "mode" in value else scope
+    scope = scope + [value["mode"]] if "mode" in value else scope
+    return scope + [value["operation_id"]] if "operation_id" in value else scope
 
 
 def approval_action(value):
-    return "quota-auth-recovery" if value.get("mode") == "renew_auth" else "quota-recovery"
+    return {"renew_auth": "quota-auth-recovery", "reauthorize": "quota-login-recovery"}.get(value.get("mode"), "quota-recovery")
 
 
 def local_status():
@@ -74,10 +83,15 @@ def local_status():
     from agent_monitor.accounts import account_holds
     blocked_reason = account_holds.blocked(exporter.ROOT / "state", account.account_id, account.label) if account else None
     auth_recovery_available = False
+    login_recovery = None
     if source == "managed" and profile and profile.startswith("monitor-"):
         from agent_monitor.quota.codex_quota import revoked_quota_failure
         try:
             record = json.loads((home.parent / "profile.json").read_text())
+            from agent_monitor import hub_config
+            from agent_monitor.quota.codex_quota import reauthorization_context
+            if account and not blocked_reason and hub_config.is_hub():
+                login_recovery = reauthorization_context(record, state)
             operation = record.get("operation") or {}
             auth_recovery_available = bool(account and not blocked_reason and revoked_quota_failure(failure)
                 and record.get("account_id") == account.account_id
@@ -93,6 +107,7 @@ def local_status():
                         "account_label": account.label if account else None,
                         "source": source, "profile": home.parent.name if source == "managed" else None,
                         "auth_recovery_available": auth_recovery_available,
+                        "login_recovery": login_recovery,
                         "blocked_reason": blocked_reason,
                         "credential_path": str(auth), "quota_profile": profile or ""},
             "last_recovery": state.get("last_recovery")}
@@ -180,6 +195,8 @@ def local_recovery(value):
     from agent_monitor.quota import quota_refresh
     from agent_monitor.accounts.upstream_controls import Controls
     validate_request(value)
+    if value.get("mode") == "reauthorize":
+        raise ValueError("重新授权需要账号主机的异步 Web 入口；未发出请求。")
     # Establish the implementation identity before the irreversible provider read.
     commit = exporter.exporter_version()
     route = None

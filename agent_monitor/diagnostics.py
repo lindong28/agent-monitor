@@ -23,7 +23,7 @@ from urllib.parse import unquote_plus
 _STAGES = {"unknown", "account_api", "admission", "child_start", "child_result",
            "credentials", "profile_read", "quota_read", "initialize", "account_check",
            "quota_parse", "cleanup", "remote_prepare", "remote_export", "transfer",
-           "network_start", "quota_worker", "pause_save"}
+           "network_start", "quota_worker", "pause_save", "recovery_commit"}
 _KINDS = {"exception", "rpc_error", "http_error", "timeout", "process_exit",
           "invalid_result", "account_missing", "account_mismatch", "missing_windows"}
 _ERROR_TYPES = {"Exception", "RuntimeError", "RefreshError", "NotSignedIn", "LocalUnavailable",

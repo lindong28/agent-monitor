@@ -389,6 +389,11 @@ def account_fingerprint(provider, account):
 
 def _codex(account, *, recovery=None):
     from agent_monitor.quota import codex_quota
+    if account.get("renew_auth"):
+        if recovery is None:
+            raise LocalUnavailable("认证修复缺少记录通道，未发出请求。")
+        recovery["initial_failure"] = diagnostics.safe_failure(account.get("auth_failure"))
+        recovery["outcome"] = "refresh_failed"
     try:
         env = network_policy.child_environment(os.environ)
     except network_policy.NetworkPolicyError as exc:
@@ -425,12 +430,21 @@ def _codex(account, *, recovery=None):
                           "-c", 'forced_login_method="chatgpt"']
         process = subprocess.Popen(arguments,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.DEVNULL, env=env)
+                                   stderr=subprocess.PIPE if account.get("renew_auth") else subprocess.DEVNULL, env=env)
     except OSError as exc:
         raise LocalUnavailable("Codex CLI 无法启动，请检查这台机器上的安装；" +
                                diagnostics.failure_summary(diagnostics.failure_details(exc, stage="child_start"))) from None
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
+    if process.stderr is not None:
+        selector.register(process.stderr, selectors.EVENT_READ)
+    client_output = bytearray()
+    client_output_truncated = False
+    def retain_client_output(chunk):
+        nonlocal client_output_truncated
+        available = 65536 - len(client_output)
+        client_output.extend(chunk[:available])
+        client_output_truncated |= len(chunk) > available
     buffer = b""
     deadline = time.monotonic() + CODEX_RPC_SECONDS
 
@@ -454,14 +468,22 @@ def _codex(account, *, recovery=None):
                         raise RefreshError(_codex_rpc_error(message["error"], request_id), failure=facts)
                     return message["result"]
             remaining = deadline - time.monotonic()
-            if remaining <= 0 or not selector.select(remaining):
+            ready = selector.select(max(0, remaining)) if remaining > 0 else []
+            if not ready:
                 raise RefreshError("Codex 配额请求超时，请重新刷新。",
                                    failure={"kind": "timeout", "timeout_seconds": CODEX_RPC_SECONDS})
-            chunk = os.read(process.stdout.fileno(), 65536)
-            if not chunk:
-                raise RefreshError("Codex 配额读取进程退出，请检查 CLI 安装与登录状态。",
-                                   failure={"kind": "process_exit", "returncode": process.poll()})
-            buffer += chunk
+            for key, _ in ready:
+                chunk = os.read(key.fd, 65536)
+                if key.fileobj is process.stderr:
+                    if chunk:
+                        retain_client_output(chunk)
+                    else:
+                        selector.unregister(process.stderr)
+                    continue
+                if not chunk:
+                    raise RefreshError("Codex 配额读取进程退出，请检查 CLI 安装与登录状态。",
+                                       failure={"kind": "process_exit", "returncode": process.poll()})
+                buffer += chunk
 
     try:
         with _failure_stage("initialize"):
@@ -482,9 +504,6 @@ def _codex(account, *, recovery=None):
             try:
                 options = {}
                 if account.get("renew_auth"):
-                    if recovery is None:
-                        raise LocalUnavailable("认证修复缺少记录通道，未发出请求。")
-                    recovery["initial_failure"] = diagnostics.safe_failure(account.get("auth_failure"))
                     options = {"renew_auth": True, "recovery": recovery}
                 reading = codex_quota.read_bound(request, auth_path, account["account_id"], account.get("label"), **options)
             except codex_quota.ReadingError as exc:
@@ -502,8 +521,39 @@ def _codex(account, *, recovery=None):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        if process.stderr is not None:
+            os.set_blocking(process.stderr.fileno(), False)
+            while True:
+                try:
+                    chunk = os.read(process.stderr.fileno(), 65536)
+                except BlockingIOError:
+                    break
+                if not chunk:
+                    break
+                retain_client_output(chunk)
+            process.stderr.close()
+            if recovery is not None and client_output:
+                recovery["client_diagnostics"] = _safe_client_excerpt(
+                    client_output.decode(errors="replace"),
+                    redactions + codex_quota.credential_secrets(auth_path),
+                    truncated=client_output_truncated)
         process.stdin.close()
         process.stdout.close()
+
+
+def _safe_client_excerpt(value, secrets, *, truncated=False):
+    # Redact before the display limit, including a credential cut by the bounded
+    # input buffer. Never classify free-form client logs as an upstream result.
+    for secret in sorted(set(secrets), key=len, reverse=True):
+        if not secret:
+            continue
+        if truncated:
+            for size in range(min(len(secret) - 1, len(value)), 0, -1):
+                if value.endswith(secret[:size]):
+                    value = value[:-size] + "[redacted truncated credential]"
+                    break
+        value = value.replace(secret, "[redacted]")
+    return diagnostics.safe_upstream_detail(value)
 
 
 if __name__ == "__main__":

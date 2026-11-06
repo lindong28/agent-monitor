@@ -6,7 +6,7 @@ async function previewEgress(...args) {
 
 const STAGES = {
   queued: "排队中",
-  checking: "检查登录", login_queued: "等待授权排队", login: "等待官方授权", sending: "正在发送", reading: "读取配额",
+  checking: "检查登录", login_queued: "等待授权排队", login: "等待官方授权", sending: "正在发送", reading: "读取配额", saving: "保存配额结果",
   succeeded: "已完成", partial: "配额待确认", failed: "未完成",
   cancelled: "已取消", interrupted: "上次操作已中断",
 };
@@ -619,6 +619,9 @@ export function init({ autoLoad = true } = {}) {
         if (op.failure) technicalDetail.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
         const diag = op.recovery_pause_id && op.stage === "succeeded" ? null : op.diagnostics;
         appendRpcFailure(technicalDetail, diag);
+        if (diag?.login_completion) technicalDetail.append(element("p", `官方授权完成回执未成功：${diag.login_completion.detail || "未提供详细原因"}。回执失败可能已保存凭据；本次未继续查询配额，不自动重新申请设备码。`, "quota-scope"));
+        if (diag?.local_commit) technicalDetail.append(element("p", `本地配额保存或发布未完成：${diag.local_commit.error_type || "原因未确认"}。保留暂停及已有候选结果，不要重复授权。`, "quota-scope"));
+        if (op.candidate_quota && op.stage !== "succeeded") technicalDetail.append(element("p", `配额复验候选观测：${timestamp(op.candidate_quota.observed_at)}；尚未完成有效窗口核验、保存和结清，不作为恢复成功。`, "quota-scope"));
         if (diag?.last_request) technicalDetail.append(element("p", `最后请求：${diag.last_request} · ${timestamp(diag.last_request_at)}`, "quota-scope"));
         if (diag?.last_event) technicalDetail.append(element("p", `最后进度：${diag.last_event} · ${timestamp(diag.last_event_at)}`, "quota-scope"));
         if (diag?.thread_id) technicalDetail.append(element("p", `Thread：${diag.thread_id}${diag.turn_id ? " · Turn：" + diag.turn_id : ""}`, "quota-scope"));
@@ -630,7 +633,9 @@ export function init({ autoLoad = true } = {}) {
           link.target = "_blank";
           link.rel = "noopener noreferrer";
           box.append(link, element("span", "设备码（不是邮箱验证码）："), element("code", op.user_code));
-          card.append(box, element("p", `请确认官方页面登录的是 ${account.email}。授权成功后仅保存登录态，不自动发送或查询；最多等待 10 分钟。`, "quota-scope"));
+          card.append(box, element("p", op.recovery
+            ? `请确认官方页面登录的是 ${account.email} 及原工作区。官方授权成功且新凭据身份核验通过后，将复验一次配额；有效读数保存并发布后才结清原任务和暂停。不发送消息。设备确认最多等待 10 分钟，另有有界的身份、配额与保存阶段；期间占用本机 Codex 通道。`
+            : `请确认官方页面登录的是 ${account.email}。授权成功后仅保存登录态，不自动发送或查询；最多等待 10 分钟。`, "quota-scope"));
         }
         if (latestReading) {
           const reading = element("dl", undefined, "codex-account-reading");
@@ -664,6 +669,7 @@ export function init({ autoLoad = true } = {}) {
       if (account.last_failure && (account.last_failure.id !== op?.id || op?.recovery_pause_id)) {
         historyDetail.append(element("p", `保留的失败摘要（${timestamp(account.last_failure.started_at)}）：${account.last_failure.detail}`, "quota-scope"));
         appendRpcFailure(historyDetail, account.last_failure.diagnostics, "历史请求错误");
+        if (account.last_failure.diagnostics?.login_completion) historyDetail.append(element("p", `历史官方授权完成回执：${account.last_failure.diagnostics.login_completion.detail || "未提供详细原因"}。回执失败不证明未保存凭据。`, "quota-scope"));
       }
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials || restrictions.authentication) {

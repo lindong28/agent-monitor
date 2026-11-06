@@ -501,11 +501,13 @@
     box.appendChild(body);
     const add = text => { const p = document.createElement("p"); p.textContent = text; body.appendChild(p); };
     const f = receipt.failure || {};
-    add(receipt.ok ? "本次配额读取成功；当前暂停状态以重新读取的结果为准。" : "本次配额读取未完成；原因尚未确认，错误码本身不能证明网络故障或登录失效。");
+    add(receipt.ok ? "本次配额读取成功；当前暂停状态以重新读取的结果为准。" : f.stage === "recovery_commit" ? "配额复验已有候选结果，本地保存或发布未完成；请先核对已有结果，不要重复授权或查询。" : "本次配额读取未完成；原因尚未确认，错误码本身不能证明网络故障或登录失效。");
     if (receipt.observed_at) add(`记录时间：${receipt.observed_at}`);
     if (receipt.request) add(`本次对象：${receipt.request.machine} · ${receipt.request.account_label} · 工作区 ${receipt.request.account_id}；原暂停 ${receipt.request.pause_id}`);
+    if (receipt.previous_recovery?.authentication_recovery?.outcome === "no_new_credentials") add("此前官方刷新未确认取得新凭据，之后才执行本次重新授权；此前恢复记录仍保留。 ");
     if (httpStatus) add(`Monitor HTTP：${httpStatus}（本地接口结果，不是供应商 HTTP 状态）`);
-    add(`停止阶段：${f.stage === "quota_read" ? "读取配额" : f.stage || "未记录"}；Codex RPC：${f.rpc_code ?? "未取得"}；上游 HTTP：${f.http_status ?? "未取得"}`);
+    add(`停止阶段：${f.stage === "quota_read" ? "读取配额" : f.stage === "recovery_commit" ? "本地保存与发布" : f.stage || "未记录"}；Codex RPC：${f.rpc_code ?? "未取得"}；上游 HTTP：${f.http_status ?? "未取得"}`);
+    if (f.error_type) add(`错误类别：${f.error_type}${f.errno != null ? ` · errno ${f.errno}` : ""}`);
     if (f.detail) add(`已记录的错误摘要：${f.detail}`);
     const auth = receipt.authentication_recovery;
     if (auth) {
@@ -513,6 +515,7 @@
       add(`认证修复：${outcomes[auth.outcome] || "结果未确认"}。`);
       if (auth.initial_failure) add(`修复前：上游 HTTP ${auth.initial_failure.http_status ?? "未取得"} · ${auth.initial_failure.upstream_code || "未取得错误代码"}`);
       if (auth.refresh_failure) add(`官方认证 RPC 摘要：${auth.refresh_failure.detail || "未返回详细原因"}；RPC ${auth.refresh_failure.rpc_code ?? "未取得"}。此 RPC 结果不能单独证明凭据刷新成败。`);
+      if (auth.client_diagnostics) add(`客户端诊断摘录：${auth.client_diagnostics}。已脱敏并截断至最多 512 字符；仅为客户端日志，不作为上游错误分类或刷新成败依据。`);
     }
     describeDiagnosticSummary(add, f.detail);
     if (f.returncode != null) add(`CLI 退出码：${f.returncode}`);
@@ -555,10 +558,12 @@
     steps.hidden = true;
     const read = make("button", "更新状态");
     const probe = make("button", "重新检查配额");
+    const relogin = make("button", "重新授权并复验配额");
+    relogin.hidden = true;
     const help = make("button", "查看排查步骤");
     const resume = make("button", "返回账号操作");
     const copy = make("button", "复制诊断信息", "btn");
-    for (const [button, action] of [[read,"read"],[probe,"probe"],[help,"help"],[resume,"continue"],[copy,"copy"]]) {
+    for (const [button, action] of [[read,"read"],[probe,"probe"],[relogin,"reauthorize"],[help,"help"],[resume,"continue"],[copy,"copy"]]) {
       button.type = "button";
       button.className = "btn";
       button.setAttribute("data-recovery-action", action);
@@ -568,7 +573,7 @@
     report.setAttribute("aria-label", "诊断信息，可选择后复制");
     const copyNotice = make("p");
     copyNotice.setAttribute("role", "status");
-    actions.append(probe, help, resume, read);
+    actions.append(probe, relogin, help, resume, read);
     const technicalBody = make("div", "", "disclosure-body recovery-technical-body");
     technicalBody.append(context, details, copy, copyNotice, report);
     technical.appendChild(technicalBody);
@@ -600,6 +605,8 @@
         && String(lastRequest.account_label || "").toLowerCase() === String(a.account_label || "").toLowerCase()
         && (lastRequest.profile || "") === (a.quota_profile || "");
       const failure = pause?.failure || (lastMatchesPause ? last.failure : null);
+      const authUnresolved = lastMatchesPause && lastRequest.mode === "renew_auth"
+        && last.authentication_recovery?.outcome === "no_new_credentials";
       const hasFailure = failure && typeof failure === "object" && Object.keys(failure).length > 0;
       const failureGuidance = hasFailure ? quotaFailureGuidance({
         reason: failure.detail || "", failure, query_state: "paused",
@@ -619,6 +626,8 @@
         : pause.id === "unreadable" ? "unreadable" : pause.probe_attempt ? "used"
         : a.blocked_reason ? "account-blocked"
         : !a.account_id || !a.account_label ? "identity"
+        : failure?.stage === "recovery_commit" ? "local-commit"
+        : authUnresolved ? "auth-unresolved"
         : lastMatchesPause ? "failed"
         : sourceMismatch ? "source-mismatch"
         : failureGuidance?.key === "identity" ? "identity"
@@ -638,10 +647,12 @@
         "upstream-auth": ["上游认证响应需要核对", `已记录${authEvidence}；这条读数不能区分凭据、权限或服务端原因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
         "read-error": ["配额读取失败，需要一次受控检查", "已记录读取阶段失败，但原因未核实。先通过目标机器的 Agent Monitor 路由桥只检查一次；仍失败时复制诊断交由管理员排查。"],
         failed: ["配额检查未成功，发送仍暂停", "具体原因尚未确认。先查看排查步骤，处理后可再次检查；已有发送结果和账号选择保留。"],
+        "auth-unresolved": ["认证刷新未取得新凭据", "本次没有继续查询配额，暂停保留。官方接口未提供明确失败原因；先查看诊断，不要重复查询同一份凭据。"],
+        "local-commit": ["配额已有候选结果，本地结清未完成", "暂停保留。先查看本地保存或发布错误及已有结果；不要重新授权或再次查询配额。"],
         paused: ["Codex 请求已暂停", "此前请求异常触发本机通道保护，不表示所有账号不可用。已确认仅某账号异常时，可在账号卡片停用该账号并核对暂停归属；其他情况先检查下面的目标与诊断。"],
       };
       [title.textContent, guidance.textContent] = copyText[mode];
-      if (!["failed","unreadable","identity","source-mismatch","upstream-auth","read-error","used"].includes(mode)) {
+      if (!["local-commit","auth-unresolved","failed","unreadable","identity","source-mismatch","upstream-auth","read-error","used"].includes(mode)) {
         steps.hidden = true; help.textContent = "查看排查步骤";
       }
       target.textContent = value ? `检查对象：${value.machine} · ${a.account_label || "账号未识别"}` : "";
@@ -656,21 +667,33 @@
       probe.textContent = mode === "failed" ? "处理后再次检查配额" : "通过目标机器路由桥检查配额";
       effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，沿用该机器原有系统代理；不会发送消息。";
       const renewAuth = canRenewAuth(value) && !probe.hidden;
+      relogin.hidden = mode !== "auth-unresolved" || !a.login_recovery
+        || a.login_recovery.pause_id !== pause?.id;
+      relogin.disabled = busy || relogin.hidden;
+      if (!relogin.hidden) effect.textContent = "需要本人在官方页面授权。设备确认等待最多 10 分钟，另有初始化、身份及配额检查的有界阶段；期间占用本机 Codex 通道，不发送消息。";
       if (renewAuth) {
         probe.textContent = "刷新认证并检查配额";
         guidance.textContent = "配额接口拒绝了当前认证。可通过官方接口尝试刷新本账号登录态；只有取得同身份的新凭据才检查配额，未恢复时保留暂停与诊断。";
         effect.textContent = "最多一次认证刷新 RPC 和一次配额 RPC，共用原总时限与目标机器路由；官方内部可能产生多次请求，不发送消息。";
       }
-      help.hidden = !["failed", "unreadable", "identity", "source-mismatch", "upstream-auth", "read-error", "used"].includes(mode);
+      help.hidden = !["local-commit", "auth-unresolved", "failed", "unreadable", "identity", "source-mismatch", "upstream-auth", "read-error", "used"].includes(mode);
       resume.hidden = mode !== "ready" || !onContinue;
       read.disabled = busy;
       read.textContent = ["unknown", "unknown-outcome"].includes(mode) ? "重新读取状态" : mode === "active" ? "更新进度" : "更新状态";
-      const primary = renewAuth || ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
-      for (const button of [read,probe,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
+      const primary = !relogin.hidden ? relogin : renewAuth || ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["local-commit","auth-unresolved","failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
+      for (const button of [read,probe,relogin,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
       steps.replaceChildren();
       const list = make("ol");
       const host = value?.machine || "执行机器";
-      const instructions = mode === "unreadable" ? [
+      const instructions = mode === "local-commit" ? [
+        "本次配额复验已有候选结果，但本地核验、保存或正常配额页发布尚未结清，暂停仍保留。",
+        `由维护者核对 ${host} 上本次本地保存/发布错误与原任务的候选观测，修复后利用已有结果处理，不先重复授权或查询。`,
+        "保留原任务和恢复链；不要删除暂停记录。技术详情列出已取得的本地错误类别。"
+      ] : mode === "auth-unresolved" ? [
+        "本次官方认证刷新没有确认写入新凭据，程序未查询配额，原错误和暂停仍保留。",
+        "展开技术详情查看认证修复结果及已保存的客户端诊断；没有明确上游原因时，不据此认定必须重新登录。",
+        !relogin.hidden ? "若决定重新授权，点击“重新授权并复验配额”。账号卡片将显示本次官方设备码；在官方页面确认本账号身份，程序只在同身份新凭据与一次配额验证成功后结清原任务及暂停。" : `由维护者核对 ${host} 上本账号的后续认证恢复路径。普通登录可能仍受当前暂停约束；不要清除暂停、切换出口或重复检查。`
+      ] : mode === "unreadable" ? [
         `在 ${host} 的终端运行 agent-monitor status，核对服务状态及显示的日志位置。`,
         "查看日志中的状态文件读取错误，修复对应文件的权限或格式；不要删除暂停记录来恢复发送。",
         "修复后点击“更新状态”。需要协助时，展开技术详情并复制诊断。"
@@ -715,7 +738,8 @@
       add("诊断包含账号、机器、路径和地址。对外分享前请核对接收者及内容，不要直接公开发布。");
       details.replaceChildren();
       if (last || pause?.failure) {
-        const diagnostic = recoveryDiagnostics(last || {ok:false,failure:pause.failure});
+        const diagnostic = recoveryDiagnostics(pause?.failure?.stage === "recovery_commit"
+          ? {ok:false,failure:pause.failure} : last || {ok:false,failure:pause.failure});
         diagnostic.open = true;
         details.appendChild(diagnostic);
       } else details.appendChild(make("p", "尚无已保存的检查诊断。"));
@@ -765,12 +789,16 @@
         copyNotice.textContent = "浏览器未允许自动复制；已选中下方信息，请手动复制。";
       }
     });
-    probe.addEventListener("click", async () => {
-      if (busy || probe.disabled || !state) return;
+    async function requestRecovery(reauthorize = false) {
+      if (busy || (reauthorize ? relogin.disabled : probe.disabled) || !state) return;
       const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id,profile:state.account.quota_profile || ""};
       if (canRenewAuth(state)) request.mode = "renew_auth";
+      if (reauthorize) {
+        request.mode = "reauthorize";
+        request.operation_id = state.account.login_recovery.operation_id;
+      }
       unrecordedOutcome = false;
-      busy = true; read.disabled = probe.disabled = true;
+      busy = true; read.disabled = probe.disabled = relogin.disabled = true;
       panel.setAttribute("aria-busy", "true");
       title.textContent = "正在检查配额…";
       guidance.textContent = "请等待本次检查结束。不会发送消息，请勿重复提交。";
@@ -779,7 +807,7 @@
       try {
         const approval = await window.AgentMonitor.previewUpstream?.(
           [{email: request.account_label, account_id: request.account_id}],
-          {approval_action: request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
+          {approval_action: request.mode === "reauthorize" ? "quota-login-recovery" : request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : []), ...(request.operation_id ? [request.operation_id] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
           controller.signal);
         if (!approval) throw new Error("已取消检查；未发出上游请求。");
         attempted = true;
@@ -789,12 +817,14 @@
       pendingPauseId = attempted && (!receipt || (typeof receipt.ok !== "boolean" && !receipt.failure)) ? request.pause_id : null;
       busy = false;
       await refresh();
-      if (receipt?.ok || receipt?.failure) {
+      if (!receipt?.login_pending && (receipt?.ok || receipt?.failure)) {
         const diagnostic = recoveryDiagnostics({...receipt,request}, code);
         diagnostic.open = true; details.replaceChildren(diagnostic);
       }
       if (code && !receipt?.ok && !receipt?.failure) notice.textContent = `检查请求未完成（Monitor HTTP ${code}）。请先更新状态；详情见诊断。`;
-    });
+    }
+    probe.addEventListener("click", () => requestRecovery());
+    relogin.addEventListener("click", () => requestRecovery(true));
     refresh();
     return panel;
   }

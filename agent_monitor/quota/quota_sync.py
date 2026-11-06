@@ -240,6 +240,51 @@ class Manager:
                     self.condition.notify_all()
             return ticket
 
+    @contextmanager
+    def managed_recovery_publication(self, machine, profile, block, *, expected_source):
+        """Publish an already obtained observation; never query a provider.
+
+        Keep view readers excluded through the caller's local commit. A failed
+        commit restores this publication without issuing another upstream read.
+        """
+        from agent_monitor.snapshots import generation, exporter
+        from agent_monitor.quota.quota_service import _merge_managed_accounts, clear_pause_projection
+        if block.get("account_profile") != profile or not quota_applicability.current_window(block):
+            raise ValueError("恢复读数的账号来源或当前有效窗口不匹配。")
+        with generation.generation_admission_snapshot() as admission:
+            current = next((item for item in admission.admitted if item.host == machine.name), None)
+            if current is None or current.meta["source_host_identity"] != expected_source:
+                raise ValueError("重新授权后的配额来源已变化，未发布读数。")
+            with self.condition:
+                limits = self.merge(current, machine)
+                existing = (limits.get("codex") or {}).get("managed_accounts", [])
+                if not any(row.get("account_profile") == profile
+                           and quota_identity("codex", row.get("account_id"), row.get("account_label"))
+                           == quota_identity("codex", block.get("account_id"), block.get("account_label"))
+                           for row in existing):
+                    raise ValueError("恢复账号已不在正常配额页的来源中，未发布读数。")
+                limits = {p: dict(limits.get(p) or {}) for p in ("claude", "codex")}
+                limits["codex"]["managed_accounts"] = _merge_managed_accounts(existing, [block])
+                for row in [limits["codex"], *limits["codex"]["managed_accounts"]]:
+                    clear_pause_projection(row)
+                payload = {"schema_version": 1, "source_host_identity": expected_source,
+                           "exporter_commit": exporter.exporter_version(), "rate_limits": limits}
+                _validate(payload)
+                before = copy.deepcopy(self.records)
+                updated = copy.deepcopy(before)
+                updated[machine.name] = {"ssh_host": machine.ssh_host, "payload": payload,
+                    "attempted_at": datetime.now(timezone.utc).isoformat(), "error": None}
+                write_message(self.path, {"version": 1, "machines": updated})
+                self.records = updated
+                self.revision += 1
+                try:
+                    yield
+                except Exception:
+                    write_message(self.path, {"version": 1, "machines": before})
+                    self.records = before
+                    self.revision += 1
+                    raise
+
     def status(self):
         with self.condition:
             return {"running": self.running, "requested": self.requested, "completed": self.completed,

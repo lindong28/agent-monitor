@@ -1,9 +1,10 @@
 """Codex quota response semantics shared by native and account-action readers."""
 import math
 import json
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from parsers.accounts import codex_account
+from parsers.accounts import codex_account, quota_identity
 from parsers.codex import select_codex_rate_limit
 from agent_monitor import diagnostics
 
@@ -86,7 +87,33 @@ def safe_auth_recovery(value):
     for key in ("initial_failure", "refresh_failure"):
         if isinstance(value.get(key), dict):
             result[key] = diagnostics.safe_failure(value[key])
+    if isinstance(value.get("client_diagnostics"), str):
+        result["client_diagnostics"] = diagnostics.safe_upstream_detail(value["client_diagnostics"])
     return result
+
+
+def reauthorization_context(record, state):
+    """A known failed, unsent quota task whose explicit refresh made no progress."""
+    pause, last = state.get("pause") or {}, state.get("last_recovery") or {}
+    request, op = last.get("request") or {}, record.get("operation") or {}
+    auth = last.get("authentication_recovery") or {}
+    failure = pause.get("failure") or {}
+    fingerprint = hashlib.sha256(quota_identity("codex", record.get("account_id"), record.get("email")).encode()).hexdigest()
+    if (last.get("ok") is not False or request.get("mode") != "renew_auth"
+            or auth.get("outcome") != "no_new_credentials"
+            or not revoked_quota_failure(auth.get("initial_failure"))
+            or not pause.get("id") or pause["id"] == "unreadable"
+            or pause["id"] not in (last.get("pause_id"), request.get("pause_id"))
+            or failure.get("account_profile") != request.get("profile")
+            or failure.get("account_fingerprint") != fingerprint
+            or request.get("profile") != "monitor-" + record.get("id", "")
+            or request.get("account_id") != record.get("account_id")
+            or str(request.get("account_label", "")).casefold() != record.get("email", "").casefold()
+            or op.get("stage") not in {"failed", "interrupted"} or not op.get("refresh_only")
+            or op.get("login_only") or op.get("message_status") != "not_sent"):
+        return None
+    return {"pause_id": pause["id"], "operation_id": op["id"],
+            "account_id": record["account_id"], "account_label": record["email"].casefold()}
 
 
 def managed_access_token(auth_path):

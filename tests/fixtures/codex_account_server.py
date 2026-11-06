@@ -70,11 +70,14 @@ for line in sys.stdin:
         result = {"loginId": "fixture-login", "verificationUrl": "https://auth.openai.com/codex/device", "userCode": "TEST-CODE"}
         if scenario == "bad_url":
             result["verificationUrl"] = "https://evil.example/steal"
-        if scenario in ("login_poll_rate_limit", "login_unknown_failure"):
+        if scenario in ("login_poll_rate_limit", "login_unknown_failure", "login_false_saved"):
+            if scenario == "login_false_saved":
+                authorize()
+            prior = json.loads((home / "auth.json").read_text())["tokens"]["access_token"] if (home / "auth.json").exists() else "SECRET_FIXTURE_TOKEN"
             emit({"id": message["id"], "result": result})
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": False,
                   "error": "device auth failed with status 429 Too Many Requests" if scenario == "login_poll_rate_limit"
-                  else "SECRET_FIXTURE_TOKEN unknown upstream failure"}})
+                  else prior + " unknown upstream failure"}})
             continue
         if scenario == "deferred_login":
             emit({"id": message["id"], "result": result})

@@ -15,8 +15,8 @@ export function countryName(code) {
 export async function previewEgress(request, targets, signal, payload = {}) {
   const sending = Array.isArray(targets) && ["batch-start", "batch-retry"].includes(payload.approval_action);
   const needsApproval = Boolean(payload.approval_action);
-  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","refresh-selected":"查询所选账号配额","refresh-retry":"继续未完成的配额查询","login":"单独登录","quota-recovery":"检查并恢复配额","quota-auth-recovery":"刷新认证并检查配额","quota-settings":"启用所选账号的自动查询"})[payload.approval_action] || "发起上游操作";
-  const operationPending = ({"quota-settings":"自动查询设置尚未改变","quota-recovery":"尚未发送配额检查请求","quota-auth-recovery":"尚未刷新认证或查询配额", refresh:"尚未发送配额刷新请求", "refresh-all":"尚未发送配额刷新请求", "refresh-selected":"尚未发送配额刷新请求", "refresh-retry":"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
+  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","refresh-selected":"查询所选账号配额","refresh-retry":"继续未完成的配额查询","login":"单独登录","quota-recovery":"检查并恢复配额","quota-auth-recovery":"刷新认证并检查配额","quota-login-recovery":"重新授权并复验配额","quota-settings":"启用所选账号的自动查询"})[payload.approval_action] || "发起上游操作";
+  const operationPending = ({"quota-settings":"自动查询设置尚未改变","quota-recovery":"尚未发送配额检查请求","quota-auth-recovery":"尚未刷新认证或查询配额","quota-login-recovery":"尚未申请设备码或查询配额", refresh:"尚未发送配额刷新请求", "refresh-all":"尚未发送配额刷新请求", "refresh-selected":"尚未发送配额刷新请求", "refresh-retry":"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
   let receipt = null;
   const dialog = node("dialog", undefined, "account-egress-dialog");
   dialog.setAttribute("aria-labelledby", "account-egress-title");
@@ -52,11 +52,16 @@ export async function previewEgress(request, targets, signal, payload = {}) {
       dialog.append(identities);
     }
     const machine = Array.isArray(payload.approval_scope) ? payload.approval_scope[0] : null;
-    if (["quota-recovery", "quota-auth-recovery", "quota-settings"].includes(payload.approval_action) && machine) {
+    if (["quota-recovery", "quota-auth-recovery", "quota-login-recovery", "quota-settings"].includes(payload.approval_action) && machine) {
       dialog.append(node("p", `本次检查将在 ${machine} 上执行，并使用该机器的 Agent Monitor 路由桥；当前浏览器不会直接访问上游。`, "quota-scope"));
     }
     if (payload.approval_action === "quota-auth-recovery") {
       dialog.append(node("p", "将为所选账号调用一次官方认证刷新 RPC；仅同身份的新凭据已保存时，再查询一次配额。共用原总时限，失败即停。官方内部可能有多次 HTTP/OAuth 请求；不发送消息，也不保证恢复。", "quota-scope"));
+    }
+    if (payload.approval_action === "quota-login-recovery") {
+      const identities = node("ul", undefined, "account-egress-identities");
+      for (const account of targets) identities.append(node("li", `${account.email}（${account.account_id}）`));
+      dialog.append(identities, node("p", "将申请一次官方设备码，需要本人完成授权。设备确认等待最多 10 分钟，另有初始化、身份核验、一次配额复验及清理的有界阶段；期间占用本机 Codex 通道。只有同账号新凭据与有效配额已保存后才结清原任务和暂停；失败即停，不发送消息。官方内部可能产生多次 HTTP/OAuth 请求。", "quota-scope"));
     }
   }
   dialog.append(controls);

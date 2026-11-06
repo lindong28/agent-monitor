@@ -568,14 +568,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
             if path == "/api/codex-accounts/egress-preview":
                 approval_action = payload.get("approval_action") or ""
-                local_actions = {"quota-recovery", "quota-auth-recovery", "quota-settings", "refresh"}
+                local_actions = {"quota-recovery", "quota-auth-recovery", "quota-login-recovery", "quota-settings", "refresh"}
                 if approval_action in local_actions and not payload.get("connection"):
                     scope = payload.get("approval_scope")
                     expected = payload.get("approval_expected")
                     if (not isinstance(scope, list) or not scope or
                             any(not isinstance(item, str) or not item for item in scope)):
                         raise codex_accounts.ActionError("预览确认范围无效。")
-                    if approval_action in {"quota-recovery", "quota-auth-recovery", "quota-settings"}:
+                    if approval_action in {"quota-recovery", "quota-auth-recovery", "quota-login-recovery", "quota-settings"}:
                         approval_machine = payload.get("approval_machine")
                         if (not isinstance(approval_machine, str) or
                                 approval_machine != scope[0]):
@@ -756,7 +756,7 @@ class Handler(BaseHTTPRequestHandler):
             raw = json.loads(self.rfile.read(length))
             if not isinstance(raw, dict):
                 raise ValueError()
-            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile", "mode") if k in raw})
+            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile", "mode", "operation_id") if k in raw})
             machine = sync.load_machine_config().by_name.get(value["machine"])
             if machine is None:
                 raise ValueError()
@@ -773,6 +773,28 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "已有配额操作，请等待结束后再核对暂停状态。"}, status=409)
                 return
             try:
+                if value.get("mode") == "reauthorize":
+                    if not machine.is_self or not hub.is_hub():
+                        self._send_json({"error": "此异步重新授权入口只支持账号所在 Hub 本机。"}, status=409)
+                        return
+                    from agent_monitor.accounts import codex_accounts
+                    try:
+                        current = QUOTA_REFRESH.recovery_status(machine)
+                        binding = {k: value[k] for k in ("pause_id", "operation_id", "account_id", "account_label")}
+                        binding["account_label"] = binding["account_label"].casefold()
+                        if ((current.get("account") or {}).get("login_recovery") != binding
+                                or (current.get("account") or {}).get("quota_profile") != value["profile"]):
+                            raise codex_accounts.ActionError("重新授权的当前来源或账号绑定已变化。", 409)
+                        def publication(block):
+                            return QUOTA_REFRESH.managed_recovery_publication(machine, value["profile"], block,
+                                expected_source=current["source_host_identity"])
+                        account = codex_accounts.manager.start_reauthorization(value["profile"][len("monitor-"):],
+                            binding, publication=publication)
+                    except (codex_accounts.ActionError, ValueError) as exc:
+                        self._send_json({"error": str(exc)}, status=getattr(exc, "status", 409))
+                        return
+                    self._send_json({"ok": True, "login_pending": True, "account": account}, status=202)
+                    return
                 receipt, status = QUOTA_REFRESH.recover(machine, value)
                 self._send_json(receipt, status=status)
             except Exception:

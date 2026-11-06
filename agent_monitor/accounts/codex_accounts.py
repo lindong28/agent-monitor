@@ -25,10 +25,11 @@ from agent_monitor.accounts.codex_messages import MESSAGES
 from agent_monitor.network import network_policy
 from agent_monitor.network import client_network
 from agent_monitor.quota import codex_quota
+from agent_monitor import diagnostics as diagnostic_evidence
 
 
 MESSAGE = f"从 {len(MESSAGES)} 条日常短消息中独立随机抽取一条，可能重复。"
-ACTIVE = {"queued", "checking", "login_queued", "login", "sending", "reading"}
+ACTIVE = {"queued", "checking", "login_queued", "login", "sending", "reading", "saving"}
 LOGIN_SECONDS = 600
 SEND_SECONDS = 120
 # Local startup pacing, not a provider rate limit or an anti-abuse guarantee.
@@ -740,7 +741,7 @@ class Manager:
                 return operation
         return None
 
-    def prepare(self, profile_id, *, published_id=None, batch_id=None, refresh_only=False, login_only=False):
+    def prepare(self, profile_id, *, published_id=None, batch_id=None, refresh_only=False, login_only=False, login_recovery=None):
         if self.stopping:
             raise ActionError("服务正在停止，请稍后重试；本次未启动账号操作。", 503)
         directory = self.directory(profile_id)
@@ -749,6 +750,18 @@ class Manager:
         lock = lock_file(directory / ".lock")
         try:
             record = self.read(directory)
+            recovery = None
+            if login_recovery is not None:
+                state = self.controls.read("codex")
+                binding = codex_quota.reauthorization_context(record, state)
+                if (not login_only or not binding or binding != login_recovery
+                        or state.get("active") or (state.get("pause") or {}).get("probe_attempt")):
+                    raise ActionError("重新授权的账号、原配额任务或暂停已变化，未发出请求。", 409)
+                codex_quota.check_identity(directory / "codex/auth.json", record["account_id"], record["email"])
+                recovery = {**binding, "original_operation": copy.deepcopy(record["operation"]),
+                            "previous_recovery": copy.deepcopy(state["last_recovery"])}
+                before_access = json.loads((directory / "codex/auth.json").read_text()).get("tokens", {}).get("access_token")
+                before_access = before_access if isinstance(before_access, str) else None
             retain_quota(record)
             previous = record.get("operation")
             if previous and (previous.get("failure") or {}).get("category") == "needsLogin":
@@ -765,6 +778,8 @@ class Manager:
             record["operation"] = {"id": str(uuid.uuid4()), "stage": "queued", "started_at": now(),
                                    "refresh_only": refresh_only, "login_only": login_only, "message_status": "not_sent",
                                    "quota_status": "not_read", "detail": "已排队，等待处理。"}
+            if recovery:
+                record["operation"]["recovery"] = recovery
             if batch_id:
                 record["operation"]["batch_id"] = batch_id
                 # A retry replaces the result of that same batch; keep one authority.
@@ -772,7 +787,8 @@ class Manager:
                     record.pop("batch_result")
             self.save(directory, record)
             return directory, record, {"cancelled": threading.Event(), "done": threading.Event(), "authorization": {},
-                                       "login_generation": self.login_generation}, lock
+                                       "login_generation": self.login_generation, "login_recovery": recovery,
+                                       "login_access_before": before_access if recovery else None}, lock
         except Exception:
             lock.close()
             raise
@@ -808,6 +824,85 @@ class Manager:
                     prepared[2]["network_route"] = network_route
                 self.launch(prepared)
                 return self.view(directory)
+
+    def start_reauthorization(self, profile_id, binding, *, publication):
+        """Explicit owner-route recovery; never borrow a browser-device route."""
+        if not callable(publication):
+            raise ActionError("缺少正常配额页面的发布通道，未开始重新授权。", 409)
+        with self.guard:
+            with lock_file(self.root / ".catalog.lock"):
+                prepared = self.prepare(profile_id, login_only=True, login_recovery=binding)
+                prepared[2]["quota_publication"] = publication
+                self.launch(prepared)
+                return self.view(prepared[0])
+
+    def finish_reauthorization(self, directory, record, job, lease, reading):
+        # Caller owns the profile lock and provider lease. Do not re-enter either
+        # lock, and update this lease's state so close cannot resurrect the pause.
+        recovery = job["login_recovery"]
+        state = self.controls.read("codex")
+        if job["cancelled"].is_set():
+            raise Cancelled("操作已取消，暂停保留。")
+        if ((state.get("pause") or {}).get("id") != recovery["pause_id"]
+                or state.get("active") != lease.state.get("active")
+                or (state.get("pause") or {}).get("probe_attempt") != lease.state["pause"].get("probe_attempt")):
+            raise ActionError("恢复状态已变化，配额结果未结清暂停。", 409)
+        self.check_restrictions(record)
+        from agent_monitor.quota import quota_service, quota_applicability
+        if not quota_applicability.current_window(reading):
+            raise ActionError("复验未返回当前有效配额窗口，暂停保留。", 502)
+        from parsers.accounts import Account
+        cache_path = self.root.parent / "quota_snapshot.json"
+        quota_service.record_codex_reading(cache_path,
+            Account(record["account_id"], record["email"], None), reading)
+        rows = (quota_service.read_cache(cache_path).get("codex") or {}).get("managed_accounts", [])
+        fresh = next((row for row in rows if row.get("account_profile") == "monitor-" + record["id"]
+                   and row.get("account_id") == record["account_id"]
+                   and row.get("account_label") == record["email"]
+                   and (row.get("quota_observation") or {}).get("observed_at") == reading["observed_at"]
+                   ), None)
+        if fresh is None:
+            raise ActionError("新配额尚未保存到本账号的已登记读数，暂停保留。", 502)
+        login_operation_id = record["operation"]["id"]
+        candidate = copy.deepcopy(record)
+        candidate["last_failure"] = copy.deepcopy(recovery["original_operation"])
+        candidate["operation"] = copy.deepcopy(recovery["original_operation"])
+        candidate["operation"].update(stage="succeeded", after=reading, quota_status="observed",
+            recovery_pause_id=recovery["pause_id"], reauthorization_operation_id=login_operation_id,
+            recovery=copy.deepcopy(recovery),
+            detail="官方重新授权后已取得新配额，本次未发送消息。")
+        candidate["operation"].pop("failure", None)
+        candidate["operation"].pop("diagnostics", None)
+        self.observe_permission(directory, candidate, reading, explicit=True)
+        self.save(directory, candidate)
+        previous = recovery["previous_recovery"]
+        committed = copy.deepcopy(lease.state)
+        committed["last_recovery"] = {"ok": True, "observed_at": now(),
+            "request": {**previous["request"], "pause_id": recovery["pause_id"], "mode": "reauthorize",
+                        "operation_id": recovery["operation_id"]},
+            "reauthorization_operation_id": login_operation_id,
+            "previous_recovery": previous,
+            "authentication_recovery": {"outcome": "quota_confirmed",
+                "initial_failure": previous["authentication_recovery"]["initial_failure"]}}
+        committed["last_pause"] = committed.pop("pause")
+        committed.pop("active", None)
+        committed["released_at"] = time.time()
+        try:
+            with job["quota_publication"](fresh):
+                with self.guard:
+                    if job["cancelled"].is_set():
+                        raise Cancelled("操作已取消，暂停保留。")
+                    self.controls._save("codex", committed)
+                    record.clear()
+                    record.update(candidate)
+                    lease.state.clear()
+                    lease.state.update(committed)
+                    job["recovery_committed"] = True
+        except Exception:
+            # Keep the authorization operation and its durable original chain;
+            # the normal failure path must not run on the candidate success.
+            self.save(directory, record)
+            raise
 
     def start_refresh_batch(self, profile_ids, *, network_route=None, retry_revision=None, expected_revision=...):
         """Queue one quota-only operation for every current account serially."""
@@ -965,6 +1060,8 @@ class Manager:
             job = self.jobs.get(profile_id)
             if not job:
                 raise ActionError("本进程没有正在运行的这项操作；请刷新查看结果。", 409)
+            if job.get("recovery_committed"):
+                raise ActionError("本次恢复结果已保存，不能再取消；请更新状态。", 409)
             job["cancelled"].set()
             return {"cancelling": True}
 
@@ -1122,6 +1219,13 @@ class Manager:
         from agent_monitor.quota.quota_refresh import account_fingerprint
         op = record["operation"]
         facts = getattr(rpc, "diagnostics", {})
+        local_commit = (op.get("diagnostics") or {}).get("local_commit")
+        if local_commit:
+            lease.pause("localRecoveryCommitFailed", failure={**local_commit,
+                "account_profile": "monitor-" + record["id"],
+                "account_fingerprint": account_fingerprint("codex", Account(record["account_id"], record["email"], None))},
+                source={"profile_id": record["id"], "operation_id": op["id"], "action": "quota"})
+            return
         lease.pause(reason, failure={"stage": "account_check" if op["stage"] == "checking" else "quota_read",
             "rpc_code": facts.get("rpc_error_code"), "upstream_code": facts.get("rpc_error_reason"),
             "kind": "rpc_error", **facts.get("rpc_failure", {}),
@@ -1183,8 +1287,9 @@ class Manager:
             acquire_slot()
             slot = True
             try:
+                options = {"probe_pause_id": job["login_recovery"]["pause_id"]} if job.get("login_recovery") else {}
                 lease = self.controls.acquire("codex", cancelled=job["cancelled"], timeout=0,
-                                              interval=self.start_interval)
+                                              interval=self.start_interval, **options)
             except (Paused, Busy) as exc:
                 if job["cancelled"].is_set():
                     raise Cancelled("操作已取消。") from None
@@ -1205,7 +1310,7 @@ class Manager:
                 self.update(directory, record, stage="succeeded", quota_status="observed", after=after,
                             detail="已读取服务端配额，本次未发送消息。")
                 return
-            if not self.identity(rpc, directory, record):
+            if job.get("login_recovery") or not self.identity(rpc, directory, record):
                 if not record["operation"].get("login_only"):
                     raise ActionError("登录态不可用，请单独登录；本次未发送消息。", 409, "needsLogin")
                 self.update(directory, record, stage="login_queued", detail="等待逐个授权；轮到此账号后显示设备码，已有登录态的账号会继续处理。")
@@ -1224,6 +1329,14 @@ class Manager:
                 completed = rpc.event("account/login/completed", lambda p: p.get("loginId") == login["loginId"], time.monotonic() + LOGIN_SECONDS)
                 job["authorization"] = {}
                 if not completed.get("success"):
+                    if job.get("login_recovery"):
+                        detail = completed.get("error")
+                        if isinstance(detail, str):
+                            known = [*codex_quota.credential_secrets(directory / "codex/auth.json"), job.get("login_access_before"), login.get("userCode")]
+                            for secret in sorted({s for s in known if isinstance(s, str) and s}, key=len, reverse=True):
+                                detail = detail.replace(secret, "[redacted]")
+                        rpc.diagnostics["login_completion"] = {"success": False,
+                            "detail": diagnostic_evidence.safe_upstream_detail(detail)}
                     if completed.get("error") == "device auth failed with status 429 Too Many Requests":
                         raise LoginRateLimited()
                     raise ActionError("官方授权未完成，本次设备码已停止使用。请重新发起操作获取新码；本次未发送消息。", 502)
@@ -1231,6 +1344,33 @@ class Manager:
                 login_slot = False
                 if not self.identity(rpc, directory, record):
                     raise ActionError("授权后仍未取得登录态，请重试。", 502)
+            if job.get("login_recovery"):
+                after_access = json.loads((directory / "codex/auth.json").read_text()).get("tokens", {}).get("access_token")
+                if not isinstance(after_access, str) or not after_access or after_access == job["login_access_before"]:
+                    raise ActionError("官方授权未确认保存新凭据，未复查配额；暂停保留。", 502)
+                self.update(directory, record, stage="reading", detail="官方授权已完成，正在复验本账号配额；本次不发送消息。")
+                after = codex_quota.read_bound(
+                    lambda method, params: rpc.request(method, params, time.monotonic() + 20),
+                    directory / "codex/auth.json", record["account_id"], record["email"])
+                from agent_monitor.quota import quota_applicability
+                if not quota_applicability.current_window(after):
+                    rpc.diagnostics["rpc_failure"] = {"stage": "quota_parse", "kind": "invalid_result",
+                        "detail": "复验未返回当前有效配额窗口，暂停保留。"}
+                    raise ActionError("复验未返回当前有效配额窗口，暂停保留。", 502)
+                self.update(directory, record, stage="saving", candidate_quota=after,
+                            diagnostics=copy.deepcopy(rpc.diagnostics),
+                            detail="已取得配额，正在核验有效窗口并保存、发布与结清原任务。")
+                rpc.close()
+                rpc = None
+                try:
+                    self.finish_reauthorization(directory, record, job, lease, after)
+                except Cancelled:
+                    raise
+                except Exception as exc:
+                    record["operation"].setdefault("diagnostics", {})["local_commit"] = diagnostic_evidence.failure_details(exc, stage="recovery_commit",
+                        detail="本地配额保存或发布未完成，已有候选结果与暂停保留。")
+                    raise ActionError("配额复验已有结果，但本地保存或发布未完成；暂停保留。请先核对已有结果，不要重新授权。", 502) from None
+                return
             if record["operation"].get("login_only"):
                 self.update(directory, record, stage="succeeded", detail="已完成登录，本次未发送消息或查询配额。请重新选择后续操作。")
                 return
@@ -1330,7 +1470,7 @@ class Manager:
                     self.pause_operation(lease, record, rpc, "operationFailed")
                 if job.get("batch_stopped") is not None:
                     job["batch_stopped"].set()
-            diagnostics = copy.deepcopy(getattr(rpc, "diagnostics", {}))
+            diagnostics = {**record["operation"].get("diagnostics", {}), **copy.deepcopy(getattr(rpc, "diagnostics", {}))}
             route = getattr(rpc, "network_route", None)
             if isinstance(route, str):
                 diagnostics["network"] = network_policy.observations(route)
@@ -1368,7 +1508,7 @@ class Manager:
             finally:
                 try:
                     if lease:
-                        lease.close(completed="cleanup_error" not in job)
+                        lease.close(completed="cleanup_error" not in job and not job.get("recovery_committed"))
                 except Exception as exc:
                     job["cleanup_error"] = exc
                     raise
