@@ -270,18 +270,27 @@
       quotaFilter.sort = ["default", "remaining", "remaining_desc", "reset", "observed"].includes(restored.get("quota_sort")) ? restored.get("quota_sort") : "default";
     }
     let restoreQuotaReading = true;
-    const accountActions = qs("#codex-account-actions");
-    if (accountActions && restored.get("account_actions") === "true") accountActions.open = true;
     resetQuotaReadings();
     onPageCleanup(resetQuotaReadings);
-    if (accountActions) {
-      const currentAccountsPage = pageScope();
-      import("/web/codex-accounts.js" + (assetVersion ? `?v=${assetVersion}` : "")).then((module) => {
-        if (currentAccountsPage()) module.init();
-      }).catch(() => {
-        const notice = qs("#codex-account-notice");
-        if (currentAccountsPage() && notice) notice.textContent = "账号操作未能加载，请刷新页面重试。";
-      });
+    const profileController = new AbortController();
+    onPageCleanup(() => profileController.abort());
+    let profileGeneration = 0;
+    async function loadAccountSnapshot() {
+      const generation = ++profileGeneration;
+      try {
+        const response = await platform.fetch('/api/codex-accounts', {headers:{'X-Agent-Monitor':'codex-accounts'}, signal:profileController.signal});
+        if (!response.ok) throw new Error('账号状态未取得');
+        const data = await response.json();
+        if (!initializationCurrent() || generation !== profileGeneration) return;
+        window.AgentMonitor.updateCodexQuotaReadings(data.accounts || []);
+        const notice = qs('#quota-profile-status');
+        if (notice) notice.textContent = '';
+      } catch (error) {
+        if (initializationCurrent() && generation === profileGeneration && error.name !== 'AbortError') {
+          const notice = qs('#quota-profile-status');
+          if (notice) notice.textContent = '账号操作状态未取得，保留上次状态；可前往账号管理更新。';
+        }
+      }
     }
     const retiredFiveHour = qs("#codex-five-hour");
     const legacyCard = retiredFiveHour && retiredFiveHour.closest(".kpi-card");
@@ -313,6 +322,8 @@
       try { await loadOverview(force); } finally { activeLoads -= 1; }
     }
     async function loadOverview(force) {
+      if (!pageCurrent()) return;
+      loadAccountSnapshot();
       const generation = ++overviewGeneration;
       const selectedRange = getRange();
       if (force === true) {

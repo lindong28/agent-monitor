@@ -59,6 +59,17 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn("immutable", headers["Cache-Control"])
         self.assertEqual(data, self.asset.read_bytes())
 
+    def test_account_page_direct_and_identity_links_use_the_account_document(self):
+        account_html = self.html.replace(b"fixture", b"account task")
+        (self.root / "accounts.html").write_bytes(account_html)
+        for path in ("/accounts", "/accounts?profile=fixture-profile&task=refresh"):
+            with self.subTest(path=path):
+                status, headers, body = self.request(path)
+                self.assertEqual(status, 200)
+                self.assertIn(b"account task", body)
+                self.assertIn(b"asset-version", body)
+                self.assertEqual(headers["Cache-Control"], "no-store")
+
     def test_gzip_head_conditional_get_and_identity_share_keepalive(self):
         version = server._web_signature()
         path = f"/web/app.js?v={version}"

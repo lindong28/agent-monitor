@@ -413,7 +413,7 @@ ui.updateCodexQuotaReadings([
  {id:'profile-wrong-email',account_id:'three',email:'different@example.test'},
 ]);
 ui.renderQuotaAccounts({codex:{accounts:['one','two','three'].map(id=>({...account(id),account_label:'same@example.test'}))}});
-const actionButtons=descendants(table).filter(n=>n.tagName==='BUTTON' && n.textContent==='账号操作');
+const actionButtons=descendants(table).filter(n=>n.tagName==='BUTTON' && n.textContent==='管理账号');
 assert.equal(actionButtons.length,2,'no link for email mismatch');
 actionButtons.forEach(n=>n.click());assert.deepEqual(opened,['profile-one','profile-two']);
 for (const [sort,hidden] of [['default',true],['remaining',false],['reset',false],['remaining_desc',false],['observed',true]]) {

@@ -166,6 +166,7 @@
 
   const PAGE_SEARCH_ENTRIES = [
     ["控制台", "总览", "用量、成本趋势与账号配额", "/"],
+    ["控制台", "账号管理", "刷新配额、登录、发送与账号维护", "/accounts"],
     ["控制台", "采集与诊断", "机器采集、历史质量与未归属账号的观测", "/collection"],
     ["控制台", "透视", "按目录、模型、机器分析成本和 token", "/explore"],
     ["控制台", "会话", "查找会话、筛选记录并查看明细", "/sessions"],
@@ -732,6 +733,20 @@
   // of markup that actually differed. The flash that produced is what this
   // removes; it is not a data cache, and every page still fetches its own API
   // data exactly as before.
+  async function initAccounts() {
+    const current = pageScope();
+    await runtimeContext();
+    if (!current()) return;
+    const module = await import('/web/codex-accounts.js' + (assetVersion ? `?v=${assetVersion}` : ''));
+    if (current()) module.init();
+  }
+  function openCodexAccount(id, task = "manage") {
+    const url = new URL('/accounts', window.location.origin);
+    url.searchParams.set('profile', id);
+    url.searchParams.set('task', task);
+    url.searchParams.set('return', currentPageUrl());
+    return renderRoute(url, {push:true}).then(handled => { if (!handled) window.location.assign(url.href); });
+  }
   const CLIENT_ROUTES = new Map([
     ["/", () => initOverview()],
     ["/explore", () => window.AgentMonitorPivot.init()],
@@ -739,6 +754,7 @@
     ["/network", () => initNetwork()],
     ...Array.from(GUIDE_ROUTES, path => [path, () => initGuide()]),
     ["/collection", () => initCollection()],
+    ["/accounts", () => initAccounts()],
   ]);
 
   // Path *and* query. Two history entries for the same page differing only in
@@ -940,7 +956,7 @@
   }
 
   window.AgentMonitor = {
-    runtimeContext, hubUrl,
+    runtimeContext, hubUrl, initAccounts, openCodexAccount,
     ...charts, ...quota, ...network, ...sessions,
     restartAndReload, updateAreaNavigation, copyGuideCode, showOverviewLoadError,
     renderRoute, renderOverview, collectionUrl, currentPageUrl, renderCostDiagnostics, costDiagnosticsQuery,

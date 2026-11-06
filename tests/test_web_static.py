@@ -541,7 +541,8 @@ assert(!visible(card).includes("7 天"), "quota comparison belongs in the table"
 assert(text(card.querySelector("details")).includes(oldTime), "operation observation time remains in details");
 assert(text(card.querySelector("details")).includes("本次抽取的消息：现在几点了？"));
 assert(!text(list.children[1].querySelector("details")).includes("抽取的消息"), "legacy records must not invent selected text");
-assert(visible(list.children[1]).includes("登录态不可用"));
+assert(visible(list.children[1]).includes("需要重新登录"));
+assert(text(list.children[1]).includes("登录态不可用"));
 assert(text(list.children[1].querySelector("details")).includes("服务端未返回"));
 const cardButtons = n => {
   const result = [];
@@ -553,7 +554,7 @@ const loginButtons = cardButtons(list.children[1]);
 assert(loginButtons.some(button => button.textContent === "单独登录"), "invalid saved login must expose re-login");
 assert(loginButtons.filter(button => ["向此账号发送一条消息", "仅刷新配额"].includes(button.textContent)).every(button => button.disabled), "invalid saved login must block upstream actions");
 assert(visible(list.children[1]).includes("需要重新登录"), "invalid saved login must be visible in the account status");
-assert(visible(list.children[1]).includes("最近配额查询") || visible(list.children[1]).includes("最近发送操作"));
+assert(text(list.children[1]).includes("最近配额查询") || text(list.children[1]).includes("最近发送操作"));
 assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（1）");
 assert.equal(loginButtons.find(button => button.textContent === "单独登录").disabled, false);
 values[1].restrictions = {authentication: true}; renderAccounts(values);
@@ -620,9 +621,10 @@ values[0].operation = {id: "failed-query", refresh_only: true, stage: "failed", 
 controller.update({accounts: values, upstream_pause: {id: "pause"}});
 let failed = list.children[0];
 assert(visible(failed).includes("配额查询失败"));
-assert(visible(failed).includes("发送仍因此前额度限制暂停"));
-assert(visible(failed).includes("工作区成员额度已耗尽") && visible(failed).includes(oldTime));
-assert(visible(failed).includes("通道暂停与检查"));
+assert(visible(failed).includes("发送受限"));
+assert(text(failed).includes("发送仍因此前额度限制暂停"));
+assert(text(failed).includes("工作区成员额度已耗尽") && text(failed).includes(oldTime));
+assert(text(failed).includes("通道暂停与检查"));
 assert(!visible(failed).includes("可仅刷新配额"), "paused channel must not recommend a disabled refresh action");
 assert(text(failed).includes("最近成功配额观测") && text(failed).includes("100%"), "failed read retains dated last successful quota");
 assert(text(failed).includes("RPC -32603 · 上游 HTTP 401 · 上游代码 token_revoked"));
@@ -638,7 +640,7 @@ delete values[0].operation.failure;
 renderAccounts(values);
 assert(!visible(list.children[0]).includes("最近查询完成"));
 assert(text(list.children[0]).includes("最近查询已完成"));
-assert(visible(list.children[0]).includes("发送仍因此前额度限制暂停"), "successful query does not imply send permission");
+assert(visible(list.children[0]).includes("发送受限"), "successful query does not imply send permission");
 const sections = list.children[0].querySelector("details").querySelector("div").children;
 assert(sections.find(s=>text(s.children[0]) === "历史记录") && text(sections.find(s=>text(s.children[0]) === "历史记录")).includes("历史请求错误摘要（已脱敏）：session expired"));
 assert(!sections.find(s=>text(s.children[0]) === "技术细节"), "recovered operation must not show stale failure as current diagnostics");
@@ -672,16 +674,17 @@ assert(cardButtons(list.children[0]).find(button => button.textContent === "向�
                         break
 
         tree = Tree()
-        tree.feed((ROOT / "web/index.html").read_text())
+        tree.feed((ROOT / "web/accounts.html").read_text())
         parents, attrs = tree.locations["codex-batch-status"]
-        self.assertEqual(parents[-1][0], "summary")
-        self.assertEqual(parents[-2][1]["id"], "codex-account-actions")
+        self.assertEqual(parents[-1][1]["id"], "codex-account-actions")
         self.assertEqual(attrs["aria-live"], "polite")
+        tree = Tree()
+        tree.feed((ROOT / "web/index.html").read_text())
         for name in ("daily-cost-data", "top-projects-data", "model-mix-data"):
             self.assertIn("chart-data-disclosure", tree.locations[name][1]["class"])
 
     def test_refresh_all_quota_action_is_visible_and_uses_approval_action(self):
-        index = (ROOT / "web/index.html").read_text()
+        index = (ROOT / "web/accounts.html").read_text()
         accounts = (ROOT / "web/codex-accounts.js").read_text()
         egress = (ROOT / "web/account-egress.js").read_text()
         self.assertNotIn('id="codex-refresh-all"', index)
@@ -2116,11 +2119,13 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
                 if tag == "details":
                     self.advanced = False
         overview = (ROOT / "web/index.html").read_text()
-        self.assertLess(overview.index('id="top-projects-chart"'), overview.index('id="codex-account-actions"'))
-        self.assertLess(overview.index('id="model-mix-chart"'), overview.index('id="codex-account-actions"'))
+        self.assertIn('id="top-projects-chart"', overview)
+        self.assertIn('id="model-mix-chart"', overview)
+        self.assertNotIn('id="codex-account-actions"', overview)
+        self.assertIn('href="/accounts"', overview)
         parser = Controls()
         parser.feed(overview)
-        self.assertEqual(parser.collapsed, [True])
+        self.assertEqual(parser.collapsed, [])
         self.assertEqual(parser.primary, [])
 
     def test_overview_side_panel_links_use_card_windows(self):
@@ -2336,7 +2341,7 @@ class SignedOutMachinesReadAsStateNotFailureTests(unittest.TestCase):
                 result = self.render_with([], [], [{"machine": "node-b", "reason": reason}], [account])
                 row = result["rows"][0]
                 self.assertIn(expected, row)
-                self.assertIn("Claude 采集详情", row)
+                self.assertIn("采集与诊断", row)
                 self.assertNotIn("可点击刷新重试", row)
                 self.assertIn(reason, result["details"][0]["text"])
 

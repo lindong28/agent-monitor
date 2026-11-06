@@ -41,6 +41,7 @@
           <a data-nav href="/">总览</a>
           <a data-nav href="/explore">透视</a>
           <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/accounts">账号管理</a>
           <a data-nav href="/collection">采集与诊断</a>
           <a data-nav href="/network">网络</a>
         </nav>
@@ -181,72 +182,11 @@
               </thead>
             </table>
             </div>
-          <details id="quota-auto-settings" class="note-disclosure"><summary>Codex 自动查询设置</summary></details>
+          <p id="quota-profile-status" class="quota-scope" role="status"></p>
+          <p id="quota-overview-status" class="quota-scope" role="status"></p>
+          <p><a data-nav href="/accounts#account-query">刷新配额</a> · <a data-nav href="/accounts">管理账号</a> · <a data-collection-link href="/collection#quota-diagnostics">查看配额更新与自动刷新设置</a></p>
             <div id="quota-machine-notice" class="quota-scope" hidden></div>
-            <details id="codex-account-actions" class="codex-account-actions">
-              <summary>Codex 账号操作<span id="codex-batch-status" role="status" aria-live="polite">正在读取账号…</span></summary>
-              <div class="codex-batch-summary">
-                <div id="codex-device-network" class="quota-scope">
-                  <p id="codex-device-status" role="status" hidden></p>
-                  <button id="codex-device-cancel" type="button" class="btn" hidden>取消连接</button>
-                  <details id="codex-device-help" class="note-disclosure">
-                    <summary>首次启用、连接与授权帮助</summary>
-                    <div class="disclosure-body">
-                    <p>操作时自动连接当前设备；发送前展示出口 IP 与地区，无需先单独连接。</p>
-                    <p>首次使用：在打开此页面的设备安装 agent-monitor，然后执行以下命令启用连接服务。服务会在登录后自动启动，无需保持终端打开。</p>
-                    <p><code id="codex-device-command"></code></p>
-                    <p>连接异常时运行 <code>agent-monitor connect status</code> 查看状态；修复后直接重试原操作。需要停用时运行 <code>agent-monitor connect stop</code>。</p>
-                    <button id="codex-device-connect" type="button" class="btn">检查本机连接</button>
-                    <p>此检查仅确认本机与服务器的连接，不查询账号或出口。仅批次发送、继续未发送账号及出口预览使用本机连接；单独登录、刷新配额和网络诊断仍在服务器执行。</p>
-                    <button id="codex-egress-preview" type="button" class="btn">查看发送出口 IP 与地区</button>
-                    <p>需要授权时，先在账号安全设置中启用设备码登录，再打开对应账号卡片中的 OpenAI 官方授权页并填写设备码。确认登录账号与卡片邮箱一致后完成授权。</p>
-                    </div>
-                  </details>
-                </div>
-                <p class="quota-scope">选择下方账号用于查询或发送；上方配额筛选不改变选择。</p>
-                <div class="codex-account-controls">
-                  <strong>配额查询</strong>
-                  <button id="codex-refresh-selected" type="button" class="btn" disabled>查询所选账号配额</button>
-                  <button id="codex-quota-retry" type="button" class="btn" hidden>继续未完成的配额查询</button>
-                  <span class="quota-scope">只查询，不发送消息</span>
-                </div>
-                <p id="codex-quota-progress" class="quota-scope" role="status" hidden></p>
-                <div class="codex-account-controls">
-                  <strong>消息发送</strong>
-                  <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
-                  <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
-                  <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
-                </div>
-                <p class="quota-scope">每账号发送一条，会消耗额度；发送前需确认出口与账号。</p>
-                <details id="codex-operation-history" class="note-disclosure" hidden>
-                  <summary>最近操作记录</summary>
-                  <div class="disclosure-body supplementary-body">
-                <p id="codex-send-receipt" class="quota-scope" hidden></p>
-                <p id="codex-quota-batch-status" class="quota-scope" role="status" hidden></p>
-                <p id="codex-batch-observation" class="quota-scope" hidden></p>
-                  </div>
-                </details>
-                <p id="codex-batch-blocked" class="quota-scope" role="status" hidden></p>
-                <div id="codex-upstream-pause" class="quota-scope" hidden>
-                  <p><strong id="codex-pause-summary"></strong></p>
-                  <p id="codex-pause-detail"></p>
-                  <button id="codex-pause-recovery" type="button" class="btn">查看暂停原因与恢复</button>
-                </div>
-                <details id="codex-recovery-history" class="note-disclosure">
-                  <summary>查看最近恢复记录</summary>
-                  <div id="codex-recovery-body" class="quota-scope disclosure-body supplementary-body"></div>
-                </details>
-                <details id="codex-sending-help" class="note-disclosure">
-                  <summary>发送规则</summary>
-                  <div id="codex-batch-help" class="quota-scope disclosure-body supplementary-body"></div>
-                </details>
-              </div>
-              <div id="codex-account-unavailable" role="status" aria-live="polite"></div>
-              <p id="codex-account-notice" role="status" aria-live="polite"></p>
-              <div class="codex-account-controls"><button id="codex-select-all" type="button" class="btn">全选可纳入账号</button><button id="codex-select-none" type="button" class="btn">取消选择</button><span id="codex-selection-count" role="status"></span></div>
-              <div id="codex-account-list"></div>
-              <p class="quota-scope">仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>
-            </details>
+
           </section>
           <div id="codex-five-hour-compat" hidden aria-hidden="true">
             <span id="codex-five-hour"></span>

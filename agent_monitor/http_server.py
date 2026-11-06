@@ -943,7 +943,7 @@ class Handler(BaseHTTPRequestHandler):
             if route:
                 self._send_json(route(query), send_body=send_body, compress=True)
                 return
-            if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/collection", "/ip-check-docs") or parsed.path in GUIDE_PAGES or parsed.path.startswith("/web/"):
+            if parsed.path in ("/", "/explore", "/sessions", "/network", "/guide", "/collection", "/accounts", "/ip-check-docs") or parsed.path in GUIDE_PAGES or parsed.path.startswith("/web/"):
                 self._serve_static(parsed.path, send_body=send_body)
                 return
             self.send_error(404)
@@ -990,6 +990,8 @@ class Handler(BaseHTTPRequestHandler):
             file_path = WEB_ROOT / "network.html"
         elif path == "/collection":
             file_path = WEB_ROOT / "collection.html"
+        elif path == "/accounts":
+            file_path = WEB_ROOT / "accounts.html"
         elif path == "/guide":
             file_path = WEB_ROOT / "guide.html"
         elif path in GUIDE_PAGES:

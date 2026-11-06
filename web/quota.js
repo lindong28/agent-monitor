@@ -356,7 +356,13 @@
       body.appendChild(row);
       table.appendChild(body);
     }
+    const overviewStatus = qs('#quota-overview-status');
+    if (overviewStatus) {
+      const affected = QUOTA_PROVIDERS.flatMap(provider => (rateLimits?.[provider.key]?.refresh_errors || []).map(f => f.machine).filter(Boolean));
+      overviewStatus.textContent = affected.length ? `${new Set(affected).size} 台机器的配额更新有异常，已有读数保留。查看采集与诊断了解原因。` : '';
+    }
     QUOTA_PROVIDERS.forEach((provider) => {
+      if (overviewStatus) return;
       const failures = rateLimits?.[provider.key]?.refresh_errors || [];
       const previous = previousDiagnostics.get(provider.key);
       if (failures.length || previous?.quotaDiagnostics.entries.some(record => record.panel)) {
@@ -785,6 +791,18 @@
     return [...groups.values()];
   }
 
+  function renderQuotaDiagnostics(rateLimits) {
+    const table = qs('#quota-diagnostic-table');
+    if (!table) return;
+    if (!table.children.length) table.textContent = '';
+    QUOTA_PROVIDERS.forEach(provider => {
+      const old = Array.from(table.children).find(body => body.quotaDiagnostics?.provider === provider.key);
+      const failures = rateLimits?.[provider.key]?.refresh_errors || [];
+      if (failures.length || old) table.appendChild(quotaFailureDetails(provider, failures, old));
+    });
+    if (!table.children.length) table.textContent = '没有已记录的配额更新异常。';
+  }
+
   function quotaFailureDetails(provider, failures, previous) {
     const body = previous || document.createElement("tbody");
     if (!body.quotaDiagnostics) {
@@ -910,7 +928,7 @@
       if (concise) return `主动${state}`;
       const reading = hasValue ? (fresh ? (account.quota_observation?.source === "codex_session" ? "当前读数来自会话日志" : "当前读数仍在更新时限内") : "读数已过期，保留上次读数") : "暂无读数";
       const machines = [...new Set(failures.map((failure) => failure.machine).filter(Boolean))].join("、");
-      return `${reading}；${machines} 的主动${state}，请展开“${provider.label} 采集详情”核对原因`;
+      return `${reading}；${machines} 的主动${state}，请在“采集与诊断”查看原因`;
     }
     if (concise) return hasValue ? "更新延迟" : "查询失败，暂无读数";
     return hasValue ? "更新延迟，保留上次读数；可点击刷新重试" : "暂不可用，可点击刷新重试";
@@ -1173,10 +1191,15 @@
       const open = document.createElement("button");
       open.type = "button";
       open.className = "btn";
-      open.textContent = "账号操作";
+      open.textContent = "管理账号";
       open.setAttribute("aria-label", `${quotaAccountName(account)}（${account.account_id}）的账号操作`);
       open.addEventListener("click", () => window.AgentMonitor?.openCodexAccount?.(profiles[0].id));
       actions.appendChild(open);
+      const refresh = document.createElement('button');
+      refresh.type = 'button'; refresh.className = 'btn'; refresh.textContent = '刷新配额';
+      refresh.setAttribute('aria-label', `${quotaAccountName(account)}（${account.account_id}）的配额刷新`);
+      refresh.addEventListener('click', () => window.AgentMonitor?.openCodexAccount?.(profiles[0].id, 'refresh'));
+      actions.appendChild(refresh);
     }
 
     if (quotaPresence(account) === "remembered") {
@@ -1815,5 +1838,5 @@
     renderedQuotaRateLimits = null;
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
-  return { createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
+  return { renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
 });

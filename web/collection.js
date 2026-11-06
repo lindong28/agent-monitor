@@ -324,7 +324,7 @@
     if (raw) {
       let url;
       try { url = new URL(raw, window.location.origin); } catch (_) { url = new URL("/", window.location.origin); }
-      if (url.origin === window.location.origin && (["/", "/explore", "/sessions", "/network"].includes(url.pathname) || GUIDE_ROUTES.has(url.pathname))) {
+      if (url.origin === window.location.origin && (["/", "/explore", "/sessions", "/network", "/accounts"].includes(url.pathname) || GUIDE_ROUTES.has(url.pathname))) {
         back.href = url.pathname + url.search + url.hash;
         back.textContent = "返回来源页（保留日期、筛选与详情）";
       }
@@ -355,6 +355,7 @@
         if (!current()) return;
         renderSyncStatus(data.sync);
         renderQuotaMachineRecords(data.rate_limits);
+        window.AgentMonitor.renderQuotaDiagnostics?.(data.rate_limits);
         renderQuotaSignedOut(data.rate_limits, true);
         qs("#collection-quota-empty").hidden = !qs("#quota-machine-records").hidden;
       } catch (error) {

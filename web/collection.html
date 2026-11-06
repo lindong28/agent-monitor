@@ -41,6 +41,7 @@
           <a data-nav href="/">总览</a>
           <a data-nav href="/explore">透视</a>
           <a data-nav href="/sessions">会话</a>
+          <a data-nav href="/accounts">账号管理</a>
           <a data-nav href="/collection">采集与诊断</a>
           <a data-nav href="/network">网络</a>
         </nav>
@@ -61,6 +62,11 @@
           <p id="sync-summary" class="status-line" aria-live="polite">检查中…</p>
           <div id="sync-machines" class="sync-machines"></div>
         </section>
+        <section class="panel" id="quota-diagnostics"><h2>配额更新</h2>
+          <p class="scope-note">按机器和服务查看更新异常；机器暂停不代表每个账号均查询失败。</p>
+          <div class="table-wrap"><table id="quota-diagnostic-table" class="quota-table"></table></div>
+          <details id="quota-auto-settings" class="note-disclosure"><summary>自动刷新</summary></details>
+        </section>
         <section class="panel" id="cost-diagnostics" aria-labelledby="cost-diagnostics-title">
           <div class="panel-head"><h2 id="cost-diagnostics-title">费用记录诊断</h2><button id="reload-cost-diagnostics" type="button">重新读取费用诊断</button></div>
           <p id="cost-diagnostics-scope" class="scope-note"></p>
@@ -77,7 +83,7 @@
           <p class="scope-note">未识别账号的观测不能用于选择可用账号；已知账号及其历史读数见<a href="/#quota-explorer">总览配额表</a>。</p>
           <p id="quota-signed-out" class="scope-note" hidden></p>
           <p id="collection-quota-empty" class="scope-note" hidden>没有未归属账号的机器观测。</p>
-          <details id="quota-auto-settings" class="note-disclosure"><summary>Codex 自动查询设置</summary></details>
+
           <details id="quota-machine-records" class="note-disclosure" open hidden></details>
         </section>
         <p><a data-preserve-range href="/guide/collection">采集与接入说明</a> · <a data-preserve-range href="/network">服务端网络诊断</a></p>

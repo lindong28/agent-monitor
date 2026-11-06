@@ -113,6 +113,7 @@ export function init({ autoLoad = true } = {}) {
   let selectedIds = null;
   let lastBatchStatus = "";
   let hasSnapshot = false;
+  let locatePending = new URLSearchParams(window.location?.search || "").get("profile");
   let refreshingAll = false;
   const controller = new AbortController();
   let deviceConnection = null;
@@ -247,6 +248,16 @@ export function init({ autoLoad = true } = {}) {
       updateRefreshAllButton();
       lastBatchStatus = batchStatus.textContent;
       hasSnapshot = true;
+      if (locatePending) {
+        const id = locatePending; locatePending = null;
+        if (!openAccount(id)) notice.textContent = '该账号已不在当前托管列表中；未执行任何操作。';
+        else if (new URLSearchParams(window.location?.search || "").get('task') === 'refresh') {
+          const card = Array.from(list.children).find(node => node.dataset.id === id);
+          const refresh = card?.querySelector('[data-reader-state$=":refresh"]');
+          if (refresh && !refresh.disabled) refresh.focus();
+        }
+      }
+      if (window.location?.pathname === '/accounts') window.AgentMonitor.restoreReaderState?.();
   }
 
   function updateRefreshAllButton() {
@@ -291,10 +302,10 @@ export function init({ autoLoad = true } = {}) {
       update(data);
     } catch (error) {
       if (current() && error.name !== "AbortError") {
-        notice.textContent = error.message + " 可重新展开此面板刷新。";
+        notice.textContent = error.message + " 可点击“更新状态”重试。";
         batchStatus.textContent = hasSnapshot
-          ? (lastBatchStatus ? lastBatchStatus + " · " : "") + "刷新失败，当前展示为上次记录；重新展开可重试。"
-          : "账号读取失败；重新展开此面板可重试。";
+          ? (lastBatchStatus ? lastBatchStatus + " · " : "") + "刷新失败，当前展示为上次记录；点击“更新状态”可重试。"
+          : "账号读取失败；点击“更新状态”可重试。";
       }
     } finally {
       loading = false;
@@ -519,16 +530,21 @@ export function init({ autoLoad = true } = {}) {
         label.append(checkbox);
         heading.prepend(label);
       }
+      if (new URLSearchParams(window.location?.search || "").get('profile') === account.id) {
+        card.dataset.located = 'true';
+        heading.append(element('span', '当前账号', 'codex-batch-result'));
+      }
       card.append(heading);
       if (account.disabled) card.append(element("p", "用户已确认此账号不可用；本机 Monitor 已跳过查询、登录和发送，历史记录保留。", "quota-scope"));
       const restrictionDetails = account.restriction_messages
         ? Object.entries(account.restriction_messages).map(([key, detail]) => key === "quota" ? quotaHoldMessage(account, upstreamPause) : detail)
         : account.restriction_details || [];
-      for (const detail of restrictionDetails) card.append(element("p", detail, "quota-scope"));
+      if (restrictionDetails.length) heading.append(element("span", (accountNeedsLogin(account) || account.restrictions?.authentication) ? "登录态不可用" : account.restrictions?.quota ? "发送受限" : "账号有限制", "codex-batch-result"));
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "账号与操作详情"));
       const detailBody = element("div", undefined, "disclosure-body");
       const currentDetail = element("section", undefined, "account-detail-section");
+      for (const detail of restrictionDetails) currentDetail.append(element("p", detail, "quota-scope"));
       const quotaDetail = element("section", undefined, "account-detail-section");
       const historyDetail = element("section", undefined, "account-detail-section");
       const technicalDetail = element("section", undefined, "account-detail-section");
@@ -553,7 +569,7 @@ export function init({ autoLoad = true } = {}) {
       }
       if (op) {
         if (op.stage === "succeeded") currentDetail.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "查询" : "发送"}已完成：${op.detail || "操作完成"}`, "quota-scope"));
-        if (op.stage !== "succeeded" && !(account.restriction_details || []).includes(op.detail)) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送操作"}（${timestamp(op.started_at)}）：${op.detail}`));
+        if (op.stage !== "succeeded" && !(account.restriction_details || []).includes(op.detail)) currentDetail.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送操作"}（${timestamp(op.started_at)}）：${op.detail}`));
         currentDetail.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
         if (op.message) currentDetail.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
         if (op.failure) technicalDetail.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
@@ -589,7 +605,7 @@ export function init({ autoLoad = true } = {}) {
         send.type = "button";
         send.disabled = actions.busy || accounts.some(a => a.busy) || Boolean(upstreamPause) || Boolean(account.disabled) || loginRequired || Object.keys(account.restrictions || {}).length > 0;
         send.addEventListener("click", () => actions.performBatch("batch-start", [account.id]));
-        controls.append(send);
+        managementDetail.append(send);
       }
       const refresh = button("仅刷新配额", "refresh", account);
       const restrictions = account.restrictions || {};
@@ -642,7 +658,13 @@ export function init({ autoLoad = true } = {}) {
     card.focus({ preventScroll: true });
     return true;
   }
-  window.AgentMonitor.openCodexAccount = openAccount;
+  document.querySelector('#accounts-reload')?.addEventListener('click', load);
+  const back = document.querySelector('#accounts-return');
+  const rawBack = new URLSearchParams(window.location?.search || "").get('return');
+  if (back && rawBack) {
+    try { const url = new URL(rawBack, location.origin); if (url.origin === location.origin && url.pathname === '/') back.href = url.pathname + url.search + url.hash; } catch (_) {}
+  }
+  if (window.location?.pathname !== '/accounts') window.AgentMonitor.openCodexAccount = openAccount;
   function visibility() { if (!document.hidden) load(); }
   document.addEventListener("visibilitychange", visibility);
   root.addEventListener("toggle", () => { if (root.open) load(); });
