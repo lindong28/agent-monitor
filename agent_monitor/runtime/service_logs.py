@@ -99,7 +99,7 @@ class LogMaintenance:
                 if _identity(temporary.lstat()) != _identity(pending_info):
                     raise ValueError('pending log changed')
                 os.ftruncate(stream.fileno(), 0)
-                offset = max(0, size - self.segment_bytes)
+                offset = 0
                 while offset < size:
                     block = os.pread(fd, min(65536, size - offset), offset)
                     if not block:

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "checks": {
+    "service-logs": {
+      "argv": [
+        "python3",
+        "scripts/acceptance_verify_service_logs.py",
+        "{report_dir}"
+      ],
+      "timeout_seconds": 60,
+      "profile": "service-logs",
+      "report": "result.json",
+      "event_workflow": "service-logs"
+    }
+  },
+  "prepush": []
+}
