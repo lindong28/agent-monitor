@@ -128,6 +128,7 @@ const account = id => ({id, email: id + '@example.test', account_id: 'workspace-
 
 test('selected quota queries preview and submits only login-ready accounts through the paired route', async () => {
   const f = fixture({accounts: [account('ready'), {...account('expired'), login_required: true}]});
+  f.select(['ready', 'expired']);
   const pending = f.node('#codex-refresh-selected').emit('click');
   f.message(); await f.preview(true); await pending;
   for (const action of ['egress-preview', 'refresh-selected']) {
@@ -239,6 +240,7 @@ test('standalone preview and retry also pair on their own user gesture', async (
 test('failed pairing and rejected exit confirmation never submit a batch', async () => {
   for (const cancelledPreview of [false, true]) {
     const f = fixture({statusError: !cancelledPreview, accounts: [account('a')]});
+    f.select(['a']);
     const pending = f.batchStart(); f.message();
     if (cancelledPreview) await f.preview();
     await pending;
