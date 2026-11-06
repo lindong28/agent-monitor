@@ -522,11 +522,17 @@ class Node {
   remove() {this.parent.children.splice(this.parent.children.indexOf(this), 1);}
   insertBefore(n, ref) {if (n.parent) n.remove(); const index = ref ? this.children.indexOf(ref) : this.children.length; this.children.splice(index, 0, n); n.parent = this;}
 }
-const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count", "#codex-refresh-selected"].map(id => [id, new Node()]));
+const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice", "#codex-batch-start", "#codex-batch-next", "#codex-batch-retry", "#codex-batch-status", "#codex-batch-help", "#codex-account-unavailable", "#codex-select-all", "#codex-select-none", "#codex-selection-count", "#codex-refresh-selected", "#codex-account-search", "#codex-account-filter", "#codex-batch-mode", "#codex-batch-panel", "#codex-account-count", "#codex-account-empty"].map(id => [id, new Node()]));
 const root = new Node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag), createTextNode: text => {const n=new Node();n.textContent=text;return n;}};
 global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x, latestCodexQuotaReading: () => null}};
 const controller = require("./web/codex-accounts.js").init({autoLoad: false});
+nodes["#codex-account-search"].value = "";
+nodes["#codex-account-filter"].value = "all";
+// Mode controls must also work before the first response arrives.
+nodes["#codex-batch-mode"].listeners.click();
+nodes["#codex-batch-mode"].listeners.click();
+assert(nodes["#codex-batch-panel"].hidden);
 const renderAccounts = (accounts, batch = null) => controller.update({accounts, batch});
 const oldTime = "2026-10-08T02:00:00.000Z";
 const values = [
@@ -555,7 +561,7 @@ assert(loginButtons.some(button => button.textContent === "单独登录"), "inva
 assert(loginButtons.filter(button => ["向此账号发送一条消息", "仅刷新配额"].includes(button.textContent)).every(button => button.disabled), "invalid saved login must block upstream actions");
 assert(visible(list.children[1]).includes("需要重新登录"), "invalid saved login must be visible in the account status");
 assert(text(list.children[1]).includes("最近配额查询") || text(list.children[1]).includes("最近发送操作"));
-assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（1）");
+assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（0）");
 assert.equal(loginButtons.find(button => button.textContent === "单独登录").disabled, false);
 values[1].restrictions = {authentication: true}; renderAccounts(values);
 assert(cardButtons(list.children[1]).find(button => button.textContent === "单独登录").disabled);
@@ -568,7 +574,7 @@ values[1].operation = {stage: "succeeded", login_only: true, message_status: "no
 renderAccounts(values);
 assert(!cardButtons(list.children[1]).some(button => button.textContent === "单独登录"));
 assert(!cardButtons(list.children[1]).find(button => button.textContent === "仅刷新配额").disabled);
-assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（2）");
+assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（0）");
 assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
 card.querySelector("details").open = true;
 renderAccounts(values);
@@ -578,6 +584,7 @@ renderAccounts(values);
 assert(list.children[0].querySelector("details").open, "changed result must preserve detail expansion");
 assert(visible(list.children[0]).includes("7 天窗口已用") && visible(list.children[0]).includes("9%"));
 const selected = () => list.children.map(n => n.querySelector("input").checked);
+nodes["#codex-select-all"].listeners.click();
 const first = list.children[0].querySelector("input");
 first.checked = false; first.listeners.change();
 assert(nodes["#codex-selection-count"].textContent.includes("1 / 2"));
@@ -588,6 +595,21 @@ first.checked = false; first.listeners.change();
 nodes["#codex-select-none"].listeners.click();
 assert.deepEqual(selected(), [false, false]);
 assert(nodes["#codex-selection-count"].textContent.includes("0 / 2"));
+nodes["#codex-account-search"].value = "b@example";
+nodes["#codex-account-search"].listeners.input();
+nodes["#codex-select-all"].listeners.click();
+assert.deepEqual(selected(), [false, true], "select all is limited to current search results");
+nodes["#codex-account-search"].value = "a@example";
+nodes["#codex-account-search"].listeners.input();
+assert(nodes["#codex-selection-count"].textContent.includes("筛选外 1 个"));
+assert.deepEqual(list.children.map(n => n.hidden), [false, true]);
+nodes["#codex-account-search"].value = "none";
+nodes["#codex-account-search"].listeners.input();
+assert(!nodes["#codex-account-empty"].hidden);
+nodes["#codex-account-search"].value = "";
+nodes["#codex-account-search"].listeners.input();
+nodes["#codex-select-none"].listeners.click();
+
 values[0].batch_result = {...values[0].operation, batch_id: "old-batch"};
 values[0].operation = {id: "refresh-a", stage: "succeeded", refresh_only: true, started_at: oldTime};
 renderAccounts(values);
@@ -676,7 +698,7 @@ assert(cardButtons(list.children[0]).find(button => button.textContent === "向�
         tree = Tree()
         tree.feed((ROOT / "web/accounts.html").read_text())
         parents, attrs = tree.locations["codex-batch-status"]
-        self.assertEqual(parents[-1][1]["id"], "codex-account-actions")
+        self.assertEqual(parents[-1][1]["id"], "codex-batch-panel")
         self.assertEqual(attrs["aria-live"], "polite")
         tree = Tree()
         tree.feed((ROOT / "web/index.html").read_text())

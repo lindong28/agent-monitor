@@ -110,7 +110,11 @@ export function init({ autoLoad = true } = {}) {
   let quotaBatch = null;
   let upstreamPause = null;
   let unavailable = [];
-  let selectedIds = null;
+  let selectedIds = new Set();
+  let batchMode = false;
+  const searchInput = root.querySelector("#codex-account-search");
+  const stateFilter = root.querySelector("#codex-account-filter");
+  const batchToggle = root.querySelector("#codex-batch-mode");
   let lastBatchStatus = "";
   let hasSnapshot = false;
   let locatePending = new URLSearchParams(window.location?.search || "").get("profile");
@@ -236,7 +240,7 @@ export function init({ autoLoad = true } = {}) {
 
   function update(data) {
       accounts = data.accounts;
-      if (selectedIds === null) selectedIds = new Set(accounts.filter(a => a.eligible !== false && !a.disabled).map(a => a.id));
+      if (selectedIds === null) selectedIds = new Set();
       else selectedIds = new Set([...selectedIds].filter(id => accounts.some(a => a.id === id && a.eligible !== false && !a.disabled)));
       batch = data.batch;
       quotaBatch = data.quota_batch || null;
@@ -302,10 +306,10 @@ export function init({ autoLoad = true } = {}) {
       update(data);
     } catch (error) {
       if (current() && error.name !== "AbortError") {
-        notice.textContent = error.message + " 可点击“更新状态”重试。";
+        notice.textContent = error.message + " 可点击“重读本地状态”重试。";
         batchStatus.textContent = hasSnapshot
-          ? (lastBatchStatus ? lastBatchStatus + " · " : "") + "刷新失败，当前展示为上次记录；点击“更新状态”可重试。"
-          : "账号读取失败；点击“更新状态”可重试。";
+          ? (lastBatchStatus ? lastBatchStatus + " · " : "") + "刷新失败，当前展示为上次记录；点击“重读本地状态”可重试。"
+          : "账号读取失败；点击“重读本地状态”可重试。";
       }
     } finally {
       loading = false;
@@ -410,10 +414,8 @@ export function init({ autoLoad = true } = {}) {
   function renderPause() {
     if (!current()) return;
     renderAccountPause(upstreamPause, window.AgentMonitor.codexPauseTarget?.(upstreamPause?.id), pauseControls);
-    if (upstreamPause) openRecovery(false);
     const panel = recoveryBody?.querySelector(".quota-recovery-panel");
     if (panel) {
-      pauseControls.pausePanel.hidden = true;
       if (recoveryPauseId !== upstreamPause?.id) {
         recoveryPauseId = upstreamPause?.id;
         panel.refresh?.();
@@ -431,6 +433,7 @@ export function init({ autoLoad = true } = {}) {
     if (!panel) {
       panel = window.AgentMonitor.createRecoveryPanel?.("self", {onContinue: async () => {
         await load();
+        setBatchMode(true);
         const next = quotaBatch ? (quotaRetry && !quotaRetry.hidden ? quotaRetry : refreshSelected)
           : !batchRetry.hidden && !batchRetry.disabled ? batchRetry : batch ? batchNext : batchStart;
         next.scrollIntoView({block: "center"});
@@ -457,7 +460,7 @@ export function init({ autoLoad = true } = {}) {
   batchRetry.addEventListener("click", () => actions.performBatch("batch-retry"));
   egressPreview?.addEventListener("click", actions.preview);
   root.querySelector("#codex-select-all").addEventListener("click", () => {
-    selectedIds = new Set(accounts.filter(a => a.eligible !== false && !a.disabled).map(a => a.id));
+    selectedIds = new Set(accounts.filter(a => a.eligible !== false && !a.disabled && matchesAccount(a)).map(a => a.id));
     render();
   });
   root.querySelector("#codex-select-none").addEventListener("click", () => {
@@ -466,6 +469,44 @@ export function init({ autoLoad = true } = {}) {
   });
   refreshSelected?.addEventListener("click", () => refreshAllQuotas("refresh-selected"));
   quotaRetry?.addEventListener("click", () => refreshAllQuotas("refresh-retry"));
+
+  function matchesAccount(account) {
+    const query = (searchInput?.value || "").trim().toLowerCase();
+    const state = stateFilter?.value || "all";
+    const matchesState = state === "all" || state === "login" && accountNeedsLogin(account)
+      || state === "restricted" && Object.keys(account.restrictions || {}).length > 0
+      || state === "busy" && account.busy || state === "disabled" && account.disabled;
+    return matchesState && `${account.email} ${account.account_id || ""}`.toLowerCase().includes(query);
+  }
+  function filterAccounts() {
+    let visible = 0, selectedOutside = 0;
+    for (const card of list.children) {
+      const account = accounts.find(account => account.id === card.dataset.id);
+      if (!account) continue;
+      card.hidden = !matchesAccount(account);
+      if (card.hidden && selectedIds.has(account.id)) selectedOutside++;
+      if (!card.hidden) visible++;
+      const checkbox = card.querySelector(".codex-select-account");
+      if (checkbox) checkbox.hidden = !batchMode;
+    }
+    const selection = root.querySelector("#codex-selection-count");
+    if (selection) selection.textContent = `已选 ${selectedIds.size} / ${accounts.filter(a => a.eligible !== false && !a.disabled).length} 个账号${selectedOutside ? `（筛选外 ${selectedOutside} 个）` : ""}`;
+    const count = root.querySelector("#codex-account-count");
+    if (count) count.textContent = `显示 ${visible} / ${accounts.length} 个账号`;
+    const empty = root.querySelector("#codex-account-empty");
+    if (empty) empty.hidden = visible > 0 || !accounts.length;
+  }
+  searchInput?.addEventListener("input", filterAccounts);
+  stateFilter?.addEventListener("change", filterAccounts);
+  function setBatchMode(value) {
+    batchMode = value;
+    root.querySelector("#codex-batch-panel").hidden = !batchMode;
+    batchToggle?.setAttribute("aria-expanded", String(batchMode));
+    if (batchToggle) batchToggle.textContent = batchMode ? "结束选择" : "批量操作";
+    if (!batchMode) { selectedIds.clear(); render(); }
+    else filterAccounts();
+  }
+  batchToggle?.addEventListener("click", () => setBatchMode(!batchMode));
 
   function render() {
     renderBatch();
@@ -508,7 +549,7 @@ export function init({ autoLoad = true } = {}) {
         : ["partial", "login", "login_queued"].includes(op?.stage) ? "warn"
         : account.busy ? "info" : "identity";
       const operationLabel = account.disabled ? "已停用" : !account.busy && loginRequired && account.has_credentials
-        ? "需要重新登录" : op?.failure?.category === "needsLogin"
+        ? "需要重新登录" : !account.busy && loginRequired ? "需要登录" : op?.failure?.category === "needsLogin"
         ? "需要重新登录" : op?.stage === "succeeded" ? ""
         : op?.refresh_only && op.stage === "failed"
         ? (op.failure?.category === "locallyPaused" ? "配额查询未执行" : "配额查询失败")
@@ -526,6 +567,7 @@ export function init({ autoLoad = true } = {}) {
           if (checkbox.checked) selectedIds.add(account.id); else selectedIds.delete(account.id);
           renderBatch();
           updateRefreshAllButton();
+          filterAccounts();
         });
         label.append(checkbox);
         heading.prepend(label);
@@ -540,11 +582,13 @@ export function init({ autoLoad = true } = {}) {
         ? Object.entries(account.restriction_messages).map(([key, detail]) => key === "quota" ? quotaHoldMessage(account, upstreamPause) : detail)
         : account.restriction_details || [];
       if (restrictionDetails.length) heading.append(element("span", (accountNeedsLogin(account) || account.restrictions?.authentication) ? "登录态不可用" : account.restrictions?.quota ? "发送受限" : "账号有限制", "codex-batch-result"));
+      if (op) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送"}：${STAGES[op.stage] || op.stage} · ${timestamp(op.started_at)}`, "quota-scope account-last-result"));
       const details = element("details", undefined, "note-disclosure");
-      details.append(element("summary", "账号与操作详情"));
+      details.append(element("summary", "详情与维护"));
       const detailBody = element("div", undefined, "disclosure-body");
       const currentDetail = element("section", undefined, "account-detail-section");
       for (const detail of restrictionDetails) currentDetail.append(element("p", detail, "quota-scope"));
+      if (loginRequired && !account.has_credentials) currentDetail.append(element("p", "登录态：需要官方授权", "quota-scope"));
       const quotaDetail = element("section", undefined, "account-detail-section");
       const historyDetail = element("section", undefined, "account-detail-section");
       const technicalDetail = element("section", undefined, "account-detail-section");
@@ -552,7 +596,7 @@ export function init({ autoLoad = true } = {}) {
       if (account.eligible === false) card.append(element("p", "已不在当前登录记录中；保留本轮结果，不纳入下一轮或继续发送。", "quota-scope"));
       const duplicateEmail = accounts.some((other) => other.id !== account.id && other.email.toLowerCase() === account.email.toLowerCase());
       if (account.account_id) (duplicateEmail ? card : managementDetail).append(element("p", `工作区：${account.account_id}`, "quota-scope codex-workspace"));
-      managementDetail.append(element("p", account.login_required && account.has_credentials ? "登录态：不可用，需要重新登录" : account.has_credentials ? "登录态：已保存，使用前仍需检查" : "登录态：需要官方授权", "quota-scope"));
+
       if (batchItem) {
         const result = element("span", `本批：${MESSAGE_STATUS[batchItem.operation?.message_status || "not_sent"]}`, "codex-batch-result");
         const attention = account.busy || ["unknown", "failed"].includes(batchItem.operation?.message_status);
@@ -570,7 +614,7 @@ export function init({ autoLoad = true } = {}) {
       if (op) {
         if (op.stage === "succeeded") currentDetail.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "查询" : "发送"}已完成：${op.detail || "操作完成"}`, "quota-scope"));
         if (op.stage !== "succeeded" && !(account.restriction_details || []).includes(op.detail)) currentDetail.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送操作"}（${timestamp(op.started_at)}）：${op.detail}`));
-        currentDetail.append(element("p", `${op.refresh_only ? "本次仅查询配额，不发送消息" : "本次消息：" + MESSAGE_STATUS[op.message_status]} · 开始于 ${timestamp(op.started_at)}`, "quota-scope"));
+        if (!op.refresh_only && !op.login_only) currentDetail.append(element("p", `消息结果：${MESSAGE_STATUS[op.message_status]}`, "quota-scope"));
         if (op.message) currentDetail.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
         if (op.failure) technicalDetail.append(element("p", `停止阶段：${STAGES[op.failure.stage] || op.failure.stage} · 错误类别：${op.failure.category}${op.failure.http_status ? " · HTTP " + op.failure.http_status : ""}`, "quota-scope"));
         const diag = op.recovery_pause_id && op.stage === "succeeded" ? null : op.diagnostics;
@@ -605,7 +649,7 @@ export function init({ autoLoad = true } = {}) {
         send.type = "button";
         send.disabled = actions.busy || accounts.some(a => a.busy) || Boolean(upstreamPause) || Boolean(account.disabled) || loginRequired || Object.keys(account.restrictions || {}).length > 0;
         send.addEventListener("click", () => actions.performBatch("batch-start", [account.id]));
-        managementDetail.append(send);
+        currentDetail.append(send);
       }
       const refresh = button("仅刷新配额", "refresh", account);
       const restrictions = account.restrictions || {};
@@ -633,7 +677,7 @@ export function init({ autoLoad = true } = {}) {
           && (!upstreamPause.source || upstreamPause.source.profile_id === account.id && upstreamPause.source.operation_id === op.id)) {
         controls.append(button("确认仅此账号异常，解除本次通道暂停", "attribute-account-pause", account));
       }
-      for (const [section, label] of [[currentDetail, "本次操作"], [quotaDetail, "配额观测"], [historyDetail, "历史记录"], [technicalDetail, "技术细节"], [managementDetail, "账号管理"]]) {
+      for (const [section, label] of [[currentDetail, "当前状态与操作"], [quotaDetail, "最近配额观测"], [historyDetail, "历史记录"], [technicalDetail, "技术诊断"], [managementDetail, "账号维护"]]) {
         if (!section.children.length) continue;
         section.prepend(element("h4", label));
         detailBody.append(section);
@@ -647,11 +691,15 @@ export function init({ autoLoad = true } = {}) {
       if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
     }
     for (const node of existing.values()) node.remove();
+    filterAccounts();
   }
 
   function openAccount(id) {
     const card = Array.from(list.children).find(node => node.dataset.id === id);
     if (!current() || !card) return false;
+    if (searchInput) searchInput.value = "";
+    if (stateFilter) stateFilter.value = "all";
+    filterAccounts();
     root.open = true;
     card.tabIndex = -1;
     card.scrollIntoView({ block: "center" });

@@ -53,16 +53,63 @@
         </nav>
       </aside>
       <main class="main">
-        <div class="page-toolbar"><h1 class="page-title">账号管理</h1><button id="accounts-reload" class="btn" type="button">更新状态</button></div>
+        <div class="page-toolbar"><h1 class="page-title">账号管理</h1><button id="accounts-reload" class="btn" type="button">重读本地状态</button></div>
         <p><a id="accounts-return" href="/#quota-explorer">返回配额列表</a> · <a data-nav href="/collection">采集与诊断</a></p>
             <section id="codex-account-actions" class="codex-account-actions">
-              <h2>Codex 账号</h2><p id="codex-batch-status" role="status" aria-live="polite">正在读取账号…</p>
-              <div class="codex-batch-summary">
-                <div id="codex-device-network" class="quota-scope">
+              <h2>Codex 账号</h2>
+              <div id="codex-upstream-pause" class="quota-scope" hidden>
+                  <p><strong id="codex-pause-summary"></strong></p>
+                  <p id="codex-pause-detail"></p>
+                  <button id="codex-pause-recovery" type="button" class="btn">查看暂停原因与恢复</button>
+                </div>
+              <div class="account-list-toolbar">
+                <label for="codex-account-search" class="sr-only">搜索账号</label><input id="codex-account-search" type="search" placeholder="搜索邮箱或工作区" autocomplete="off">
+                <label for="codex-account-filter" class="sr-only">账号状态</label><select id="codex-account-filter"><option value="all">全部状态</option><option value="login">需要登录</option><option value="restricted">有限制</option><option value="busy">操作中</option><option value="disabled">已停用</option></select>
+                <button id="codex-batch-mode" type="button" class="btn" aria-expanded="false" aria-controls="codex-batch-panel">批量操作</button>
+                <span id="codex-account-count" class="quota-scope" role="status"></span>
+              </div>
+              <div id="codex-batch-panel" class="codex-batch-summary" hidden>
+              <div class="codex-account-controls"><button id="codex-select-all" type="button" class="btn">全选当前结果</button><button id="codex-select-none" type="button" class="btn">取消选择</button><span id="codex-selection-count" role="status"></span></div>
+                  <div id="account-query" class="codex-account-controls">
+                  <strong>配额查询</strong>
+                  <button id="codex-refresh-selected" type="button" class="btn" disabled>查询所选账号配额</button>
+                  <button id="codex-quota-retry" type="button" class="btn" hidden>继续未完成的配额查询</button>
+                </div>
+                <p id="codex-quota-progress" class="quota-scope" role="status" hidden></p>
+                <details class="note-disclosure"><summary>批次发送</summary><div class="codex-account-controls">
+                  <strong>消息发送</strong>
+                  <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
+                  <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
+                  <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
+                </div>
+                <p class="quota-scope">每账号发送一条，会消耗额度；发送前需确认出口与账号。</p></details>
+                <p id="codex-batch-blocked" class="quota-scope" role="status" hidden></p>
+                <p id="codex-batch-status" role="status" aria-live="polite"></p>
+                <details id="codex-operation-history" class="note-disclosure" hidden>
+                  <summary>最近操作记录</summary>
+                  <div class="disclosure-body supplementary-body">
+                <p id="codex-send-receipt" class="quota-scope" hidden></p>
+                <p id="codex-quota-batch-status" class="quota-scope" role="status" hidden></p>
+                <p id="codex-batch-observation" class="quota-scope" hidden></p>
+                  </div>
+                </details>
+                <details id="codex-sending-help" class="note-disclosure">
+                  <summary>发送规则</summary>
+                  <div id="codex-batch-help" class="quota-scope disclosure-body supplementary-body"></div>
+                </details>
+              </div>
+              <div id="codex-account-unavailable" role="status" aria-live="polite"></div>
+              <p id="codex-account-notice" role="status" aria-live="polite"></p>
+              <div id="codex-account-list"></div>
+              <p id="codex-account-empty" class="quota-scope" hidden>没有匹配的账号，请调整搜索或状态筛选。</p>
+              <div class="account-support"><details id="codex-recovery-history" class="note-disclosure">
+                  <summary>查看最近恢复记录</summary>
+                  <div id="codex-recovery-body" class="quota-scope disclosure-body supplementary-body"></div>
+                </details><div id="codex-device-network" class="quota-scope">
                   <p id="codex-device-status" role="status" hidden></p>
                   <button id="codex-device-cancel" type="button" class="btn" hidden>取消连接</button>
                   <details id="codex-device-help" class="note-disclosure">
-                    <summary>首次启用、连接与授权帮助</summary>
+                    <summary>连接与登录帮助</summary>
                     <div class="disclosure-body">
                     <p>操作时自动连接当前设备；发送前展示出口 IP 与地区，无需先单独连接。</p>
                     <p>首次使用：在打开此页面的设备安装 agent-monitor，然后执行以下命令启用连接服务。服务会在登录后自动启动，无需保持终端打开。</p>
@@ -74,49 +121,7 @@
                     <p>需要授权时，先在账号安全设置中启用设备码登录，再打开对应账号卡片中的 OpenAI 官方授权页并填写设备码。确认登录账号与卡片邮箱一致后完成授权。</p>
                     </div>
                   </details>
-                </div>
-                <p class="quota-scope">选择账号后，可查询配额或展开批次发送。</p>
-                <div id="account-query" class="codex-account-controls">
-                  <strong>配额查询</strong>
-                  <button id="codex-refresh-selected" type="button" class="btn" disabled>查询所选账号配额</button>
-                  <button id="codex-quota-retry" type="button" class="btn" hidden>继续未完成的配额查询</button>
-                  <span class="quota-scope">只查询，不发送消息</span>
-                </div>
-                <p id="codex-quota-progress" class="quota-scope" role="status" hidden></p>
-                <details class="note-disclosure"><summary>批次发送</summary><div class="codex-account-controls">
-                  <strong>消息发送</strong>
-                  <button id="codex-batch-start" type="button" class="btn btn-primary" disabled>正在读取账号…</button>
-                  <button id="codex-batch-retry" type="button" class="btn" hidden>继续未发送账号</button>
-                  <button id="codex-batch-next" type="button" class="btn btn-primary" hidden>开始新一轮发送</button>
-                </div>
-                <p class="quota-scope">每账号发送一条，会消耗额度；发送前需确认出口与账号。</p></details>
-                <details id="codex-operation-history" class="note-disclosure" hidden>
-                  <summary>最近操作记录</summary>
-                  <div class="disclosure-body supplementary-body">
-                <p id="codex-send-receipt" class="quota-scope" hidden></p>
-                <p id="codex-quota-batch-status" class="quota-scope" role="status" hidden></p>
-                <p id="codex-batch-observation" class="quota-scope" hidden></p>
-                  </div>
-                </details>
-                <p id="codex-batch-blocked" class="quota-scope" role="status" hidden></p>
-                <div id="codex-upstream-pause" class="quota-scope" hidden>
-                  <p><strong id="codex-pause-summary"></strong></p>
-                  <p id="codex-pause-detail"></p>
-                  <button id="codex-pause-recovery" type="button" class="btn">查看暂停原因与恢复</button>
-                </div>
-                <details id="codex-recovery-history" class="note-disclosure">
-                  <summary>查看最近恢复记录</summary>
-                  <div id="codex-recovery-body" class="quota-scope disclosure-body supplementary-body"></div>
-                </details>
-                <details id="codex-sending-help" class="note-disclosure">
-                  <summary>发送规则</summary>
-                  <div id="codex-batch-help" class="quota-scope disclosure-body supplementary-body"></div>
-                </details>
-              </div>
-              <div id="codex-account-unavailable" role="status" aria-live="polite"></div>
-              <p id="codex-account-notice" role="status" aria-live="polite"></p>
-              <div class="codex-account-controls"><button id="codex-select-all" type="button" class="btn">全选可纳入账号</button><button id="codex-select-none" type="button" class="btn">取消选择</button><span id="codex-selection-count" role="status"></span></div>
-              <div id="codex-account-list"></div>
+                </div></div>
               <p class="quota-scope">仅限可信私人网络使用：能访问本服务的人可操作这些账号。</p>
             </section>
       </main>

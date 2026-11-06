@@ -123,7 +123,10 @@
     }
     qsa("[data-nav]").forEach((link) => {
       const url = new URL(link.getAttribute("href"), window.location.origin);
-      setLinkRange(url);
+      if (url.pathname === "/accounts") {
+        ["range", "start", "end"].forEach(key => url.searchParams.delete(key));
+        if (window.location.pathname === "/") url.searchParams.set("return", currentPageUrl());
+      } else setLinkRange(url);
       if (url.pathname === "/collection" && window.location.pathname !== "/collection") url.searchParams.set("return", currentPageUrl());
       link.href = url.pathname + url.search;
       const current = url.pathname === window.location.pathname;
@@ -201,7 +204,9 @@
         const url = new URL(path, window.location.origin);
         const range = getRange();
         const custom = range === "custom" && ["/explore", "/sessions", "/collection"].includes(url.pathname);
-        url.searchParams.set("range", range === "custom" && !custom ? "30d" : range);
+        if (url.pathname === "/accounts") {
+          if (window.location.pathname === "/") url.searchParams.set("return", currentPageUrl());
+        } else url.searchParams.set("range", range === "custom" && !custom ? "30d" : range);
         if (custom) ["start", "end"].forEach((key) => { if (params().get(key)) url.searchParams.set(key, params().get(key)); });
         if (url.pathname === "/collection" && window.location.pathname !== "/collection") url.searchParams.set("return", currentPageUrl());
         link.href = url.pathname + url.search + url.hash;

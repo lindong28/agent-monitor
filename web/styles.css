@@ -2040,3 +2040,11 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 @media (max-width: 900px) {
   .overview-main .codex-account-actions { padding-inline: 12px; }
 }
+
+/* Account browsing is primary; selection is an explicit mode. */
+.account-list-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 16px; }
+.account-list-toolbar input { flex: 1 1 240px; min-width: 0; }
+.account-list-toolbar input, .account-list-toolbar select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+#codex-batch-panel { padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 16px; }
+.account-support { border-top: 1px solid var(--line); padding-top: 16px; }
+.codex-account-card > .account-last-result { grid-column: 1; }
