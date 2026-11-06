@@ -60,7 +60,7 @@ def rpc_failure(error, *, stage="quota_read", secrets=()):
 class ReadingError(ValueError):
     def __init__(self, message, kind="account_mismatch", stage="account_check"):
         super().__init__(message)
-        self.failure = {"stage": stage, "kind": kind}
+        self.failure = {"stage": stage, "kind": kind, "detail": message}
 
 
 def check_identity(auth_path, account_id, label):
@@ -71,18 +71,86 @@ def check_identity(auth_path, account_id, label):
     return current
 
 
-def read_bound(request, auth_path, account_id, label):
+def revoked_quota_failure(failure):
+    return (isinstance(failure, dict) and failure.get("stage") == "quota_read"
+            and failure.get("kind") == "rpc_error" and failure.get("http_status") == 401
+            and failure.get("upstream_code") == "token_revoked")
+
+
+def safe_auth_recovery(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    if value.get("outcome") in {"no_new_credentials", "new_credentials", "quota_confirmed", "quota_failed", "identity_changed", "refresh_failed"}:
+        result["outcome"] = value["outcome"]
+    for key in ("initial_failure", "refresh_failure"):
+        if isinstance(value.get(key), dict):
+            result[key] = diagnostics.safe_failure(value[key])
+    return result
+
+
+def managed_access_token(auth_path):
+    """Local preflight only; the returned secret is never serialized."""
+    try:
+        auth = json.loads(Path(auth_path).read_text())
+        tokens = auth.get("tokens") or {}
+        before = tokens.get("access_token")
+        refresh = tokens.get("refresh_token")
+        valid = auth.get("auth_mode") in (None, "chatgpt")
+    except (OSError, ValueError, AttributeError):
+        valid, before, refresh = False, None, None
+    if not valid or not isinstance(before, str) or not before or not isinstance(refresh, str) or not refresh:
+        raise ReadingError("此配置没有可用的 managed 刷新凭据，未开始认证修复。", "invalid_result", "credentials")
+    return before
+
+
+def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recovery=None):
     """One quota RPC, bound to the same local identity before and after it.
 
     Callers retain transport, cancellation, admission and pause ownership.
     account/read is not a prerequisite of the upstream quota method.
     """
     check_identity(auth_path, account_id, label)
-    result = request("account/rateLimits/read", {})
+    if renew_auth:
+        if recovery is None:
+            raise ReadingError("认证修复缺少结果记录，未发出请求。", "invalid_result", "credentials")
+        recovery["outcome"] = "refresh_failed"
+        before = managed_access_token(auth_path)
+        try:
+            request("account/read", {"refreshToken": True})
+        except Exception as exc:
+            facts = diagnostics.safe_failure(getattr(exc, "failure", None))
+            recovery["refresh_failure"] = facts
+            # Only an RPC refusal may follow a persisted refresh. Transport,
+            # cancellation and deadline failures never authorize another call.
+            if facts.get("kind") != "rpc_error":
+                raise
+        try:
+            check_identity(auth_path, account_id, label)
+        except ReadingError:
+            recovery["outcome"] = "identity_changed"
+            raise
+        try:
+            current = json.loads(Path(auth_path).read_text())
+            after = (current.get("tokens") or {}).get("access_token")
+        except (OSError, ValueError, AttributeError):
+            after = None
+        if not isinstance(after, str) or not after or after == before:
+            recovery["outcome"] = "no_new_credentials"
+            raise ReadingError("官方刷新未确认产生新凭据；本次未重查配额，暂停保留。请查看认证修复详情。", "invalid_result", "credentials")
+        recovery["outcome"] = "new_credentials"
+    try:
+        result = request("account/rateLimits/read", {"excludeResetCreditDetails": True} if renew_auth else {})
+    except Exception:
+        if renew_auth:
+            recovery["outcome"] = "quota_failed"
+        raise
     check_identity(auth_path, account_id, label)
     reading = decode(result, account_id)
     if reading["five_hour_used_pct"] is None and reading["seven_day_used_pct"] is None:
         raise ReadingError("服务端未返回可用配额窗口，本次保留上次读数。", "missing_windows", "quota_parse")
+    if renew_auth:
+        recovery["outcome"] = "quota_confirmed"
     return reading
 
 

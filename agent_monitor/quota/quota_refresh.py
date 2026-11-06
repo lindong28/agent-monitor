@@ -37,6 +37,7 @@ from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
 TIMEOUT = 35
+CODEX_RPC_SECONDS = 28
 
 
 class RefreshError(RuntimeError):
@@ -95,7 +96,7 @@ def load_rate_limits(provider, account, *, codex_home=None, **options):
 
 
 def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None,
-                     codex_home=None, root=None, account_profile=None):
+                     codex_home=None, root=None, account_profile=None, renew_auth=False):
     root = Path(root) if root is not None else ROOT
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
@@ -131,6 +132,17 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
     failure = None
     stage = "child_start"
     try:
+        auth_failure = None
+        if renew_auth:
+            from agent_monitor.quota import codex_quota
+            first = (lease.state.get("pause") or {}).get("failure") or {}
+            if (provider != "codex" or probe_pause_id is None or not admitted_probe
+                    or not (account_profile or "").startswith("monitor-")
+                    or first.get("account_profile") != account_profile
+                    or first.get("account_fingerprint") != account_fingerprint(provider, account)
+                    or not codex_quota.revoked_quota_failure(first)):
+                raise LocalUnavailable("认证修复与当前暂停不匹配，未发出上游请求。")
+            auth_failure = diagnostics.safe_failure(first)
         if provider == "codex":
             from agent_monitor.accounts import account_holds
             reason = account_holds.blocked(root / "state", account.account_id, account.label)
@@ -150,6 +162,9 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
         try:
             # The lease remains held through the bounded child's cleanup.
             target = dataclasses.asdict(account)
+            if renew_auth:
+                target["renew_auth"] = True
+                target["auth_failure"] = auth_failure
             if codex_home is not None:
                 target["codex_home"] = str(Path(codex_home).absolute())
             output, _ = child.communicate(json.dumps(target),
@@ -166,6 +181,9 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
             payload = json.loads(output)
             if not isinstance(payload, dict):
                 raise ValueError()
+            if renew_auth and admitted_probe is not None:
+                from agent_monitor.quota.codex_quota import safe_auth_recovery
+                admitted_probe["authentication_recovery"] = safe_auth_recovery(payload.get("authentication_recovery"))
             if child.returncode or payload.get("error"):
                 kind = (NotSignedIn if payload.get("signed_out") is True else
                         LocalUnavailable if payload.get("local_unavailable") is True else RefreshError)
@@ -369,7 +387,7 @@ def account_fingerprint(provider, account):
     return hashlib.sha256(quota_identity(provider, account.account_id, account.label).encode()).hexdigest()
 
 
-def _codex(account):
+def _codex(account, *, recovery=None):
     from agent_monitor.quota import codex_quota
     try:
         env = network_policy.child_environment(os.environ)
@@ -380,8 +398,16 @@ def _codex(account):
     auth_path = home / "auth.json"
     try:
         codex_quota.check_identity(auth_path, account["account_id"], account.get("label"))
+        if account.get("renew_auth"):
+            codex_quota.managed_access_token(auth_path)
     except codex_quota.ReadingError as exc:
         raise LocalUnavailable(str(exc), failure=exc.failure) from None
+    if account.get("renew_auth"):
+        from agent_monitor.accounts.codex_accounts import child_environment
+        # Managed recovery has the same identity boundary as managed login.
+        # The helper keeps the selected Monitor route but excludes alternate
+        # tokens and parent Codex configuration before starting the supplier.
+        env = child_environment(home.parent)
     env["CODEX_HOME"] = str(home)
     redactions = codex_quota.credential_secrets(auth_path)
     # SSH/launchd do not load shell rc files. Supply installed user binary paths
@@ -393,8 +419,11 @@ def _codex(account):
     if not command:
         raise LocalUnavailable("Codex CLI 不可用，请在这台机器上安装后刷新。")
     try:
-        process = subprocess.Popen([command, "app-server", "--listen", "stdio://",
-                                    "-c", "features.respect_system_proxy=false"],
+        arguments = [command, "app-server", "--listen", "stdio://", "-c", "features.respect_system_proxy=false"]
+        if account.get("renew_auth"):
+            arguments += ["-c", 'cli_auth_credentials_store="file"',
+                          "-c", 'forced_login_method="chatgpt"']
+        process = subprocess.Popen(arguments,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL, env=env)
     except OSError as exc:
@@ -403,13 +432,13 @@ def _codex(account):
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
     buffer = b""
-    deadline = time.monotonic() + 28
+    deadline = time.monotonic() + CODEX_RPC_SECONDS
 
     def send(message):
         process.stdin.write((json.dumps(message) + "\n").encode())
         process.stdin.flush()
 
-    def receive(request_id):
+    def receive(request_id, method=None):
         nonlocal buffer
         while True:
             while b"\n" in buffer:
@@ -418,14 +447,16 @@ def _codex(account):
                 if message.get("id") == request_id:
                     if "error" in message:
                         # Keep failures visible and preserve the prior reading.
-                        raise RefreshError(_codex_rpc_error(message["error"], request_id),
-                                           failure=_rpc_failure(message["error"], request_id,
-                                               redactions + codex_quota.credential_secrets(auth_path)))
+                        facts = _rpc_failure(message["error"], request_id,
+                            redactions + codex_quota.credential_secrets(auth_path))
+                        if method == "account/read":
+                            facts["stage"] = "account_check"
+                        raise RefreshError(_codex_rpc_error(message["error"], request_id), failure=facts)
                     return message["result"]
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not selector.select(remaining):
                 raise RefreshError("Codex 配额请求超时，请重新刷新。",
-                                   failure={"kind": "timeout", "timeout_seconds": 28})
+                                   failure={"kind": "timeout", "timeout_seconds": CODEX_RPC_SECONDS})
             chunk = os.read(process.stdout.fileno(), 65536)
             if not chunk:
                 raise RefreshError("Codex 配额读取进程退出，请检查 CLI 安装与登录状态。",
@@ -439,13 +470,23 @@ def _codex(account):
             receive(1)
         with _failure_stage("quota_read"):
             send({"method": "initialized"})
+            sequence = 1
             def request(method, params):
-                nonlocal redactions
+                nonlocal redactions, sequence
+                if time.monotonic() >= deadline:
+                    raise RefreshError("本次检查已达到总时限，未发出下一阶段请求。", failure={"kind": "timeout", "timeout_seconds": CODEX_RPC_SECONDS})
                 redactions += codex_quota.credential_secrets(auth_path)
-                send({"id": 2, "method": method, "params": params})
-                return receive(2)
+                sequence += 1
+                send({"id": sequence, "method": method, "params": params})
+                return receive(sequence, method)
             try:
-                reading = codex_quota.read_bound(request, auth_path, account["account_id"], account.get("label"))
+                options = {}
+                if account.get("renew_auth"):
+                    if recovery is None:
+                        raise LocalUnavailable("认证修复缺少记录通道，未发出请求。")
+                    recovery["initial_failure"] = diagnostics.safe_failure(account.get("auth_failure"))
+                    options = {"renew_auth": True, "recovery": recovery}
+                reading = codex_quota.read_bound(request, auth_path, account["account_id"], account.get("label"), **options)
             except codex_quota.ReadingError as exc:
                 raise RefreshError(str(exc), failure=exc.failure) from None
         value = _reading((reading["five_hour_used_pct"], reading["five_hour_resets_at"]),
@@ -466,20 +507,22 @@ def _codex(account):
 
 
 if __name__ == "__main__":
+    recovery = {}
     try:
         reader = {"claude": _claude, "codex": _codex}[sys.argv[1]]
         with _reader_lifetime(int(sys.argv[2]), float(sys.argv[3])):
-            reading = reader(json.load(sys.stdin))
-        print(json.dumps({"reading": dataclasses.asdict(reading)}))
+            target = json.load(sys.stdin)
+            reading = reader(target, recovery=recovery) if sys.argv[1] == "codex" else reader(target)
+        print(json.dumps({"reading": dataclasses.asdict(reading), "authentication_recovery": recovery}))
     except RefreshError as exc:
         # `signed_out` is the class, carried as data because the parent runs in a
         # different process and only sees this line.
         print(json.dumps({"error": str(exc), "signed_out": isinstance(exc, NotSignedIn),
                           "local_unavailable": isinstance(exc, LocalUnavailable),
-                          "failure": diagnostics.failure_details(exc)}))
+                          "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery}))
         sys.exit(1)
     except Exception as exc:
         # External errors can contain request headers or provider payloads.
         print(json.dumps({"error": "配额请求失败，请检查这台机器的网络与登录状态后刷新。",
-                          "failure": diagnostics.failure_details(exc)}))
+                          "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery}))
         sys.exit(1)

@@ -507,6 +507,13 @@
     if (httpStatus) add(`Monitor HTTP：${httpStatus}（本地接口结果，不是供应商 HTTP 状态）`);
     add(`停止阶段：${f.stage === "quota_read" ? "读取配额" : f.stage || "未记录"}；Codex RPC：${f.rpc_code ?? "未取得"}；上游 HTTP：${f.http_status ?? "未取得"}`);
     if (f.detail) add(`已记录的错误摘要：${f.detail}`);
+    const auth = receipt.authentication_recovery;
+    if (auth) {
+      const outcomes = {quota_confirmed: "已取得新配额", quota_failed: "新凭据后的配额查询仍失败", no_new_credentials: "未确认取得新凭据，未查询配额", new_credentials: "已保存新候选凭据，配额未确认", identity_changed: "身份发生变化，已停止", refresh_failed: "认证修复未完成"};
+      add(`认证修复：${outcomes[auth.outcome] || "结果未确认"}。`);
+      if (auth.initial_failure) add(`修复前：上游 HTTP ${auth.initial_failure.http_status ?? "未取得"} · ${auth.initial_failure.upstream_code || "未取得错误代码"}`);
+      if (auth.refresh_failure) add(`官方认证 RPC 摘要：${auth.refresh_failure.detail || "未返回详细原因"}；RPC ${auth.refresh_failure.rpc_code ?? "未取得"}。此 RPC 结果不能单独证明凭据刷新成败。`);
+    }
     describeDiagnosticSummary(add, f.detail);
     if (f.returncode != null) add(`CLI 退出码：${f.returncode}`);
     if (receipt.record_error) add(receipt.record_error);
@@ -519,6 +526,12 @@
   }
 
   function createRecoveryPanel(machine = "self", {onContinue, sourceFailure = null} = {}) {
+    function canRenewAuth(value) {
+      const failure = value?.pause?.failure;
+      return Boolean(value?.account?.auth_recovery_available === true && value.account.source === "managed" && value.account.quota_profile?.startsWith("monitor-")
+        && failure?.stage === "quota_read" && failure.kind === "rpc_error"
+        && failure.http_status === 401 && failure.upstream_code === "token_revoked");
+    }
     const make = (tag, text, className) => {
       const node = document.createElement(tag);
       if (text) node.textContent = text;
@@ -642,11 +655,17 @@
       probe.disabled = busy || probe.hidden;
       probe.textContent = mode === "failed" ? "处理后再次检查配额" : "通过目标机器路由桥检查配额";
       effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，沿用该机器原有系统代理；不会发送消息。";
+      const renewAuth = canRenewAuth(value) && !probe.hidden;
+      if (renewAuth) {
+        probe.textContent = "刷新认证并检查配额";
+        guidance.textContent = "配额接口拒绝了当前认证。可通过官方接口尝试刷新本账号登录态；只有取得同身份的新凭据才检查配额，未恢复时保留暂停与诊断。";
+        effect.textContent = "最多一次认证刷新 RPC 和一次配额 RPC，共用原总时限与目标机器路由；官方内部可能产生多次请求，不发送消息。";
+      }
       help.hidden = !["failed", "unreadable", "identity", "source-mismatch", "upstream-auth", "read-error", "used"].includes(mode);
       resume.hidden = mode !== "ready" || !onContinue;
       read.disabled = busy;
       read.textContent = ["unknown", "unknown-outcome"].includes(mode) ? "重新读取状态" : mode === "active" ? "更新进度" : "更新状态";
-      const primary = ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
+      const primary = renewAuth || ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
       for (const button of [read,probe,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
       steps.replaceChildren();
       const list = make("ol");
@@ -749,6 +768,7 @@
     probe.addEventListener("click", async () => {
       if (busy || probe.disabled || !state) return;
       const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id,profile:state.account.quota_profile || ""};
+      if (canRenewAuth(state)) request.mode = "renew_auth";
       unrecordedOutcome = false;
       busy = true; read.disabled = probe.disabled = true;
       panel.setAttribute("aria-busy", "true");
@@ -759,7 +779,7 @@
       try {
         const approval = await window.AgentMonitor.previewUpstream?.(
           [{email: request.account_label, account_id: request.account_id}],
-          {approval_action: "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native"], approval_expected: request.pause_id, approval_machine: request.machine},
+          {approval_action: request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
           controller.signal);
         if (!approval) throw new Error("已取消检查；未发出上游请求。");
         attempted = true;

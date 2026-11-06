@@ -81,7 +81,10 @@ def main():
         onPageCleanup:()=>{}}).initNetwork();
       </script></body>''')
     def pause():
-        return dict(id=state['pause_id'], at=1793004570, failure=dict(detail='Synthetic RPC failure', stage='quota_read', rpc_code=-32603), **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
+        failure = dict(detail='Synthetic RPC failure', stage='quota_read', rpc_code=-32603)
+        if state['recovery_state'] == 'auth':
+            failure.update(kind='rpc_error', http_status=401, upstream_code='token_revoked')
+        return dict(id=state['pause_id'], at=1793004570, failure=failure, **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
     def quota():
         target = dict(machine='fixture-hub', account_id='workspace-0', account_label='fixture0@example.test',
                       reason='本机已暂停该服务的自动请求', query_state='paused', pause=pause())
@@ -97,11 +100,10 @@ def main():
         if state['pause_record'] == 'duplicate' and state['paused']:
             failures.append(dict(target))
         return dict(codex=dict(accounts=[], refresh_errors=failures), claude=dict(accounts=[]))
-    source = (ROOT / 'web/index.html').read_text()
-    panel = source.split('<details id="codex-account-actions"', 1)[1].split('</section>', 1)[0]
+    source = (ROOT / 'web/accounts.html').read_text()
+    panel = re.search(r'<main\b[^>]*>(.*?)</main>', source, re.S).group(1)
     html = ('<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
-            '<link rel="stylesheet" href="/web/styles.css"><body><main><h1>出口确认隔离夹具</h1>'
-            '<details id="codex-account-actions" open' + panel + '''
+            '<link rel="stylesheet" href="/web/styles.css"><body><main>' + panel + '''
             <section><h2>配额记录</h2><table id="quota-accounts"></table></section></main><script>
             window.AgentMonitor={pageScope:()=>()=>true,ensureTimezone:async()=>{},
               formatDate:x=>new Date(x).toLocaleString(),onPageCleanup:()=>{},pageInterval:()=>{},
@@ -187,7 +189,7 @@ def main():
                 self.send(dict(machine='fixture-hub', source_host_identity='fixture-host', observed_at='2026-10-28T00:00:00Z',
                     pause=(dict(id='unreadable') if state['recovery_state']=='unreadable' else pause()) if state['paused'] else None,
                     active=dict(id='active') if state['recovery_state']=='active' else None,
-                    account=dict(account_id='' if state['recovery_state']=='identity' else 'workspace-0', account_label='fixture0@example.test', source='default', credential_path='/fixture/.codex/auth.json'),
+                    account=dict(account_id='' if state['recovery_state']=='identity' else 'workspace-0', account_label='fixture0@example.test', source='managed' if state['recovery_state']=='auth' else 'default', auth_recovery_available=state['recovery_state']=='auth', quota_profile='monitor-fixture' if state['recovery_state']=='auth' else '', credential_path='/fixture/.codex/auth.json'),
                     last_recovery=state['last_recovery']))
             elif self.path == '/fixture/quota':
                 self.send(quota())
@@ -203,9 +205,9 @@ def main():
                 self.send(dict(checked_host='fixture-server-device', error='Synthetic server unavailable', verdict='unknown'))
             elif self.path == '/api/codex-accounts/egress-preview':
                 try:
-                    recovery = payload.get('approval_action') == 'quota-recovery'
+                    recovery = payload.get('approval_action') in ('quota-recovery', 'quota-auth-recovery')
                     if recovery:
-                        confirmation = recovery_approvals.issue('quota-recovery', payload['approval_scope'], payload['approval_expected'])
+                        confirmation = recovery_approvals.issue(payload['approval_action'], payload['approval_scope'], payload['approval_expected'])
                     else:
                         route = client_network.hub.browser_route(payload.get('connection'))
                         confirmation = route.issue(payload.get('profile_ids', []), payload.get('expected_batch_id'))
@@ -246,8 +248,10 @@ def main():
                 self.send(state)
             elif self.path == '/api/quota-recovery':
                 try:
-                    recovery_approvals.consume(payload.get('confirmation'), 'quota-recovery',
-                        [payload['machine'], payload['account_id'], payload['account_label'], payload.get('profile') or 'native'], payload['pause_id'])
+                    scope = [payload['machine'], payload['account_id'], payload['account_label'], payload.get('profile') or 'native']
+                    if payload.get('mode'):
+                        scope.append(payload['mode'])
+                    recovery_approvals.consume(payload.get('confirmation'), 'quota-auth-recovery' if payload.get('mode') else 'quota-recovery', scope, payload['pause_id'])
                 except client_network.NetworkError as exc:
                     self.send(dict(error=str(exc)), status=exc.status)
                     return
@@ -258,6 +262,8 @@ def main():
                     failure=dict(stage='quota_read', rpc_code=-32603, detail='Synthetic recovery failure'),
                     network=dict(policy='chromium-system', coverage='recent_connections_only', events=[
                         dict(target='https://chatgpt.com', route='PROXY 127.0.0.1:59527', result='connected')]))
+                if payload.get('mode') == 'renew_auth':
+                    receipt['authentication_recovery'] = dict(outcome='quota_confirmed', initial_failure=dict(stage='quota_read', kind='rpc_error', http_status=401, upstream_code='token_revoked'))
                 state['last_recovery'] = receipt
                 if state['recovery_mode'] == 'unknown':
                     self.send(dict(ok=False, error='恢复回执未取得，执行结果未知；勿重复探测。'), status=409)

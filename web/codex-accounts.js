@@ -582,7 +582,7 @@ export function init({ autoLoad = true } = {}) {
         ? Object.entries(account.restriction_messages).map(([key, detail]) => key === "quota" ? quotaHoldMessage(account, upstreamPause) : detail)
         : account.restriction_details || [];
       if (restrictionDetails.length) heading.append(element("span", (accountNeedsLogin(account) || account.restrictions?.authentication) ? "登录态不可用" : account.restrictions?.quota ? "发送受限" : "账号有限制", "codex-batch-result"));
-      if (op) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送"}：${STAGES[op.stage] || op.stage} · ${timestamp(op.started_at)}`, "quota-scope account-last-result"));
+      if (op) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送"}：${STAGES[op.stage] || op.stage} · ${timestamp(op.recovery_pause_id && op.stage === "succeeded" ? op.after?.observed_at : op.started_at)}`, "quota-scope account-last-result"));
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "详情与维护"));
       const detailBody = element("div", undefined, "disclosure-body");

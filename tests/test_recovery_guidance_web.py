@@ -229,6 +229,36 @@ async function render(changes={}, error=false) {
   assert.equal(calls.length,readsBefore+2,'retained history must not create recurring remote reads');
   const action=(p,key)=>all(p).find(n=>n.attrs?.['data-recovery-action']===key);
   const settle=()=>new Promise(r=>setImmediate(r));
+  {
+    let current={...base,account:{...base.account,source:'managed',auth_recovery_available:true,quota_profile:'monitor-fixture'},
+      pause:{id:'b'.repeat(32),failure:{stage:'quota_read',kind:'rpc_error',http_status:401,upstream_code:'token_revoked'}}};
+    let preview, submitted;
+    const repair=require('./web/quota.js')({platform:{document:{createElement:node,dispatchEvent(){}},
+      window:{AgentMonitor:{onPageCleanup(){},previewUpstream:async(accounts,payload)=>{preview=payload;return 'auth-confirmation';}}},
+      fetch:async(url,options)=>{
+        if(options?.method==='POST') {
+          submitted=JSON.parse(options.body);
+          const receipt={ok:true,authentication_recovery:{outcome:'quota_confirmed'},request:submitted};
+          current={...current,pause:null,last_recovery:receipt};
+          return {ok:true,status:200,json:async()=>receipt};
+        }
+        return {ok:true,status:200,json:async()=>current};
+      }},formatDate:String});
+    p=repair.createRecoveryPanel('fixture-host'); await settle();
+    assert.equal(action(p,'probe').textContent,'刷新认证并检查配额');
+    assert(action(p,'probe').className.includes('btn-primary'));
+    assert.match(visibleText(p),/同身份的新凭据/);
+    await action(p,'probe').click();
+    assert.equal(preview.approval_action,'quota-auth-recovery');
+    assert.equal(preview.approval_machine,'fixture-host');
+    assert.deepEqual(preview.approval_scope,['fixture-host','fixture-id','fixture@example.test','monitor-fixture','renew_auth']);
+    assert.equal(submitted.mode,'renew_auth');
+    assert.equal(submitted.confirmation,'auth-confirmation');
+    assert.match(p.textContent,/已取得新配额/);
+    const reloaded=repair.createRecoveryPanel('fixture-host'); await settle();
+    assert.match(reloaded.textContent,/已取得新配额/,'saved authentication result survives a new panel');
+    assert.equal(action(reloaded,'probe').hidden,true,'success does not automatically repeat the provider operation');
+  }
   for (const scenario of ['matched','missing','still-paused']) {
     let current={...base}, posts=0, continued=0;
     const recovery=require('./web/quota.js')({platform:{document:{createElement:node,dispatchEvent(){}},

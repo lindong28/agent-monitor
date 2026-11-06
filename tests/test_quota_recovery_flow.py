@@ -247,7 +247,8 @@ class RecoveryHttpTests(unittest.TestCase):
             admitted = mock.MagicMock()
             admitted.__enter__.return_value = SimpleNamespace(admitted=[current])
             network = {"policy": "chromium-system", "coverage": "recent_connections_only", "events": []}
-            receipt = {"ok": True, "block": {**block, "refresh_error": None}, "source_host_identity": "host-fixture", "exporter_commit": "a" * 40, "network": network}
+            auth_result = {"outcome": "quota_confirmed", "initial_failure": {"stage": "quota_read", "http_status": 401, "upstream_code": "token_revoked"}}
+            receipt = {"ok": True, "block": {**block, "refresh_error": None}, "source_host_identity": "host-fixture", "exporter_commit": "a" * 40, "network": network, "authentication_recovery": auth_result}
             with mock.patch.object(server, "QUOTA_REFRESH", manager),\
                     mock.patch("agent_monitor.http_server.sync.load_machine_config", return_value=SimpleNamespace(by_name={"fixture": machine})),\
                     mock.patch("agent_monitor.http_server.generation.generation_admission_snapshot", return_value=admitted),\
@@ -286,6 +287,7 @@ class RecoveryHttpTests(unittest.TestCase):
                         self.assertTrue(request_finished.wait(3), "HTTP handler did not finish")
                         if response.status == 200:
                             self.assertEqual(body["network"], network)
+                            self.assertEqual(body["authentication_recovery"], auth_result)
                         return response.status
                     finally:
                         connection.close()

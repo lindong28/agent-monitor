@@ -203,9 +203,13 @@ class Manager:
                     "attempted_at": datetime.now(timezone.utc).isoformat(), "error": None}
                 write_message(self.path, {"version": 1, "machines": self.records})
                 self.revision += 1
+            from agent_monitor.quota.codex_quota import safe_auth_recovery
+            auth_result = safe_auth_recovery(receipt.get("authentication_recovery"))
             receipt = {"ok": True, "message": "有效读数已保存，目标机器的 Codex 自动查询已恢复。",
                        **({"record_error": receipt["record_error"]} if receipt.get("record_error") else {}),
                        "network": receipt.get("network", {"coverage": "unavailable", "events": []})}
+            if auth_result:
+                receipt["authentication_recovery"] = auth_result
         return receipt, 200 if receipt.get("ok") else 409
 
     def request(self, machines):

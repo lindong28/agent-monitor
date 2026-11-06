@@ -26,18 +26,25 @@ def validate_exclusions(value):
 
 def validate_request(value):
     fields = {"machine", "account_id", "account_label", "pause_id"}
-    if (not isinstance(value, dict) or set(value) - {"profile"} != fields
+    if (not isinstance(value, dict) or set(value) - {"profile", "mode"} != fields
             or any(not isinstance(value[k], str) or not value[k] or len(value[k]) > 256 for k in fields)
             or not re.fullmatch(r"[0-9a-f]{32}", value["pause_id"])):
         raise ValueError("请指定机器、完整账号身份和当前暂停标识。")
     if "profile" in value and (not isinstance(value["profile"], str) or (value["profile"] and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", value["profile"]))):
         raise ValueError("账号来源无效。")
+    if "mode" in value and (value["mode"] != "renew_auth" or not value.get("profile", "").startswith("monitor-")):
+        raise ValueError("认证修复模式或账号来源无效。")
     return value
 
 
 def approval_scope(value):
     scope = [value["machine"], value["account_id"]]
-    return scope + [value["account_label"], value["profile"] or "native"] if "profile" in value else scope
+    scope = scope + [value["account_label"], value["profile"] or "native"] if "profile" in value else scope
+    return scope + [value["mode"]] if "mode" in value else scope
+
+
+def approval_action(value):
+    return "quota-auth-recovery" if value.get("mode") == "renew_auth" else "quota-recovery"
 
 
 def local_status():
@@ -66,12 +73,26 @@ def local_status():
         source = "managed"
     from agent_monitor.accounts import account_holds
     blocked_reason = account_holds.blocked(exporter.ROOT / "state", account.account_id, account.label) if account else None
+    auth_recovery_available = False
+    if source == "managed" and profile and profile.startswith("monitor-"):
+        from agent_monitor.quota.codex_quota import revoked_quota_failure
+        try:
+            record = json.loads((home.parent / "profile.json").read_text())
+            operation = record.get("operation") or {}
+            auth_recovery_available = bool(account and not blocked_reason and revoked_quota_failure(failure)
+                and record.get("account_id") == account.account_id
+                and record.get("email", "").casefold() == (account.label or "").casefold()
+                and operation.get("stage") in {"failed", "interrupted"} and operation.get("refresh_only")
+                and not operation.get("login_only") and operation.get("message_status") == "not_sent")
+        except (OSError, ValueError, AttributeError):
+            pass  # A capability cannot be granted from unreadable local state.
     return {"source_host_identity": generation.self_certified_host_identity(),
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "pause": state.get("pause"), "active": state.get("active"),
             "account": {"account_id": account.account_id if account else None,
                         "account_label": account.label if account else None,
                         "source": source, "profile": home.parent.name if source == "managed" else None,
+                        "auth_recovery_available": auth_recovery_available,
                         "blocked_reason": blocked_reason,
                         "credential_path": str(auth), "quota_profile": profile or ""},
             "last_recovery": state.get("last_recovery")}
@@ -167,7 +188,8 @@ def local_recovery(value):
         # Scope observations without choosing a different endpoint or proxy policy.
         route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
         with network_policy.using_route(route):
-            block = quota_service.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"], root=exporter.ROOT, admitted_probe=admitted_probe, profile=value.get("profile"))
+            options = {"renew_auth": True} if value.get("mode") == "renew_auth" else {}
+            block = quota_service.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"], root=exporter.ROOT, admitted_probe=admitted_probe, profile=value.get("profile"), **options)
     except (quota_refresh.RefreshError, OSError, RuntimeError) as exc:
         pause = Controls(exporter.ROOT / "state/upstream_controls").read("codex").get("pause")
         receipt = {"ok": False, "error": "恢复未完成，暂停保留；请查看诊断后再决定下一步。",
@@ -178,10 +200,16 @@ def local_recovery(value):
     # Loopback bridge evidence only; unavailable observations do not replay or
     # change the provider outcome. Empty events do not establish no request.
     receipt["network"] = safe_network(network_policy.observations(route))
+    from agent_monitor.quota.codex_quota import safe_auth_recovery
+    auth_recovery = safe_auth_recovery(admitted_probe.get("authentication_recovery"))
+    if auth_recovery:
+        receipt["authentication_recovery"] = auth_recovery
     historical = {"ok": receipt["ok"], "request": dict(value),
                   "observed_at": datetime.now(timezone.utc).isoformat(),
                   "pause_id": receipt.get("pause_id"),
                   "failure": diagnostics.safe_failure(receipt.get("failure")), "network": receipt["network"]}
+    if auth_recovery:
+        historical["authentication_recovery"] = auth_recovery
     if admitted_probe.get("id"):
         try:
             Controls(exporter.ROOT / "state/upstream_controls").record_recovery(historical, attempt_id=admitted_probe["id"])

@@ -568,14 +568,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
             if path == "/api/codex-accounts/egress-preview":
                 approval_action = payload.get("approval_action") or ""
-                local_actions = {"quota-recovery", "quota-settings", "refresh"}
+                local_actions = {"quota-recovery", "quota-auth-recovery", "quota-settings", "refresh"}
                 if approval_action in local_actions and not payload.get("connection"):
                     scope = payload.get("approval_scope")
                     expected = payload.get("approval_expected")
                     if (not isinstance(scope, list) or not scope or
                             any(not isinstance(item, str) or not item for item in scope)):
                         raise codex_accounts.ActionError("预览确认范围无效。")
-                    if approval_action in {"quota-recovery", "quota-settings"}:
+                    if approval_action in {"quota-recovery", "quota-auth-recovery", "quota-settings"}:
                         approval_machine = payload.get("approval_machine")
                         if (not isinstance(approval_machine, str) or
                                 approval_machine != scope[0]):
@@ -756,12 +756,12 @@ class Handler(BaseHTTPRequestHandler):
             raw = json.loads(self.rfile.read(length))
             if not isinstance(raw, dict):
                 raise ValueError()
-            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile") if k in raw})
+            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile", "mode") if k in raw})
             machine = sync.load_machine_config().by_name.get(value["machine"])
             if machine is None:
                 raise ValueError()
             scope = quota_recovery.approval_scope(value)
-            UPSTREAM_APPROVALS.consume(raw.get("confirmation"), "quota-recovery", scope, value["pause_id"])
+            UPSTREAM_APPROVALS.consume(raw.get("confirmation"), quota_recovery.approval_action(value), scope, value["pause_id"])
         except (ValueError, UnicodeDecodeError):
             self._send_json({"error": "恢复目标或请求格式无效。"}, status=400)
             return

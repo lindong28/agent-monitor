@@ -563,6 +563,12 @@ assert(visible(list.children[1]).includes("需要重新登录"), "invalid saved 
 assert(text(list.children[1]).includes("最近配额查询") || text(list.children[1]).includes("最近发送操作"));
 assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（0）");
 assert.equal(loginButtons.find(button => button.textContent === "单独登录").disabled, false);
+const previousAccount = values[1], recoveredTime = "2026-11-06T12:00:00.000Z";
+values[1] = {...previousAccount, login_required:false, operation:{stage:"succeeded", refresh_only:true,
+  message_status:"not_sent", started_at:oldTime, recovery_pause_id:"fixture-repair", after:{observed_at:recoveredTime}}};
+renderAccounts(values);
+assert(visible(list.children[1]).includes(recoveredTime), "recovery summary uses the new quota observation time");
+values[1] = previousAccount; renderAccounts(values);
 values[1].restrictions = {authentication: true}; renderAccounts(values);
 assert(cardButtons(list.children[1]).find(button => button.textContent === "单独登录").disabled);
 assert(cardButtons(list.children[1]).find(button => button.textContent === "仅刷新配额").disabled);

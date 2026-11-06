@@ -15,8 +15,8 @@ export function countryName(code) {
 export async function previewEgress(request, targets, signal, payload = {}) {
   const sending = Array.isArray(targets) && ["batch-start", "batch-retry"].includes(payload.approval_action);
   const needsApproval = Boolean(payload.approval_action);
-  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","refresh-selected":"查询所选账号配额","refresh-retry":"继续未完成的配额查询","login":"单独登录","quota-recovery":"检查并恢复配额","quota-settings":"启用所选账号的自动查询"})[payload.approval_action] || "发起上游操作";
-  const operationPending = ({"quota-settings":"自动查询设置尚未改变","quota-recovery":"尚未发送配额检查请求", refresh:"尚未发送配额刷新请求", "refresh-all":"尚未发送配额刷新请求", "refresh-selected":"尚未发送配额刷新请求", "refresh-retry":"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
+  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","refresh-selected":"查询所选账号配额","refresh-retry":"继续未完成的配额查询","login":"单独登录","quota-recovery":"检查并恢复配额","quota-auth-recovery":"刷新认证并检查配额","quota-settings":"启用所选账号的自动查询"})[payload.approval_action] || "发起上游操作";
+  const operationPending = ({"quota-settings":"自动查询设置尚未改变","quota-recovery":"尚未发送配额检查请求","quota-auth-recovery":"尚未刷新认证或查询配额", refresh:"尚未发送配额刷新请求", "refresh-all":"尚未发送配额刷新请求", "refresh-selected":"尚未发送配额刷新请求", "refresh-retry":"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
   let receipt = null;
   const dialog = node("dialog", undefined, "account-egress-dialog");
   dialog.setAttribute("aria-labelledby", "account-egress-title");
@@ -52,8 +52,11 @@ export async function previewEgress(request, targets, signal, payload = {}) {
       dialog.append(identities);
     }
     const machine = Array.isArray(payload.approval_scope) ? payload.approval_scope[0] : null;
-    if (["quota-recovery", "quota-settings"].includes(payload.approval_action) && machine) {
+    if (["quota-recovery", "quota-auth-recovery", "quota-settings"].includes(payload.approval_action) && machine) {
       dialog.append(node("p", `本次检查将在 ${machine} 上执行，并使用该机器的 Agent Monitor 路由桥；当前浏览器不会直接访问上游。`, "quota-scope"));
+    }
+    if (payload.approval_action === "quota-auth-recovery") {
+      dialog.append(node("p", "将为所选账号调用一次官方认证刷新 RPC；仅同身份的新凭据已保存时，再查询一次配额。共用原总时限，失败即停。官方内部可能有多次 HTTP/OAuth 请求；不发送消息，也不保证恢复。", "quota-scope"));
     }
   }
   dialog.append(controls);
@@ -84,7 +87,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
       row.append(node("h3", target.host === "chatgpt.com" ? "ChatGPT 业务 · chatgpt.com" : "认证 · auth.openai.com"));
       row.append(node("p", `${target.ip || "IP 未知"} · ${countryName(target.country_code)}`,
         target.country_code === "CN" ? "account-egress-address is-china" : "account-egress-address"));
-      if (target.country_code === "CN") row.append(node("p", "出口地区为中国，请确认后再发送。", "is-china"));
+      if (target.country_code === "CN") row.append(node("p", sending ? "出口地区为中国，请确认后再发送。" : "出口地区为中国，请核对后再继续。", "is-china"));
       if (target.error) row.append(node("p", target.error, "quota-scope"));
       const observed = new Date(target.observed_at * 1000);
       row.append(node("p", `观测于 ${Number.isFinite(observed.getTime()) ? observed.toLocaleString("zh-CN") : "未知时间"}${target.cached ? " · 缓存结果" : ""}；${target.retry_after_seconds} 秒后可重新探测。`, "quota-scope"));
