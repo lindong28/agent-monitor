@@ -1087,7 +1087,7 @@
         || (account.quota_status && account.quota_status !== "current") ? "历史记录"
         : quotaPlanSourcesDisagree(account) ? "记录不同"
         : typeof account.reading_plan === "string" && account.reading_plan ? ""
-        : typeof account.credential_plan === "string" && account.credential_plan ? "登录信息"
+        : typeof account.credential_plan === "string" && account.credential_plan ? ""
         : "来源未记录";
       if (source.textContent) cell.appendChild(source);
     }

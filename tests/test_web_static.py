@@ -71,7 +71,7 @@ assert.ok(!passive.includes('主动查询'));
 const legacyAccount = {account_state: 'known', account_plan: 'pro'};
 const legacy = detailText(legacyAccount);
 assert.ok(quota.quotaPlanCell(legacyAccount, codex).textContent.includes('来源未记录'));
-assert.ok(quota.quotaPlanCell({...known, reading_plan:null}, codex).textContent.includes('登录信息'));
+assert.ok(!quota.quotaPlanCell({...known, reading_plan:null}, codex).textContent.includes('登录信息'));
 assert.ok(quota.quotaPlanCell({...known, presence:'remembered'}, codex).textContent.includes('历史记录'));
 assert.ok(legacy.includes('来源未记录'));
 assert.ok(legacy.includes('配额记录中的套餐未取得'));
@@ -93,7 +93,7 @@ for (const presence of ['in_use', 'remembered']) {
   assert.ok(detailText(fresh).includes('原始值：promax'));
   assert.ok(detailText(fresh).includes('原始值：pro'));
   const loginOnly = {...fresh, reading_plan:null, account_plan:'pro'};
-  assert.ok(quota.quotaPlanCell(loginOnly, codex).textContent.includes('登录信息'));
+  assert.ok(!quota.quotaPlanCell(loginOnly, codex).textContent.includes('登录信息'));
 }
 const newer = {...before, updated_at: '2026-11-05T12:00:00Z'};
 assert.strictEqual(quota.quotaDisplayReading(codex, newer), newer);
