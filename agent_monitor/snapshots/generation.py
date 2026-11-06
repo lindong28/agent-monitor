@@ -863,7 +863,7 @@ def self_certified_host_identity():
         namespace = "linux-machine-id"
     elif system == "Darwin":
         result = subprocess.run(
-            ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
             check=True,
             capture_output=True,
             text=True,

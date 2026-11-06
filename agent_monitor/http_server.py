@@ -941,7 +941,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 self._send_json(QUOTA_REFRESH.recovery_status(machine), send_body=send_body)
-            except Exception:
+            except Exception as exc:
+                diagnostics.monitor.record_failure("admission", exc)
                 self._send_json({"error": "未取得可核验的当前状态；暂停未解除，未发出上游请求。"}, status=503, send_body=send_body)
             return
         if parsed.path == "/api/codex-accounts":

@@ -1,5 +1,7 @@
 import json
 import math
+import os
+import platform
 import sqlite3
 import subprocess
 import tempfile
@@ -15,6 +17,18 @@ from agent_monitor.snapshots.machine_config import MachineConfigError; from agen
 
 
 class GenerationTests(unittest.TestCase):
+    def test_darwin_identity_uses_system_ioreg_without_path_lookup(self):
+        result = subprocess.CompletedProcess([], 0, '"IOPlatformUUID" = "fixture-uuid"')
+        with mock.patch.object(generation.platform, "system", return_value="Darwin"), mock.patch.object(generation.subprocess, "run", return_value=result) as run:
+            self.assertTrue(generation.self_certified_host_identity().startswith("host-v1:"))
+        self.assertEqual(run.call_args.args[0], ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
+
+    @unittest.skipUnless(platform.system() == "Darwin", "Darwin system identity command")
+    def test_darwin_identity_matches_with_service_and_shell_paths(self):
+        expected = generation.self_certified_host_identity()
+        with mock.patch.dict(os.environ, {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}):
+            self.assertEqual(generation.self_certified_host_identity(), expected)
+
     def test_retirement_preserves_disabled_machine_lines_and_other_comments(self):
         for marker in ("#", "//"):
             for position in range(3):

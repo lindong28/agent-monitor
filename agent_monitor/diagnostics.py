@@ -36,7 +36,7 @@ _SOURCE_PATHS = {PROJECT_ROOT / relative for relative in (
     "agent_monitor/quota/quota_sync.py", "agent_monitor/snapshots/sync.py",
     "agent_monitor/diagnostics.py", "agent_monitor/quota/account_memory.py",
     "agent_monitor/collection.py", "agent_monitor/quota/quota_view.py",
-    "agent_monitor/quota/quota_service.py",
+    "agent_monitor/quota/quota_service.py", "agent_monitor/snapshots/generation.py",
 )}
 # Stored frames use basenames; retain the former HTTP name in older records.
 _SOURCE_FILES = {path.name for path in _SOURCE_PATHS} | {"server.py"}

@@ -11,6 +11,19 @@ from parsers import accounts
 
 
 class RecoveryStatusTests(unittest.TestCase):
+    def test_status_http_records_read_failure_without_exposing_exception_text(self):
+        from agent_monitor import http_server as server
+        handler = object.__new__(server.Handler)
+        handler.path = "/api/quota-recovery?machine=self"
+        handler._send_json = mock.Mock()
+        machine = SimpleNamespace(name="fixture", is_self=True)
+        error = FileNotFoundError("fixture-secret must not reach the response")
+        with mock.patch.object(server.hub_reads, "origin", return_value=None), mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(by_name={"fixture": machine})), mock.patch.object(server.QUOTA_REFRESH, "recovery_status", side_effect=error), mock.patch.object(server.diagnostics.monitor, "record_failure") as record:
+            handler._handle_request()
+        record.assert_called_once_with("admission", error)
+        self.assertEqual(handler._send_json.call_args.kwargs["status"], 503)
+        self.assertNotIn("fixture-secret", str(handler._send_json.call_args))
+
     def test_failed_and_successful_attempts_survive_readback(self):
         for success, keep_pause in ((False, False), (False, True), (True, False)):
             with self.subTest(success=success, keep_pause=keep_pause), tempfile.TemporaryDirectory() as tmp:
