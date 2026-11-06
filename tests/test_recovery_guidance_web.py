@@ -174,6 +174,27 @@ async function render(changes={}, error=false) {
   p=await render({pause:{id:'new-pause'},last_recovery:{ok:false,request:{pause_id:'old-pause',machine:'fixture-host',account_id:'fixture-id'},failure:{upstream_code:'token_revoked',http_status:401}}});
   assert.doesNotMatch(visibleText(p),/上游认证响应需要核对/);
   assert.match(visibleText(p),/Codex 请求已暂停/);
+  const failedRecovery = {ok:false,pause_id:'result-pause',
+    request:{pause_id:'original-pause',machine:base.machine,account_id:base.account.account_id,account_label:base.account.account_label,profile:'monitor-managed-fixture'},
+    failure:{stage:'quota_read',upstream_code:'token_revoked',http_status:401}};
+  const resultingPause = {id:'result-pause',failure:failedRecovery.failure};
+  const managedAccount={...base.account,profile:'managed-fixture',quota_profile:'monitor-managed-fixture'};
+  p=await render({account:managedAccount,pause:resultingPause,last_recovery:failedRecovery});
+  assert.match(visibleText(p),/配额检查未成功，发送仍暂停/);
+  assert.doesNotMatch(visibleText(p),/先通过目标机器.*只检查一次/);
+  assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='probe').textContent,'处理后再次检查配额');
+  assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='help').className.includes('btn-primary'),true);
+  await all(p).find(n=>n.attrs?.['data-recovery-action']==='help').click();
+  assert.match(visibleText(p),/本次检查已经失败/);
+  assert.doesNotMatch(visibleText(p),/确认出口后点击“通过目标机器路由桥检查配额”/);
+  for(const mismatch of [{machine:'another-host'},{account_id:'another-account'},{account_label:'another@example.test'},{profile:'another-profile'}]) {
+    p=await render({account:managedAccount,pause:resultingPause,
+      last_recovery:{...failedRecovery,request:{...failedRecovery.request,...mismatch}}});
+    assert.doesNotMatch(visibleText(p),/配额检查未成功，发送仍暂停/);
+    assert.match(visibleText(p),/上游认证响应需要核对/);
+  }
+  p=await render({pause:resultingPause,last_recovery:{...failedRecovery,request:{...failedRecovery.request,profile:''}}});
+  assert.match(visibleText(p),/配额检查未成功，发送仍暂停/);
   const only401=ui.quotaFailureDetails(provider,[{machine:'only-401',reason:'上游拒绝，http_status=401',query_state:'paused',failure:{http_status:401}}]);
   assert.match(only401.quotaDiagnostics.entries[0].note.textContent,/上游返回 HTTP 401，原因未核实/);
   assert.doesNotMatch(only401.quotaDiagnostics.entries[0].note.textContent,/token_revoked/);

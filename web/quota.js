@@ -581,8 +581,11 @@
     function render(value) {
       const a = value?.account || {}, pause = value?.pause, last = value?.last_recovery;
       const lastRequest = last?.request;
-      const lastMatchesPause = last?.ok === false && pause?.id && lastRequest?.pause_id === pause.id
-        && lastRequest.machine === value.machine && lastRequest.account_id === a.account_id;
+      const lastMatchesPause = last?.ok === false && pause?.id && lastRequest
+        && (lastRequest.pause_id === pause.id || last.pause_id === pause.id)
+        && lastRequest.machine === value.machine && lastRequest.account_id === a.account_id
+        && String(lastRequest.account_label || "").toLowerCase() === String(a.account_label || "").toLowerCase()
+        && (lastRequest.profile || "") === (a.quota_profile || "");
       const failure = pause?.failure || (lastMatchesPause ? last.failure : null);
       const hasFailure = failure && typeof failure === "object" && Object.keys(failure).length > 0;
       const failureGuidance = hasFailure ? quotaFailureGuidance({
@@ -603,11 +606,12 @@
         : pause.id === "unreadable" ? "unreadable" : pause.probe_attempt ? "used"
         : a.blocked_reason ? "account-blocked"
         : !a.account_id || !a.account_label ? "identity"
+        : lastMatchesPause ? "failed"
         : sourceMismatch ? "source-mismatch"
         : failureGuidance?.key === "identity" ? "identity"
         : failureGuidance?.key === "upstream_auth" ? "upstream-auth"
         : failureGuidance?.key === "read_error" ? "read-error"
-        : lastMatchesPause ? "failed" : "paused";
+        : "paused";
       const copyText = {
         unknown: ["暂时无法确认恢复状态", "先更新状态。读取失败期间不能检查配额；下方技术详情可能是此前的记录。"],
         "unknown-outcome": ["本次检查结果尚未确认", "先更新状态核对本次检查的结果，暂不再次提交，避免重复检查。"],
@@ -667,6 +671,10 @@
         `核对上方检查对象。检查将在 ${host} 执行，并使用该机器的 Agent Monitor 路由桥，不使用打开网页设备的直连。`,
         "点击“通过目标机器路由桥检查配额”前先确认出口预览完整；预览失败时不会发送配额检查请求。",
         "若仍失败，保留暂停状态并复制技术详情交由管理员排查，不要重复盲试。"
+      ] : mode === "failed" ? [
+        "本次检查已经失败。保留暂停和诊断，先展开技术详情并复制诊断信息，不要直接重复检查。",
+        `由 Agent Monitor 维护者核对 ${host} 上本次失败的阶段、错误码、账号与路由记录，按已核实原因处理；错误码本身不能证明需要换出口或重新登录。`,
+        "完成处理后先更新状态；仍需验证配额时，再点击“处理后再次检查配额”并确认原路由出口。已有发送结果不会重放。"
       ] : [
         `核对上方检查对象。检查发生在 ${host}，不是自动使用打开网页这台设备的网络。`,
         `检查会通过 ${host} 的 Agent Monitor 路由桥执行；保持该机器原有出口，不切换节点。错误码本身不能确认是代理或登录故障。`,
