@@ -93,6 +93,18 @@ class HubActionsTests(unittest.TestCase):
         self.assertEqual(self.request('/api/refresh',payload=['invalid'])[0],400)
         self.assertEqual(self.receipts,[])
 
+    def test_account_recovery_selection_survives_client_facade(self):
+        for profile in ('monitor-account-a', 'monitor-account-b'):
+            path = '/api/quota-recovery?machine=self&profile=' + profile + '&pause_scope=account'
+            self.value = {'account': {'quota_profile': profile}, 'pause_scope': 'account'}
+            self.assertEqual(self.request(path, 'GET'), (200, self.value))
+            self.assertEqual(self.receipts[-1][:2], ('GET', path))
+        count = len(self.receipts)
+        for path in ('/api/quota-recovery?machine=self&url=http://evil.test',
+                     '/api/quota-settings?machine=self&profile=monitor-account-a'):
+            self.assertEqual(self.request(path, 'GET')[0], 400)
+        self.assertEqual(len(self.receipts), count)
+
     def test_lost_or_invalid_write_receipt_is_unknown_without_replay(self):
         for status, value in ((302,{}),(200,[])):
             self.status=status; self.value=value; before=len(self.receipts)

@@ -29,7 +29,9 @@ def forward(method, path, query, payload, *, target, session_factory=None):
     method = 'GET' if method == 'HEAD' else method
     if not supports(method, path):
         return 404, {'error': '未找到此操作。'}
-    keys = {'ack', 'approval'} if path == '/api/refresh' else {'machine'} if method == 'GET' and path in ('/api/quota-recovery', '/api/quota-settings') else set()
+    keys = ({'ack', 'approval'} if path == '/api/refresh' else
+            {'machine', 'profile', 'pause_scope'} if method == 'GET' and path == '/api/quota-recovery' else
+            {'machine'} if method == 'GET' and path == '/api/quota-settings' else set())
     if set(query) - keys:
         return 400, {'error': '操作参数无效；未发出请求。'}
     headers = {'X-Agent-Monitor': 'codex-accounts' if path.startswith('/api/codex-accounts') else 'action',

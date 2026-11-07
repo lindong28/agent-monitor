@@ -38,6 +38,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--facade', action='store_true', help='Exercise real same-origin forwarding to the synthetic owner.')
     parser.add_argument('--loopback', action='store_true', help='Use a loopback page origin for automated acceptance.')
+    parser.add_argument('--state-root', type=Path, help='Explicit facade installation root for isolated acceptance.')
     args = parser.parse_args()
     accounts = [dict(id=str(i), email=f'fixture{i}@example.test', account_id=f'workspace-{i}',
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
@@ -116,7 +117,7 @@ def main():
             import {init} from '/web/codex-accounts.js';
             import {previewEgress} from '/web/account-egress.js';
             window.AgentMonitor.previewUpstream=(targets,payload,signal)=>previewEgress(async(action,body)=>{
-              const r=await fetch('/api/codex-accounts/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});
+              const r=await fetch('/api/codex-accounts/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Agent-Monitor':'codex-accounts'},body:JSON.stringify(body),signal});
               const value=await r.json(); if(!r.ok) throw new Error(value.error); return value;
             },targets,signal,payload);
             const quota=window.AgentMonitorModules.quota({platform:{window,document,fetch:(...args)=>fetch(...args)},
@@ -378,7 +379,7 @@ def main():
         from agent_monitor.network import client_connector, network_policy
         from agent_monitor.runtime import process_identity
         import requests
-        fixture_root = Path(os.environ['HOME']) / 'facade-installation'
+        fixture_root = args.state_root or Path(os.environ['HOME']) / 'facade-installation'
         fixture_state = fixture_root / 'state'
         fixture_state.mkdir(parents=True)
         client_connector.PROJECT_ROOT = fixture_root
