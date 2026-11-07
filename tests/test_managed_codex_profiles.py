@@ -542,7 +542,7 @@ class ManagedCodexTests(unittest.TestCase):
             "error": None, "attempted_at": "2026-11-03T00:00:00Z"}}
         current = SimpleNamespace(host="fixture", meta={"source_host_identity": "fixture-id",
                                   "rate_limits": {"codex": old}})
-        result = manager.merge(current, SimpleNamespace(ssh_host="fixture"))["codex"]
+        result = manager.merge(current, SimpleNamespace(ssh_host="fixture", is_self=False))["codex"]
         self.assertEqual(result["seven_day_pct"], 3)
         self.assertEqual(result["managed_accounts"][0]["seven_day_pct"], 7)
 
@@ -560,7 +560,7 @@ class ManagedCodexTests(unittest.TestCase):
                 "error": None, "attempted_at": "2026-11-03T00:00:00Z"}}
             current = SimpleNamespace(host="fixture", meta={"source_host_identity": "fixture-id",
                 "generated_at": generated, "rate_limits": {"codex": old}})
-            row = manager.merge(current, SimpleNamespace(ssh_host="fixture"))["codex"]
+            row = manager.merge(current, SimpleNamespace(ssh_host="fixture", is_self=False))["codex"]
             self.assertEqual(row["reading_plan"], "prolite")
             self.assertEqual(row["credential_plan"], expected)
             self.assertEqual(row["account_plan"], "prolite")
@@ -586,7 +586,7 @@ class ManagedCodexTests(unittest.TestCase):
                 manager.on_complete = None
                 manager.path = self.root / "receipt.json"
                 manager.running = True
-                machine = SimpleNamespace(name="fixture", ssh_host="fixture")
+                machine = SimpleNamespace(name="fixture", ssh_host="fixture", is_self=False)
                 manager.machines = (machine,)
                 payload = lambda row: {"source_host_identity": "fixture-id",
                                        "rate_limits": {"codex": copy.deepcopy(row)}}
