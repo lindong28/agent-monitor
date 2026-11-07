@@ -26,7 +26,7 @@ def validate_exclusions(value):
 
 def validate_request(value):
     fields = {"machine", "account_id", "account_label", "pause_id"}
-    if (not isinstance(value, dict) or set(value) - {"profile", "mode", "operation_id"} != fields
+    if (not isinstance(value, dict) or set(value) - {"profile", "mode", "operation_id", "pause_scope"} != fields
             or any(not isinstance(value[k], str) or not value[k] or len(value[k]) > 256 for k in fields)
             or not re.fullmatch(r"[0-9a-f]{32}", value["pause_id"])):
         raise ValueError("请指定机器、完整账号身份和当前暂停标识。")
@@ -42,29 +42,54 @@ def validate_request(value):
             raise ValueError("重新授权必须绑定原配额任务。") from None
     elif "operation_id" in value:
         raise ValueError("原配额任务只适用于重新授权。")
+    if "pause_scope" in value:
+        validate_selection(value.get("profile"), value["pause_scope"])
     return value
+
+
+def validate_selection(profile, pause_scope):
+    if pause_scope != "account" or not isinstance(profile, str) or not profile.startswith("monitor-"):
+        raise ValueError("账号恢复范围无效。")
+    try:
+        if str(uuid.UUID(profile[8:])) != profile[8:]:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ValueError("账号来源无效。") from None
 
 
 def approval_scope(value):
     scope = [value["machine"], value["account_id"]]
     scope = scope + [value["account_label"], value["profile"] or "native"] if "profile" in value else scope
     scope = scope + [value["mode"]] if "mode" in value else scope
-    return scope + [value["operation_id"]] if "operation_id" in value else scope
+    scope = scope + [value["operation_id"]] if "operation_id" in value else scope
+    return scope + ["account"] if value.get("pause_scope") == "account" else scope
 
 
 def approval_action(value):
     return {"renew_auth": "quota-auth-recovery", "reauthorize": "quota-login-recovery"}.get(value.get("mode"), "quota-recovery")
 
 
-def local_status():
+def local_status(*, profile=None, pause_scope=None):
     """Read local files and machine identity, without initializing a provider."""
     from agent_monitor.snapshots import exporter, generation
     from agent_monitor.accounts.upstream_controls import Controls
     from parsers import accounts
-    state = Controls(exporter.ROOT / "state/upstream_controls").read("codex")
+    shared = Controls(exporter.ROOT / "state/upstream_controls").read("codex")
+    state = shared
     from agent_monitor.quota import quota_service, quota_refresh
+    from agent_monitor.accounts import account_holds
+    if pause_scope is not None:
+        validate_selection(profile, pause_scope)
+        from agent_monitor import hub_config
+        if not hub_config.is_hub():
+            raise ValueError("账号恢复只支持账号所在 Hub。")
+        home = quota_service.recovery_home(profile, exporter.ROOT)
+        record = json.loads((home.parent / "profile.json").read_text())
+        if record.get("id") != profile[8:] or not record.get("account_id"):
+            raise ValueError("账号来源已变化。")
+        state = account_holds.controls(exporter.ROOT / "state", record["account_id"], record["email"]).read("codex")
     failure = (state.get("pause") or {}).get("failure") or {}
-    profile = failure.get("account_profile")
+    profile = profile if pause_scope == "account" else failure.get("account_profile")
     auth = accounts.CODEX_AUTH
     if profile:
         try:
@@ -81,7 +106,10 @@ def local_status():
     if (home.parent / "profile.json").is_file() and home.name == "codex":
         source = "managed"
     from agent_monitor.accounts import account_holds
-    blocked_reason = account_holds.blocked(exporter.ROOT / "state", account.account_id, account.label) if account else None
+    blocked_reason = account_holds.blocked(exporter.ROOT / "state", account.account_id, account.label, auth_path=auth,
+        probe_pause_id=(state.get("pause") or {}).get("id") if pause_scope == "account" else None) if account else None
+    if pause_scope == "account" and (shared.get("pause") or shared.get("active")):
+        blocked_reason = "本机共享通道仍有暂停或在办操作，请先核对共享保护。"
     auth_recovery_available = False
     login_recovery = None
     local_commit = None
@@ -95,6 +123,10 @@ def local_status():
                 login_recovery = reauthorization_context(record, state)
                 from agent_monitor.quota.codex_quota import local_commit_context
                 local_commit = local_commit_context(record, state)
+                if pause_scope == "account":
+                    for binding in (login_recovery, local_commit):
+                        if binding:
+                            binding["pause_scope"] = "account"
             operation = record.get("operation") or {}
             auth_recovery_available = bool(account and not blocked_reason and revoked_quota_failure(failure)
                 and record.get("account_id") == account.account_id
@@ -103,7 +135,8 @@ def local_status():
                 and not operation.get("login_only") and operation.get("message_status") == "not_sent")
         except (OSError, ValueError, AttributeError):
             pass  # A capability cannot be granted from unreadable local state.
-    return {"source_host_identity": generation.self_certified_host_identity(),
+    return {**({"pause_scope": "account", "shared_pause": shared.get("pause")} if pause_scope == "account" else {}),
+            "source_host_identity": generation.self_certified_host_identity(),
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "pause": state.get("pause"), "active": state.get("active"),
             "account": {"account_id": account.account_id if account else None,
@@ -112,14 +145,18 @@ def local_status():
                         "auth_recovery_available": auth_recovery_available,
                         "login_recovery": login_recovery,
                         "local_commit": local_commit,
+                        "account_quota_pause": (account_holds.controls(exporter.ROOT / "state", account.account_id,
+                            account.label).read("codex").get("pause") if account else None),
                         "blocked_reason": blocked_reason,
                         "credential_path": str(auth), "quota_profile": profile or ""},
             "last_recovery": state.get("last_recovery")}
 
 
-def read_status(machine):
+def read_status(machine, *, profile=None, pause_scope=None):
     if machine.is_self:
-        return local_status()
+        return local_status(**({"profile": profile, "pause_scope": pause_scope} if pause_scope is not None else {}))
+    if pause_scope is not None:
+        raise ValueError("账号恢复只支持账号所在 Hub 本机。")
     from agent_monitor.snapshots import sync
     result = subprocess.run([*sync._SSH_PREFIX, machine.ssh_host,
                              "~/.local/bin/agent-monitor quota-recover --status"],
@@ -205,14 +242,23 @@ def local_recovery(value):
     commit = exporter.exporter_version()
     route = None
     admitted_probe = {}
+    selected_controls = Controls(exporter.ROOT / "state/upstream_controls")
+    if value.get("pause_scope") == "account":
+        from agent_monitor.accounts import account_holds
+        from agent_monitor import hub_config
+        if not hub_config.is_hub():
+            raise ValueError("账号恢复只支持账号所在 Hub。")
+        selected_controls = account_holds.controls(exporter.ROOT / "state", value["account_id"], value["account_label"])
     try:
         # Scope observations without choosing a different endpoint or proxy policy.
         route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
         with network_policy.using_route(route):
             options = {"renew_auth": True} if value.get("mode") == "renew_auth" else {}
+            if value.get("pause_scope") == "account":
+                options["pause_scope"] = "account"
             block = quota_service.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"], root=exporter.ROOT, admitted_probe=admitted_probe, profile=value.get("profile"), **options)
     except (quota_refresh.RefreshError, OSError, RuntimeError) as exc:
-        pause = Controls(exporter.ROOT / "state/upstream_controls").read("codex").get("pause")
+        pause = selected_controls.read("codex").get("pause")
         receipt = {"ok": False, "error": "恢复未完成，暂停保留；请查看诊断后再决定下一步。",
                 "failure": diagnostics.failure_details(exc), "pause_id": (pause or {}).get("id")}
     else:
@@ -233,7 +279,7 @@ def local_recovery(value):
         historical["authentication_recovery"] = auth_recovery
     if admitted_probe.get("id"):
         try:
-            Controls(exporter.ROOT / "state/upstream_controls").record_recovery(historical, attempt_id=admitted_probe["id"])
+            selected_controls.record_recovery(historical, attempt_id=admitted_probe["id"])
         except (OSError, RuntimeError):
             receipt["record_error"] = "本次诊断记录未保存；请保留当前回执，重新读取状态核对，勿重复探测。"
     return receipt
@@ -247,6 +293,8 @@ def run(machine, value):
         raise ValueError("目标机器不一致")
     if machine.is_self:
         return local_recovery(value)
+    if value.get("pause_scope") == "account":
+        raise ValueError("账号恢复只支持账号所在 Hub 本机。")
     command = "~/.local/bin/agent-monitor quota-recover --request " + shlex.quote(json.dumps(value))
     try:
         result = subprocess.run([*sync._SSH_PREFIX, machine.ssh_host, command],

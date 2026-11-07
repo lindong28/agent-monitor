@@ -2,6 +2,7 @@
 import math
 import json
 import hashlib
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from parsers.accounts import codex_account, quota_identity
@@ -76,6 +77,34 @@ def revoked_quota_failure(failure):
     return (isinstance(failure, dict) and failure.get("stage") == "quota_read"
             and failure.get("kind") == "rpc_error" and failure.get("http_status") == 401
             and failure.get("upstream_code") == "token_revoked")
+
+
+def revoked_quota_transport(error, method):
+    """Validate the fixed Codex RequestError wire format, not diagnostic facts."""
+    if method != "account/rateLimits/read" or not isinstance(error, dict) or error.get("code") != -32603:
+        return False
+    message = error.get("message")
+    if not isinstance(message, str):
+        return False
+    # account_processor.rs wraps RequestError in this exact fixed prefix.
+    match = re.fullmatch(r"failed to fetch codex rate limits: GET https://[^\s;]+ failed: 401 Unauthorized; content-type=[^\r\n]*?; body=(.*)", message, re.DOTALL)
+    if not match:
+        return False
+    try:
+        body = json.loads(match[1])
+    except ValueError:
+        return False
+    return (isinstance(body, dict) and ("status" not in body or type(body["status"]) is int and body["status"] == 401)
+            and isinstance(body.get("error"), dict) and body["error"].get("code") == "token_revoked")
+
+
+def credential_digest(auth_path):
+    """Only a non-reversible generation identifier may leave credential memory."""
+    try:
+        token = (json.loads(Path(auth_path).read_text()).get("tokens") or {}).get("access_token")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return hashlib.sha256(token.encode()).hexdigest() if isinstance(token, str) and token else None
 
 
 def safe_auth_recovery(value):
@@ -193,9 +222,18 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
             recovery["outcome"] = "no_new_credentials"
             raise ReadingError("官方刷新未确认产生新凭据；本次未重查配额，暂停保留。请查看认证修复详情。", "invalid_result", "credentials")
         recovery["outcome"] = "new_credentials"
+    before_digest = credential_digest(auth_path)
     try:
         result = request("account/rateLimits/read", {"excludeResetCreditDetails": True} if renew_auth else {})
-    except Exception:
+    except Exception as exc:
+        # An error return still needs identity and credential-generation checks.
+        try:
+            check_identity(auth_path, account_id, label)
+            unchanged = before_digest and before_digest == credential_digest(auth_path)
+        except ReadingError:
+            unchanged = False
+        if unchanged and getattr(exc, "revoked_quota_transport", False):
+            exc.account_quota_rejection = before_digest
         if renew_auth:
             recovery["outcome"] = "quota_failed"
         raise

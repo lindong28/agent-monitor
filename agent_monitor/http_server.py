@@ -689,6 +689,7 @@ class Handler(BaseHTTPRequestHandler):
                 route.consume(payload.get("confirmation"), [account_id], batch_id, "login")
                 result = manager.start(account_id, login_only=True, network_route=route)
             elif path == "/api/codex-accounts/commit-recovery":
+                from agent_monitor.quota import quota_recovery
                 if not hub.is_hub():
                     raise codex_accounts.ActionError("请通过账号所在 Hub 保存已有结果。", 409)
                 config = sync.load_machine_config()
@@ -698,7 +699,11 @@ class Handler(BaseHTTPRequestHandler):
                 with QUOTA_REFRESH.recovery_scope() as available:
                     if not available:
                         raise codex_accounts.ActionError("已有配额操作，请等待结束。", 409)
-                    current = QUOTA_REFRESH.recovery_status(machine)
+                    options = {}
+                    if "pause_scope" in payload:
+                        quota_recovery.validate_selection("monitor-" + str(payload.get("id")), payload["pause_scope"])
+                        options = {"profile": "monitor-" + payload["id"], "pause_scope": "account"}
+                    current = QUOTA_REFRESH.recovery_status(machine, **options)
                     binding = (current.get("account") or {}).get("local_commit")
                     if (not binding or binding["pause_id"] != payload.get("pause_id")
                             or binding["operation_id"] != payload.get("operation_id")
@@ -708,7 +713,7 @@ class Handler(BaseHTTPRequestHandler):
                         return QUOTA_REFRESH.managed_recovery_publication(machine, "monitor-" + payload["id"], block,
                             expected_source=current["source_host_identity"])
                     result = manager.commit_saved_recovery(payload["id"], binding["operation_id"], binding["pause_id"],
-                        publication=publication)
+                        publication=publication, **({"pause_scope": "account"} if options else {}))
             elif path == "/api/codex-accounts/resume":
                 result = manager.resume(payload.get("id"), payload.get("operation_id"), payload.get("pause_id"))
             elif path == "/api/codex-accounts/cancel":
@@ -777,7 +782,7 @@ class Handler(BaseHTTPRequestHandler):
             raw = json.loads(self.rfile.read(length))
             if not isinstance(raw, dict):
                 raise ValueError()
-            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile", "mode", "operation_id") if k in raw})
+            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile", "mode", "operation_id", "pause_scope") if k in raw})
             machine = sync.load_machine_config().by_name.get(value["machine"])
             if machine is None:
                 raise ValueError()
@@ -800,9 +805,12 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     from agent_monitor.accounts import codex_accounts
                     try:
-                        current = QUOTA_REFRESH.recovery_status(machine)
+                        current = QUOTA_REFRESH.recovery_status(machine, **({"profile": value["profile"], "pause_scope": "account"}
+                            if value.get("pause_scope") == "account" else {}))
                         binding = {k: value[k] for k in ("pause_id", "operation_id", "account_id", "account_label")}
                         binding["account_label"] = binding["account_label"].casefold()
+                        if value.get("pause_scope") == "account":
+                            binding["pause_scope"] = "account"
                         if ((current.get("account") or {}).get("login_recovery") != binding
                                 or (current.get("account") or {}).get("quota_profile") != value["profile"]):
                             raise codex_accounts.ActionError("重新授权的当前来源或账号绑定已变化。", 409)
@@ -961,7 +969,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "请选择已配置的机器。"}, status=400, send_body=send_body)
                 return
             try:
-                self._send_json(QUOTA_REFRESH.recovery_status(machine), send_body=send_body)
+                options = {}
+                if "pause_scope" in query:
+                    from agent_monitor.quota import quota_recovery
+                    profile, pause_scope = _first(query, "profile", ""), _first(query, "pause_scope", "")
+                    quota_recovery.validate_selection(profile, pause_scope)
+                    options = {"profile": profile, "pause_scope": pause_scope}
+                self._send_json(QUOTA_REFRESH.recovery_status(machine, **options), send_body=send_body)
             except Exception as exc:
                 diagnostics.monitor.record_failure("admission", exc)
                 self._send_json({"error": "未取得可核验的当前状态；暂停未解除，未发出上游请求。"}, status=503, send_body=send_body)

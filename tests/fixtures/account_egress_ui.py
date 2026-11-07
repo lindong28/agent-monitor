@@ -44,7 +44,8 @@ def main():
     state = dict(disclosure=False, quota_failure=False, mode='mixed', delay=0, starts=[], previews=0, paused=False,
                  pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
                  pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause', recovery_state='ready')
-    state.update(process_reads=0, server_reads=0, process_probes=0, process_probe_kinds=[], process_mode="ready")
+    state.update(process_reads=0, server_reads=0, process_probes=0, process_probe_kinds=[], process_mode="ready",
+                 account_scopes=False, cleared_scopes=[], scoped_receipts={}, scoped_reads=[])
     recovery_approvals = client_network.ApprovalStore()
     from agent_monitor.network import process_network
     def process_report():
@@ -84,7 +85,7 @@ def main():
         failure = dict(detail='Synthetic RPC failure', stage='quota_read', rpc_code=-32603)
         if state['recovery_state'] == 'auth':
             failure.update(kind='rpc_error', http_status=401, upstream_code='token_revoked')
-        return dict(id=state['pause_id'], at=1793004570, failure=failure, **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
+        return dict(id='f' * 32 if state['account_scopes'] and state['paused'] else state['pause_id'], at=1793004570, failure=failure, **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
     def quota():
         target = dict(machine='fixture-hub', account_id='workspace-0', account_label='fixture0@example.test',
                       reason='本机已暂停该服务的自动请求', query_state='paused', pause=pause())
@@ -100,6 +101,9 @@ def main():
         if state['pause_record'] == 'duplicate' and state['paused']:
             failures.append(dict(target))
         return dict(codex=dict(accounts=[], refresh_errors=failures), claude=dict(accounts=[]))
+    def account_pause(profile_id):
+        return dict(id='account-pause-' + profile_id, at=1793004570,
+                    failure=dict(stage='quota_read', kind='rpc_error', http_status=401, upstream_code='token_revoked'))
     source = (ROOT / 'web/accounts.html').read_text()
     panel = re.search(r'<main\b[^>]*>(.*?)</main>', source, re.S).group(1)
     html = ('<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
@@ -179,10 +183,32 @@ def main():
                             failure=dict(stage='reading', category='unknown'),
                             diagnostics=dict(last_request='account/rateLimits/read', rpc_failure=dict(rpc_code=-32603,
                                 http_status=401, upstream_code='token_revoked', detail='session expired'))))
+                if state['account_scopes']:
+                    for account in visible[:2]:
+                        held = account['id'] not in state['cleared_scopes']
+                        account.update(account_quota_pause=account_pause(account['id']) if held else None,
+                                       quota_query_allowed=not held)
                 self.send(dict(accounts=visible, batch=dict(id='fixture-old', items=items, created_at='2026-10-23T01:00:00Z'),
                                upstream_pause=pause() if state['paused'] else None))
             elif self.path.startswith('/api/quota-recovery?'):
                 state['recovery_reads'] += 1
+                query = parse_qs(urlsplit(self.path).query)
+                if state['account_scopes'] and query.get('pause_scope') == ['account']:
+                    profile = query.get('profile', [''])[0]
+                    account = next((a for a in accounts[:2] if 'monitor-' + a['id'] == profile), None)
+                    if not account:
+                        self.send(dict(error='Unknown synthetic account'), status=400)
+                        return
+                    state['scoped_reads'].append(profile)
+                    self.send(dict(machine='self', observed_at='2026-11-07T00:00:00Z', pause_scope='account', active=None,
+                        pause=account_pause(account['id']) if account['id'] not in state['cleared_scopes'] else None,
+                        shared_pause=pause() if state['paused'] else None,
+                        account=dict(account_id=account['account_id'], account_label=account['email'], quota_profile=profile,
+                            source='managed', auth_recovery_available=not state['paused'],
+                            account_quota_pause=account_pause(account['id']),
+                            blocked_reason='共享通道已暂停' if state['paused'] else None),
+                        last_recovery=state['scoped_receipts'].get(profile)))
+                    return
                 if state['recovery_state'] == 'unavailable':
                     self.send(dict(error='Synthetic state read failure'), status=503)
                     return
@@ -242,7 +268,7 @@ def main():
                 state['starts'].append(payload)
                 self.send({})
             elif self.path == '/fixture/config':
-                for key in ('disclosure', 'quota_failure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state', 'process_mode'):
+                for key in ('disclosure', 'quota_failure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state', 'process_mode', 'account_scopes'):
                     if key in payload:
                         state[key] = payload[key]
                 self.send(state)
@@ -251,11 +277,21 @@ def main():
                     scope = [payload['machine'], payload['account_id'], payload['account_label'], payload.get('profile') or 'native']
                     if payload.get('mode'):
                         scope.append(payload['mode'])
+                    if payload.get('pause_scope'):
+                        scope.append(payload['pause_scope'])
                     recovery_approvals.consume(payload.get('confirmation'), 'quota-auth-recovery' if payload.get('mode') else 'quota-recovery', scope, payload['pause_id'])
                 except client_network.NetworkError as exc:
                     self.send(dict(error=str(exc)), status=exc.status)
                     return
                 state['recoveries'].append(payload)
+                if payload.get('pause_scope') == 'account':
+                    account = next((a for a in accounts[:2] if 'monitor-' + a['id'] == payload.get('profile')), None)
+                    assert account and payload['pause_id'] == account_pause(account['id'])['id']
+                    state['cleared_scopes'].append(account['id'])
+                    receipt = dict(ok=True, request=payload, observed_at='2026-11-07T00:00:01Z', pause_id=payload['pause_id'])
+                    state['scoped_receipts'][payload['profile']] = receipt
+                    self.send(receipt)
+                    return
                 state['pause_id'] = 'pause-after-' + str(len(state['recoveries']))
                 receipt = dict(ok=state['recovery_mode']=='success', request=payload,
                     observed_at='2026-10-28T00:00:01Z', pause_id=state['pause_id'],

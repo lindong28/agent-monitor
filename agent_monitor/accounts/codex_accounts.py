@@ -25,6 +25,7 @@ from agent_monitor.accounts.codex_messages import MESSAGES
 from agent_monitor.network import network_policy
 from agent_monitor.network import client_network
 from agent_monitor.quota import codex_quota
+from agent_monitor.accounts import account_holds
 from agent_monitor import diagnostics as diagnostic_evidence
 
 
@@ -409,7 +410,11 @@ class Rpc:
                     if method == "account/rateLimits/read":
                         detail = ("当前 Codex 不支持配额查询接口，请核对 CLI 版本。" if code == -32601 else
                                   "Codex 配额查询失败，本次未取得新读数；请查看技术详情中的错误摘要。")
-                        raise ActionError(detail, 502)
+                        failure = ActionError(detail, 502)
+                        failure.revoked_quota_transport = codex_quota.revoked_quota_transport(error, method)
+                        if failure.revoked_quota_transport:
+                            self.diagnostics["rpc_failure"].update(http_status=401, upstream_code="token_revoked")
+                        raise failure
                     # Upstream messages can contain tokens, URLs or configuration.
                     if (method == "account/login/start" and value["error"].get("message") ==
                             "failed to request device code: device code request failed with status 429 Too Many Requests"):
@@ -643,13 +648,21 @@ class Manager:
                                           if key in record.get("restrictions", {})}
         result["restriction_details"] = list(result["restriction_messages"].values())
         result["has_credentials"] = (directory / "codex/auth.json").is_file()
+        local = account_holds.controls(self.root.parent, record.get("account_id"), record["email"]).read("codex")
+        result["account_quota_pause"] = local.get("pause")
+        stale_credential = account_holds.rejected_credential(self.root.parent, directory / "codex/auth.json")
+        unavailable_hold = account_holds.unreadable_credential_holds(self.root.parent)
+        if unavailable_hold:
+            message = "账号凭据保护记录无法核实，请先修复本机保护状态。"
+            result["restriction_messages"]["credential_protection"] = message
+            result["restriction_details"].append(message)
         result["login_required"] = bool(
-            not result["has_credentials"]
+            not result["has_credentials"] or (stale_credential and not local.get("pause"))
             or record.get("login_required")
             or (operation and (operation.get("failure") or {}).get("category") == "needsLogin")
         )
         result["busy"] = bool(job) or bool(operation and operation["stage"] in ACTIVE)
-        result["quota_query_allowed"] = not (result["login_required"] or result.get("disabled")
+        result["quota_query_allowed"] = not (result["login_required"] or result.get("disabled") or local.get("pause") or stale_credential or unavailable_hold
             or any(key in record.get("restrictions", {})
                    for key in ("authentication", "unknown", "rate_limit", "login_rate_limit")))
         if job and operation and operation["stage"] == "login":
@@ -750,10 +763,21 @@ class Manager:
         lock = lock_file(directory / ".lock")
         try:
             record = self.read(directory)
+            original_record = copy.deepcopy(record)
             recovery = None
+            local = account_holds.controls(self.root.parent, record.get("account_id"), record["email"]).read("codex")
+            local_pause = local.get("pause")
+            selected_recovery = (login_recovery and login_recovery.get("pause_scope") == "account"
+                                 and local_pause and login_recovery.get("pause_id") == local_pause.get("id"))
+            if local.get("active") or (local_pause and not selected_recovery):
+                raise ActionError("此账号仍有配额暂停，请通过“修复登录”继续；原失败操作保留。", 409, "locallyPaused")
             if login_recovery is not None:
-                state = self.controls.read("codex")
+                selected_controls = (account_holds.controls(self.root.parent, record.get("account_id"), record["email"])
+                                     if login_recovery.get("pause_scope") == "account" else self.controls)
+                state = selected_controls.read("codex")
                 binding = codex_quota.reauthorization_context(record, state)
+                if binding and login_recovery.get("pause_scope") == "account":
+                    binding["pause_scope"] = "account"
                 if (not login_only or not binding or binding != login_recovery
                         or state.get("active") or (state.get("pause") or {}).get("probe_attempt")):
                     raise ActionError("重新授权的账号、原配额任务或暂停已变化，未发出请求。", 409)
@@ -787,11 +811,22 @@ class Manager:
                     record.pop("batch_result")
             self.save(directory, record)
             return directory, record, {"cancelled": threading.Event(), "done": threading.Event(), "authorization": {},
+                                       "original_record": original_record,
                                        "login_generation": self.login_generation, "login_recovery": recovery,
                                        "login_access_before": before_access if recovery else None}, lock
         except Exception:
             lock.close()
             raise
+
+    @staticmethod
+    def rollback_prepared(prepared):
+        """Restore unlaunched records while their preparation locks remain held."""
+        try:
+            for directory, _, job, _ in prepared:
+                write_record(directory / "profile.json", job["original_record"])
+        finally:
+            for *_, lock in prepared:
+                lock.close()
 
     def launch(self, prepared):
         directory, record, job, lock = prepared
@@ -840,7 +875,7 @@ class Manager:
         # Caller owns the profile lock and provider lease. Do not re-enter either
         # lock, and update this lease's state so close cannot resurrect the pause.
         recovery = job["login_recovery"]
-        state = self.controls.read("codex")
+        state = lease.controls.read("codex")
         if job["cancelled"].is_set():
             raise Cancelled("操作已取消，暂停保留。")
         if ((state.get("pause") or {}).get("id") != recovery["pause_id"]
@@ -895,7 +930,7 @@ class Manager:
                 with self.guard:
                     if job["cancelled"].is_set():
                         raise Cancelled("操作已取消，暂停保留。")
-                    self.controls._save("codex", committed)
+                    lease.controls._save("codex", committed)
                     record.clear()
                     record.update(candidate)
                     lease.state.clear()
@@ -907,7 +942,7 @@ class Manager:
             self.save(directory, record)
             raise
 
-    def commit_saved_recovery(self, profile_id, operation_id, pause_id, *, publication):
+    def commit_saved_recovery(self, profile_id, operation_id, pause_id, *, publication, pause_scope=None):
         """Complete retained local work; never create an RPC or provider job."""
         if not callable(publication):
             raise ActionError("本地配额发布入口不可用，暂停保留。", 503)
@@ -917,7 +952,9 @@ class Manager:
             directory = self.directory(profile_id)
             with lock_file(directory / ".lock"):
                 record = self.read(directory)
-                state = self.controls.read("codex")
+                selected_controls = (account_holds.controls(self.root.parent, record.get("account_id"), record["email"])
+                                     if pause_scope == "account" else self.controls)
+                state = selected_controls.read("codex")
                 binding = codex_quota.local_commit_context(record, state)
                 if not binding or binding["operation_id"] != operation_id or binding["pause_id"] != pause_id:
                     raise ActionError("已有结果、账号或暂停已变化，请更新状态。", 409)
@@ -928,7 +965,8 @@ class Manager:
                 job = {"cancelled": threading.Event(), "login_recovery": recovery,
                        "quota_publication": publication}
                 try:
-                    lease = self.controls.acquire("codex", probe_pause_id=pause_id)
+                    lease = (account_holds.acquire(self.root.parent, record["account_id"], record["email"], pause_id=pause_id)
+                             if pause_scope == "account" else self.controls.acquire("codex", probe_pause_id=pause_id))
                 except (Paused, Busy) as exc:
                     raise ActionError(str(exc), 409) from None
                 try:
@@ -942,7 +980,7 @@ class Manager:
                 finally:
                     try:
                         if not job.get("recovery_committed"):
-                            current = self.controls.read("codex")
+                            current = selected_controls.read("codex")
                             if (current.get("active") == lease.state.get("active")
                                     and (current.get("pause") or {}).get("id") == pause_id
                                     and (current.get("pause") or {}).get("probe_attempt")
@@ -952,7 +990,9 @@ class Manager:
                                 current["pause"].pop("probe_attempt", None)
                                 current.pop("active", None)
                                 current["released_at"] = time.time()
-                                self.controls._save("codex", current)
+                                selected_controls._save("codex", current)
+                                lease.state.clear()
+                                lease.state.update(current)
                     finally:
                         lease.close(completed=False)
                 return self.view(directory)
@@ -991,9 +1031,10 @@ class Manager:
                         raise ActionError("还有账号正在操作，请等待完成后再刷新全部配额。", 409)
                     if retry_revision and (profile_id not in self.quota_pending(set(selected))):
                         raise ActionError("待查询账号已变化，请重新确认。", 409)
+                    if account.get("account_quota_pause"):
+                        continue  # Keep the original operation bound to its recovery pause.
                     accounts.append((directory, account))
                 prepared = []
-                originals = {directory: self.read(directory) for directory, _ in accounts}
                 sending = self.read_batch()
                 try:
                     for directory, _ in accounts:
@@ -1006,12 +1047,7 @@ class Manager:
                             item[2]["network_route"] = network_route
                     write_record(self.root / "quota-batch.json", quota_batch)
                 except Exception:
-                    try:
-                        for directory, *_ in prepared:
-                            write_record(directory / "profile.json", originals[directory])
-                    finally:
-                        for *_, lock in prepared:
-                            lock.close()
+                    self.rollback_prepared(prepared)
                     raise
                 self.launch_sequence(prepared)
                 return self.list(set(selected))
@@ -1033,6 +1069,8 @@ class Manager:
                     accounts = [account for account in accounts if account["id"] in eligible_ids]
                 if not accounts:
                     raise ActionError("尚未发现可发送的 Codex 登录账号，请刷新来源机器的账号记录。")
+                if any(account.get("account_quota_pause") for account in accounts):
+                    raise ActionError("所选账号仍有配额暂停，请先修复登录或取消选择；原失败操作保留。", 409, "locallyPaused")
                 batch = {"id": str(uuid.uuid4()), "created_at": now(), "profile_ids": [a["id"] for a in accounts]}
                 if network_route:
                     network_route.require()
@@ -1057,8 +1095,7 @@ class Manager:
                             prepared[-1][2]["network_route"] = network_route
                     write_record(self.root / "batch.json", batch)
                 except Exception:
-                    for *_, lock in prepared:
-                        lock.close()
+                    self.rollback_prepared(prepared)
                     raise
                 self.batch_routes = {batch["id"]: network_route} if network_route else {}
                 self.launch_sequence(prepared)
@@ -1091,8 +1128,7 @@ class Manager:
                         if network_route:
                             prepared[-1][2]["network_route"] = network_route
                 except Exception:
-                    for *_, lock in prepared:
-                        lock.close()
+                    self.rollback_prepared(prepared)
                     raise
                 self.launch_sequence(prepared)
                 return self.list()
@@ -1122,6 +1158,10 @@ class Manager:
         with self.guard:
             directory = self.directory(profile_id)
             with lock_file(directory / ".lock"):
+                record = self.read(directory)
+                local = account_holds.controls(self.root.parent, record.get("account_id"), record["email"]).read("codex")
+                if local.get("pause") or local.get("active"):
+                    raise ActionError("此账号的配额认证仍暂停，请先使用修复登录结清；为保留恢复入口，未清除登录态。", 409)
                 (directory / "codex/auth.json").unlink(missing_ok=True)
                 record = self.read(directory)
                 self.save(directory, record)
@@ -1217,7 +1257,7 @@ class Manager:
                     self.controls._save("codex", state)
                 return self.view(directory)
 
-    def record_quota_recovery(self, profile_id, operation_id, pause_id, reading):
+    def record_quota_recovery(self, profile_id, operation_id, pause_id, reading, *, pause_scope=None):
         """Attach a successful recovery observation to its exact failed query."""
         with self.guard:
             directory = self.directory(profile_id)
@@ -1227,8 +1267,10 @@ class Manager:
                 if (operation.get("id") != operation_id or not operation.get("refresh_only")
                         or operation.get("login_only") or operation.get("message_status") != "not_sent"):
                     raise ActionError("恢复目标操作已变化；暂停保留，请重新核对。", 409)
-                with self.controls._lock("codex", threading.Event(), 0):
-                    state = self.controls.read("codex")
+                selected_controls = (account_holds.controls(self.root.parent, record.get("account_id"), record["email"])
+                                     if pause_scope == "account" else self.controls)
+                with selected_controls._lock("codex", threading.Event(), 0):
+                    state = selected_controls.read("codex")
                     if (state.get("pause") or {}).get("id") != pause_id or state.get("active"):
                         raise ActionError("恢复暂停已变化；未更新原操作。", 409)
                     record["last_failure"] = copy.deepcopy(operation)
@@ -1324,6 +1366,18 @@ class Manager:
                     finally:
                         migration.close()
             self.check_restrictions(record)
+            recovery = job.get("login_recovery") or {}
+            def check_account_hold():
+                reason = account_holds.blocked(self.root.parent, record.get("account_id"), record["email"],
+                    auth_path=directory / "codex/auth.json",
+                    probe_pause_id=recovery.get("pause_id") if recovery.get("pause_scope") == "account" else None,
+                    allow_rejected_login=bool(record["operation"].get("login_only") and not recovery))
+                if reason:
+                    raise ActionError(reason, 409, "locallyPaused")
+            check_account_hold()
+            force_login = bool(record["operation"].get("login_only") and
+                account_holds.rejected_credential(self.root.parent, directory / "codex/auth.json"))
+            login_digest = codex_quota.credential_digest(directory / "codex/auth.json") if force_login else None
             if not record["operation"].get("login_only") and not (directory / "codex/auth.json").is_file():
                 raise ActionError("本页尚未保存登录态。请单独登录；授权完成后需重新点击发送或刷新。", 409, "needsLogin")
             if not record["operation"].get("login_only") and record.get("login_required"):
@@ -1342,12 +1396,17 @@ class Manager:
             slot = True
             try:
                 options = {"probe_pause_id": job["login_recovery"]["pause_id"]} if job.get("login_recovery") else {}
-                lease = self.controls.acquire("codex", cancelled=job["cancelled"], timeout=0,
-                                              interval=self.start_interval, **options)
+                if recovery.get("pause_scope") == "account":
+                    lease = account_holds.acquire(self.root.parent, record["account_id"], record["email"],
+                        pause_id=recovery["pause_id"], cancelled=job["cancelled"], timeout=0, interval=self.start_interval)
+                else:
+                    lease = self.controls.acquire("codex", cancelled=job["cancelled"], timeout=0,
+                                                  interval=self.start_interval, **options)
             except (Paused, Busy) as exc:
                 if job["cancelled"].is_set():
                     raise Cancelled("操作已取消。") from None
                 raise ActionError(str(exc), 409, "locallyPaused") from None
+            check_account_hold()
             self.update(directory, record, stage="checking", detail="正在检查登录状态。")
             rpc = self.open_rpc(directory, job)
             rpc.initialize()
@@ -1364,7 +1423,7 @@ class Manager:
                 self.update(directory, record, stage="succeeded", quota_status="observed", after=after,
                             detail="已读取服务端配额，本次未发送消息。")
                 return
-            if job.get("login_recovery") or not self.identity(rpc, directory, record):
+            if job.get("login_recovery") or force_login or not self.identity(rpc, directory, record):
                 if not record["operation"].get("login_only"):
                     raise ActionError("登录态不可用，请单独登录；本次未发送消息。", 409, "needsLogin")
                 self.update(directory, record, stage="login_queued", detail="等待逐个授权；轮到此账号后显示设备码，已有登录态的账号会继续处理。")
@@ -1398,6 +1457,8 @@ class Manager:
                 login_slot = False
                 if not self.identity(rpc, directory, record):
                     raise ActionError("授权后仍未取得登录态，请重试。", 502)
+                if force_login and login_digest == codex_quota.credential_digest(directory / "codex/auth.json"):
+                    raise ActionError("授权未确认保存新凭据，旧凭据限制保留；请重新登录。", 409, "needsLogin")
             if job.get("login_recovery"):
                 after_access = json.loads((directory / "codex/auth.json").read_text()).get("tokens", {}).get("access_token")
                 if not isinstance(after_access, str) or not after_access or after_access == job["login_access_before"]:
@@ -1508,10 +1569,23 @@ class Manager:
                 "stage": record["operation"]["stage"],
                 "category": exc.category if isinstance(exc, ActionError) else "unknown",
             }
+            digest = getattr(exc, "account_quota_rejection", None)
+            scoped_rejection = bool(digest and lease and record["operation"].get("refresh_only")
+                and not record["operation"].get("login_only") and record["operation"]["message_status"] == "not_sent")
+            if scoped_rejection:
+                try:
+                    local = account_holds.controls(self.root.parent, record["account_id"], record["email"]).acquire("codex")
+                    try:
+                        local.state.setdefault("rejected_credentials", {}).setdefault(digest, now())
+                        self.pause_operation(local, record, rpc, "quotaAuthenticationFailed")
+                    finally:
+                        local.close()
+                except (OSError, RuntimeError):
+                    scoped_rejection = False  # Unrecorded scope cannot authorize continuation.
             self.restrict(directory, record, failure)
             if record["operation"]["message_status"] == "unknown":
                 record.setdefault("restrictions", {})["unknown"] = {"category": failure["category"], "created_at": now()}
-            benign = failure["category"] in ("needsLogin", "accountDisabled", "unauthorized", "missingCli", "networkPolicyUnavailable", "usageLimitExceeded", "quotaAtCapacity", "locallyPaused")
+            benign = scoped_rejection or failure["category"] in ("needsLogin", "accountDisabled", "unauthorized", "missingCli", "networkPolicyUnavailable", "usageLimitExceeded", "quotaAtCapacity", "locallyPaused")
             if record["operation"]["message_status"] == "unknown":
                 benign = False
             if failure["category"] == "clientNetworkDisconnected" and rpc is None:

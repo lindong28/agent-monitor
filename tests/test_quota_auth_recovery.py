@@ -319,6 +319,13 @@ class RecoveryApprovalTests(unittest.TestCase):
 
 
 class PersistedRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        from parsers.codex_profiles import SessionLinks
+        for patch in (mock.patch('parsers.codex_profiles.discover', return_value=[]),
+                      mock.patch('parsers.codex_profiles.session_links', return_value=SessionLinks())):
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def test_bound_child_receipt_updates_profile_cache_and_retains_original_failure(self):
         from datetime import datetime, timezone
         from agent_monitor.accounts.codex_accounts import Manager

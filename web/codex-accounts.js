@@ -25,7 +25,7 @@ export function accountNeedsLogin(account) {
 }
 
 function accountRefreshBlocked(account) {
-  return account.disabled || account.quota_query_allowed === false || accountNeedsLogin(account) || ["authentication", "unknown", "rate_limit", "login_rate_limit"]
+  return account.disabled || Boolean(account.account_quota_pause) || account.quota_query_allowed === false || accountNeedsLogin(account) || ["authentication", "unknown", "rate_limit", "login_rate_limit"]
     .some(key => account.restrictions?.[key]);
 }
 
@@ -352,6 +352,7 @@ export function init({ autoLoad = true } = {}) {
 
   async function perform(action, id, button) {
     const account = accounts.find(value => value.id === id);
+    if (action === "repair-login") { openRecovery(true, account); return; }
     if (action === "set-disabled" && !window.confirm(account?.disabled
       ? `重新启用 ${account.email}？仅改变本机 Monitor 的停用状态；其他限制保留，不会自动查询、登录或发送。`
       : `停用 ${account.email}？此账号将从本机 Monitor 的查询、登录和发送中排除，已有身份、登录态与配额记录保留。`)) return;
@@ -416,22 +417,34 @@ export function init({ autoLoad = true } = {}) {
     renderAccountPause(upstreamPause, window.AgentMonitor.codexPauseTarget?.(upstreamPause?.id), pauseControls);
     const panel = recoveryBody?.querySelector(".quota-recovery-panel");
     if (panel) {
-      if (recoveryPauseId !== upstreamPause?.id) {
-        recoveryPauseId = upstreamPause?.id;
+      const selected = accounts.find(account => account.id === recoveryAccountId);
+      const pauseKey = recoveryAccountId ? `${recoveryAccountId}:${selected?.account_quota_pause?.id || ""}:global:${upstreamPause?.id || ""}` : `global:${upstreamPause?.id || ""}`;
+      if (recoveryPauseId !== pauseKey) {
+        recoveryPauseId = pauseKey;
         panel.refresh?.();
       }
     }
     const summary = recoveryHistory?.querySelector("summary");
-    if (summary) summary.textContent = upstreamPause ? "查看通道暂停与检查" : "查看最近恢复记录";
+    if (summary) summary.textContent = recoveryAccountId ? "查看此账号的登录修复" : upstreamPause ? "查看通道暂停与检查" : "查看最近恢复记录";
   }
   const recoveryHistory = root.querySelector("#codex-recovery-history");
   const recoveryBody = root.querySelector("#codex-recovery-body");
-  let recoveryPauseId;
-  function openRecovery(scroll = true) {
+  let recoveryPauseId, recoveryAccountId = null;
+  function openRecovery(scroll = true, account = null) {
     if (!recoveryBody) return;
     let panel = recoveryBody.querySelector(".quota-recovery-panel");
+    const selectedId = account?.id || null;
+    if (panel && selectedId !== recoveryAccountId) {
+      panel.dispose?.();
+      panel.remove();
+      panel = null;
+    }
+    recoveryAccountId = selectedId;
+    const pauseKey = selectedId ? `${selectedId}:${account.account_quota_pause?.id || ""}:global:${upstreamPause?.id || ""}` : `global:${upstreamPause?.id || ""}`;
     if (!panel) {
-      panel = window.AgentMonitor.createRecoveryPanel?.("self", {onSaved: () => load(), onContinue: async () => {
+      panel = window.AgentMonitor.createRecoveryPanel?.("self", {
+        ...(selectedId ? {profile: `monitor-${selectedId}`, pauseScope: "account"} : {}),
+        onSaved: () => load(), onContinue: async () => {
         await load();
         setBatchMode(true);
         const next = quotaBatch ? (quotaRetry && !quotaRetry.hidden ? quotaRetry : refreshSelected)
@@ -440,15 +453,17 @@ export function init({ autoLoad = true } = {}) {
         if (!next.disabled) next.focus({preventScroll: true});
       }});
       if (panel) recoveryBody.appendChild(panel);
-      recoveryPauseId = upstreamPause?.id;
-    } else if (recoveryPauseId !== upstreamPause?.id) {
-      recoveryPauseId = upstreamPause?.id;
+      recoveryPauseId = pauseKey;
+    } else if (recoveryPauseId !== pauseKey) {
+      recoveryPauseId = pauseKey;
       panel.refresh?.();
     }
     if (recoveryHistory) recoveryHistory.open = true;
+    const summary = recoveryHistory?.querySelector("summary");
+    if (summary) summary.textContent = selectedId ? "查看此账号的登录修复" : upstreamPause ? "查看通道暂停与检查" : "查看最近恢复记录";
     if (scroll) panel?.scrollIntoView({block: "nearest"});
   }
-  pauseControls.pauseRecovery?.addEventListener("click", openRecovery);
+  pauseControls.pauseRecovery?.addEventListener("click", () => openRecovery());
   recoveryHistory?.addEventListener("toggle", () => {
     if (recoveryHistory.open && recoveryBody && !recoveryBody.querySelector(".quota-recovery-panel")) openRecovery();
   });
@@ -474,7 +489,7 @@ export function init({ autoLoad = true } = {}) {
     const query = (searchInput?.value || "").trim().toLowerCase();
     const state = stateFilter?.value || "all";
     const matchesState = state === "all" || state === "login" && accountNeedsLogin(account)
-      || state === "restricted" && Object.keys(account.restrictions || {}).length > 0
+      || state === "restricted" && (Boolean(account.account_quota_pause) || Object.keys(account.restrictions || {}).length > 0)
       || state === "busy" && account.busy || state === "disabled" && account.disabled;
     return matchesState && `${account.email} ${account.account_id || ""}`.toLowerCase().includes(query);
   }
@@ -650,20 +665,26 @@ export function init({ autoLoad = true } = {}) {
         }
       }
       const controls = element("div", undefined, "codex-account-controls");
+      if (account.account_quota_pause) {
+        heading.append(element("span", "此账号配额查询已暂停", "codex-batch-result"));
+        const repair = button("修复登录", "repair-login", account);
+        repair.disabled = false;
+        controls.append(repair);
+      }
       if (account.eligible !== false) {
         const send = element("button", "向此账号发送一条消息", "btn");
         send.type = "button";
-        send.disabled = actions.busy || accounts.some(a => a.busy) || Boolean(upstreamPause) || Boolean(account.disabled) || loginRequired || Object.keys(account.restrictions || {}).length > 0;
+        send.disabled = actions.busy || accounts.some(a => a.busy) || Boolean(upstreamPause) || Boolean(account.account_quota_pause) || Boolean(account.disabled) || loginRequired || Object.keys(account.restrictions || {}).length > 0;
         send.addEventListener("click", () => actions.performBatch("batch-start", [account.id]));
         currentDetail.append(send);
       }
       const refresh = button("仅刷新配额", "refresh", account);
       const restrictions = account.restrictions || {};
-      refresh.disabled ||= accountRefreshBlocked(account) || Boolean(upstreamPause);
+      refresh.disabled ||= accountRefreshBlocked(account) || Boolean(upstreamPause) || Boolean(account.account_quota_pause);
       controls.append(refresh);
       if (loginRequired && !account.disabled) {
         const login = button("单独登录", "login", account);
-        login.disabled ||= Boolean(upstreamPause || restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit);
+        login.disabled ||= Boolean(upstreamPause || account.account_quota_pause || restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit);
         controls.append(login);
       }
       if (restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("核对后解除此账号限制", "resume", account));
@@ -675,7 +696,12 @@ export function init({ autoLoad = true } = {}) {
       if (account.busy) controls.append(button("取消操作", "cancel", account));
       else if (account.has_credentials || restrictions.authentication) {
         const maintenance = element("div", undefined, "codex-account-controls");
-        maintenance.append(button("清除本页登录态", "forget-login", account));
+        const forget = button("清除本页登录态", "forget-login", account);
+        if (account.account_quota_pause) {
+          forget.disabled = true;
+          maintenance.append(element("p", "此账号的配额暂停尚未结清；先通过“修复登录”处理，再清除登录态。", "quota-scope"));
+        }
+        maintenance.append(forget);
         managementDetail.append(maintenance);
       }
       if (!account.busy) managementDetail.append(button(account.disabled ? "重新启用此账号" : "停用此账号", "set-disabled", account));
@@ -834,18 +860,20 @@ export function renderAccountBatch(state, controls) {
     const eligible = accounts.filter((account) => account.eligible !== false);
     const count = eligible.filter(account => selectedIds?.has(account.id)).length;
     const selectedLoginRequired = eligible.filter(account => selectedIds?.has(account.id) && accountNeedsLogin(account)).length;
+    const selectedPaused = eligible.filter(account => selectedIds?.has(account.id) && account.account_quota_pause).length;
     const selectionCount = root.querySelector("#codex-selection-count");
     if (selectionCount) selectionCount.textContent = `已选 ${count} / ${eligible.length} 个账号`;
     batchStart.hidden = Boolean(batch);
     batchStart.textContent = `给所选 ${count} 个账号发送`;
-    batchStart.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || Boolean(upstreamPause);
+    batchStart.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || selectedPaused > 0 || Boolean(upstreamPause);
     batchNext.hidden = !batch;
     batchNext.textContent = `开始新一轮 · 所选 ${count} 个账号`;
-    batchNext.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || Boolean(upstreamPause);
+    batchNext.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || selectedPaused > 0 || Boolean(upstreamPause);
     if (blockedReason) {
       blockedReason.textContent = upstreamPause ? ""
         : submittingBatch ? "正在连接、确认或提交本次操作，请等待完成。"
         : busy ? "有账号操作正在进行；完成或取消后才能开始新一轮。"
+        : selectedPaused ? `所选账号中有 ${selectedPaused} 个配额查询已暂停，请先“修复登录”，或取消选择这些账号后发送。`
         : selectedLoginRequired ? `所选账号中有 ${selectedLoginRequired} 个需要登录，请先「单独登录」，或取消勾选这些账号后发送。`
         : !count ? "请至少选择一个账号。" : "";
       blockedReason.hidden = !blockedReason.textContent;
@@ -860,7 +888,7 @@ export function renderAccountBatch(state, controls) {
         element("p", "账号来自当前及历史登录记录，无需手动添加。"),
         element("p", "发送时为每个账号从 100 条预设消息中随机抽取一条；发送前会检查登录与账号限制。"),
         element("p", "按邮箱顺序逐个完成账号操作，前一个结束并清理后才处理下一个。登录态不可用的账号会明确要求单独登录，完成后再发起操作。"),
-        element("p", upstreamPause ? "本机 Codex 请求已暂停；请从按钮旁的恢复入口查看原因、当前可做的操作与检查后的接续。检查配额需要单独确认。" : "仅刷新配额不会发送消息。发送会实际使用额度，不保证固定或重置窗口；异常会停止后续账号。")
+        element("p", upstreamPause ? "本机 Codex 请求已暂停；请从按钮旁的恢复入口查看原因、当前可做的操作与检查后的接续。检查配额需要单独确认。" : "仅刷新配额不会发送消息；已确认的单账号凭据撤销会隔离该账号，其他独立账号继续。共享或原因未明的故障仍会停止后续查询。发送会实际使用额度，不保证固定或重置窗口。")
       );
       return;
     }
@@ -907,9 +935,16 @@ export function renderAccountBatch(state, controls) {
       const account = accounts.find(value => value.id === item.profile_id);
       return account && account.eligible !== false && (!item.operation || item.operation.message_status === "not_sent") && accountNeedsLogin(account) ? [account] : [];
     });
+    const pausedUnsent = batch.items.filter(item => accounts.some(account => account.id === item.profile_id
+      && account.eligible !== false && account.account_quota_pause && (!item.operation || item.operation.message_status === "not_sent")));
     if (loginUnsent.length) batchRetry.disabled = true;
     if (blockedReason && loginUnsent.length && !submittingBatch && !busy && !upstreamPause) {
       blockedReason.textContent = `未发送账号中有 ${loginUnsent.length} 个登录态不可用，请先单独登录后再继续未发送账号。`;
+      blockedReason.hidden = false;
+    }
+    if (pausedUnsent.length) batchRetry.disabled = true;
+    if (blockedReason && pausedUnsent.length && !submittingBatch && !busy && !upstreamPause) {
+      blockedReason.textContent = `未发送账号中有 ${pausedUnsent.length} 个配额查询已暂停，请先“修复登录”，再继续发送。`;
       blockedReason.hidden = false;
     }
     if (blockedReason && quotaUnsent.length && !submittingBatch && !busy && !upstreamPause) {

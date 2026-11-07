@@ -96,7 +96,7 @@ def load_rate_limits(provider, account, *, codex_home=None, **options):
 
 
 def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None,
-                     codex_home=None, root=None, account_profile=None, renew_auth=False):
+                     codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None):
     root = Path(root) if root is not None else ROOT
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
@@ -107,12 +107,22 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
         raise NoSubscription("用户已确认此账号无有效 Claude Code 订阅；未请求配额。")
     if provider == "codex":
         from agent_monitor.accounts import account_holds
-        reason = account_holds.blocked(root / "state", account.account_id, account.label)
+        from parsers import accounts
+        auth_path = Path(codex_home) / "auth.json" if codex_home else accounts.CODEX_AUTH
+        if pause_scope == "account" and not renew_auth and account_holds.rejected_credential(root / "state", auth_path):
+            raise LocalUnavailable("当前凭据仍是已拒绝的版本，请使用认证修复；未重查配额。")
+        reason = account_holds.blocked(root / "state", account.account_id, account.label, auth_path=auth_path,
+            probe_pause_id=probe_pause_id if pause_scope == "account" else None)
         if reason:
             raise LocalUnavailable(reason)
     try:
         options = {} if probe_pause_id is None else {"probe_pause_id": probe_pause_id}
-        lease = upstream_controls.Controls(root / "state/upstream_controls").acquire(provider, **options)
+        if pause_scope == "account":
+            if provider != "codex" or not probe_pause_id or not (account_profile or "").startswith("monitor-"):
+                raise LocalUnavailable("账号恢复范围无效，未发出请求。")
+            lease = account_holds.acquire(root / "state", account.account_id, account.label, pause_id=probe_pause_id)
+        else:
+            lease = upstream_controls.Controls(root / "state/upstream_controls").acquire(provider, **options)
         if admitted_probe is not None and probe_pause_id is not None:
             admitted_probe.update(lease.state['pause']['probe_attempt'])
     except (upstream_controls.Paused, upstream_controls.Busy) as exc:
@@ -145,7 +155,8 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
             auth_failure = diagnostics.safe_failure(first)
         if provider == "codex":
             from agent_monitor.accounts import account_holds
-            reason = account_holds.blocked(root / "state", account.account_id, account.label)
+            reason = account_holds.blocked(root / "state", account.account_id, account.label, auth_path=auth_path,
+                probe_pause_id=probe_pause_id if pause_scope == "account" else None)
             if reason:
                 raise LocalUnavailable(reason)
         deadline = time.monotonic() + TIMEOUT
@@ -215,7 +226,10 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
         save_error = None
         if child is not None:
             try:
-                lease.pause("quotaRefreshFailed", failure=facts)
+                no_new = (pause_scope == "account" and renew_auth and admitted_probe is not None
+                    and (admitted_probe.get("authentication_recovery") or {}).get("outcome") == "no_new_credentials")
+                pause = lease.pause_local if no_new else lease.pause
+                pause("quotaRefreshFailed", failure=facts)
             except OSError as error:
                 save_error = diagnostics.failure_summary(diagnostics.failure_details(error, stage="pause_save"))
         if not isinstance(exc, (RefreshError, subprocess.TimeoutExpired)):

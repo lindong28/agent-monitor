@@ -145,7 +145,7 @@ class Manager:
             with self.condition:
                 self.recovering = False
 
-    def recovery_status(self, machine):
+    def recovery_status(self, machine, *, profile=None, pause_scope=None):
         from agent_monitor.snapshots import generation
         from agent_monitor.quota import quota_recovery
         with generation.generation_admission_snapshot() as admission:
@@ -153,7 +153,7 @@ class Manager:
             if current is None:
                 raise ValueError("目标机器尚未通过来源确认。")
             identity = current.meta["source_host_identity"]
-        status = quota_recovery.read_status(machine)
+        status = quota_recovery.read_status(machine, **({"profile": profile, "pause_scope": pause_scope} if pause_scope is not None else {}))
         if status.get("source_host_identity") != identity:
             raise ValueError("目标机器身份变化，未采纳状态；请先重新采集确认来源。")
         return {**status, "machine": machine.name}
@@ -168,12 +168,13 @@ class Manager:
                 return {"error": "目标机器尚未通过来源确认。"}, 409
             meta = dict(current.meta)
             limits = self.merge(current, machine)
-        status = self.recovery_status(machine)
+        status = self.recovery_status(machine, **({"profile": value.get("profile"), "pause_scope": "account"}
+            if value.get("pause_scope") == "account" else {}))
         before = status.get("account") or {}
         if (value.get("profile", "") != before.get("quota_profile", "") or
                 (before.get("account_id"), before.get("account_label")) != (value["account_id"], value["account_label"])):
             return {"error": "页面账号已变化，请重新核对。"}, 409
-        if (status.get("active") or (status.get("pause") or {}).get("probe_attempt")
+        if (before.get("blocked_reason") or status.get("active") or (status.get("pause") or {}).get("probe_attempt")
                 or (status.get("pause") or {}).get("id") != value["pause_id"]):
             return {"error": "暂停状态已变化或仍有操作，请重新读取状态。"}, 409
         receipt = quota_recovery.run(machine, value)
@@ -193,9 +194,11 @@ class Manager:
             else:
                 recovered_limits["codex"] = {**block, "managed_accounts": recovered_limits["codex"].get("managed_accounts", [])}
             from agent_monitor.quota.quota_service import clear_pause_projection
-            clear_pause_projection(recovered_limits["codex"])
+            if value.get("pause_scope") != "account":
+                clear_pause_projection(recovered_limits["codex"])
             for row in recovered_limits["codex"].get("managed_accounts", []):
-                clear_pause_projection(row)
+                if value.get("pause_scope") != "account" or row.get("account_profile") == value.get("profile"):
+                    clear_pause_projection(row)
             payload = {"schema_version": 1, "source_host_identity": receipt["source_host_identity"],
                        "exporter_commit": receipt["exporter_commit"], "rate_limits": recovered_limits}
             _validate(payload)

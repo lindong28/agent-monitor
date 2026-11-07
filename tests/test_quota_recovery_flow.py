@@ -25,6 +25,7 @@ class EvidenceTests(unittest.TestCase):
     def setUp(self):
         from parsers.codex_profiles import SessionLinks
         for patch in (mock.patch('parsers.codex_profiles.session_links', return_value=SessionLinks()),
+                      mock.patch('parsers.codex_profiles.discover', return_value=[]),
                       mock.patch('agent_monitor.quota.quota_service.managed_codex_rate_limits', return_value=[])):
             patch.start()
             self.addCleanup(patch.stop)

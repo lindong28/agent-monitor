@@ -94,6 +94,19 @@ for line in sys.stdin:
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
     elif method == "account/rateLimits/read":
         quota_reads += 1
+        if scenario.startswith("scoped_"):
+            status = 500 if scenario == "scoped_500" else 403 if scenario == "scoped_403" else 401
+            phrase = {500: "Internal Server Error", 403: "Forbidden", 401: "Unauthorized"}[status]
+            code = "other" if scenario == "scoped_generic" else "token_revoked"
+            if scenario == "scoped_changed":
+                auth = json.loads((home / "auth.json").read_text())
+                auth["tokens"]["access_token"] = "changed-fixture"
+                (home / "auth.json").write_text(json.dumps(auth))
+            body = json.dumps({**({} if scenario == "scoped_no_status" else {"status": 401}), "error": {"code": code}})
+            error_message = ("body=" if scenario == "scoped_body" else
+                       f"failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: {status} {phrase}; content-type=application/json; body=") + body
+            emit({"id": message["id"], "error": {"code": -32603, "message": error_message}})
+            continue
         if scenario == "quota_rpc_diagnostic" or (scenario == "post_quota_diagnostic" and quota_reads > 1):
             emit({"id": message["id"], "error": {"code": -32603, "message":
                 'failed to fetch codex rate limits: body=' + json.dumps({"status": 401,

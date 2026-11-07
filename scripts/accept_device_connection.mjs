@@ -11,6 +11,7 @@ import {parseArgs} from 'node:util';
 const {values:args} = parseArgs({options:{
   'agent-browser':{type:'string'}, browser:{type:'string'}, python:{type:'string'},
   'quota-settings-only':{type:'boolean'}, 'dashboard-only':{type:'boolean'}, vendor:{type:'string'}, facade:{type:'boolean'}, 'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
+  'account-scopes-only':{type:'boolean'},
 }});
 if (args.help) {
   console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks passive entry and explicit system diagnostics. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
@@ -174,7 +175,47 @@ try {
   await browserCommand(['get','url'],false,false);
   assert.equal((await bt('get','url')).data.url,new URL(url).href,'pinned fixture origin');
   console.log('Isolated browser opened the local fixture.');
-  if (args['quota-settings-only']) {
+  if (args['account-scopes-only']) {
+    await configure({account_scopes:true});
+    await bt('open',url);
+    const panel='#codex-recovery-body .quota-recovery-panel';
+    await until('account repair buttons',()=>read("document.querySelectorAll('[data-reader-state$=\":repair-login\"]').length===2"));
+    assert.equal((await stats()).recoveries.length,0,'passive entry sends no recovery');
+    await click('#codex-batch-mode',"!document.querySelector('#codex-batch-panel').hidden");
+    await click('[data-id="0"] input[type=checkbox]',"document.querySelector('[data-id=\"0\"] input[type=checkbox]').checked");
+    assert.equal(await read("document.querySelector('#codex-batch-next').disabled"),true,'paused member cannot overwrite its recovery task through batch send');
+    assert.match(await read("document.querySelector('#codex-batch-blocked').textContent"),/修复登录/);
+    await click('#codex-batch-mode',"document.querySelector('#codex-batch-panel').hidden");
+    const repair=id=>`[data-reader-state="codex-account:${id}:repair-login"]`;
+    await click(repair('0'),`document.querySelector('${panel} .recovery-target')?.textContent.includes('fixture0@example.test')`);
+    await click(repair('1'),`document.querySelector('${panel} .recovery-target')?.textContent.includes('fixture1@example.test')`);
+    await click(repair('0'),`document.querySelector('${panel} .recovery-target')?.textContent.includes('fixture0@example.test')`);
+    assert.deepEqual((await stats()).scoped_reads,['monitor-0','monitor-1','monitor-0']);
+    const probe=panel+' [data-recovery-action=probe]';
+    await click(probe,"!!document.querySelector('dialog.account-egress-dialog[open]')");
+    await until('scoped preview ready',()=>read("!document.querySelector('dialog.account-egress-dialog .btn-primary').disabled"));
+    await click('dialog.account-egress-dialog .btn-primary',`document.querySelector('${panel} h3')?.textContent==='此账号当前没有配额暂停'`);
+    const observed=await stats();
+    assert.equal(observed.recoveries.length,1);
+    assert.equal(observed.recoveries[0].profile,'monitor-0');
+    assert.equal(observed.recoveries[0].pause_scope,'account');
+    assert.deepEqual(observed.cleared_scopes,['0']);
+    await until('saved recovery refreshes account card',()=>read("document.querySelectorAll('[data-reader-state$=\":repair-login\"]').length===1"));
+    await bt('open',url);
+    await until('only B still paused',()=>read("document.querySelectorAll('[data-reader-state$=\":repair-login\"]').length===1"));
+    assert.equal(await read(`!!document.querySelector('${repair('1')}')`),true);
+    assert.equal(await read("document.querySelector('[data-reader-state=\"codex-account:2:refresh\"]').disabled"),false,'independent account remains queryable');
+    await configure({paused:true});
+    await bt('open',url);
+    await until('remaining account with shared pause',()=>read(`!!document.querySelector('${repair('1')}')`));
+    await click(repair('1'),`document.querySelector('${panel} h3')?.textContent==='账号与本机通道均已暂停'`);
+    assert.equal(await read(`document.querySelector('${probe}').disabled`),true);
+    await click(panel+' [data-recovery-action=help]',`!document.querySelector('${panel} .recovery-steps').hidden`);
+    assert((await read(`document.querySelector('${panel} .recovery-steps').textContent`)).includes('agent-monitor upstream-holds resume codex --pause-id '+'f'.repeat(32)));
+    assert.equal((await stats()).recoveries.length,1,'layered guidance issues no automatic request or acknowledgement');
+    await bt('screenshot',path.join(root,'account-scopes.png'));
+    console.log('PASS: two account targets switch safely; one confirmed recovery clears only its target; reload retains the other hold; independent account remains usable. Synthetic API fixture only.');
+  } else if (args['quota-settings-only']) {
     await until('quota settings entry',()=>read("!!document.querySelector('[data-quota-settings-machine]')"));
     await click('#quota-auto-settings > summary',"document.querySelector('#quota-auto-settings').open");
     const group='[data-quota-settings-machine="fixture-machine"]';

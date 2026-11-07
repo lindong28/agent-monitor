@@ -528,7 +528,7 @@
     return box;
   }
 
-  function createRecoveryPanel(machine = "self", {onContinue, onSaved, sourceFailure = null} = {}) {
+  function createRecoveryPanel(machine = "self", {onContinue, onSaved, sourceFailure = null, profile = "", pauseScope = ""} = {}) {
     function canRenewAuth(value) {
       const failure = value?.pause?.failure;
       return Boolean(value?.account?.auth_recovery_available === true && value.account.source === "managed" && value.account.quota_profile?.startsWith("monitor-")
@@ -582,7 +582,8 @@
     panel.append(title, guidance, target, result, actions, effect, notice, steps, technical);
     let state = null, busy = false, pendingPauseId = null, unrecordedOutcome = false, refreshPending = false;
     const controller = new AbortController();
-    window.AgentMonitor?.onPageCleanup?.(() => controller.abort());
+    panel.dispose = () => controller.abort();
+    window.AgentMonitor?.onPageCleanup?.(panel.dispose);
     const when = value => value ? formatDate(value) : "时间未记录";
     async function requestJSON(url, options = {}, timeout = 20000) {
       const attempt = new AbortController();
@@ -600,6 +601,10 @@
     }
     function render(value) {
       const a = value?.account || {}, pause = value?.pause, last = value?.last_recovery;
+      const sharedPause = value?.shared_pause || (value?.pause_scope !== "account" && a.account_quota_pause ? pause : null);
+      const layeredPause = Boolean(sharedPause && (value?.pause_scope === "account" ? pause : a.account_quota_pause));
+      const sharedResumeCommand = layeredPause && /^[a-f0-9]{32}$/.test(sharedPause.id)
+        ? `agent-monitor upstream-holds resume codex --pause-id ${sharedPause.id}` : null;
       const lastRequest = last?.request;
       const lastMatchesPause = last?.ok === false && pause?.id && lastRequest
         && (lastRequest.pause_id === pause.id || last.pause_id === pause.id)
@@ -626,7 +631,7 @@
       const mode = !value ? "unknown" : value.active ? "active"
         : pendingPauseId ? "unknown-outcome" : !pause ? "ready"
         : pause.id === "unreadable" ? "unreadable" : pause.probe_attempt ? "used"
-        : a.blocked_reason ? "account-blocked"
+        : a.blocked_reason || value.shared_pause ? "account-blocked"
         : !a.account_id || !a.account_label ? "identity"
         : failure?.stage === "recovery_commit" ? "local-commit"
         : authUnresolved ? "auth-unresolved"
@@ -654,6 +659,30 @@
         paused: ["Codex 请求已暂停", "此前请求异常触发本机通道保护，不表示所有账号不可用。已确认仅某账号异常时，可在账号卡片停用该账号并核对暂停归属；其他情况先检查下面的目标与诊断。"],
       };
       [title.textContent, guidance.textContent] = copyText[mode];
+      if (mode === "account-blocked" && layeredPause) {
+        title.textContent = "账号与本机通道均已暂停";
+        guidance.textContent = "先由维护者核对并处理通道故障，再明确解除通道暂停；此账号的暂停继续保留。查看下方排查步骤。";
+      }
+      if (value?.pause_scope === "account") {
+        if (mode === "ready") {
+          title.textContent = "此账号当前没有配额暂停";
+          guidance.textContent = "可以返回账号操作。不会自动查询、登录或发送；其他账号及通道限制分别保留。";
+        } else if (mode === "paused") {
+          title.textContent = "此账号的配额查询已暂停";
+          guidance.textContent = "本次失败已隔离，其他独立账号可继续刷新。处理此账号后才恢复它的查询。";
+        } else if (mode === "account-blocked" && value.shared_pause) {
+          title.textContent = "账号与本机通道均已暂停";
+          guidance.textContent = "先由维护者核对并处理通道故障，再明确解除通道暂停；此账号的暂停继续保留。查看下方排查步骤。";
+        } else if (mode === "failed") {
+          title.textContent = "此账号的配额检查未成功";
+          guidance.textContent = "此账号暂停保留。先查看本次诊断；其他账号的结果与限制分别保留。";
+        } else if (mode === "identity") {
+          title.textContent = "此账号的登录身份需要确认";
+          guidance.textContent = "此账号暂停保留。先核对目标账号与工作区，不能用其他身份的凭据继续恢复。";
+        } else if (mode === "unreadable") {
+          guidance.textContent = "此账号的暂停记录无法读取。先修复状态记录，再更新状态；不能直接清除暂停。";
+        }
+      }
       if (!["local-commit","auth-unresolved","failed","unreadable","identity","source-mismatch","upstream-auth","read-error","used"].includes(mode)) {
         steps.hidden = true; help.textContent = "查看排查步骤";
       }
@@ -681,16 +710,22 @@
         guidance.textContent = "配额接口拒绝了当前认证。可通过官方接口尝试刷新本账号登录态；只有取得同身份的新凭据才检查配额，未恢复时保留暂停与诊断。";
         effect.textContent = "最多一次认证刷新 RPC 和一次配额 RPC，共用原总时限与目标机器路由；官方内部可能产生多次请求，不发送消息。";
       }
-      help.hidden = !["local-commit", "auth-unresolved", "failed", "unreadable", "identity", "source-mismatch", "upstream-auth", "read-error", "used"].includes(mode);
+      help.hidden = !(mode === "account-blocked" && layeredPause) && !["local-commit", "auth-unresolved", "failed", "unreadable", "identity", "source-mismatch", "upstream-auth", "read-error", "used"].includes(mode);
       resume.hidden = mode !== "ready" || !onContinue;
       read.disabled = busy;
       read.textContent = ["unknown", "unknown-outcome"].includes(mode) ? "重新读取状态" : mode === "active" ? "更新进度" : "更新状态";
-      const primary = !commit.hidden ? commit : !relogin.hidden ? relogin : renewAuth || ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["local-commit","auth-unresolved","failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
+      const primary = !commit.hidden ? commit : !relogin.hidden ? relogin : mode === "account-blocked" && layeredPause ? help : renewAuth || ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["local-commit","auth-unresolved","failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
       for (const button of [read,probe,relogin,commit,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
       steps.replaceChildren();
       const list = make("ol");
       const host = value?.machine || "执行机器";
-      const instructions = mode === "local-commit" ? [
+      const instructions = mode === "account-blocked" && layeredPause ? [
+        `先由维护者检查 ${host} 的本次通道失败记录，修复共享网络或服务故障。不要为了继续查询而直接清除保护。`,
+        sharedResumeCommand
+          ? `确认通道故障已处理后，在 ${host} 本机运行：${sharedResumeCommand}。这是既有的人工确认命令，只解除该通道暂停，不查询上游、不解除账号暂停，也不证明上游已恢复。`
+          : "通道暂停标识无法核实，先修复状态记录；不能直接解除保护。",
+        "处理后点击“更新状态”，再从账号卡片的“修复登录”继续此账号。其他限制和结果保留，不会自动查询或发送。"
+      ] : mode === "local-commit" ? [
         "本次配额复验已有候选结果，但本地核验、保存或正常配额页发布尚未结清，暂停仍保留。",
         !commit.hidden ? "点击“保存已有配额结果”只继续本地保存。若仍失败，保留诊断交由维护者修复，不先重复授权或查询。" : `由维护者核对 ${host} 上本次本地保存/发布错误与原任务的候选观测，修复后利用已有结果处理，不先重复授权或查询。`,
         "保留原任务和恢复链；不要删除暂停记录。技术详情列出已取得的本地错误类别。"
@@ -757,8 +792,11 @@
       panel.setAttribute("aria-busy", "true");
       notice.textContent = "正在读取状态，不查询上游…";
       try {
-        const {response, value} = await requestJSON(`/api/quota-recovery?machine=${encodeURIComponent(machine)}`);
+        const query = new URLSearchParams({machine});
+        if (pauseScope === "account") { query.set("profile", profile); query.set("pause_scope", "account"); }
+        const {response, value} = await requestJSON(`/api/quota-recovery?${query}`);
         if (!response.ok || !value.machine || !value.observed_at || !Object.hasOwn(value, "pause") || !Object.hasOwn(value, "active")) throw new Error(value.error || "状态回执不完整");
+        if (pauseScope === "account" && (value.pause_scope !== "account" || value.account?.quota_profile !== profile)) throw new Error("账号恢复状态与所选对象不一致");
         if (controller.signal.aborted) return;
         state = value;
         if (pendingPauseId && value.last_recovery?.request?.pause_id === pendingPauseId) pendingPauseId = null;
@@ -797,6 +835,7 @@
     async function requestRecovery(reauthorize = false) {
       if (busy || (reauthorize ? relogin.disabled : probe.disabled) || !state) return;
       const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id,profile:state.account.quota_profile || ""};
+      if (state.pause_scope === "account") request.pause_scope = "account";
       if (canRenewAuth(state)) request.mode = "renew_auth";
       if (reauthorize) {
         request.mode = "reauthorize";
@@ -812,7 +851,7 @@
       try {
         const approval = await window.AgentMonitor.previewUpstream?.(
           [{email: request.account_label, account_id: request.account_id}],
-          {approval_action: request.mode === "reauthorize" ? "quota-login-recovery" : request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : []), ...(request.operation_id ? [request.operation_id] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
+          {approval_action: request.mode === "reauthorize" ? "quota-login-recovery" : request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : []), ...(request.operation_id ? [request.operation_id] : []), ...(request.pause_scope ? [request.pause_scope] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
           controller.signal);
         if (!approval) throw new Error("已取消检查；未发出上游请求。");
         attempted = true;
@@ -841,7 +880,8 @@
         const {response, value} = await requestJSON("/api/codex-accounts/commit-recovery", {
           method:"POST", headers:{"Content-Type":"application/json", "X-Agent-Monitor":"codex-accounts"},
           body:JSON.stringify({id:profile.slice("monitor-".length), machine:state.machine,
-            operation_id:binding.operation_id, pause_id:binding.pause_id}),
+            operation_id:binding.operation_id, pause_id:binding.pause_id,
+            ...(state.pause_scope === "account" ? {pause_scope:"account"} : {})}),
         });
         success = response.ok;
         message = success ? "已有配额结果已保存，原查询任务已结清；未发出上游请求。" : value.error || "本地保存未完成；先更新状态，不要重新授权。";
