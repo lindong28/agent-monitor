@@ -165,6 +165,12 @@ async function render(changes={}, error=false) {
   assert.match(visibleText(p),/通过目标机器的 Agent Monitor 路由桥只检查一次/);
   assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='probe').hidden,false);
   assert.match(p.textContent,/页面不能替你修复该机器的账号或部署/);
+  p=await render({pause_scope:'account', account:{...base.account,source:'managed',quota_profile:'monitor-managed-fixture',auth_recovery_available:true}, pause:{...base.pause,failure:{stage:'quota_read',kind:'rpc_error',upstream_code:'token_revoked',http_status:401,detail:'invalidated oauth token'}}});
+  assert.match(visibleText(p),/配额接口拒绝了当前认证/);
+  const renew = all(p).find(n=>n.attrs?.['data-recovery-action']==='probe');
+  assert.equal(renew.textContent,'刷新认证并检查配额');
+  assert.equal(renew.hidden,false);
+  assert.equal(renew.disabled,false);
   p=await render({pause:{...base.pause,failure:{stage:'quota_read',http_status:401,detail:'upstream refused'}}});
   assert.match(visibleText(p),/上游返回 HTTP 401，原因未核实/);
   assert.doesNotMatch(visibleText(p),/token_revoked/);

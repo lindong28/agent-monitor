@@ -234,6 +234,7 @@ class BatchTests(unittest.TestCase):
         self.assertEqual([self.calls(pid, "account/rateLimits/read") for pid in ids], [1] * 4 + [0] * 5)
         failed = next(a for a in data["accounts"] if a["id"] == ids[3])
         pause = data["upstream_pause"]
+        self.assertEqual(failed["operation"]["failure"]["category"], "needsReauth")
         self.assertEqual(pause["source"], {"profile_id": ids[3], "operation_id": failed["operation"]["id"], "action": "quota"})
         self.assertEqual(pause["failure"]["upstream_code"], "token_revoked")
         first_readings = [item["operation"]["after"] for item in batch["items"][:3]]

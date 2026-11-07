@@ -57,7 +57,8 @@ class AccountScopeTests(unittest.TestCase):
         rows = self.accounts()
         self.scenario = "scoped_revoked"
         self.manager.start(rows[1]["id"], refresh_only=True)
-        self.wait(rows[1]["id"])
+        failed = self.wait(rows[1]["id"])
+        self.assertEqual(failed["operation"]["failure"]["category"], "needsReauth")
         originals = {row["id"]: self.manager.read(self.manager.directory(row["id"])) for row in rows}
         for options in ({}, {"refresh_only": True}, {"login_only": True}):
             with self.subTest(options=options), self.assertRaises(ca.ActionError):

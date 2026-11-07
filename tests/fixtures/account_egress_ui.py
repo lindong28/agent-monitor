@@ -204,9 +204,9 @@ def main():
                         pause=account_pause(account['id']) if account['id'] not in state['cleared_scopes'] else None,
                         shared_pause=pause() if state['paused'] else None,
                         account=dict(account_id=account['account_id'], account_label=account['email'], quota_profile=profile,
-                            source='managed', auth_recovery_available=not state['paused'],
+                            source='managed', auth_recovery_available=not state['paused'] and not account.get('disabled'),
                             account_quota_pause=account_pause(account['id']),
-                            blocked_reason='共享通道已暂停' if state['paused'] else None),
+                            blocked_reason='此账号已停用' if account.get('disabled') else '共享通道已暂停' if state['paused'] else None),
                         last_recovery=state['scoped_receipts'].get(profile)))
                     return
                 if state['recovery_state'] == 'unavailable':
@@ -267,7 +267,13 @@ def main():
                 route.consume(payload.get('confirmation'), payload.get('profile_ids'), payload.get('expected_batch_id'))
                 state['starts'].append(payload)
                 self.send({})
+            elif self.path == '/api/codex-accounts/set-disabled':
+                account = next(a for a in accounts if a['id'] == payload['id'])
+                account['disabled'] = payload['disabled']
+                self.send(account)
             elif self.path == '/fixture/config':
+                if 'disabled' in payload:
+                    accounts[0]['disabled'] = payload['disabled']
                 for key in ('disclosure', 'quota_failure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state', 'process_mode', 'account_scopes'):
                     if key in payload:
                         state[key] = payload[key]

@@ -43,6 +43,19 @@ function quotaHoldMessage(account, pause) {
   return `发送仍因此前额度限制暂停${since ? `（记录于 ${timestamp(since)}）` : ""}。${evidence}${next}只有服务端明确允许使用后才解除额度暂停，0% 或重置时间经过不代表恢复。`;
 }
 
+export function accountQuotaPauseGuidance(account) {
+  return account.disabled
+    ? "恢复此账号前，请先重新启用；启用后仍需处理配额暂停。"
+    : "本机账号已启用，配额暂停仍保留。打开登录修复后，按面板当前提示完成恢复；仅打开面板不会发起上游请求。";
+}
+
+export function accountToggleNotice(account) {
+  if (account.disabled) return "已停用此账号；未发出上游请求，历史记录和其他限制保留。";
+  return account.account_quota_pause
+    ? "已重新启用此账号；配额暂停仍保留，请打开登录修复继续处理。"
+    : "已重新启用此账号；未自动查询、登录或发送，其他限制保留。";
+}
+
 export function quotaBatchSummary(batch) {
   if (!batch) return "";
   const counts = { succeeded: 0, failed: 0, unattempted: 0, skipped: 0, active: 0 };
@@ -389,6 +402,10 @@ export function init({ autoLoad = true } = {}) {
       notice.textContent = action === "cancel" ? "正在取消；已发出的消息无法撤回。" : "";
       await load();
       if (current() && action === "resume") notice.textContent = "此账号的本地限制已解除，未发出上游请求。本机通道暂停和已记录的失败信息保留；后续操作需重新点击。";
+      if (current() && action === "set-disabled") {
+        const updated = accounts.find(value => value.id === id);
+        if (updated) notice.textContent = accountToggleNotice(updated);
+      }
     } catch (error) {
       if (current() && error.name !== "AbortError") notice.textContent = error.message;
     } finally {
@@ -418,7 +435,7 @@ export function init({ autoLoad = true } = {}) {
     const panel = recoveryBody?.querySelector(".quota-recovery-panel");
     if (panel) {
       const selected = accounts.find(account => account.id === recoveryAccountId);
-      const pauseKey = recoveryAccountId ? `${recoveryAccountId}:${selected?.account_quota_pause?.id || ""}:global:${upstreamPause?.id || ""}` : `global:${upstreamPause?.id || ""}`;
+      const pauseKey = recoveryAccountId ? `${recoveryAccountId}:${selected?.account_quota_pause?.id || ""}:disabled:${Boolean(selected?.disabled)}:global:${upstreamPause?.id || ""}` : `global:${upstreamPause?.id || ""}`;
       if (recoveryPauseId !== pauseKey) {
         recoveryPauseId = pauseKey;
         panel.refresh?.();
@@ -440,7 +457,7 @@ export function init({ autoLoad = true } = {}) {
       panel = null;
     }
     recoveryAccountId = selectedId;
-    const pauseKey = selectedId ? `${selectedId}:${account.account_quota_pause?.id || ""}:global:${upstreamPause?.id || ""}` : `global:${upstreamPause?.id || ""}`;
+    const pauseKey = selectedId ? `${selectedId}:${account.account_quota_pause?.id || ""}:disabled:${Boolean(account.disabled)}:global:${upstreamPause?.id || ""}` : `global:${upstreamPause?.id || ""}`;
     if (!panel) {
       panel = window.AgentMonitor.createRecoveryPanel?.("self", {
         ...(selectedId ? {profile: `monitor-${selectedId}`, pauseScope: "account"} : {}),
@@ -454,7 +471,7 @@ export function init({ autoLoad = true } = {}) {
       }});
       if (panel) recoveryBody.appendChild(panel);
       recoveryPauseId = pauseKey;
-    } else if (recoveryPauseId !== pauseKey) {
+    } else {
       recoveryPauseId = pauseKey;
       panel.refresh?.();
     }
@@ -566,6 +583,8 @@ export function init({ autoLoad = true } = {}) {
       const operationLabel = account.disabled ? "已停用" : !account.busy && loginRequired && account.has_credentials
         ? "需要重新登录" : !account.busy && loginRequired ? "需要登录" : op?.failure?.category === "needsLogin"
         ? "需要重新登录" : op?.stage === "succeeded" ? ""
+        : op?.failure?.category === "needsReauth"
+        ? "需要重新认证"
         : op?.refresh_only && op.stage === "failed"
         ? (op.failure?.category === "locallyPaused" ? "配额查询未执行" : "配额查询失败")
         : op ? STAGES[op.stage] || op.stage : "";
@@ -667,7 +686,8 @@ export function init({ autoLoad = true } = {}) {
       const controls = element("div", undefined, "codex-account-controls");
       if (account.account_quota_pause) {
         heading.append(element("span", "此账号配额查询已暂停", "codex-batch-result"));
-        const repair = button("修复登录", "repair-login", account);
+        card.append(element("p", accountQuotaPauseGuidance(account), "quota-scope account-quota-pause-guidance"));
+        const repair = button("打开登录修复", "repair-login", account);
         repair.disabled = false;
         controls.append(repair);
       }
@@ -699,7 +719,7 @@ export function init({ autoLoad = true } = {}) {
         const forget = button("清除本页登录态", "forget-login", account);
         if (account.account_quota_pause) {
           forget.disabled = true;
-          maintenance.append(element("p", "此账号的配额暂停尚未结清；先通过“修复登录”处理，再清除登录态。", "quota-scope"));
+          maintenance.append(element("p", "此账号的配额暂停尚未结清；先打开登录修复并完成复验，再清除登录态。", "quota-scope"));
         }
         maintenance.append(forget);
         managementDetail.append(maintenance);

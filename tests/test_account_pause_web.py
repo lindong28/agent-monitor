@@ -99,3 +99,17 @@ assert.equal(controls.pauseRecovery.disabled, false, "used probe still has a rea
 render(null, null);
 assert.equal(controls.pausePanel.hidden, true);
 ''')
+
+    def test_account_pause_guidance_distinguishes_local_enable_from_auth_recovery(self):
+        self.run_js(r'''
+const assert = require("assert");
+const {accountQuotaPauseGuidance, accountToggleNotice} = require("./web/codex-accounts.js");
+const tokenRevoked = {account_quota_pause: {failure: {stage: "quota_read", kind: "rpc_error", http_status: 401, upstream_code: "token_revoked"}}};
+assert.match(accountQuotaPauseGuidance({...tokenRevoked, disabled: false}), /本机账号已启用/);
+assert.match(accountQuotaPauseGuidance({...tokenRevoked, disabled: false}), /按面板当前提示/);
+assert.match(accountQuotaPauseGuidance({...tokenRevoked, disabled: true}), /先重新启用/);
+assert.match(accountQuotaPauseGuidance({account_quota_pause: {failure: {stage: "quota_read", kind: "rpc_error", http_status: 500}}}), /按面板当前提示/);
+assert.match(accountToggleNotice({...tokenRevoked,disabled:false}), /打开登录修复/);
+assert.doesNotMatch(accountToggleNotice({disabled:false}), /配额暂停|登录修复/);
+assert.match(accountToggleNotice({disabled:true}), /已停用/);
+''')

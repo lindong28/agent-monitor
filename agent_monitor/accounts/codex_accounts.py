@@ -1569,6 +1569,11 @@ class Manager:
                 "stage": record["operation"]["stage"],
                 "category": exc.category if isinstance(exc, ActionError) else "unknown",
             }
+            # Preserve the exact structured upstream fact as an actionable
+            # account state; generic 401s remain unclassified.
+            rpc_failure = (getattr(rpc, "diagnostics", {}) or {}).get("rpc_failure")
+            if codex_quota.revoked_quota_failure(rpc_failure):
+                failure["category"] = "needsReauth"
             digest = getattr(exc, "account_quota_rejection", None)
             scoped_rejection = bool(digest and lease and record["operation"].get("refresh_only")
                 and not record["operation"].get("login_only") and record["operation"]["message_status"] == "not_sent")
