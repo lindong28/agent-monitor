@@ -704,7 +704,7 @@ export function init({ autoLoad = true } = {}) {
         maintenance.append(forget);
         managementDetail.append(maintenance);
       }
-      if (!account.busy) managementDetail.append(button(account.disabled ? "重新启用此账号" : "停用此账号", "set-disabled", account));
+      if (!account.busy) controls.append(button(account.disabled ? "重新启用此账号" : "停用此账号", "set-disabled", account));
       if (account.disabled && upstreamPause?.reason === "operationFailed" && op?.refresh_only
           && op.stage === "failed" && op.message_status === "not_sent" && op.diagnostics?.last_request
           && (!upstreamPause.source || upstreamPause.source.profile_id === account.id && upstreamPause.source.operation_id === op.id)) {

@@ -542,7 +542,7 @@ const values = [
 const text = n => n.textContent + n.children.map(text).join(" ");
 const visible = n => n.tag === "details" && !n.open ? text(n.children[0]) : n.textContent + n.children.map(visible).join(" ");
 renderAccounts(values);
-const list = nodes["#codex-account-list"], card = list.children[0];
+const list = nodes["#codex-account-list"]; let card = list.children[0];
 assert(!visible(card).includes("7 天"), "quota comparison belongs in the table");
 assert(text(card.querySelector("details")).includes(oldTime), "operation observation time remains in details");
 assert(text(card.querySelector("details")).includes("本次抽取的消息：现在几点了？"));
@@ -563,6 +563,12 @@ assert(visible(list.children[1]).includes("需要重新登录"), "invalid saved 
 assert(text(list.children[1]).includes("最近配额查询") || text(list.children[1]).includes("最近发送操作"));
 assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（0）");
 assert.equal(loginButtons.find(button => button.textContent === "单独登录").disabled, false);
+assert.equal(cardButtons(list.children[0]).filter(button => button.textContent === "停用此账号").length, 1, "account toggle is visible without opening details");
+assert(!visible(list.children[0].querySelector("details")).includes("停用此账号"), "account toggle is not duplicated in the maintenance disclosure");
+values[0].disabled = true; renderAccounts(values);
+assert(visible(list.children[0]).includes("重新启用此账号"), "disabled account exposes the enable action");
+assert.equal(cardButtons(list.children[0]).filter(button => button.textContent === "重新启用此账号").length, 1);
+delete values[0].disabled; renderAccounts(values); card = list.children[0];
 const previousAccount = values[1], recoveredTime = "2026-11-06T12:00:00.000Z";
 values[1] = {...previousAccount, login_required:false, operation:{stage:"succeeded", refresh_only:true,
   message_status:"not_sent", started_at:oldTime, recovery_pause_id:"fixture-repair", after:{observed_at:recoveredTime}}};
