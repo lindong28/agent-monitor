@@ -110,6 +110,7 @@ class Manager:
         self.machines = ()
         self.records = {}
         self.load_error = None
+        self.local_cache_error = None
         self.recovering = False
         try:
             data = json.loads(self.path.read_text())
@@ -258,10 +259,14 @@ class Manager:
             with self.condition:
                 limits = self.merge(current, machine)
                 existing = (limits.get("codex") or {}).get("managed_accounts", [])
-                if not any(row.get("account_profile") == profile
+                registered = self._local_monitor_member(machine, profile, block,
+                    source_verified=self._self_source_matches(current, machine))
+                published = any(row.get("account_profile") == profile
                            and quota_identity("codex", row.get("account_id"), row.get("account_label"))
                            == quota_identity("codex", block.get("account_id"), block.get("account_label"))
-                           for row in existing):
+                           for row in existing)
+                local_monitor = machine.is_self and profile.startswith("monitor-")
+                if not (registered if local_monitor else published):
                     raise ValueError("恢复账号已不在正常配额页的来源中，未发布读数。")
                 limits = {p: dict(limits.get(p) or {}) for p in ("claude", "codex")}
                 limits["codex"]["managed_accounts"] = _merge_managed_accounts(existing, [block])
@@ -289,7 +294,7 @@ class Manager:
         with self.condition:
             return {"running": self.running, "requested": self.requested, "completed": self.completed,
                     "pending_machines": list(self.pending), "errors": dict(self.errors),
-                    "revision": self.revision, "cache_error": self.load_error}
+                    "revision": self.revision, "cache_error": self.load_error or self.local_cache_error}
 
     def wait(self, ticket, timeout=None):
         with self.condition:
@@ -375,7 +380,70 @@ class Manager:
         if self.on_complete is not None and not self.stopping:
             self.on_complete()
 
+    def _self_source_matches(self, current, machine):
+        if not machine or not machine.is_self:
+            return False
+        from agent_monitor.snapshots import generation
+        try:
+            matches = generation.self_certified_host_identity() == current.meta.get("source_host_identity")
+        except (OSError, ValueError, generation.GenerationError, subprocess.SubprocessError) as exc:
+            self.local_cache_error = "本机身份暂无法确认，未采纳本机配额补充结果。"
+            diagnostics.monitor.record_failure("profile_read", exc)
+            return False
+        if not matches:
+            self.local_cache_error = "本机身份与当前配额来源不一致，未采纳本机配额补充结果。"
+        return matches
+
+    def _local_monitor_member(self, machine, profile, block, *, source_verified=False):
+        from agent_monitor.quota.quota_service import monitor_profile_matches
+        return bool(source_verified and machine and machine.is_self and monitor_profile_matches(
+            profile, block.get("account_id"), block.get("account_label"),
+            profile_root=self.path.parent / "codex-accounts"))
+
     def merge(self, current, machine):
+        with self.condition:
+            if not machine or not machine.is_self:
+                return self._merge(current, machine)
+            from agent_monitor.quota.quota_service import read_cache, monitor_profile_record, _merge_managed_accounts
+            try:
+                cache = read_cache(self.path.parent / "quota_snapshot.json").get("codex") or {}
+            except OSError as exc:
+                self.local_cache_error = "本机已保存配额暂不可读；保留已发布读数，请检查本地缓存。"
+                diagnostics.monitor.record_failure("profile_read", exc)
+                cache = {}
+            else:
+                self.local_cache_error = None
+            cached_rows = cache.get("managed_accounts")
+            cached_rows = [row for row in cached_rows if isinstance(row, dict)] if isinstance(cached_rows, list) else []
+            published = self.records.get(current.host) or {}
+            payload = published.get("payload") or {}
+            incoming = (payload.get("rate_limits", {}).get("codex") or {}).get("managed_accounts")
+            incoming = [row for row in incoming if isinstance(row, dict)] if isinstance(incoming, list) else []
+            mismatch = bool(published and (published.get("ssh_host") != machine.ssh_host
+                or payload and payload.get("source_host_identity") != current.meta.get("source_host_identity")))
+            has_monitor = any(isinstance(row.get("account_profile"), str) and row["account_profile"].startswith("monitor-")
+                for row in [*cached_rows, *incoming])
+            verified = bool(has_monitor and not mismatch and self._self_source_matches(current, machine))
+            result = self._merge(current, machine)
+            if not verified:
+                return result
+            rows = []
+            for row in cached_rows:
+                record = monitor_profile_record(row.get("account_profile"), row.get("account_id"), row.get("account_label"),
+                    profile_root=self.path.parent / "codex-accounts")
+                observation = quota_applicability.observation(row.get("quota_observation")) or {}
+                if (record and not (record.get("operation") or {}).get("recovery")
+                        and observation.get("source") == "active_query"
+                        and observation.get("observed_at")
+                        and observation["observed_at"] == (record.get("last_quota") or {}).get("observed_at")):
+                    rows.append(row)
+            if rows:
+                codex = dict(result.get("codex") or {})
+                codex["managed_accounts"] = _merge_managed_accounts(codex.get("managed_accounts"), rows)
+                result["codex"] = codex
+            return result
+
+    def _merge(self, current, machine):
         result = copy.deepcopy(current.meta.get("rate_limits") or {})
         with self.condition:
             record = copy.deepcopy(self.records.get(current.host))
@@ -397,8 +465,16 @@ class Manager:
                 existing = base.get("managed_accounts", [])
                 identities = {(row.get("account_profile"), quota_identity("codex", row.get("account_id"), row.get("account_label")))
                               for row in existing}
-                admitted = [row for row in incoming.get("managed_accounts", [])
-                            if (row.get("account_profile"), quota_identity("codex", row.get("account_id"), row.get("account_label"))) in identities]
+                admitted = []
+                for row in incoming.get("managed_accounts", []):
+                    profile = row.get("account_profile")
+                    local_monitor = bool(machine and machine.is_self and isinstance(profile, str) and profile.startswith("monitor-"))
+                    # This persisted payload already passed the host/endpoint
+                    # checks above. A failed current identity lookup blocks new
+                    # cache additions, not these dated published observations.
+                    if (self._local_monitor_member(machine, profile, row, source_verified=True) if local_monitor else
+                            (profile, quota_identity("codex", row.get("account_id"), row.get("account_label"))) in identities):
+                        admitted.append(row)
                 base["managed_accounts"] = _merge_managed_accounts(existing, admitted,
                     incoming_metadata=_time(record["attempted_at"]) >= _time(current.meta.get("generated_at")))
                 result[provider] = base

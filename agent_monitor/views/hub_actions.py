@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 ACCOUNT_ACTIONS = frozenset(('egress-preview', 'network-status', 'add', 'batch-start',
                             'batch-retry', 'refresh', 'refresh-all', 'refresh-selected', 'refresh-retry',
                             'set-disabled', 'attribute-account-pause', 'login', 'resume', 'cancel',
-                            'forget-login', 'release-rate-limit'))
+                            'forget-login', 'release-rate-limit', 'commit-recovery'))
 POST_PATHS = frozenset('/api/codex-accounts/' + name for name in ACCOUNT_ACTIONS) | {
     '/api/account-memory/remove', '/api/quota-recovery', '/api/quota-settings', '/api/refresh'}
 GET_PATHS = frozenset(('/api/codex-accounts', '/api/quota-recovery', '/api/quota-settings'))

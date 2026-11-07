@@ -287,6 +287,20 @@ async function render(changes={}, error=false) {
     assert.equal(action(localCommit,'probe').hidden,true);
     assert.equal(action(localCommit,'reauthorize').hidden,true);
     assert.match(localCommit.textContent,/错误类别：OSError/);
+    current={...current,account:{...current.account,local_commit:{pause_id:current.pause.id,operation_id:'failed-local-operation'}}};
+    let saved=0;
+    const resumable=repair.createRecoveryPanel('fixture-host',{onSaved:()=>saved++});await settle();
+    assert.equal(action(resumable,'commit').hidden,false);
+    assert(action(resumable,'commit').className.includes('btn-primary'));
+    preview=null;
+    await action(resumable,'commit').click();
+    assert.equal(preview,null,'a local commit never previews egress or asks for an upstream confirmation');
+    assert.equal(submitted.operation_id,'failed-local-operation');
+    assert.equal(submitted.pause_id,'local-commit-pause');
+    assert.equal(submitted.id,'fixture');
+    assert.equal(submitted.mode,undefined);
+    assert.equal(saved,1);
+    assert.match(visibleText(resumable),/未发出上游请求/);
   }
   for (const scenario of ['matched','missing','still-paused']) {
     let current={...base}, posts=0, continued=0;

@@ -116,6 +116,33 @@ def reauthorization_context(record, state):
             "account_id": record["account_id"], "account_label": record["email"].casefold()}
 
 
+def local_commit_context(record, state):
+    """A saved successful reading whose local commit, not provider work, failed."""
+    from agent_monitor.quota import quota_applicability
+    pause, op = state.get("pause") or {}, record.get("operation") or {}
+    failure, source = pause.get("failure") or {}, pause.get("source") or {}
+    recovery, reading = op.get("recovery") or {}, op.get("candidate_quota") or {}
+    original = recovery.get("original_operation") or {}
+    fingerprint = hashlib.sha256(quota_identity("codex", record.get("account_id"), record.get("email")).encode()).hexdigest()
+    if (pause.get("reason") != "localRecoveryCommitFailed" or not pause.get("id")
+            or failure.get("stage") != "recovery_commit"
+            or failure.get("account_profile") != "monitor-" + record.get("id", "")
+            or failure.get("account_fingerprint") != fingerprint
+            or source.get("profile_id") != record.get("id") or source.get("operation_id") != op.get("id")
+            or source.get("action") != "quota" or state.get("active") or pause.get("probe_attempt")
+            or op.get("stage") not in {"failed", "interrupted"} or not op.get("login_only")
+            or op.get("message_status") != "not_sent" or not recovery.get("previous_recovery")
+            or not original.get("refresh_only") or original.get("message_status") != "not_sent"
+            or recovery.get("operation_id") != original.get("id")
+            or recovery.get("account_id") != record.get("account_id")
+            or str(recovery.get("account_label", "")).casefold() != str(record.get("email", "")).casefold()
+            or (op.get("diagnostics") or {}).get("local_commit", {}).get("stage") != "recovery_commit"
+            or not quota_applicability.current_window(reading)):
+        return None
+    return {"pause_id": pause["id"], "operation_id": op["id"],
+            "account_id": record["account_id"], "account_label": record["email"].casefold()}
+
+
 def managed_access_token(auth_path):
     """Local preflight only; the returned secret is never serialized."""
     try:

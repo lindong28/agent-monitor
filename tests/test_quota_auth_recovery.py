@@ -381,6 +381,13 @@ class ReauthorizationTests(unittest.TestCase):
     def setUp(self):
         from contextlib import nullcontext
         self._Cases.setUp(self)
+        from agent_monitor.accounts import codex_accounts as ca
+        self.manager.close()
+        self.manager = ca.Manager(self.root / "codex-accounts")
+        self.addCleanup(self.manager.close)
+        identity = mock.patch('agent_monitor.snapshots.generation.self_certified_host_identity', return_value='fixture-host')
+        identity.start()
+        self.addCleanup(identity.stop)
         self.publication = lambda block: nullcontext()
     account = _Cases.account
     wait = _Cases.wait
@@ -389,7 +396,7 @@ class ReauthorizationTests(unittest.TestCase):
     def start(self, account, binding):
         return self.manager.start_reauthorization(account['id'],binding,publication=self.publication)
 
-    def seed(self):
+    def seed(self, *, cached=True):
         import uuid
         from agent_monitor.accounts import codex_accounts as ca
         from agent_monitor.quota.quota_refresh import account_fingerprint
@@ -406,8 +413,9 @@ class ReauthorizationTests(unittest.TestCase):
             'quota_batch_id':'original-quota-batch','failure':{'category':'unknown'}}
         self.manager.save(directory, record)
         profile = 'monitor-' + account['id']
-        ca.write_record(self.manager.root.parent/'quota_snapshot.json',{'codex':{'managed_accounts':[
-            {'account_profile':profile,'account_id':account['account_id'],'account_label':account['email']} ]}})
+        if cached:
+            ca.write_record(self.manager.root.parent/'quota_snapshot.json',{'codex':{'managed_accounts':[
+                {'account_profile':profile,'account_id':account['account_id'],'account_label':account['email']} ]}})
         failure = {'stage':'credentials','kind':'invalid_result','account_profile':profile,
             'account_fingerprint':account_fingerprint('codex', Account(account['account_id'],account['email'],None))}
         state = {'version':1,'pause':{'id':'d'*32,'reason':'quotaRefreshFailed','failure':failure},
@@ -511,7 +519,7 @@ class ReauthorizationTests(unittest.TestCase):
                 # Separate synthetic identity/profile per failure case.
                 self.manager.close()
                 from agent_monitor.accounts import codex_accounts as ca
-                self.manager=ca.Manager(self.root/(scenario+'-next')/'profiles')
+                self.manager=ca.Manager(self.root/(scenario+'-next')/'codex-accounts')
                 self.addCleanup(self.manager.close)
 
     def test_normal_quota_view_updates_and_commit_failures_restore_publication(self):
@@ -531,7 +539,7 @@ class ReauthorizationTests(unittest.TestCase):
                 current=SimpleNamespace(host=machine.name,meta={'rate_limits':{'codex':{'managed_accounts':[block]},'claude':{}},
                     'source_host_identity':'fixture-host','generated_at':'2026-11-01T00:00:00Z'})
                 admission=SimpleNamespace(admitted=[current],config=SimpleNamespace(by_name={machine.name:machine},self_machine=machine))
-                publisher=quota_sync.Manager(self.root/('machine-quota-'+fault+'.json'))
+                publisher=quota_sync.Manager(self.manager.root.parent/('machine-quota-'+fault+'.json'))
                 view=QuotaView(mock.Mock(),publisher)
                 @contextmanager
                 def snapshot():
@@ -579,6 +587,233 @@ class ReauthorizationTests(unittest.TestCase):
                     self.assertEqual(result['operation']['recovery']['original_operation']['id'],self.original_id)
                     self.assertEqual(result['operation']['diagnostics']['local_commit']['stage'],'recovery_commit')
                     self.assertEqual(state['pause']['failure']['stage'],'recovery_commit')
+
+
+    def test_first_monitor_observation_reaches_cache_publication_and_view(self):
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+        from agent_monitor.quota import quota_sync, quota_service
+        from agent_monitor.quota.quota_view import QuotaView
+        from agent_monitor.snapshots import generation, exporter
+        account, binding = self.seed(cached=False)
+        profile = 'monitor-' + account['id']
+        machine = SimpleNamespace(name='fixture-owner', ssh_host='fixture-owner', is_self=True)
+        current = SimpleNamespace(host=machine.name, meta={'rate_limits': {'codex': {}, 'claude': {}},
+            'source_host_identity': 'fixture-host', 'generated_at': '2026-11-01T00:00:00Z'})
+        admission = SimpleNamespace(admitted=[current], config=SimpleNamespace(by_name={machine.name: machine}, self_machine=machine))
+        publisher = quota_sync.Manager(self.root / 'machine_quota.json')
+        @contextmanager
+        def snapshot():
+            yield admission
+        self.publication = lambda fresh: publisher.managed_recovery_publication(machine, profile, fresh, expected_source='fixture-host')
+        with mock.patch.object(generation, 'generation_admission_snapshot', snapshot), mock.patch.object(exporter, 'exporter_version', return_value='0'*40), mock.patch('agent_monitor.quota.quota_view.hub.enabled', return_value=True):
+            self.start(account, binding)
+            result = self.wait(account['id'])
+            self.assertEqual(result['operation']['stage'], 'succeeded')
+            view = QuotaView(mock.Mock(), publisher)
+            rows = view.live_from_admission(admission)['codex']['accounts']
+            self.assertEqual(rows[0]['seven_day_used_pct'], 0)
+            reopened = quota_sync.Manager(publisher.path)
+            self.assertEqual(QuotaView(mock.Mock(), reopened).live_from_admission(admission)['codex']['accounts'][0]['seven_day_used_pct'], 0)
+            from datetime import datetime, timezone, timedelta
+            after = {**result['operation']['after'], 'seven_day_used_pct':42,
+                'observed_at':(datetime.now(timezone.utc)+timedelta(seconds=1)).isoformat()}
+            with mock.patch.object(quota, 'read_bound', return_value=after):
+                self.manager.start(account['id'], refresh_only=True)
+                refreshed = self.wait(account['id'])
+            self.assertEqual(refreshed['operation']['after']['seven_day_used_pct'],42)
+            normal = view.live_from_admission(admission)['codex']['accounts'][0]
+            self.assertEqual(normal['seven_day_used_pct'],42)
+            self.assertEqual(normal['updated_at'],after['observed_at'])
+            self.assertEqual(QuotaView(mock.Mock(),quota_sync.Manager(publisher.path)).live_from_admission(admission)['codex']['accounts'][0]['seven_day_used_pct'],42)
+            with mock.patch.object(quota_service, 'read_cache', side_effect=PermissionError('synthetic unreadable local quota cache')), mock.patch('agent_monitor.quota.quota_sync.diagnostics.monitor.record_failure') as diagnostic:
+                self.assertEqual(view.live_from_admission(admission)['codex']['accounts'][0]['seven_day_used_pct'],0)
+                self.assertTrue(publisher.status()['cache_error'])
+                diagnostic.assert_called()
+            self.assertEqual(view.live_from_admission(admission)['codex']['accounts'][0]['seven_day_used_pct'],42)
+            self.assertIsNone(publisher.status()['cache_error'])
+            current.meta['source_host_identity'] = 'different-host'
+            self.assertFalse(publisher.merge(current, machine)['codex'].get('managed_accounts'))
+            current.meta['source_host_identity'] = 'fixture-host'
+            cold = quota_sync.Manager(self.root/'cold_machine_quota.json')
+            with mock.patch.object(generation,'self_certified_host_identity',return_value='different-host'):
+                self.assertFalse(cold.merge(current,machine)['codex'].get('managed_accounts'))
+            self.assertEqual(cold.merge(current,machine)['codex']['managed_accounts'][0]['seven_day_pct'],42)
+            unavailable = generation.GenerationError('synthetic missing host identity')
+            with mock.patch.object(generation,'self_certified_host_identity',side_effect=unavailable), mock.patch('agent_monitor.quota.quota_sync.diagnostics.monitor.record_failure') as diagnostic:
+                self.assertEqual(view.live_from_admission(admission)['codex']['accounts'][0]['seven_day_used_pct'],0)
+                self.assertTrue(publisher.status()['cache_error'])
+                diagnostic.assert_called()
+                self.assertEqual(quota_sync.diagnostics.failure_details(unavailable)['error_type'],'GenerationError')
+            record = self.manager.read(self.manager.directory(account['id']))
+            record['email'] = 'changed@example.test'
+            self.manager.save(self.manager.directory(account['id']), record)
+            self.assertFalse(publisher.merge(current, machine)['codex']['managed_accounts'])
+            record['email'] = account['email']
+            self.manager.save(self.manager.directory(account['id']), record)
+            remote = SimpleNamespace(name=machine.name, ssh_host=machine.ssh_host, is_self=False)
+            self.assertFalse(publisher.merge(current, remote)['codex']['managed_accounts'])
+            (self.manager.directory(account['id']) / 'profile.json').unlink()
+            self.assertFalse(publisher.merge(current, machine)['codex']['managed_accounts'])
+        cache = quota_service.read_cache(self.root / 'quota_snapshot.json')['codex']['managed_accounts']
+        self.assertEqual(cache[0]['account_profile'], profile)
+        self.assertIn('network', self.manager.controls.read('codex')['last_recovery'])
+
+    def failed_commit(self):
+        from contextlib import contextmanager
+        account, binding = self.seed(cached=False)
+        @contextmanager
+        def broken(block):
+            raise OSError('synthetic local publication failure')
+            yield
+        self.publication = broken
+        self.start(account, binding)
+        result = self.wait(account['id'])
+        self.assertEqual(result['operation']['stage'], 'failed')
+        pause = self.manager.controls.read('codex')['pause']
+        self.assertIsNotNone(quota.local_commit_context(result, self.manager.controls.read('codex')))
+        return account, result, pause
+
+    def test_local_commit_uses_retained_result_and_rejects_replay(self):
+        from contextlib import nullcontext
+        from agent_monitor.accounts.codex_accounts import ActionError
+        account, result, pause = self.failed_commit()
+        count = len(self.spawned)
+        with mock.patch.object(self.manager, 'open_rpc') as rpc:
+            saved = self.manager.commit_saved_recovery(account['id'], result['operation']['id'], pause['id'], publication=lambda block: nullcontext())
+            rpc.assert_not_called()
+        self.assertEqual(len(self.spawned), count)
+        self.assertEqual(saved['operation']['id'], self.original_id)
+        self.assertEqual(saved['operation']['stage'], 'succeeded')
+        state = self.manager.controls.read('codex')
+        self.assertNotIn('pause', state)
+        self.assertNotIn('active', state)
+        self.assertEqual(state['last_pause']['id'], pause['id'])
+        with self.assertRaises(ActionError):
+            self.manager.commit_saved_recovery(account['id'], result['operation']['id'], pause['id'], publication=lambda block: nullcontext())
+
+    def test_local_commit_failure_keeps_candidate_and_releases_only_own_probe(self):
+        from contextlib import contextmanager
+        from agent_monitor.accounts.codex_accounts import ActionError
+        account, result, pause = self.failed_commit()
+        @contextmanager
+        def broken(block):
+            raise OSError('synthetic local write still broken')
+            yield
+        with self.assertRaises(ActionError), mock.patch.object(self.manager, 'open_rpc') as rpc:
+            self.manager.commit_saved_recovery(account['id'], result['operation']['id'], pause['id'], publication=broken)
+        rpc.assert_not_called()
+        current = self.manager.controls.read('codex')
+        self.assertEqual(current['pause']['id'], pause['id'])
+        self.assertNotIn('active', current)
+        self.assertNotIn('probe_attempt', current['pause'])
+        record = self.manager.read(self.manager.directory(account['id']))
+        self.assertEqual(record['operation']['candidate_quota'], result['operation']['candidate_quota'])
+        self.assertEqual(record['operation']['recovery'], result['operation']['recovery'])
+        for changed in ({'active': {'id':'other'}}, {'pause': {**current['pause'], 'id':'different', 'probe_attempt':{'id':'other'}}}):
+            self.assertIsNone(quota.local_commit_context(record, {**current, **changed}))
+        record['operation']['candidate_quota'].update(five_hour_resets_at=1, seven_day_resets_at=1)
+        self.assertIsNone(quota.local_commit_context(record, current))
+
+    def test_local_final_save_failure_can_continue_without_reauthorizing(self):
+        from contextlib import nullcontext
+        from agent_monitor.accounts.codex_accounts import ActionError
+        account, result, pause = self.failed_commit()
+        save = self.manager.controls._save
+        failures = []
+        def fail_terminal(provider, state):
+            if not state.get('pause') and not failures:
+                failures.append(True)
+                raise OSError('synthetic final local state failure')
+            return save(provider, state)
+        with mock.patch.object(self.manager.controls, '_save', side_effect=fail_terminal), mock.patch.object(self.manager, 'open_rpc') as rpc:
+            with self.assertRaises(ActionError):
+                self.manager.commit_saved_recovery(account['id'], result['operation']['id'], pause['id'], publication=lambda block:nullcontext())
+            rpc.assert_not_called()
+        state = self.manager.controls.read('codex')
+        self.assertEqual(state['pause']['id'], pause['id'])
+        self.assertNotIn('probe_attempt', state['pause'])
+        self.assertNotIn('active', state)
+        failed = self.manager.read(self.manager.directory(account['id']))
+        self.assertEqual(failed['operation']['stage'], 'failed')
+        self.assertEqual(failed['operation']['candidate_quota'], result['operation']['candidate_quota'])
+        with mock.patch.object(self.manager, 'open_rpc') as rpc:
+            saved = self.manager.commit_saved_recovery(account['id'], result['operation']['id'], pause['id'], publication=lambda block:nullcontext())
+            rpc.assert_not_called()
+        self.assertEqual(saved['operation']['id'], self.original_id)
+        self.assertEqual(saved['operation']['stage'], 'succeeded')
+
+    def test_monitor_cache_projection_preserves_explicit_permission_and_unknown_values(self):
+        from agent_monitor.quota import quota_service
+        from parsers.accounts import Account
+        account = self.account()
+        for allowed in (True, False, None):
+            reading = {'observed_at':'2026-11-07T00:00:00Z', 'seven_day_used_pct':80,
+                'seven_day_resets_at':1900000000, 'codex_quota_available':allowed,
+                'ordinary_usage_allowed':allowed, 'spend_control_reached':allowed,
+                'rate_limit_reached_type':'credits' if allowed is not None else None}
+            quota_service.record_codex_reading(self.root/'quota_snapshot.json',
+                Account(account['account_id'],account['email'],None),reading,
+                account_profile='monitor-'+account['id'],profile_root=self.manager.root)
+            row=quota_service.read_cache(self.root/'quota_snapshot.json')['codex']['managed_accounts'][0]
+            for key in ('codex_quota_available','ordinary_usage_allowed','spend_control_reached','rate_limit_reached_type'):
+                self.assertEqual(row[key],reading[key])
+            self.assertIsNone(row['five_hour_pct'])
+
+    def test_local_commit_http_scope_origin_and_real_first_member_publication(self):
+        import http.client
+        import threading
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+        from agent_monitor import http_server as server
+        from agent_monitor.accounts import codex_accounts as ca
+        from agent_monitor.quota import quota_sync
+        from agent_monitor.quota.quota_view import QuotaView
+        from agent_monitor.snapshots import generation, exporter
+        account, result, pause = self.failed_commit()
+        profile = 'monitor-' + account['id']
+        machine = SimpleNamespace(name='fixture-owner', ssh_host='fixture-owner', is_self=True)
+        current = SimpleNamespace(host=machine.name, meta={'rate_limits': {'codex': {}, 'claude': {}},
+            'source_host_identity':'fixture-host', 'generated_at':'2026-11-01T00:00:00Z'})
+        admission = SimpleNamespace(admitted=[current],config=SimpleNamespace(by_name={machine.name:machine},self_machine=machine))
+        publisher = quota_sync.Manager(self.root/'machine_quota.json')
+        binding = quota.local_commit_context(result, self.manager.controls.read('codex'))
+        @contextmanager
+        def snapshot():
+            yield admission
+        status = {'source_host_identity':'fixture-host','account':{'local_commit':binding,'quota_profile':profile}}
+        with mock.patch.object(server,'QUOTA_REFRESH',publisher), mock.patch.object(ca,'manager',self.manager), \
+                mock.patch.object(server.hub,'enabled',return_value=False), mock.patch.object(server.hub,'is_hub',return_value=True), \
+                mock.patch.object(server.sync,'load_machine_config',return_value=admission.config), \
+                mock.patch.object(publisher,'recovery_status',return_value=status), \
+                mock.patch.object(generation,'generation_admission_snapshot',snapshot), \
+                mock.patch.object(exporter,'exporter_version',return_value='0'*40), \
+                mock.patch.object(self.manager,'open_rpc') as rpc:
+            httpd=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
+            thread=threading.Thread(target=httpd.serve_forever);thread.start()
+            body={'id':account['id'],'machine':machine.name,'operation_id':result['operation']['id'],'pause_id':pause['id']}
+            def post(value, *, trusted=True):
+                conn=http.client.HTTPConnection('127.0.0.1',httpd.server_port,timeout=3)
+                try:
+                    headers={'Content-Type':'application/json','X-Agent-Monitor':'codex-accounts',
+                        'Origin':f'http://127.0.0.1:{httpd.server_port}' if trusted else 'http://untrusted.example'}
+                    conn.request('POST','/api/codex-accounts/commit-recovery',json.dumps(value),headers)
+                    response=conn.getresponse();return response.status,json.loads(response.read())
+                finally:conn.close()
+            try:
+                self.assertEqual(post(body,trusted=False)[0],403)
+                self.assertEqual(post({**body,'pause_id':'wrong'})[0],409)
+                self.assertEqual(post({**body,'operation_id':'wrong'})[0],409)
+                code,saved=post(body)
+                self.assertEqual(code,200)
+                self.assertEqual(saved['operation']['id'],self.original_id)
+                self.assertEqual(saved['operation']['stage'],'succeeded')
+                self.assertEqual(post(body)[0],409)
+                rpc.assert_not_called()
+                with mock.patch('agent_monitor.quota.quota_view.hub.enabled',return_value=True):
+                    self.assertEqual(QuotaView(mock.Mock(),publisher).live_from_admission(admission)['codex']['accounts'][0]['seven_day_used_pct'],0)
+            finally:
+                httpd.shutdown();httpd.server_close();thread.join(timeout=3)
 
 
 if __name__ == "__main__":

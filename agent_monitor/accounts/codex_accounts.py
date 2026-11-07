@@ -854,7 +854,8 @@ class Manager:
         from parsers.accounts import Account
         cache_path = self.root.parent / "quota_snapshot.json"
         quota_service.record_codex_reading(cache_path,
-            Account(record["account_id"], record["email"], None), reading)
+            Account(record["account_id"], record["email"], None), reading,
+            account_profile="monitor-" + record["id"], profile_root=self.root)
         rows = (quota_service.read_cache(cache_path).get("codex") or {}).get("managed_accounts", [])
         fresh = next((row for row in rows if row.get("account_profile") == "monitor-" + record["id"]
                    and row.get("account_id") == record["account_id"]
@@ -881,6 +882,8 @@ class Manager:
             "request": {**previous["request"], "pause_id": recovery["pause_id"], "mode": "reauthorize",
                         "operation_id": recovery["operation_id"]},
             "reauthorization_operation_id": login_operation_id,
+            "network": copy.deepcopy((record["operation"].get("diagnostics") or {}).get("network")
+                                     or {"coverage": "unavailable", "events": []}),
             "previous_recovery": previous,
             "authentication_recovery": {"outcome": "quota_confirmed",
                 "initial_failure": previous["authentication_recovery"]["initial_failure"]}}
@@ -903,6 +906,56 @@ class Manager:
             # the normal failure path must not run on the candidate success.
             self.save(directory, record)
             raise
+
+    def commit_saved_recovery(self, profile_id, operation_id, pause_id, *, publication):
+        """Complete retained local work; never create an RPC or provider job."""
+        if not callable(publication):
+            raise ActionError("本地配额发布入口不可用，暂停保留。", 503)
+        with self.guard:
+            if self.stopping or profile_id in self.jobs:
+                raise ActionError("账号服务仍有操作，请等待结束。", 409)
+            directory = self.directory(profile_id)
+            with lock_file(directory / ".lock"):
+                record = self.read(directory)
+                state = self.controls.read("codex")
+                binding = codex_quota.local_commit_context(record, state)
+                if not binding or binding["operation_id"] != operation_id or binding["pause_id"] != pause_id:
+                    raise ActionError("已有结果、账号或暂停已变化，请更新状态。", 409)
+                self.check_restrictions(record)
+                codex_quota.check_identity(directory / "codex/auth.json", record["account_id"], record["email"])
+                recovery = copy.deepcopy(record["operation"]["recovery"])
+                recovery["pause_id"] = pause_id
+                job = {"cancelled": threading.Event(), "login_recovery": recovery,
+                       "quota_publication": publication}
+                try:
+                    lease = self.controls.acquire("codex", probe_pause_id=pause_id)
+                except (Paused, Busy) as exc:
+                    raise ActionError(str(exc), 409) from None
+                try:
+                    self.finish_reauthorization(directory, record, job, lease, record["operation"]["candidate_quota"])
+                except Exception as exc:
+                    record["operation"].setdefault("diagnostics", {})["local_commit"] = diagnostic_evidence.failure_details(
+                        exc, stage="recovery_commit", detail="本地保存未完成，已有配额结果与暂停保留。")
+                    record["operation"]["detail"] = "本地保存未完成；保留已有配额结果，不需要重新授权或查询。"
+                    self.save(directory, record)
+                    raise ActionError(record["operation"]["detail"], 503) from None
+                finally:
+                    try:
+                        if not job.get("recovery_committed"):
+                            current = self.controls.read("codex")
+                            if (current.get("active") == lease.state.get("active")
+                                    and (current.get("pause") or {}).get("id") == pause_id
+                                    and (current.get("pause") or {}).get("probe_attempt")
+                                    == (lease.state.get("pause") or {}).get("probe_attempt")):
+                                # This local attempt started without a probe. Remove
+                                # only its own marker; no provider budget is reset.
+                                current["pause"].pop("probe_attempt", None)
+                                current.pop("active", None)
+                                current["released_at"] = time.time()
+                                self.controls._save("codex", current)
+                    finally:
+                        lease.close(completed=False)
+                return self.view(directory)
 
     def start_refresh_batch(self, profile_ids, *, network_route=None, retry_revision=None, expected_revision=...):
         """Queue one quota-only operation for every current account serially."""
@@ -1195,7 +1248,8 @@ class Manager:
                 from agent_monitor.quota import quota_service
                 from parsers.accounts import Account
                 quota_service.record_codex_reading(self.root.parent / "quota_snapshot.json",
-                    Account(record["account_id"], record["email"], None), reading)
+                    Account(record["account_id"], record["email"], None), reading,
+                    account_profile="monitor-" + record["id"], profile_root=self.root)
 
     def identity(self, rpc, directory, record):
         account = rpc.request("account/read", {"refreshToken": False}, time.monotonic() + 20).get("account")
@@ -1357,6 +1411,7 @@ class Manager:
                     rpc.diagnostics["rpc_failure"] = {"stage": "quota_parse", "kind": "invalid_result",
                         "detail": "复验未返回当前有效配额窗口，暂停保留。"}
                     raise ActionError("复验未返回当前有效配额窗口，暂停保留。", 502)
+                rpc.diagnostics["network"] = network_policy.observations(rpc.network_route)
                 self.update(directory, record, stage="saving", candidate_quota=after,
                             diagnostics=copy.deepcopy(rpc.diagnostics),
                             detail="已取得配额，正在核验有效窗口并保存、发布与结清原任务。")

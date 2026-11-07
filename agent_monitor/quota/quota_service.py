@@ -490,12 +490,41 @@ def clear_pause_projection(block):
         block["refresh_error"] = None
 
 
-def record_codex_reading(cache_path, account, reading):
+def monitor_profile_record(profile, account_id, label, *, profile_root):
+    """Admit local Monitor metadata without consulting credentials or collectors."""
+    try:
+        if not isinstance(profile, str) or not profile.startswith("monitor-"):
+            return None
+        identity = profile.removeprefix("monitor-")
+        if str(uuid.UUID(identity)) != identity or not account_id or not label:
+            return None
+        directory = Path(profile_root) / identity
+        path = directory / "profile.json"
+        if directory.is_symlink() or path.is_symlink():
+            return None
+        record = json.loads(path.read_text())
+        if (record.get("id") == identity and accounts.quota_identity("codex", record.get("account_id"), record.get("email"))
+                == accounts.quota_identity("codex", account_id, label)):
+            return record
+        return None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def monitor_profile_matches(profile, account_id, label, *, profile_root):
+    return monitor_profile_record(profile, account_id, label, profile_root=profile_root) is not None
+
+
+def record_codex_reading(cache_path, account, reading, *, account_profile=None, profile_root=None):
     """Publish an account action's observation to already known collection targets."""
     value = RateLimits(reading.get("five_hour_used_pct"), reading.get("five_hour_resets_at"),
                        reading.get("seven_day_used_pct"), reading.get("seven_day_resets_at"),
                        updated_at=reading["observed_at"], plan=reading.get("plan"),
-                       quota_observation={"source": "active_query", "observed_at": reading["observed_at"]})
+                       quota_observation={"source": "active_query", "observed_at": reading["observed_at"]},
+                       codex_quota_available=reading.get("codex_quota_available"),
+                       ordinary_usage_allowed=reading.get("ordinary_usage_allowed"),
+                       spend_control_reached=reading.get("spend_control_reached"),
+                       rate_limit_reached_type=reading.get("rate_limit_reached_type"))
     fresh = rate_limit_block(value, account)
     fresh.update(refresh_attempted_at=reading["observed_at"], refresh_error=None, refresh_failure=None,
                  signed_out=False, query_state="succeeded")
@@ -504,6 +533,11 @@ def record_codex_reading(cache_path, account, reading):
     def matches(row):
         return accounts.quota_identity("codex", row.get("account_id"), row.get("account_label")) == identity
     rows = [dict(fresh, account_profile=row["account_profile"]) for row in previous.get("managed_accounts", []) if matches(row)]
+    if account_profile is not None:
+        if profile_root is None or not monitor_profile_matches(account_profile, account.account_id, account.label, profile_root=profile_root):
+            raise ValueError("Monitor 账号来源已变化，未保存配额结果。")
+        if not any(row["account_profile"] == account_profile for row in rows):
+            rows.append(dict(fresh, account_profile=account_profile))
     result = dict(fresh) if matches(previous) else {}
     if rows:
         result["managed_accounts"] = rows

@@ -84,6 +84,7 @@ def local_status():
     blocked_reason = account_holds.blocked(exporter.ROOT / "state", account.account_id, account.label) if account else None
     auth_recovery_available = False
     login_recovery = None
+    local_commit = None
     if source == "managed" and profile and profile.startswith("monitor-"):
         from agent_monitor.quota.codex_quota import revoked_quota_failure
         try:
@@ -92,6 +93,8 @@ def local_status():
             from agent_monitor.quota.codex_quota import reauthorization_context
             if account and not blocked_reason and hub_config.is_hub():
                 login_recovery = reauthorization_context(record, state)
+                from agent_monitor.quota.codex_quota import local_commit_context
+                local_commit = local_commit_context(record, state)
             operation = record.get("operation") or {}
             auth_recovery_available = bool(account and not blocked_reason and revoked_quota_failure(failure)
                 and record.get("account_id") == account.account_id
@@ -108,6 +111,7 @@ def local_status():
                         "source": source, "profile": home.parent.name if source == "managed" else None,
                         "auth_recovery_available": auth_recovery_available,
                         "login_recovery": login_recovery,
+                        "local_commit": local_commit,
                         "blocked_reason": blocked_reason,
                         "credential_path": str(auth), "quota_profile": profile or ""},
             "last_recovery": state.get("last_recovery")}

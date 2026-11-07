@@ -688,6 +688,27 @@ class Handler(BaseHTTPRequestHandler):
                     raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
                 route.consume(payload.get("confirmation"), [account_id], batch_id, "login")
                 result = manager.start(account_id, login_only=True, network_route=route)
+            elif path == "/api/codex-accounts/commit-recovery":
+                if not hub.is_hub():
+                    raise codex_accounts.ActionError("请通过账号所在 Hub 保存已有结果。", 409)
+                config = sync.load_machine_config()
+                machine = config.by_name.get(payload.get("machine"))
+                if machine is None or not machine.is_self:
+                    raise codex_accounts.ActionError("保存目标与账号所在机器不一致。", 409)
+                with QUOTA_REFRESH.recovery_scope() as available:
+                    if not available:
+                        raise codex_accounts.ActionError("已有配额操作，请等待结束。", 409)
+                    current = QUOTA_REFRESH.recovery_status(machine)
+                    binding = (current.get("account") or {}).get("local_commit")
+                    if (not binding or binding["pause_id"] != payload.get("pause_id")
+                            or binding["operation_id"] != payload.get("operation_id")
+                            or (current.get("account") or {}).get("quota_profile") != "monitor-" + str(payload.get("id"))):
+                        raise codex_accounts.ActionError("已有结果或暂停已变化，请更新状态。", 409)
+                    def publication(block):
+                        return QUOTA_REFRESH.managed_recovery_publication(machine, "monitor-" + payload["id"], block,
+                            expected_source=current["source_host_identity"])
+                    result = manager.commit_saved_recovery(payload["id"], binding["operation_id"], binding["pause_id"],
+                        publication=publication)
             elif path == "/api/codex-accounts/resume":
                 result = manager.resume(payload.get("id"), payload.get("operation_id"), payload.get("pause_id"))
             elif path == "/api/codex-accounts/cancel":

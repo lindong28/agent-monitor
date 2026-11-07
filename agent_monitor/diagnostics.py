@@ -26,7 +26,7 @@ _STAGES = {"unknown", "account_api", "admission", "child_start", "child_result",
            "network_start", "quota_worker", "pause_save", "recovery_commit"}
 _KINDS = {"exception", "rpc_error", "http_error", "timeout", "process_exit",
           "invalid_result", "account_missing", "account_mismatch", "missing_windows"}
-_ERROR_TYPES = {"Exception", "RuntimeError", "RefreshError", "NotSignedIn", "LocalUnavailable",
+_ERROR_TYPES = {"Exception", "RuntimeError", "GenerationError", "RefreshError", "NotSignedIn", "LocalUnavailable",
                 "OSError", "PermissionError", "FileNotFoundError", "TimeoutError", "TimeoutExpired",
                 "CalledProcessError", "HTTPError", "URLError", "JSONDecodeError", "ValueError",
                 "KeyError", "TypeError", "BrokenPipeError", "ConnectionError", "ConnectionResetError"}

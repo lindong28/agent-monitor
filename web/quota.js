@@ -528,7 +528,7 @@
     return box;
   }
 
-  function createRecoveryPanel(machine = "self", {onContinue, sourceFailure = null} = {}) {
+  function createRecoveryPanel(machine = "self", {onContinue, onSaved, sourceFailure = null} = {}) {
     function canRenewAuth(value) {
       const failure = value?.pause?.failure;
       return Boolean(value?.account?.auth_recovery_available === true && value.account.source === "managed" && value.account.quota_profile?.startsWith("monitor-")
@@ -560,10 +560,12 @@
     const probe = make("button", "重新检查配额");
     const relogin = make("button", "重新授权并复验配额");
     relogin.hidden = true;
+    const commit = make("button", "保存已有配额结果");
+    commit.hidden = true;
     const help = make("button", "查看排查步骤");
     const resume = make("button", "返回账号操作");
     const copy = make("button", "复制诊断信息", "btn");
-    for (const [button, action] of [[read,"read"],[probe,"probe"],[relogin,"reauthorize"],[help,"help"],[resume,"continue"],[copy,"copy"]]) {
+    for (const [button, action] of [[read,"read"],[probe,"probe"],[relogin,"reauthorize"],[commit,"commit"],[help,"help"],[resume,"continue"],[copy,"copy"]]) {
       button.type = "button";
       button.className = "btn";
       button.setAttribute("data-recovery-action", action);
@@ -573,7 +575,7 @@
     report.setAttribute("aria-label", "诊断信息，可选择后复制");
     const copyNotice = make("p");
     copyNotice.setAttribute("role", "status");
-    actions.append(probe, relogin, help, resume, read);
+    actions.append(probe, relogin, commit, help, resume, read);
     const technicalBody = make("div", "", "disclosure-body recovery-technical-body");
     technicalBody.append(context, details, copy, copyNotice, report);
     technical.appendChild(technicalBody);
@@ -670,6 +672,9 @@
       relogin.hidden = mode !== "auth-unresolved" || !a.login_recovery
         || a.login_recovery.pause_id !== pause?.id;
       relogin.disabled = busy || relogin.hidden;
+      commit.hidden = mode !== "local-commit" || !a.local_commit || a.local_commit.pause_id !== pause?.id;
+      commit.disabled = busy || commit.hidden;
+      if (!commit.hidden) effect.textContent = "只保存并发布已取得的结果，不登录、不查询上游，也不发送消息。";
       if (!relogin.hidden) effect.textContent = "需要本人在官方页面授权。设备确认等待最多 10 分钟，另有初始化、身份及配额检查的有界阶段；期间占用本机 Codex 通道，不发送消息。";
       if (renewAuth) {
         probe.textContent = "刷新认证并检查配额";
@@ -680,14 +685,14 @@
       resume.hidden = mode !== "ready" || !onContinue;
       read.disabled = busy;
       read.textContent = ["unknown", "unknown-outcome"].includes(mode) ? "重新读取状态" : mode === "active" ? "更新进度" : "更新状态";
-      const primary = !relogin.hidden ? relogin : renewAuth || ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["local-commit","auth-unresolved","failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
-      for (const button of [read,probe,relogin,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
+      const primary = !commit.hidden ? commit : !relogin.hidden ? relogin : renewAuth || ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["local-commit","auth-unresolved","failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
+      for (const button of [read,probe,relogin,commit,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
       steps.replaceChildren();
       const list = make("ol");
       const host = value?.machine || "执行机器";
       const instructions = mode === "local-commit" ? [
         "本次配额复验已有候选结果，但本地核验、保存或正常配额页发布尚未结清，暂停仍保留。",
-        `由维护者核对 ${host} 上本次本地保存/发布错误与原任务的候选观测，修复后利用已有结果处理，不先重复授权或查询。`,
+        !commit.hidden ? "点击“保存已有配额结果”只继续本地保存。若仍失败，保留诊断交由维护者修复，不先重复授权或查询。" : `由维护者核对 ${host} 上本次本地保存/发布错误与原任务的候选观测，修复后利用已有结果处理，不先重复授权或查询。`,
         "保留原任务和恢复链；不要删除暂停记录。技术详情列出已取得的本地错误类别。"
       ] : mode === "auth-unresolved" ? [
         "本次官方认证刷新没有确认写入新凭据，程序未查询配额，原错误和暂停仍保留。",
@@ -825,6 +830,29 @@
     }
     probe.addEventListener("click", () => requestRecovery());
     relogin.addEventListener("click", () => requestRecovery(true));
+    commit.addEventListener("click", async () => {
+      const binding = state?.account?.local_commit;
+      const profile = state?.account?.quota_profile;
+      if (busy || !binding || !profile?.startsWith("monitor-")) return;
+      busy = true; render(state);
+      notice.textContent = "正在保存已有结果，不查询上游…";
+      let success = false, message = "";
+      try {
+        const {response, value} = await requestJSON("/api/codex-accounts/commit-recovery", {
+          method:"POST", headers:{"Content-Type":"application/json", "X-Agent-Monitor":"codex-accounts"},
+          body:JSON.stringify({id:profile.slice("monitor-".length), machine:state.machine,
+            operation_id:binding.operation_id, pause_id:binding.pause_id}),
+        });
+        success = response.ok;
+        message = success ? "已有配额结果已保存，原查询任务已结清；未发出上游请求。" : value.error || "本地保存未完成；先更新状态，不要重新授权。";
+      } catch {
+        message = "本地保存回执未取得；先更新状态核对结果，不要重复授权或查询。";
+      }
+      busy = false;
+      await refresh();
+      if (success) await onSaved?.();
+      notice.textContent = message;
+    });
     refresh();
     return panel;
   }

@@ -431,7 +431,7 @@ export function init({ autoLoad = true } = {}) {
     if (!recoveryBody) return;
     let panel = recoveryBody.querySelector(".quota-recovery-panel");
     if (!panel) {
-      panel = window.AgentMonitor.createRecoveryPanel?.("self", {onContinue: async () => {
+      panel = window.AgentMonitor.createRecoveryPanel?.("self", {onSaved: () => load(), onContinue: async () => {
         await load();
         setBatchMode(true);
         const next = quotaBatch ? (quotaRetry && !quotaRetry.hidden ? quotaRetry : refreshSelected)
@@ -636,6 +636,7 @@ export function init({ autoLoad = true } = {}) {
           card.append(box, element("p", op.recovery
             ? `请确认官方页面登录的是 ${account.email} 及原工作区。官方授权成功且新凭据身份核验通过后，将复验一次配额；有效读数保存并发布后才结清原任务和暂停。不发送消息。设备确认最多等待 10 分钟，另有有界的身份、配额与保存阶段；期间占用本机 Codex 通道。`
             : `请确认官方页面登录的是 ${account.email}。授权成功后仅保存登录态，不自动发送或查询；最多等待 10 分钟。`, "quota-scope"));
+          if (op.recovery) card.append(element("p", "后台认证与配额检查使用执行机器的 Monitor 路由桥；官方授权网页使用浏览器自己的网络。需要网页同出口时，请先核实浏览器路由。", "quota-scope"));
         }
         if (latestReading) {
           const reading = element("dl", undefined, "codex-account-reading");
