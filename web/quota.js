@@ -89,15 +89,9 @@
     if (quotaFilter.sort === "default") return entries.slice();
     const readingValue = ({ provider, account }) => {
       const reading = quotaDisplayReading(provider, account);
-      if (quotaFilter.sort === "observed") {
+      if (["observed", "observed_asc"].includes(quotaFilter.sort)) {
         const observed = Date.parse(reading.updated_at);
-        return Number.isFinite(observed) ? [-observed] : null;
-      }
-      if (quotaFilter.sort === "remaining_reset") {
-        const used = reading[quotaFilter.window + "_used_pct"];
-        const reset = reading[quotaFilter.window + "_resets_at"];
-        return quotaUsage(used).known && used < 100 && typeof reset === "number" && Number.isFinite(reset) && reset > now
-          ? [reset, used] : null;
+        return Number.isFinite(observed) ? [quotaFilter.sort === "observed" ? -observed : observed] : null;
       }
       const remaining = ["remaining", "remaining_desc"].includes(quotaFilter.sort);
       const key = quotaFilter.window + (remaining ? "_used_pct" : "_resets_at");
@@ -107,7 +101,7 @@
         if (!quotaUsage(value).known) return null;
         return [quotaFilter.sort === "remaining_desc" ? value - 100 : 100 - value];
       }
-      return value > now ? [value] : null;
+      return value > now ? [quotaFilter.sort === "reset_desc" ? -value : value] : null;
     };
     return entries.map((entry, index) => ({ entry, index, value: readingValue(entry) }))
       .sort((a,b) => a.value === null ? (b.value === null ? a.index-b.index : 1)
@@ -130,10 +124,44 @@
     return terms.every((term) => text.includes(term));
   }
 
+  const QUOTA_SORT_DIRECTIONS = {
+    usage: ["remaining_desc", "remaining"],
+    reset: ["reset", "reset_desc"],
+    observed: ["observed_asc", "observed"],
+  };
+
+  function quotaSortButtons() {
+    return qs("#quota-accounts")?.querySelectorAll?.("button[data-quota-sort]") || [];
+  }
+
+  function syncQuotaSort() {
+    ["window", "sort"].forEach(key => {
+      const select = qs("#quota-" + key);
+      if (select) select.value = quotaFilter[key];
+    });
+    quotaSortButtons().forEach(button => {
+      const directions = QUOTA_SORT_DIRECTIONS[button.dataset.quotaSort];
+      const active = directions.includes(quotaFilter.sort)
+        && (!button.dataset.quotaWindow || button.dataset.quotaWindow === quotaFilter.window);
+      const ascending = quotaFilter.sort === directions[0];
+      button.parentNode.setAttribute("aria-sort", active ? (ascending ? "ascending" : "descending") : "none");
+      button.querySelector(".quota-sort-icon").textContent = active ? (ascending ? "↑" : "↓") : "↕";
+    });
+  }
+
   function bindQuotaExplorer() {
     const explorer = qs("#quota-explorer");
     if (!explorer || boundQuotaExplorer === explorer) return;
     boundQuotaExplorer = explorer;
+    quotaSortButtons().forEach(button => button.addEventListener("click", () => {
+      const directions = QUOTA_SORT_DIRECTIONS[button.dataset.quotaSort];
+      const sameWindow = !button.dataset.quotaWindow || button.dataset.quotaWindow === quotaFilter.window;
+      const initial = button.dataset.quotaSort === "observed" ? directions[1] : directions[0];
+      quotaFilter.sort = sameWindow && directions.includes(quotaFilter.sort)
+        ? directions[1 - directions.indexOf(quotaFilter.sort)] : initial;
+      if (button.dataset.quotaWindow) quotaFilter.window = button.dataset.quotaWindow;
+      renderQuotaAccounts(renderedQuotaRateLimits);
+    }));
     const search = qs("#quota-search");
     const buttons = explorer.querySelectorAll("[data-quota-provider]");
     search.value = quotaFilter.search;
@@ -298,7 +326,7 @@
     const table = qs("#quota-accounts");
     const reset = qs("#quota-clear");
     const windowControl = qs("#quota-window-control");
-    if (windowControl) windowControl.hidden = !["remaining", "remaining_desc", "reset", "remaining_reset"].includes(quotaFilter.sort);
+    if (windowControl) windowControl.hidden = !["remaining", "remaining_desc", "reset", "reset_desc"].includes(quotaFilter.sort);
     if (reset) reset.hidden = quotaFilter.provider === "all" && !quotaFilter.search
       && quotaFilter.window === "five_hour" && quotaFilter.sort === "default";
     if (!table) {
@@ -310,6 +338,7 @@
     };
     renderedQuotaRateLimits = rateLimits;
     bindQuotaExplorer();
+    syncQuotaSort();
     const history = qs("#quota-past-accounts");
     const rememberedExpanded = options.rememberedExpanded ?? (history ? !history.hidden : initialQuotaHistoryExpanded);
     const focusedObservation = document.activeElement?.closest?.(".quota-observation-details")?.dataset.observationKey;
@@ -371,7 +400,7 @@
       const body = document.createElement("tbody");
       body.className = "quota-filter-empty";
       const cell = document.createElement("td");
-      cell.colSpan = 7;
+      cell.colSpan = 9;
       cell.textContent = "没有匹配的配额记录。可清空筛选查看全部；这不表示配额可用或已用尽。";
       const row = document.createElement("tr");
       row.appendChild(cell);
@@ -955,7 +984,7 @@
     const body = previous || document.createElement("tbody");
     if (!body.quotaDiagnostics) {
       const row = document.createElement("tr"), cell = document.createElement("td");
-      cell.colSpan = 7;
+      cell.colSpan = 9;
       const details = document.createElement("details");
       details.className = "note-disclosure quota-failure-details";
       const summary = document.createElement("summary");
@@ -1143,7 +1172,7 @@
     const summaryRow = document.createElement("tr");
     summaryRow.className = "quota-row quota-summary";
     const summaryCell = document.createElement("td");
-    summaryCell.colSpan = 7;
+    summaryCell.colSpan = 9;
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "quota-toggle quota-past-toggle";
@@ -1208,12 +1237,15 @@
     row.appendChild(quotaAccountCell(provider, account));
     row.appendChild(quotaProviderCell(provider));
     row.appendChild(quotaPlanCell(display, provider));
-    QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell(provider, spec, display)));
+    QUOTA_COLUMNS.forEach((spec) => {
+      row.appendChild(quotaWindowCell(provider, spec, display));
+      row.appendChild(quotaResetCell(provider, spec, display));
+    });
     row.appendChild(quotaMachinesCell(account, display));
     row.appendChild(quotaUpdatedCell(provider, display, stale, display.quota_source === "account_action"
       ? null : quotaRefreshNotice(provider, account)));
     Array.from(row.children).forEach((cell, index) => {
-      cell.dataset.label = ["账号", "服务商", "套餐记录", "5 小时已用", "7 天已用", "机器", "配额更新"][index];
+      cell.dataset.label = ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间", "机器", "配额更新"][index];
     });
     return row;
   }
@@ -1550,15 +1582,12 @@
     }
 
     const { known, used, band } = quotaUsage(account[spec.used]);
-    const renderedAtMs = Date.now();
-    const resetEpoch = account[spec.reset];
-    const resetState = quotaResetState(resetEpoch, renderedAtMs);
-    if (!known && resetState === "unknown") {
+    if (!known) {
       const missing = document.createElement("span");
       missing.className = "quota-window-reason";
       missing.textContent = "未知";
-      missing.setAttribute("aria-label", "用量与重置时间未知");
-      missing.title = "用量与重置时间未知";
+      missing.setAttribute("aria-label", "用量未知");
+      missing.title = "用量未知";
       cell.appendChild(missing);
       return cell;
     }
@@ -1586,6 +1615,19 @@
     line.appendChild(usage);
     cell.appendChild(line);
 
+    return cell;
+  }
+
+  function quotaResetCell(provider, spec, account) {
+    const cell = document.createElement("td");
+    cell.className = "quota-reset-cell";
+    if (account.quota_status === "no_subscription" || !provider.windows.some(window => window.key === spec.key)) {
+      cell.textContent = "不适用";
+      return cell;
+    }
+    const renderedAtMs = Date.now();
+    const resetEpoch = account[spec.reset];
+    const resetState = quotaResetState(resetEpoch, renderedAtMs);
     const reset = document.createElement("div");
     reset.className = "quota-window-reset";
     reset.textContent = quotaPresence(account) === "remembered" && resetState === "unknown"
@@ -1594,7 +1636,7 @@
     if (resetState !== "unknown") {
       reset.title = resetText(resetEpoch, renderedAtMs);
     }
-    line.appendChild(reset);
+    cell.appendChild(reset);
     return cell;
   }
 
@@ -1978,7 +2020,7 @@
     row.appendChild(head);
 
     const detail = document.createElement("td");
-    detail.colSpan = 4;
+    detail.colSpan = 6;
     detail.className = "quota-updated-cell";
     detail.textContent = reason || "无已纳入的数据源";
     row.appendChild(detail);
@@ -1993,5 +2035,5 @@
     initialQuotaHistoryExpanded = Boolean(options.rememberedExpanded);
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
-  return { renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
+  return { renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaResetCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
 });

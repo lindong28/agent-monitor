@@ -158,15 +158,15 @@
               <label class="quota-search-label" for="quota-search">搜索账号、套餐或机器
                 <input id="quota-search" type="search" autocomplete="off" placeholder="邮箱、Pro、机器名…">
               </label>
-              <label for="quota-sort">排序 <select id="quota-sort"><option value="default">默认顺序</option><option value="remaining_desc">剩余额度多优先</option><option value="remaining_reset">有余额且即将重置优先</option><option value="remaining">剩余额度少优先</option><option value="reset">即将重置优先</option><option value="observed">最近观测优先</option></select></label>
-              <label id="quota-window-control" for="quota-window" hidden>排序窗口 <select id="quota-window"><option value="five_hour">5 小时配额窗口</option><option value="seven_day">7 天配额窗口</option></select></label>
+              <label class="quota-mobile-sort" for="quota-sort">排序 <select id="quota-sort"><option value="default">默认顺序</option><option value="remaining_desc">剩余额度多优先</option><option value="remaining">剩余额度少优先</option><option value="reset">即将重置优先</option><option value="reset_desc">较晚重置优先</option><option value="observed">最近观测优先</option><option value="observed_asc">较早观测优先</option></select></label>
+              <label class="quota-mobile-sort" id="quota-window-control" for="quota-window" hidden>排序窗口 <select id="quota-window"><option value="five_hour">5 小时配额窗口</option><option value="seven_day">7 天配额窗口</option></select></label>
               <button id="quota-clear" type="button" class="btn" hidden>重置筛选与排序</button>
             </div>
             <p id="quota-match-count" class="quota-scope" role="status" aria-live="polite"></p>
             <p id="quota-signed-out" class="quota-scope" hidden></p>
             <!-- Focusable and named: on narrower viewports this box is the only
                  way to reach the later columns, and a scroller a keyboard
-                 cannot enter hides part of the seven-column comparison. -->
+                 cannot enter hides part of the nine-column comparison. -->
             <div class="quota-table-wrap" tabindex="0" role="region" aria-label="按账号的配额">
             <table id="quota-accounts" class="quota-table">
               <thead>
@@ -174,10 +174,12 @@
                   <th scope="col" class="quota-identity">账号</th>
                   <th scope="col">服务商</th>
                   <th scope="col">套餐记录</th>
-                  <th scope="col" class="numeric">5 小时已用</th>
-                  <th scope="col" class="numeric">7 天已用</th>
+                  <th scope="col" class="numeric"><button type="button" class="quota-sort-button" data-quota-sort="usage" data-quota-window="five_hour">5 小时已用 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
+                  <th scope="col"><button type="button" class="quota-sort-button" data-quota-sort="reset" data-quota-window="five_hour">5 小时重置时间 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="numeric"><button type="button" class="quota-sort-button" data-quota-sort="usage" data-quota-window="seven_day">7 天已用 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
+                  <th scope="col"><button type="button" class="quota-sort-button" data-quota-sort="reset" data-quota-window="seven_day">7 天重置时间 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
                   <th scope="col">机器</th>
-                  <th scope="col">配额更新</th>
+                  <th scope="col"><button type="button" class="quota-sort-button" data-quota-sort="observed">配额更新 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
                 </tr>
               </thead>
             </table>

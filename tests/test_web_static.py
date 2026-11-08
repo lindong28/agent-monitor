@@ -820,7 +820,7 @@ require("./web/app.js")();
         # The config constrains rendering only if the renderer reads it. Without
         # these, a row that emitted a value for every column would leave the
         # assertions above true while every Codex row grew a 5h figure.
-        self.assertIn("QUOTA_COLUMNS.forEach((spec) => row.appendChild(quotaWindowCell", js)
+        self.assertIn("row.appendChild(quotaWindowCell(provider, spec, display))", js)
         # "n/a" and the em dash are different facts: no such window at all, vs
         # no reading for one that exists. One glyph in two weights carries
         # neither to a screen reader nor to anyone who cannot hover a tooltip.
@@ -1051,8 +1051,8 @@ process.stdout.write(JSON.stringify({
         self.assertIn('<table id="quota-accounts"', prose)
         header = re.search(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", prose).group(1)
         self.assertEqual(
-            re.findall(r">([^<]+)</th>", header),
-            ["账号", "服务商", "套餐记录", "5 小时已用", "7 天已用", "机器", "配额更新"],
+            [re.sub(r"<[^>]+>", "", cell).replace("↕", "").strip() for cell in re.findall(r"<th[^>]*>(.*?)</th>", header)],
+            ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间", "机器", "配额更新"],
         )
         # Two files decide one thing. The header row is static markup; the cells
         # under it are emitted in QUOTA_COLUMNS order. Reorder one and every
@@ -1096,7 +1096,7 @@ process.stdout.write(JSON.stringify({
         self.assertIn("`${used}%`", cell)
         self.assertIn("quotaMeter(used)", cell)
         self.assertNotIn("quotaBandPill", cell)
-        self.assertIn('line.appendChild(reset)', cell)
+        self.assertIn('cell.appendChild(reset)', cell)
 
     def test_plan_source_details_explain_only_actual_raw_record_differences(self):
         """Missing, historical and equal sources must not imply a conflict."""
@@ -1361,7 +1361,7 @@ const base = {
 };
 
 function reading(row) {
-  const windows = row.cells.slice(3, 5);
+  const windows = [row.cells[3], row.cells[5]];
   return {
     cellCount: row.cells.length,
     rowClass: row.className,
@@ -1369,7 +1369,7 @@ function reading(row) {
     providerPillClass: byClass(row.cells[1], "pill")[0]?.className || "",
     planText: row.cells[2].textContent,
     accountText: row.cells[0].textContent,
-    updateText: row.cells[6].textContent,
+    updateText: row.cells[8].textContent,
     warningTexts: byClass(row, "status-pill")
       .map((node) => node.textContent)
       .filter((text) => text === "余量偏低" || text === "即将用尽"),
@@ -1381,7 +1381,7 @@ function reading(row) {
     observedTexts: byClass(row, "quota-window-observed").map((node) => node.textContent),
     amounts: windows.map((cell) => byClass(cell, "quota-window-value")[0]?.textContent || null),
     fills: windows.map((cell) => byClass(cell, "quota-meter-fill")[0]?.style.values["--quota-fill"] || null),
-    resets: windows.map((cell) => {
+    resets: [row.cells[4], row.cells[6]].map((cell) => {
       const reset = byClass(cell, "quota-window-reset")[0];
       return reset ? { text: reset.textContent, title: reset.title || "" } : null;
     }),
@@ -1432,7 +1432,7 @@ Date.now = () => {
   boundaryClockReads += 1;
   return boundaryClockReads === 1 ? now * 1000 - 1 : now * 1000 + 1;
 };
-const rememberedBoundary = windowReading(window.AgentMonitor.quotaWindowCell(
+const rememberedBoundary = windowReading(window.AgentMonitor.quotaResetCell(
   provider,
   provider.windows[0],
   { ...base, seven_day_resets_at: now },
@@ -1496,7 +1496,7 @@ process.stdout.write(JSON.stringify({
             },
         )
 
-        self.assertEqual(future["cellCount"], 7)
+        self.assertEqual(future["cellCount"], 9)
         self.assertEqual(future["providerText"], "Claude")
         self.assertIn("agent-claude-code", future["providerPillClass"])
         self.assertEqual(future["planText"], "Max 20×历史记录")
@@ -1867,9 +1867,9 @@ process.stdout.write(JSON.stringify({
             payload["unavailable"],
             payload["onlyRemembered"],
         ):
-            with self.subTest("every rendered row spans seven columns"):
+            with self.subTest("every rendered row spans nine columns"):
                 self.assertTrue(state)
-                self.assertEqual({row["columnTotal"] for row in state}, {7})
+                self.assertEqual({row["columnTotal"] for row in state}, {9})
 
     def test_only_remembered_rows_offer_confirmed_removal(self):
         script = r'''

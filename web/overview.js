@@ -267,7 +267,7 @@
       quotaFilter.provider = ["all", "claude", "codex"].includes(restored.get("quota_provider")) ? restored.get("quota_provider") : "all";
       quotaFilter.search = restored.get("quota_search") || "";
       quotaFilter.window = restored.get("quota_window") === "seven_day" ? "seven_day" : "five_hour";
-      quotaFilter.sort = ["default", "remaining", "remaining_desc", "reset", "remaining_reset", "observed"].includes(restored.get("quota_sort")) ? restored.get("quota_sort") : "default";
+      quotaFilter.sort = ["default", "remaining", "remaining_desc", "reset", "reset_desc", "observed", "observed_asc"].includes(restored.get("quota_sort")) ? restored.get("quota_sort") : "default";
     }
     let restoreQuotaReading = true;
     resetQuotaReadings({rememberedExpanded: restored.get("quota_history") === "true"});
