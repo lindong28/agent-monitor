@@ -41,6 +41,7 @@
   ];
   let renderedQuotaRateLimits = null;
   let codexQuotaReadings = [];
+  let initialQuotaHistoryExpanded = false;
   const quotaFilter = { provider: "all", search: "", window: "five_hour", sort: "default" };
   let boundQuotaExplorer = null;
 
@@ -52,7 +53,7 @@
 
   function updateCodexQuotaReadings(accounts) {
     const signature = (profiles) => JSON.stringify(profiles.map((account) => [
-      account.id, account.account_id, account.email.toLowerCase(), latestCodexQuotaReading(account),
+      account.id, account.account_id, account.email.toLowerCase(), Boolean(account.disabled), latestCodexQuotaReading(account),
     ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
     const changed = signature(accounts) !== signature(codexQuotaReadings);
     codexQuotaReadings = accounts;
@@ -78,13 +79,25 @@
     return display;
   }
 
-  function sortQuotaAccounts(provider, accounts, now = Date.now() / 1000) {
-    if (quotaFilter.sort === "default") return accounts.slice();
-    const readingValue = (account) => {
+  function quotaAccountDisabled(provider, account) {
+    return provider.key === "codex" && codexQuotaReadings.some(profile => profile.disabled
+      && profile.account_id === account.account_id
+      && profile.email.toLowerCase() === account.account_label?.toLowerCase());
+  }
+
+  function sortQuotaEntries(entries, now = Date.now() / 1000) {
+    if (quotaFilter.sort === "default") return entries.slice();
+    const readingValue = ({ provider, account }) => {
       const reading = quotaDisplayReading(provider, account);
       if (quotaFilter.sort === "observed") {
         const observed = Date.parse(reading.updated_at);
-        return Number.isFinite(observed) ? -observed : null;
+        return Number.isFinite(observed) ? [-observed] : null;
+      }
+      if (quotaFilter.sort === "remaining_reset") {
+        const used = reading[quotaFilter.window + "_used_pct"];
+        const reset = reading[quotaFilter.window + "_resets_at"];
+        return quotaUsage(used).known && used < 100 && typeof reset === "number" && Number.isFinite(reset) && reset > now
+          ? [reset, used] : null;
       }
       const remaining = ["remaining", "remaining_desc"].includes(quotaFilter.sort);
       const key = quotaFilter.window + (remaining ? "_used_pct" : "_resets_at");
@@ -92,13 +105,18 @@
       if (typeof value !== "number" || !Number.isFinite(value)) return null;
       if (remaining) {
         if (!quotaUsage(value).known) return null;
-        return quotaFilter.sort === "remaining_desc" ? value - 100 : 100 - value;
+        return [quotaFilter.sort === "remaining_desc" ? value - 100 : 100 - value];
       }
-      return value > now ? value : null;
+      return value > now ? [value] : null;
     };
-    return accounts.map((account, index) => ({ account, index, value: readingValue(account) }))
+    return entries.map((entry, index) => ({ entry, index, value: readingValue(entry) }))
       .sort((a,b) => a.value === null ? (b.value === null ? a.index-b.index : 1)
-        : b.value === null ? -1 : a.value-b.value || a.index-b.index).map(item => item.account);
+        : b.value === null ? -1 : a.value[0]-b.value[0] || (a.value[1] || 0)-(b.value[1] || 0) || a.index-b.index)
+      .map(item => item.entry);
+  }
+
+  function sortQuotaAccounts(provider, accounts, now = Date.now() / 1000) {
+    return sortQuotaEntries(accounts.map(account => ({provider, account})), now).map(entry => entry.account);
   }
 
   function quotaMatches(provider, account) {
@@ -280,7 +298,7 @@
     const table = qs("#quota-accounts");
     const reset = qs("#quota-clear");
     const windowControl = qs("#quota-window-control");
-    if (windowControl) windowControl.hidden = !["remaining", "remaining_desc", "reset"].includes(quotaFilter.sort);
+    if (windowControl) windowControl.hidden = !["remaining", "remaining_desc", "reset", "remaining_reset"].includes(quotaFilter.sort);
     if (reset) reset.hidden = quotaFilter.provider === "all" && !quotaFilter.search
       && quotaFilter.window === "five_hour" && quotaFilter.sort === "default";
     if (!table) {
@@ -292,8 +310,8 @@
     };
     renderedQuotaRateLimits = rateLimits;
     bindQuotaExplorer();
-    const rememberedExpanded = options.rememberedExpanded ?? Boolean(qs("#quota-past-accounts")
-      && !qs("#quota-past-accounts").hidden);
+    const history = qs("#quota-past-accounts");
+    const rememberedExpanded = options.rememberedExpanded ?? (history ? !history.hidden : initialQuotaHistoryExpanded);
     const focusedObservation = document.activeElement?.closest?.(".quota-observation-details")?.dataset.observationKey;
     const openObservations = new Set(Array.from(table.querySelectorAll?.(".quota-observation-details[open]") || [])
       .filter((node) => node.tagName === "DETAILS").map((node) => node.dataset.observationKey));
@@ -305,6 +323,7 @@
     Array.from(table.tBodies).forEach((body) => body.remove());
 
     const remembered = [];
+    const currentEntries = [];
     const allEntries = QUOTA_PROVIDERS.flatMap((provider) =>
       (rateLimits?.[provider.key]?.accounts || []).filter((account) => account.account_state === "known")
         .map((account) => ({ provider, account })));
@@ -312,11 +331,12 @@
     const count = qs("#quota-match-count");
     if (count) {
       const known = matches.filter(({ account }) => account.account_state === "known");
-      const current = known.filter(({ account }) => quotaPresence(account) === "in_use").length;
+      const disabled = known.filter(({ provider, account }) => quotaAccountDisabled(provider, account)).length;
+      const current = known.filter(({ provider, account }) => quotaPresence(account) === "in_use" && !quotaAccountDisabled(provider, account)).length;
       const history = known.filter(({ account }) => quotaPresence(account) === "remembered").length;
       const filtered = quotaFilter.provider !== "all" || quotaFilter.search.trim();
       count.textContent = (filtered ? `匹配 ${matches.length} / ${allEntries.length} 个账号 · ` : "")
-        + `机器关联 ${current} · 历史账号 ${history}`;
+        + `机器关联 ${current} · 历史账号 ${history}` + (disabled ? ` · 已停用 ${disabled}` : "");
     }
     QUOTA_PROVIDERS.forEach((provider) => {
       const block = rateLimits?.[provider.key];
@@ -332,19 +352,21 @@
           "机器观测见“采集与诊断”，不能据此选择可用账号。", "无已识别账号"));
         return;
       }
-      const accounts = sortQuotaAccounts(provider, sourceAccounts.filter((account) => account.account_state === "known" && quotaMatches(provider, account)));
-      const live = accounts.filter((account) => quotaPresence(account) === "in_use");
-      const named = live.filter((account) => account.account_state === "known");
-      if (named.length) {
-        table.appendChild(quotaBody(provider, named));
-      }
-      accounts
-        .filter((account) => quotaPresence(account) === "remembered")
-        .forEach((account) => remembered.push({ provider, account }));
+      sourceAccounts.filter((account) => account.account_state === "known" && quotaMatches(provider, account))
+        .forEach((account) => {
+          if (quotaPresence(account) === "remembered" || quotaAccountDisabled(provider, account)) remembered.push({provider, account});
+          else if (quotaPresence(account) === "in_use") currentEntries.push({provider, account});
+        });
     });
 
+    if (currentEntries.length) {
+      const body = document.createElement("tbody");
+      sortQuotaEntries(currentEntries).forEach(({provider, account}) => body.appendChild(quotaAccountRow(provider, account)));
+      table.appendChild(body);
+    }
     renderQuotaMachineRecords(rateLimits);
-    appendRememberedAccounts(table, remembered, rememberedExpanded);
+    appendRememberedAccounts(table, sortQuotaEntries(remembered), rememberedExpanded);
+    if (remembered.length) initialQuotaHistoryExpanded = false;
     if (!matches.length && (quotaFilter.provider !== "all" || quotaFilter.search.trim())) {
       const body = document.createElement("tbody");
       body.className = "quota-filter-empty";
@@ -1127,7 +1149,7 @@
     toggle.className = "quota-toggle quota-past-toggle";
     toggle.setAttribute("aria-expanded", String(expanded));
     toggle.setAttribute("aria-controls", "quota-past-accounts");
-    toggle.textContent = `历史账号（${entries.length}）`;
+    toggle.textContent = `${entries.some(({provider, account}) => quotaAccountDisabled(provider, account)) ? "已停用与历史账号" : "历史账号"}（${entries.length}）`;
     summaryCell.appendChild(toggle);
     summaryRow.appendChild(summaryCell);
     summaryBody.appendChild(summaryRow);
@@ -1158,6 +1180,7 @@
   function quotaAccountRow(provider, account) {
     const row = document.createElement("tr");
     row.className = "quota-row";
+    row.dataset.disabled = String(quotaAccountDisabled(provider, account));
     row.dataset.presence = quotaPresence(account);
     if (quotaPresence(account) === "remembered") {
       row.classList.add("remembered");
@@ -1302,6 +1325,12 @@
     name.textContent = account.account_state === "known" ? quotaAccountName(account)
       : account.account_state === "signed_out" ? "未登录" : "账号未知";
     wrap.appendChild(name);
+    if (quotaAccountDisabled(provider, account)) {
+      const status = document.createElement("span");
+      status.className = "status-pill bad";
+      status.textContent = "已停用";
+      wrap.appendChild(status);
+    }
     if (account.account_state !== "known" && account.account_state !== "signed_out") {
       const note = document.createElement("span");
       note.className = "quota-history-note";
@@ -1325,7 +1354,7 @@
       refresh.type = 'button'; refresh.className = 'btn'; refresh.textContent = '刷新配额';
       refresh.setAttribute('aria-label', `${quotaAccountName(account)}（${account.account_id}）的配额刷新`);
       refresh.addEventListener('click', () => window.AgentMonitor?.openCodexAccount?.(profiles[0].id, 'refresh'));
-      actions.appendChild(refresh);
+      if (!quotaAccountDisabled(provider, account)) actions.appendChild(refresh);
     }
 
     if (quotaPresence(account) === "remembered") {
@@ -1408,9 +1437,8 @@
     if (!historyBody || !summaryBody) {
       return;
     }
-    const count = Array.from(historyBody.children).filter(
-      (row) => row.dataset.presence === "remembered",
-    ).length;
+    const rows = Array.from(historyBody.children);
+    const count = rows.length;
     if (!count) {
       historyBody.remove();
       summaryBody.remove();
@@ -1420,7 +1448,7 @@
     const cell = row && row.children[0];
     const toggle = cell && cell.children[0];
     if (toggle) {
-      toggle.textContent = `历史账号（${count}）`;
+      toggle.textContent = `${rows.some(row => row.dataset.disabled === "true") ? "已停用与历史账号" : "历史账号"}（${count}）`;
     }
   }
 
@@ -1959,9 +1987,10 @@
     return body;
   }
 
-  function resetQuotaReadings() {
+  function resetQuotaReadings(options = {}) {
     codexQuotaReadings = [];
     renderedQuotaRateLimits = null;
+    initialQuotaHistoryExpanded = Boolean(options.rememberedExpanded);
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
   return { renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };

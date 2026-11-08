@@ -267,10 +267,10 @@
       quotaFilter.provider = ["all", "claude", "codex"].includes(restored.get("quota_provider")) ? restored.get("quota_provider") : "all";
       quotaFilter.search = restored.get("quota_search") || "";
       quotaFilter.window = restored.get("quota_window") === "seven_day" ? "seven_day" : "five_hour";
-      quotaFilter.sort = ["default", "remaining", "remaining_desc", "reset", "observed"].includes(restored.get("quota_sort")) ? restored.get("quota_sort") : "default";
+      quotaFilter.sort = ["default", "remaining", "remaining_desc", "reset", "remaining_reset", "observed"].includes(restored.get("quota_sort")) ? restored.get("quota_sort") : "default";
     }
     let restoreQuotaReading = true;
-    resetQuotaReadings();
+    resetQuotaReadings({rememberedExpanded: restored.get("quota_history") === "true"});
     onPageCleanup(resetQuotaReadings);
     const profileController = new AbortController();
     onPageCleanup(() => profileController.abort());
@@ -363,11 +363,6 @@
       renderOverview(data, selectedRange);
       if (restoreQuotaReading) {
         restoreQuotaReading = false;
-        if (restored.get("quota_history") === "true") {
-          const history = qs("#quota-past-accounts");
-          if (history) history.hidden = false;
-          qs(".quota-past-toggle")?.setAttribute("aria-expanded", "true");
-        }
         const open = new Set(restored.getAll("quota_observation"));
         qsa(".quota-observation-details").forEach(node => { if (open.has(node.dataset.observationKey)) node.open = true; });
       }

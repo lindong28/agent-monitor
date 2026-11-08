@@ -576,7 +576,7 @@ export function init({ autoLoad = true } = {}) {
       const op = account.operation;
       const loginRequired = accountNeedsLogin(account);
       const heading = element("div", undefined, "codex-account-heading");
-      const tone = op?.stage === "succeeded" ? "ok"
+      const tone = account.disabled ? "bad" : op?.stage === "succeeded" ? "ok"
         : ["failed", "interrupted"].includes(op?.stage) ? "bad"
         : ["partial", "login", "login_queued"].includes(op?.stage) ? "warn"
         : account.busy ? "info" : "identity";

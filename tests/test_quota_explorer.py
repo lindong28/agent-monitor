@@ -73,6 +73,72 @@ assert.equal(ui.quotaDisplayReading({key:'codex'},{...missingPlan,updated_at:'20
 assert.equal(ui.quotaDisplayReading({key:'codex'},{...missingPlan,account_label:'other@example.test'}).account_plan,null);
 ui.updateCodexQuotaReadings([]);
 
+// A disabled profile is folded without changing persisted presence/removal rights.
+{
+const disabled = account('disabled'), active = {...account('disabled'),account_label:'other@example.test'};
+const past = account('past','known','remembered');
+const disabledProfile = {id:'disabled-profile',account_id:'disabled',email:'disabled@example.test',disabled:false};
+ui.updateCodexQuotaReadings([disabledProfile]);
+ui.renderQuotaAccounts({codex:{accounts:[disabled,active,past]}});
+ui.updateCodexQuotaReadings([{...disabledProfile,disabled:true}]);
+let folded = table.tBodies.find(b=>b.id==='quota-past-accounts');
+assert(folded.hidden);
+assert.equal(folded.children.length,2);
+const disabledRow=folded.children.find(r=>r.dataset.accountId==='disabled');
+assert.equal(disabledRow.dataset.presence,'in_use');
+assert(descendants(disabledRow).some(n=>n.textContent==='已停用' && n.className==='status-pill bad'));
+assert(!descendants(disabledRow).some(n=>n.textContent==='移除' || n.textContent==='刷新配额'));
+assert(table.tBodies.filter(b=>b!==folded).flatMap(b=>b.children).some(r=>r.dataset.accountLabel===JSON.stringify(active.account_label)));
+const foldToggle=descendants(table).find(n=>n.tagName==='BUTTON' && n.attributes['aria-controls']==='quota-past-accounts');
+assert.match(foldToggle.textContent,/已停用与历史账号（2）/);
+foldToggle.click();
+ui.updateCodexQuotaReadings([{...disabledProfile,disabled:false}]);
+folded=table.tBodies.find(b=>b.id==='quota-past-accounts');
+assert(!folded.hidden,'status changes preserve the disclosure');
+assert.equal(folded.children.length,1);
+assert(!table.textContent.includes('已停用'));
+ui.updateCodexQuotaReadings([]);
+}
+
+// Restore expansion even when disabled profiles arrive after the overview.
+{
+const row=account('late-disabled');
+const profile={id:'late-profile',account_id:row.account_id,email:row.account_label,disabled:true};
+for (const profilesFirst of [false,true]) {
+  table.children=[];
+  ui.resetQuotaReadings({rememberedExpanded:true});
+  if (profilesFirst) ui.updateCodexQuotaReadings([profile]);
+  ui.renderQuotaAccounts({codex:{accounts:[row]}});
+  if (!profilesFirst) ui.updateCodexQuotaReadings([profile]);
+  assert.equal(table.tBodies.find(b=>b.id==='quota-past-accounts').hidden,false);
+  descendants(table).find(n=>n.className.includes('quota-past-toggle')).click();
+  ui.renderQuotaAccounts({codex:{accounts:[row]}});
+  assert.equal(table.tBodies.find(b=>b.id==='quota-past-accounts').hidden,true);
+}
+ui.resetQuotaReadings();
+table.children=[];
+}
+
+// Sorting uses the selected window and compares providers within each group.
+{
+const now=1000, provider={key:'codex'};
+const samples=[['full',100,1001],['unknown',null,1002],['later',0,1200],['soon',90,1100],
+  ['tie-more',20,1100],['expired',0,999],['invalid',101,1003],['no-reset',0,null]]
+  .map(([id,used,reset])=>({...account(id),five_hour_used_pct:used,five_hour_resets_at:reset}));
+ui.quotaFilter.sort='remaining_reset';
+assert.deepEqual(ui.sortQuotaAccounts(provider,samples,now).map(a=>a.account_id),
+  ['tie-more','soon','later','full','unknown','expired','invalid','no-reset']);
+ui.quotaFilter.window='seven_day';
+assert.deepEqual(ui.sortQuotaAccounts(provider,[{...account('a'),seven_day_used_pct:100,seven_day_resets_at:1001},
+  {...account('b'),seven_day_used_pct:0,seven_day_resets_at:1100}],now).map(a=>a.account_id),['b','a']);
+ui.quotaFilter.window='five_hour';
+ui.quotaFilter.sort='remaining_desc';
+ui.renderQuotaAccounts({claude:{accounts:[{...account('claude'),five_hour_used_pct:80}]},
+  codex:{accounts:[{...account('codex'),five_hour_used_pct:20}]}});
+assert.deepEqual(table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId).map(r=>r.dataset.accountId),['codex','claude']);
+ui.quotaFilter.sort='default';
+}
+
 // Fresh passive readings must not be called stale because active queries pause.
 const passive={...account('passive'),updated_at:new Date().toISOString(),
   quota_observation:{source:'codex_session',observed_at:new Date().toISOString()}};
