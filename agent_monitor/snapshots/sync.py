@@ -150,12 +150,15 @@ def sync_machine(
     runner=subprocess.run,
     export_kwargs=None,
     quota_refresh=True,
+    automatic_quota=False,
     accept_first_use_ssh_target=False,
 ):
     root = Path(root)
     root.parent.mkdir(parents=True, exist_ok=True)
     generation.recover_generation_state(machine.name, root=root)
     export_kwargs = dict(export_kwargs or {})
+    if automatic_quota:
+        export_kwargs["automatic_quota"] = True
     if not quota_refresh:
         export_kwargs["quota_refresh"] = False
     with staging.Staging(root.parent) as temporary:
@@ -193,6 +196,7 @@ def sync_machine(
                 runner=runner,
                 transfer_runner=temporary.transfer_runner(runner),
                 quota_refresh=quota_refresh,
+                **({"automatic_quota": True} if automatic_quota else {}),
             )
             accept_first_use = accept_first_use_ssh_target
         return install_export_bundle(
@@ -213,6 +217,7 @@ def sync_all(
     runner=subprocess.run,
     accept_first_use_ssh_targets=None,
     quota_refresh=True,
+    automatic_quota=False,
     on_complete=None,
     progressive=False,
     on_statistics=None,
@@ -228,6 +233,7 @@ def sync_all(
                 timeout=timeout,
                 runner=runner,
                 quota_refresh=quota_refresh and not progressive,
+                **({"automatic_quota": True} if automatic_quota else {}),
                 accept_first_use_ssh_target=machine.name
                 in (accept_first_use_ssh_targets or ()),
             )
@@ -235,7 +241,8 @@ def sync_all(
                 try:
                     if on_statistics is not None:
                         on_statistics(machine.name, SyncResult(generation=current))
-                    updated = sync_quota(machine, current, root=root, timeout=timeout, runner=runner)
+                    updated = sync_quota(machine, current, root=root, timeout=timeout, runner=runner,
+                        **({"automatic_quota": True} if automatic_quota else {}))
                 finally:
                     current.close()
                 current = updated
@@ -266,15 +273,15 @@ def sync_all(
 
 
 def sync_quota(machine, current, *, root=generation.DEFAULT_GENERATIONS_ROOT,
-               timeout=180, runner=subprocess.run):
+               timeout=180, runner=subprocess.run, automatic_quota=False):
     """Publish new quota against the statistics just admitted for this machine."""
     from agent_monitor import hub_config as hub
     try:
         if machine.is_self:
-            payload = exporter.export_quota()
+            payload = exporter.export_quota(**({"automatic_quota": True} if automatic_quota else {}))
         else:
             result = _run(runner, [*_SSH_PREFIX, machine.ssh_host,
-                "~/.local/bin/agent-monitor export --quota-only" + (" --gui-quota" if hub.enabled() else "")],
+                "~/.local/bin/agent-monitor export --quota-only" + (" --automatic-quota" if automatic_quota else " --gui-quota" if hub.enabled() else "")],
                 time.monotonic() + timeout, stage="quota_read")
             payload = json.loads(result.stdout)
         if (not isinstance(payload, dict)
@@ -324,7 +331,7 @@ def _command_failure_reason(exc):
     )
 
 
-def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refresh=True, transfer_runner=None):
+def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refresh=True, transfer_runner=None, automatic_quota=False):
     from agent_monitor import hub_config as hub
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise ValueError("sync timeout must be positive")
@@ -355,7 +362,7 @@ def _pull_remote_export(ssh_host, local_bundle, *, timeout, runner, quota_refres
                     _REMOTE_EXPORT_SCRIPT, remote_temp,
                     max(0, deadline - time.monotonic()),
                     "~/.local/bin/agent-monitor", "export", "--out", remote_temp + "/bundle",
-                    *((["--gui-quota"] if hub.enabled() else []) if quota_refresh else ["--cached-quota"]),
+                    *(((["--automatic-quota"] if automatic_quota else ["--gui-quota"] if hub.enabled() else [])) if quota_refresh else ["--cached-quota"]),
                 ),
             ],
             deadline, stage="remote_export",

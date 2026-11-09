@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--artifacts', type=Path, required=True)
     parser.add_argument('--vendor', type=Path, required=True)
+    parser.add_argument('--automatic-egress', action='store_true')
     args = parser.parse_args()
     sys.addaudithook(source_guard)
     try:
@@ -50,6 +51,13 @@ def main():
     overview = dict(today={'cost_usd': 12}, week={'cost_usd': 34}, range={'cost_usd': 56, 'total_tokens': 100},
                     rate_limits={'claude': {'accounts': []}, 'codex': {'accounts': rows}},
                     daily_cost_30d=[], top_projects_week=[], model_mix_month=[], sync=sync)
+    if args.automatic_egress:
+        from agent_monitor.network.automatic_egress import Skipped
+        overview['rate_limits']['codex']['refresh_errors'] = [
+            dict(machine=machine.name, account_id='workspace', account_label=name+'@example.test',
+                 account_profile=name, query_state='skipped', reason=str(Skipped(reason)),
+                 refresh_skip=Skipped(reason).details)
+            for name, reason in (('alpha', 'china'), ('beta', 'unknown'))]
     def preview():
         counts['previews'] += 1
         return {'checked_host': machine.name, 'targets': [dict(target=key, ip='192.0.2.1', country_code='US',
@@ -58,7 +66,7 @@ def main():
         def log_message(self, *_args): pass
         def _handle_request(self, send_body=True):
             path = urlsplit(self.path).path
-            values = {'/api/overview': overview, '/api/timezone': {'timezone': 'UTC'},
+            values = {'/api/overview': overview, '/api/collection': overview, '/api/cost-diagnostics': {'groups': []}, '/api/timezone': {'timezone': 'UTC'},
                       '/api/sync-status': sync, '/api/codex-accounts': {'accounts': []}, '/fixture/stats': counts}
             if path in values:
                 return self._send_json(values[path], send_body=send_body)

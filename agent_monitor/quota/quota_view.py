@@ -342,7 +342,7 @@ class QuotaView:
                     failure_entry = {"machine": current.host, "reason": refresh_error}
                     if isinstance(block, dict):
                         # Identity and outcome do not depend on diagnostic availability.
-                        for key in ("account_id", "account_label", "account_profile", "query_state"):
+                        for key in ("account_id", "account_label", "account_profile", "query_state", "refresh_skip"):
                             value = identity_id(block) if key == "account_id" else block.get(key)
                             if value is not None:
                                 failure_entry[key] = value

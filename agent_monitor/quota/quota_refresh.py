@@ -26,7 +26,7 @@ from pathlib import Path
 from agent_monitor.contracts.usage import RateLimits
 from parsers.codex import select_codex_rate_limit
 from parsers.accounts import quota_identity
-from agent_monitor.network import network_policy
+from agent_monitor.network import network_policy, automatic_egress
 from agent_monitor.accounts import claude_oauth
 from agent_monitor.accounts import upstream_controls
 from agent_monitor import diagnostics
@@ -78,6 +78,22 @@ class NoSubscription(RefreshError):
     """The user confirmed this account has no quota-bearing subscription."""
 
 
+def _bridge_explainable_failure(detail):
+    """Only transport failures can be replaced by a proven local bridge denial.
+
+    Keep completed upstream/identity/parse outcomes even if a sibling revokes
+    the batch before the parent consumes them. Unknown payloads remain failures.
+    """
+    if detail.get("http_status") or detail.get("upstream_code") or detail.get("stage") in {"account_check", "quota_parse"}:
+        return False
+    # Codex wraps transport failures as JSON-RPC internal errors. Protocol
+    # errors (including unsupported methods) and unknown codes are not transport.
+    return (detail.get("kind") in {"timeout", "process_exit"}
+            or (detail.get("kind") == "rpc_error" and detail.get("rpc_code") == -32603)
+            or detail.get("error_type") in {"URLError", "ConnectionError", "ConnectionResetError",
+                                           "ConnectionAbortedError", "BrokenPipeError", "TimeoutError"})
+
+
 def load_rate_limits(provider, account, *, codex_home=None, **options):
     if codex_home is None:
         return _load_rate_limits(provider, account, **options)
@@ -96,7 +112,7 @@ def load_rate_limits(provider, account, *, codex_home=None, **options):
 
 
 def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None,
-                     codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None):
+                     codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None, automatic_batch=None):
     root = Path(root) if root is not None else ROOT
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
@@ -141,6 +157,7 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
     parent_read = parent_write = None
     failure = None
     stage = "child_start"
+    bridge_explainable = False
     try:
         auth_failure = None
         if renew_auth:
@@ -159,13 +176,14 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 probe_pause_id=probe_pause_id if pause_scope == "account" else None)
             if reason:
                 raise LocalUnavailable(reason)
+        env = automatic_batch.environment() if automatic_batch else network_policy.child_environment(os.environ)
         deadline = time.monotonic() + TIMEOUT
         parent_read, parent_write = os.pipe()
         child = subprocess.Popen(
             module_command("agent_monitor.quota.quota_refresh", provider, parent_read, deadline),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, start_new_session=True, pass_fds=(parent_read,),
-            env=network_policy.child_environment(os.environ),
+            env=env,
         )
         os.close(parent_read)
         parent_read = None
@@ -196,10 +214,15 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 from agent_monitor.quota.codex_quota import safe_auth_recovery
                 admitted_probe["authentication_recovery"] = safe_auth_recovery(payload.get("authentication_recovery"))
             if child.returncode or payload.get("error"):
+                detail = diagnostics.safe_failure(payload.get("failure"))
+                # A sibling can revoke this batch after our provider has already
+                # answered. Retain that result and its existing pause semantics.
+                # RPC transport errors alone do not prove an upstream response.
+                bridge_explainable = _bridge_explainable_failure(detail)
                 kind = (NotSignedIn if payload.get("signed_out") is True else
                         LocalUnavailable if payload.get("local_unavailable") is True else RefreshError)
                 raise kind(payload.get("error") or "配额读取失败，请核对后解除本地暂停。",
-                           failure=diagnostics.safe_failure(payload.get("failure")))
+                           failure=detail)
             reading = RateLimits(**payload["reading"])
             return dataclasses.replace(reading, quota_observation={
                 "source": "active_query", "observed_at": reading.updated_at})
@@ -208,9 +231,11 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                                failure={"stage": stage, "kind": "invalid_result"}) from None
     except network_policy.NetworkPolicyError as exc:
         raise LocalUnavailable(str(exc), failure={"stage": stage, "kind": exc.kind}) from None
-    except (NotSignedIn, LocalUnavailable):
+    except (NotSignedIn, LocalUnavailable, automatic_egress.Skipped):
         raise
     except BaseException as exc:
+        if automatic_batch and (bridge_explainable or isinstance(exc, (subprocess.TimeoutExpired, ConnectionError, TimeoutError))):
+            automatic_batch.check()
         failure = exc
         facts = diagnostics.failure_details(exc, stage=stage,
                     kind="timeout" if isinstance(exc, subprocess.TimeoutExpired) else "exception",

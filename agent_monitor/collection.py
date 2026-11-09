@@ -163,6 +163,7 @@ class CollectionCoordinator:
             "round_refresh": 0,
             "queued_refresh": False,
             "round_quota_refresh": True,
+            "round_automatic_quota": True,
             "phase": None,
             "pending_machines": (),
             "statistics_pending": (),
@@ -231,6 +232,7 @@ class CollectionCoordinator:
                 last_completed_round_machines=(),
                 round_refresh=self._state["refresh_requested"],
                 round_quota_refresh=force or (not hub.enabled() and runtime_hub.quota_due()),
+                round_automatic_quota=not force,
                 phase="statistics",
                 pending_machines=round_machines,
                 statistics_pending=round_machines,
@@ -344,10 +346,12 @@ class CollectionCoordinator:
         try:
             with self._lock:
                 quota = self._state["round_quota_refresh"]
+                automatic = self._state["round_automatic_quota"]
             # Hub quota has its own worker and does not publish a statistics DB.
             collect = sync_process.sync_all if hub.enabled() else sync.sync_all
             results = collect(
                 quota_refresh=quota and not hub.enabled(), progressive=False,
+                **({"automatic_quota": True} if automatic and not hub.enabled() else {}),
                 on_statistics=lambda name, result: self.machine_completed(name, result, statistics_only=True),
                 on_complete=self.machine_completed,
             )

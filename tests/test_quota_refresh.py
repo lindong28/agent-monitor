@@ -6,6 +6,7 @@ import os
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -201,6 +202,107 @@ class ProviderTests(unittest.TestCase):
         sleeper = mock.patch("agent_monitor.snapshots.exporter.time.sleep")
         self.sleep = sleeper.start()
         self.addCleanup(sleeper.stop)
+
+    def test_automatic_region_skip_keeps_quota_clock_and_never_spawns_or_pauses(self):
+        from agent_monitor.network import automatic_egress as gate
+        from agent_monitor.accounts.upstream_controls import Controls
+        old = RateLimits(12, 4102444800, 34, 4102444800, updated_at="2026-10-20T00:00:00Z")
+        account = accounts.Account("workspace", "fixture@example.test")
+        for reason in ("china", "unknown"):
+            with self.subTest(reason=reason), \
+                    mock.patch.object(accounts, "claude_account", return_value=account), \
+                    mock.patch.object(accounts, "codex_account", return_value=account), \
+                    mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=old), \
+                    mock.patch.object(quota_service.codex, "load_rate_limits", return_value=old), \
+                    mock.patch.object(gate.Batch, "environment", side_effect=gate.Skipped(reason)), \
+                    mock.patch.object(quota_refresh.subprocess, "Popen") as spawn:
+                result = quota_service.rate_limits(refresh=True, automatic=True, root=self.root)
+                passive = quota_service.rate_limits(refresh=False, root=self.root)
+            spawn.assert_not_called()
+            for provider in ("claude", "codex"):
+                self.assertEqual(result[provider]["query_state"], "skipped")
+                self.assertEqual(result[provider]["updated_at"], old.updated_at)
+                self.assertIsNone(result[provider].get("refresh_attempted_at"))
+                self.assertEqual(passive[provider]["query_state"], "skipped")
+                self.assertEqual(passive[provider]["refresh_skip"]["reason"], reason)
+                self.assertNotIn("pause", Controls(self.root / "state/upstream_controls").read(provider))
+
+    def test_bridge_denial_after_child_is_skip_not_provider_pause(self):
+        from agent_monitor.network import automatic_egress as gate
+        from agent_monitor.accounts.upstream_controls import Controls
+        batch = mock.Mock()
+        batch.environment.return_value = {}
+        batch.check.side_effect = gate.Skipped("route_changed")
+        child = SimpleNamespace(returncode=1, communicate=lambda *a, **k: (json.dumps({'error': 'transport failed', 'failure': {'error_type': 'URLError'}}), ''))
+        with mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child):
+            with self.assertRaises(gate.Skipped):
+                quota_refresh.load_rate_limits("claude", accounts.Account("fixture"), root=self.root, automatic_batch=batch)
+        self.assertNotIn("pause", Controls(self.root / "state/upstream_controls").read("claude"))
+
+    def test_batch_revocation_does_not_erase_completed_provider_result(self):
+        from agent_monitor.network import automatic_egress as gate
+        from agent_monitor.accounts.upstream_controls import Controls
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                batch = mock.Mock()
+                batch.environment.return_value = {}
+                # The sibling revokes the batch while this completed response is
+                # waiting to be consumed by its parent.
+                revoked = threading.Event()
+                def check():
+                    if revoked.is_set(): raise gate.Skipped("route_changed")
+                batch.check.side_effect = check
+                reading = RateLimits(12, None, 34, None, updated_at="2026-11-09T00:00:00Z")
+                payload = ({"error": "rate limited", "failure": {"stage": "quota_read", "kind": "http_error", "http_status": 429}}
+                           if failed else {"reading": dataclasses.asdict(reading)})
+                def complete(*_args, **_kwargs):
+                    sibling = threading.Thread(target=revoked.set); sibling.start(); sibling.join(1)
+                    return json.dumps(payload), ""
+                child = SimpleNamespace(returncode=int(failed), communicate=complete)
+                with mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child):
+                    if failed:
+                        with self.assertRaises(quota_refresh.RefreshError):
+                            quota_refresh.load_rate_limits("claude", accounts.Account("fixture"), root=self.root, automatic_batch=batch)
+                    else:
+                        actual = quota_refresh.load_rate_limits("claude", accounts.Account("fixture"), root=self.root, automatic_batch=batch)
+                        self.assertEqual(actual.five_hour_pct, 12)
+                pause = Controls(self.root / "state/upstream_controls").read("claude").get("pause")
+                if failed:
+                    self.assertEqual(pause["failure"]["http_status"], 429)
+                else:
+                    self.assertIsNone(pause)
+
+    def test_batch_denial_keeps_identity_parse_and_unknown_failures(self):
+        from agent_monitor.network import automatic_egress as gate
+        from agent_monitor.accounts.upstream_controls import Controls
+        failures = [dict(stage="account_check", kind="account_mismatch"),
+                    dict(stage="quota_parse", kind="missing_windows"),
+                    dict(stage="profile_read", error_type="JSONDecodeError"), {}]
+        from agent_monitor.quota.codex_quota import rpc_failure
+        failures.extend(rpc_failure({"code": code, "message": "protocol failure"}, stage="initialize")
+                        for code in (-32700, -32600, -32601, -32602, None))
+        for index, detail in enumerate(failures):
+            with self.subTest(detail=detail):
+                root = self.root / str(index)
+                batch = mock.Mock(); batch.environment.return_value = {}
+                batch.check.side_effect = gate.Skipped("route_changed")
+                payload = {"error": "confirmed fixture failure", "failure": detail}
+                child = SimpleNamespace(returncode=1, communicate=lambda *a, **k: (json.dumps(payload), ""))
+                with mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child):
+                    with self.assertRaises(quota_refresh.RefreshError):
+                        quota_refresh.load_rate_limits("claude", accounts.Account("fixture"), root=root, automatic_batch=batch)
+                self.assertIn("pause", Controls(root / "state/upstream_controls").read("claude"))
+
+    def test_existing_pause_prevents_even_automatic_probe(self):
+        from agent_monitor.accounts.upstream_controls import Controls
+        controls = Controls(self.root / "state/upstream_controls")
+        lease = controls.acquire("claude"); lease.pause("original"); lease.close()
+        before = controls.read("claude")["pause"]
+        batch = mock.Mock()
+        with self.assertRaises(quota_refresh.RefreshError):
+            quota_refresh.load_rate_limits("claude", accounts.Account("fixture"), root=self.root, automatic_batch=batch)
+        batch.environment.assert_not_called()
+        self.assertEqual(controls.read("claude")["pause"], before)
 
     def test_recovery_keeps_pause_until_cache_saved_and_reads_only_codex(self):
         from agent_monitor.accounts.upstream_controls import Controls; from agent_monitor.accounts.upstream_controls import Paused

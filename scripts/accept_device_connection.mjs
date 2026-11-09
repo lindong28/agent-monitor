@@ -11,10 +11,10 @@ import {parseArgs} from 'node:util';
 const {values:args} = parseArgs({options:{
   'agent-browser':{type:'string'}, browser:{type:'string'}, python:{type:'string'},
   'quota-settings-only':{type:'boolean'}, 'dashboard-only':{type:'boolean'}, vendor:{type:'string'}, facade:{type:'boolean'}, 'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
-  'account-scopes-only':{type:'boolean'},
+  'account-scopes-only':{type:'boolean'}, 'automatic-egress-only':{type:'boolean'},
 }});
 if (args.help) {
-  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks passive entry and explicit system diagnostics. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
+  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--automatic-egress-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks passive entry and explicit system diagnostics. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --automatic-egress-only checks automatic-region skips and retained readings without provider requests. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
   process.exit(0);
 }
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -128,7 +128,7 @@ async function click(selector, expect) {
 async function stats() { return (await fetch(url+'/fixture/stats',{signal:AbortSignal.timeout(3000)})).json(); }
 async function configure(value) { const r=await fetch(url+'/fixture/config',{method:'POST',body:JSON.stringify(value),signal:AbortSignal.timeout(3000)}); assert.equal(r.status,200); }
 async function startFixture() {
-  const command=args['quota-settings-only'] ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
+  const command=(args['quota-settings-only'] || args['automatic-egress-only']) ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor'), ...(args['automatic-egress-only'] ? ['--automatic-egress'] : [])] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
   fixture=spawn(python,command,{env,cwd:repo,stdio:['ignore','pipe','pipe']});
   children.push(fixture);
   let line='',error='';
@@ -163,7 +163,7 @@ const timer=setTimeout(()=>{
 },acceptanceBudgetMs);
 let failure;
 try {
-  console.log(args['quota-settings-only'] ? 'Checking full dashboard quota settings with isolated accounts and provider execution disabled.' : args['dashboard-only'] ? 'Checking the full dashboard with isolated persisted account records; provider calls are disabled.' : args['network-only'] ? 'Checking synthetic system diagnostics in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
+  console.log(args['automatic-egress-only'] ? 'Checking automatic-region skips on the full dashboard; provider execution is disabled.' : args['quota-settings-only'] ? 'Checking full dashboard quota settings with isolated accounts and provider execution disabled.' : args['dashboard-only'] ? 'Checking the full dashboard with isolated persisted account records; provider calls are disabled.' : args['network-only'] ? 'Checking synthetic system diagnostics in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
   await startFixture();
   assert.equal((await fetch(url,{signal:AbortSignal.timeout(3000)})).status,200,'fixture page reachable');
   browserAttempted=true;
@@ -215,6 +215,29 @@ try {
     assert.equal((await stats()).recoveries.length,1,'layered guidance issues no automatic request or acknowledgement');
     await bt('screenshot',path.join(root,'account-scopes.png'));
     console.log('PASS: two account targets switch safely; one confirmed recovery clears only its target; reload retains the other hold; independent account remains usable. Synthetic API fixture only.');
+  } else if (args['automatic-egress-only']) {
+    await until('retained quota and local statistics',()=>read("document.querySelector('#today-cost').textContent.includes('12') && document.body.innerText.includes('alpha@example.test')"));
+    // Follow the visible disclosure into the two account outcomes, without a recovery action.
+    assert.match(await read("document.querySelector('#quota-accounts').innerText"),/12/);
+    await click('a[data-collection-link]',"!!document.querySelector('#quota-diagnostic-table')");
+    await until('automatic skip disclosure',()=>read("document.querySelector('#quota-diagnostic-table')?.textContent.includes('出口地区保护')"));
+    await bt('snapshot','-i');
+    await click('#quota-diagnostic-table .quota-failure-details > summary',"document.querySelector('#quota-diagnostic-table .quota-failure-details').open");
+    for (let index=0; index<2; index++) {
+      const selector=`#quota-diagnostic-table .quota-failure-details > div:nth-of-type(${index+1}) .recovery-source > summary`;
+      await click(selector,`document.querySelector('${selector}').parentElement.open`);
+    }
+    const text=await read("document.querySelector('#quota-diagnostic-table').innerText");
+    assert.match(text,/出口地区为中国/); assert.match(text,/无法确认模型服务出口地区/);
+    assert.match(text,/出口检查时间/); assert.match(text,/不是额度观测时间/);
+    assert.match(text,/下一个正常采集周期/); assert.doesNotMatch(text,/先处理前序机器/);
+
+    assert.equal((await stats()).provider_requests,0);
+    assert.equal(await read("[...document.querySelectorAll('#quota-diagnostic-table button')].some(b=>b.checkVisibility())"),false,'automatic skips do not prescribe account recovery');
+    assert.equal(await read("document.querySelector('#quota-diagnostic-table').getBoundingClientRect().left >= document.querySelector('main').getBoundingClientRect().left"),true,'diagnostic prose remains within content');
+    await bt('screenshot',path.join(root,'automatic-egress.png'));
+    fs.writeFileSync(path.join(root,'automatic-egress.txt'),text);
+    console.log('PASS: CN and unknown automatic skips, retained quota and local statistics, next-cycle guidance and independent check time; no provider execution.');
   } else if (args['quota-settings-only']) {
     await until('quota settings entry',()=>read("!!document.querySelector('[data-quota-settings-machine]')"));
     await click('#quota-auto-settings > summary',"document.querySelector('#quota-auto-settings').open");

@@ -1,0 +1,15 @@
+# Automatic model-service egress admission
+
+Decision: Guard automatic quota batches on the account-owning machine with anonymous region probes and a revocable route-bound bridge scope.
+
+Accepted 2026-11-09 following one independent decision review (all seven criteria satisfied). The user requires automatic model-company requests to stop for CN, explicitly excludes GitHub, permits chatgpt.com and auth.openai.com to represent other model companies under the installation's shared proxy rules, and chose to skip the batch when geography is unknown. Manual actions keep their existing preview and one-time confirmation. Existing provider and account pauses retain priority.
+
+Carry automatic origin explicitly through scheduled collection, standalone synchronization, export and quota execution. A lazy batch gate runs only when an eligible account is due, shares probe results across native and managed accounts, and blocks on any CN result or absent usable non-CN route evidence. An anonymous probe remains permitted to establish geography; the protected requests are subsequent model-company business requests. Local statistics, machine transport and GitHub price downloads continue.
+
+Bind usable evidence to the bridge instance, configuration generation, actually observed route and a short lifetime. The bridge rejects unobserved fallback routes, expired admission and changed generations before handing a socket to the provider client. Invalidation revokes automatic scopes. Do not silently re-probe and resume the same batch. Record local admission skips separately from provider failures and quota observation timestamps, retain previous quota values and use the normal scheduled interval for the next check. No new daemon or database is introduced.
+
+Frontend-only warnings miss background workers. A Hub-only gate measures the wrong machine. A preflight without transport binding can silently fall back to an unobserved exit. Stopping the whole collector unnecessarily stops local statistics and GitHub. Per-account probes duplicate work and can split batch decisions. The shared quota executor and existing loopback bridge cover the affected consumers without those costs.
+
+This installation's cross-model routing premise is user supplied, not an empirical guarantee for every public installation. A route key and local generation do not detect invisible egress rotation inside a proxy service. Requests already sent cannot be undone. Existing network observation remains passive; this adds probes only to explicitly automatic quota admission. Existing quota executor, identity/cache isolation and failure-retention decisions remain applicable.
+
+Before delivery, verify CN/unknown/non-CN business-request counts, route changes and fallback, scheduling cadence, managed accounts, old-value retention, manual behavior, local collection and GitHub independence. Implementation, deployed consumers and provider availability were unverified at decision acceptance. Isolated local tests are the default; live account requests are not needed for acceptance of the admission policy. Rollback is a source release without a persistent data migration.

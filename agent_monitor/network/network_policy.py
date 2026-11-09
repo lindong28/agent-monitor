@@ -43,7 +43,7 @@ def _validate_endpoint(value):
     try:
         parsed = urllib.parse.urlsplit(value)
         valid = (parsed.scheme == "http" and parsed.hostname == "127.0.0.1" and parsed.port
-                 and re.fullmatch(r"agent-monitor(?:\.[a-f0-9]{32})?", parsed.username or "") and parsed.password
+                 and re.fullmatch(r"agent-monitor(?:\.(?:auto-)?[a-f0-9]{32})?", parsed.username or "") and parsed.password
                  and not parsed.path and not parsed.query and not parsed.fragment)
         if not valid:
             raise ValueError()
@@ -192,9 +192,11 @@ def child_environment(base, scope=None):
     env = dict(base)
     route = endpoint()
     if scope is not None:
-        if not re.fullmatch(r"[a-f0-9]{32}", scope):
+        if not re.fullmatch(r"(?:auto-)?[a-f0-9]{32}", scope):
             raise ValueError("invalid network operation scope")
         address = urllib.parse.urlsplit(route)
+        if (address.username or "").startswith("agent-monitor.auto-"):
+            raise NetworkPolicyError("automatic_scope_cannot_be_replaced")
         route = f"http://agent-monitor.{scope}:{address.password}@127.0.0.1:{address.port}"
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env[name] = route
@@ -216,6 +218,21 @@ def observations(route):
             return json.loads(response.read(65536))
     except Exception:
         return {"policy": "chromium-system", "coverage": "unavailable", "events": []}
+
+
+def admit_automatic(route, scope, generation, routes, seconds):
+    """Install a bounded capability on the existing loopback bridge."""
+    address = urllib.parse.urlsplit(_validate_endpoint(route))
+    auth = base64.b64encode((address.username + ":" + address.password).encode()).decode()
+    request = urllib.request.Request(f"http://127.0.0.1:{address.port}/automatic-egress",
+        data=json.dumps(dict(scope=scope, generation=generation, routes=routes, seconds=seconds)).encode(),
+        headers={"Proxy-Authorization": "Basic " + auth, "Content-Type": "application/json"})
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=.5) as response:
+            if json.loads(response.read(1024)).get("admitted") is not True:
+                raise ValueError()
+    except Exception:
+        raise NetworkPolicyError("automatic_admission_unavailable") from None
 
 
 def session():

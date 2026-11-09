@@ -517,7 +517,7 @@ class Manager:
                     base_note = quota_applicability.confirmation(base.get("subscription_confirmation"))
                     if incoming_note and (not base_note or quota_applicability.confirmation_time(incoming_note) > quota_applicability.confirmation_time(base_note)):
                         base["subscription_confirmation"] = incoming_note
-                    for field in ("refresh_failure", "refresh_pause", "query_state"):
+                    for field in ("refresh_failure", "refresh_pause", "refresh_skip", "query_state"):
                         if field in incoming:
                             base[field] = incoming[field]
                     # Login state is the latest query outcome, not the age of
@@ -586,7 +586,7 @@ def accumulate_exclusions(blocked, result):
     blocks = list(result["payload"]["rate_limits"].items())
     blocks.extend(("codex", row) for row in (result["payload"]["rate_limits"].get("codex") or {}).get("managed_accounts", []))
     for provider, block in blocks:
-        if not block.get("refresh_error") or block.get("query_state") in {"local_unavailable", "blocked", "pending"}:
+        if not block.get("refresh_error") or block.get("query_state") in {"local_unavailable", "blocked", "pending", "skipped"}:
             continue
         failure = diagnostics.safe_failure(block.get("refresh_failure"))
         identity = failure.get("account_fingerprint") if block.get("query_state") != "unknown" else None

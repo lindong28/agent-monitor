@@ -1775,6 +1775,10 @@ td.numeric {
   min-width: 1040px;
 }
 
+/* Diagnostic prose has one cell, rather than the nine-column account grid. */
+#quota-diagnostic-table { min-width: 0; table-layout: fixed; }
+#quota-diagnostic-table td { overflow-wrap: anywhere; }
+
 /* Narrow-screen adaptation: retain all destinations in a horizontal rail. */
 @media (max-width: 900px) {
   .app-shell {

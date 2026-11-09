@@ -18,6 +18,7 @@ def main():
         help="print the exporter commit without reading or refreshing rollup state",
     )
     parser.add_argument("--cached-quota", action="store_true", help="collect statistics without actively querying provider Quota")
+    parser.add_argument("--automatic-quota", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--gui-quota", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--quota-exclusions", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -29,9 +30,9 @@ def main():
             exclusions = json.loads(args.quota_exclusions) if args.quota_exclusions else None
             from agent_monitor.quota.quota_recovery import validate_exclusions
             validate_exclusions(exclusions or {})
-            print(json.dumps(exporter.export_quota(gui_quota=args.gui_quota, blocked_accounts=exclusions), sort_keys=True))
+            print(json.dumps(exporter.export_quota(gui_quota=args.gui_quota, blocked_accounts=exclusions, **({"automatic_quota": True} if args.automatic_quota else {})), sort_keys=True))
         else:
-            manifest = exporter.export_bundle(output_path=args.out, quota_refresh=not args.cached_quota, gui_quota=args.gui_quota)
+            manifest = exporter.export_bundle(output_path=args.out, quota_refresh=not args.cached_quota, gui_quota=args.gui_quota, **({"automatic_quota": True} if args.automatic_quota else {}))
             print(json.dumps(manifest, sort_keys=True))
     except exporter.ExportError as exc:
         print("Export refused: %s" % exc, file=sys.stderr)

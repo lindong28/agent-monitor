@@ -243,3 +243,72 @@ test('HTTPS proxy verifies its certificate and can fall over before sending HTTP
   assert.equal((await get(proxy.port, 'http://example.invalid/certificate-trusted')).body, 'secure-proxy');
   assert.equal(secureRequests, 1);
 });
+
+const automaticAuth = scope => 'Basic ' + Buffer.from(`agent-monitor.${scope}:${token}`).toString('base64');
+async function admit(proxy, scope, routes = ['DIRECT'], seconds = 60, generation = proxy.router.generation) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({host: '127.0.0.1', port: proxy.port, path: '/automatic-egress', method: 'POST',
+      headers: {'proxy-authorization': authorization, 'content-type': 'application/json'}}, response => {
+      response.resume(); response.on('end', () => resolve(response.statusCode));
+    });
+    req.on('error', reject); req.end(JSON.stringify({scope, routes, seconds, generation}));
+  });
+}
+
+test('automatic scopes fail closed without admission, on expiry and generation changes; manual traffic continues', async t => {
+  let received = 0, now = 1000;
+  const source = http.createServer((_req, res) => { received++; res.end('business'); });
+  const port = await listen(source); dispose(t, source);
+  const proxy = await bridge(t, async () => 'DIRECT', {now: () => now});
+  const url = `http://127.0.0.1:${port}/`;
+  const scope = 'auto-' + 'a'.repeat(32), auth = automaticAuth(scope);
+  assert.equal((await get(proxy.port, url, auth)).status, 502); assert.equal(received, 0);
+  assert.equal(await admit(proxy, scope), 201);
+  assert.equal((await get(proxy.port, url, auth)).status, 200); assert.equal(received, 1);
+  now += 60001;
+  assert.equal((await get(proxy.port, url, auth)).status, 502); assert.equal(received, 1);
+  const next = 'auto-' + 'b'.repeat(32);
+  assert.equal(await admit(proxy, next), 201);
+  proxy.router.invalidate();
+  assert.equal((await get(proxy.port, url, automaticAuth(next))).status, 502); assert.equal(received, 1);
+  assert.equal(JSON.parse((await get(proxy.port, '/status', automaticAuth(next))).body).automatic_rejection, 'automatic_route_changed');
+  assert.equal((await get(proxy.port, url)).status, 200); assert.equal(received, 2);
+  assert.equal(await admit(proxy, 'auto-' + 'c'.repeat(32), ['DIRECT'], 60, 0), 409);
+});
+
+test('automatic fallback cannot reach an unobserved proxy; ordinary scope retains fallback', async t => {
+  const unused = net.createServer(); const dead = await listen(unused); await new Promise(resolve => unused.close(resolve));
+  let received = 0;
+  const source = http.createServer((_req, res) => { received++; res.end('fallback'); });
+  const port = await listen(source); dispose(t, source);
+  const first = `PROXY 127.0.0.1:${dead}`, second = `PROXY 127.0.0.1:${port}`;
+  const proxy = await bridge(t, async () => `${first}; ${second}`);
+  const scope = 'auto-' + 'd'.repeat(32);
+  assert.equal(await admit(proxy, scope, [first]), 201);
+  const denied = await get(proxy.port, 'http://provider.invalid/', automaticAuth(scope));
+  assert.equal(denied.headers['x-agent-monitor-error'], 'automatic_route_unobserved'); assert.equal(received, 0);
+  assert.equal((await get(proxy.port, 'http://provider.invalid/')).status, 200); assert.equal(received, 1);
+});
+
+test('automatic CONNECT checks after proxy handshake before releasing provider bytes', async t => {
+  let finishHandshake, started;
+  const pending = new Promise(resolve => { started = resolve; });
+  let bytes = 0;
+  const upstream = net.createServer(socket => {
+    socket.once('data', () => {
+      socket.on('data', data => { bytes += data.length; });
+      finishHandshake = () => socket.write('HTTP/1.1 200 OK\r\n\r\n'); started();
+    });
+  });
+  const port = await listen(upstream); dispose(t, upstream);
+  const route = `PROXY 127.0.0.1:${port}`;
+  const proxy = await bridge(t, async () => route);
+  const scope = 'auto-' + 'e'.repeat(32); await admit(proxy, scope, [route]);
+  const client = net.connect(proxy.port, '127.0.0.1'); t.after(() => client.destroy());
+  await once(client, 'connect');
+  client.write(`CONNECT provider.invalid:443 HTTP/1.1\r\nHost: provider.invalid\r\nProxy-Authorization: ${automaticAuth(scope)}\r\n\r\nSECRET`);
+  const response = once(client, 'data');
+  await pending; proxy.router.invalidate(); finishHandshake();
+  assert.match((await response)[0].toString(), /^HTTP\/1.1 502/);
+  assert.equal(bytes, 0);
+});

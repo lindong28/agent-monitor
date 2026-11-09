@@ -460,7 +460,7 @@
 
   function quotaFailureKind(reason, queryState) {
     if (queryState === "paused") return "paused";
-    if (queryState === "blocked") return "skipped";
+    if (queryState === "blocked" || queryState === "skipped") return "skipped";
     const text = String(reason || "");
     if (text.startsWith("本轮前序机器查询异常；本机尚未尝试")) return "skipped";
     if (text.startsWith("本轮同服务账号已有失败")) return "skipped";
@@ -470,6 +470,12 @@
   }
 
   function quotaFailureGuidance(failure) {
+    if (failure?.query_state === "skipped") {
+      return {
+        key: "egress_skipped", label: "自动查询已跳过", summary: "出口地区保护",
+        action: "保留上次额度读数；下一个正常采集周期会重新检查出口。无需解除账号暂停。本地统计与 GitHub 更新继续。",
+      };
+    }
     const detail = failure?.failure || {};
     const reason = String(failure?.reason || "");
     if (detail.kind === "account_mismatch" || reason.includes("登录账号已变化")) {
@@ -995,7 +1001,7 @@
     const groups = quotaFailureGroups(provider, failures);
     const counts = {paused:new Set(), skipped:new Set(), busy:new Set(), error:new Set()};
     groups.forEach(group => { if (group.machine) counts[group.kind].add(group.machine); });
-    const labels = [["paused","暂停"],["skipped","本轮未尝试"],["busy","通道占用未查询"],["error","查询异常"]];
+    const labels = [["paused","暂停"],["skipped",failures.some(f => f.query_state === "skipped") ? "本轮跳过或停止" : "本轮未尝试"],["busy","通道占用未查询"],["error","查询异常"]];
     const status = labels.filter(([key]) => counts[key].size).map(([key,label]) => `${counts[key].size} 台${label}`).join("，");
     const identities = new Set(failures.map(f => failureAccountKey(provider, f)).filter(Boolean));
     const unknown = failures.some(failure => !failureAccountKey(provider, failure));
@@ -1017,7 +1023,7 @@
         record = {machine:failure.machine, entry, note, panel:null, pauseId:failure.pause?.id};
         record.accounts = document.createElement("ul");
         entry.appendChild(record.accounts);
-        if (provider.key === "codex" && failure.machine) {
+        if (failure.machine && (provider.key === "codex" || failure.query_state === "skipped")) {
           const open = document.createElement("button");
           open.type = "button"; open.textContent = "查看当前状态与恢复";
           open.addEventListener("click", () => {
@@ -1026,7 +1032,7 @@
             record.panel = createRecoveryPanel(record.machine, {sourceFailure: record.failure});
             entry.appendChild(record.panel);
           });
-          entry.appendChild(open);
+          entry.appendChild(open); record.open = open;
           const sourceDetails = document.createElement("details"), sourceSummary = document.createElement("summary");
           sourceDetails.className = "recovery-source";
           sourceSummary.textContent = "采集记录与错误详情";
@@ -1036,6 +1042,10 @@
         }
       }
       record.key = group.key; record.kind = group.kind; record.failure = failure;
+      if (record.open) {
+        if (failure.query_state === "skipped") record.open.remove();
+        else if (!record.open.parentNode) record.entry.insertBefore(record.open, record.sourceText.parentElement);
+      }
       record.accounts.textContent = "";
       const accountGroups = new Map();
       group.failures.forEach((item, index) => {
@@ -1049,15 +1059,18 @@
           : f.account_profile === "" ? "默认来源" : "来源未记录"))];
         const label = typeof item.account_label === "string" && item.account_label.trim()
           ? item.account_label : failureAccountKey(provider, item) ? item.account_id : "账号身份未确认";
-        const states = [...new Set(items.map(f => ({paused:"受暂停影响", skipped:"未执行", busy:"通道占用", error:"查询未完成"})[quotaFailureKind(f.reason, f.query_state)]))];
+        const states = [...new Set(items.map(f => ({paused:"受暂停影响", skipped:f.query_state === "skipped" ? "已跳过或停止" : "未执行", busy:"通道占用", error:"查询未完成"})[quotaFailureKind(f.reason, f.query_state)]))];
         row.textContent = `${label}${provider.key === "codex" && typeof item.account_id === "string" ? " · 工作区 " + item.account_id : ""} · ${sources.join("、")} · ${states.join("、")}`;
         record.accounts.appendChild(row);
       }
       record.panel?.updateSourceFailure(failure);
       if (record.sourceText) {
-        const statusText = {paused:"已暂停", skipped:"未执行", busy:"通道占用", error:"未完成"}[group.kind];
+        const statusText = {paused:"已暂停", skipped:failure.query_state === "skipped" ? "已跳过或停止" : "未执行", busy:"通道占用", error:"未完成"}[group.kind];
         record.sourceText.textContent = group.failures.length === 1 ? failure.reason || "未记录错误详情"
           : group.failures.map(f => `${f.account_label || "账号身份未确认"}${f.account_profile ? " · " + f.account_profile : ""}：${f.reason || "未记录错误详情"}`).join("\n\n");
+        if (failure.refresh_skip?.checked_at) {
+          record.sourceText.textContent += `\n出口检查时间：${failure.refresh_skip.checked_at}（不是额度观测时间）。`;
+        }
         const guidance = quotaFailureGuidance(failure);
         record.note.dataset.failureCategory = guidance.key;
         record.note.textContent = failure.machine + "：上次配额采集" + statusText + "；"
@@ -1099,7 +1112,7 @@
     const fresh = Number.isFinite(Date.parse(account.updated_at)) && !quotaIsStale(account.updated_at);
     if (sourceHealthy && fresh && hasValue) return null;
     const kinds = new Set(failures.map(({ reason, query_state }) => quotaFailureKind(reason, query_state)));
-    const state = kinds.has("paused") ? "查询已暂停" : kinds.has("skipped") ? "上次查询未执行"
+    const state = kinds.has("paused") ? "查询已暂停" : kinds.has("skipped") ? (failures.some(f => f.query_state === "skipped") ? "查询已跳过或停止" : "上次查询未执行")
       : kinds.has("busy") ? "查询通道占用" : null;
     if (state) {
       if (concise) return `主动${state}`;

@@ -194,8 +194,49 @@ class Router {
   constructor(resolve, {timeout = 10000, now = Date.now} = {}) {
     this.resolve = resolve; this.timeout = timeout; this.now = now;
     this.bad = new Map(); this.generation = 0; this.sockets = new Set(); this.events = [];
+    this.automatic = new Map();
   }
-  invalidate() { this.bad.clear(); this.generation++; }
+  invalidate() {
+    this.bad.clear(); this.generation++;
+    for (const scope of this.automatic.keys()) this.deny(scope, 'automatic_route_changed');
+  }
+  admit(scope, generation, routes, seconds) {
+    // Automatic scope names remain fail-closed even after their record expires.
+    for (const [key, value] of this.automatic) {
+      if (value.until + 60000 < this.now()) { clearTimeout(value.timer); this.automatic.delete(key); }
+    }
+    if (!/^auto-[a-f0-9]{32}$/.test(scope) || this.automatic.has(scope)
+        || generation !== this.generation || !Array.isArray(routes) || !routes.length || routes.length > 2
+        || routes.some(key => typeof key !== 'string' || key.length > 512)
+        || !Number.isFinite(seconds) || seconds <= 0 || seconds > 120 || this.automatic.size >= 256) {
+      throw new RouteError('automatic_admission_invalid');
+    }
+    const value = {generation, routes: new Set(routes), until: this.now() + seconds * 1000,
+      rejection: null, sockets: new Set()};
+    value.timer = setTimeout(() => this.deny(scope, 'automatic_admission_expired'), seconds * 1000);
+    value.timer.unref(); this.automatic.set(scope, value);
+  }
+  deny(scope, reason) {
+    const value = this.automatic.get(scope);
+    if (value) {
+      value.rejection ||= reason;
+      for (const socket of value.sockets) socket.destroy();
+    }
+  }
+  rejection(scope) {
+    if (!scope.startsWith('auto-')) return null;
+    const value = this.automatic.get(scope);
+    if (!value) return 'automatic_admission_missing';
+    if (value.generation !== this.generation) this.deny(scope, 'automatic_route_changed');
+    if (value.until <= this.now()) this.deny(scope, 'automatic_admission_expired');
+    return value.rejection;
+  }
+  require(scope, route) {
+    if (!scope.startsWith('auto-')) return;
+    let reason = this.rejection(scope);
+    if (!reason && !this.automatic.get(scope).routes.has(route.key)) reason = 'automatic_route_unobserved';
+    if (reason) { this.deny(scope, reason); throw new RouteError(reason); }
+  }
   async routes(url) {
     for (const [key, until] of this.bad) if (until <= this.now()) this.bad.delete(key);
     const list = candidates(await this.resolve(url));
@@ -205,16 +246,26 @@ class Router {
   async connect(target, tunnel, signal, scope = 'shared') {
     let list;
     try { list = await this.routes(target.url.href); }
-    catch (error) { this.record(target, {key:null}, 'proxy_resolution_failed', scope); throw error; }
+    catch (error) {
+      this.deny(scope, 'automatic_route_unobserved');
+      this.record(target, {key:null}, 'proxy_resolution_failed', scope); throw error;
+    }
     const generation = this.generation;
     let last = new RouteError('proxy_connect_failed');
     for (const route of list) {
       if (signal.aborted) throw new RouteError('client_cancelled');
       let socket;
       try {
+        this.require(scope, route);
         socket = await connected(route, target, signal, this.timeout);
+        this.require(scope, route);
         this.sockets.add(socket); socket.once('close', () => this.sockets.delete(socket));
         await handshake(socket, route, target, tunnel, signal, this.timeout);
+        this.require(scope, route);
+        const admission = this.automatic.get(scope);
+        if (admission) {
+          admission.sockets.add(socket); socket.once('close', () => admission.sockets.delete(socket));
+        }
         this.record(target, route, 'connected', scope);
         return {socket, route};
       } catch (error) {
@@ -231,7 +282,11 @@ class Router {
     this.events.push({scope, target: target.url.origin, route: route.key, result, at: new Date().toISOString(), generation: this.generation});
     if (this.events.length > 64) this.events.shift();
   }
-  close() { for (const socket of this.sockets) socket.destroy(); this.sockets.clear(); }
+  close() {
+    for (const value of this.automatic.values()) clearTimeout(value.timer);
+    this.automatic.clear();
+    for (const socket of this.sockets) socket.destroy(); this.sockets.clear();
+  }
 }
 
 function authorizedScope(req, expected) {
@@ -242,7 +297,7 @@ function authorizedScope(req, expected) {
   const user = decoded.slice(0, separator);
   const actual = Buffer.from(decoded.slice(separator + 1));
   // Product protocol: optional generated operation UUID hex, never identity.
-  if (!/^agent-monitor(?:\.[a-f0-9]{32})?$/.test(user)) return null;
+  if (!/^agent-monitor(?:\.(?:auto-)?[a-f0-9]{32})?$/.test(user)) return null;
   if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
   return user.includes('.') ? user.split('.')[1] : 'shared';
 }
@@ -265,7 +320,22 @@ function createBridge(resolve, token, options) {
       res.setHeader('content-type', 'application/json');
       const events = router.events.filter(row => scope === 'shared' || row.scope === scope).map(({scope, ...row}) => row);
       res.end(JSON.stringify({policy: 'chromium-system', generation: router.generation,
-        coverage: 'recent_connections_only', events})); return;
+        coverage: 'recent_connections_only', automatic_rejection: router.rejection(scope), events})); return;
+    }
+    if (req.url === '/automatic-egress' && req.method === 'POST' && scope === 'shared') {
+      try {
+        let body = '';
+        for await (const chunk of req) {
+          body += chunk;
+          if (body.length > 4096) throw new RouteError('automatic_admission_invalid');
+        }
+        const value = JSON.parse(body);
+        router.admit(value.scope, value.generation, value.routes, value.seconds);
+        res.writeHead(201, {'content-type': 'application/json'}); res.end('{"admitted":true}');
+      } catch {
+        res.writeHead(409); res.end();
+      }
+      return;
     }
     const controller = new AbortController();
     res.on('close', () => controller.abort());

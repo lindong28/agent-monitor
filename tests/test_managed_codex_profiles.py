@@ -76,6 +76,37 @@ class ManagedCodexTests(unittest.TestCase):
             (codex_home / "auth.json").write_text(json.dumps({"tokens": {"account_id": "shared-workspace", "id_token": "fixture." + claim + ".fixture"}}))
         return codex_home
 
+    def test_automatic_managed_skip_keeps_old_reading_and_normal_cadence(self):
+        from agent_monitor.network import automatic_egress as gate
+        from agent_monitor.quota import quota_refresh
+        from agent_monitor.runtime import hub
+        from agent_monitor import hub_config
+        self.profile("alpha")
+        old = dict(account_profile="alpha", account_id="shared-workspace", account_label="alpha@example.test",
+                   updated_at="2026-10-01T00:00:00Z", five_hour_pct=17, refresh_attempted_at="2026-10-01T00:00:00Z")
+        path = self.root / "state/quota_snapshot.json"
+        quota_service.save_cache(path, {"codex": {"managed_accounts": [old]}})
+        batch = gate.Batch()
+        with mock.patch.object(gate.Batch, "environment", side_effect=gate.Skipped("china")) as check, \
+                mock.patch.object(quota_refresh.subprocess, "Popen") as spawn, \
+                mock.patch.object(quota_refresh.network_policy, "endpoint", return_value="http://agent-monitor:fixture@127.0.0.1:9"), \
+                mock.patch.object(hub_config, "quota_interval", return_value=300):
+            first = quota_service.managed_codex_rate_limits(root=self.root, refresh=True, scheduled=True, automatic_batch=batch)[0]
+            second = quota_service.managed_codex_rate_limits(root=self.root, refresh=True, scheduled=True, automatic_batch=batch)[0]
+        spawn.assert_not_called(); self.assertEqual(check.call_count, 1)
+        self.assertEqual(second["query_state"], "skipped")
+        self.assertEqual(second["five_hour_pct"], 17)
+        self.assertEqual(second["updated_at"], old["updated_at"])
+        self.assertEqual(second["refresh_attempted_at"], old["refresh_attempted_at"])
+        self.assertEqual(first["refresh_skip"], second["refresh_skip"])
+        with mock.patch.object(hub, "native_quota_due", return_value=False), \
+                mock.patch("agent_monitor.quota.quota_settings.read", return_value={"accounts": [dict(profile="alpha", account_id=old["account_id"], account_label=old["account_label"], enabled=True)]}), \
+                mock.patch.object(hub_config, "quota_interval", return_value=300):
+            from datetime import datetime
+            checked = datetime.fromisoformat(first["refresh_skip"]["checked_at"]).timestamp()
+            self.assertFalse(hub.quota_due(root=self.root, now=checked + 299))
+            self.assertTrue(hub.quota_due(root=self.root, now=checked + 301))
+
     def test_credential_plan_survives_newer_cached_reading_and_native_home(self):
         home = self.profile("alpha")
         cached = dict(account_profile="alpha", account_id="shared-workspace",

@@ -17,7 +17,7 @@ from agent_monitor.snapshots import exporter
 from agent_monitor.runtime import hub
 from agent_monitor.accounting import rollup
 from agent_monitor.snapshots import sync
-from parsers import RateLimits, accounts
+from parsers import RateLimits, accounts, codex_profiles
 
 
 class GuiQuotaTests(unittest.TestCase):
@@ -32,6 +32,8 @@ class GuiQuotaTests(unittest.TestCase):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
         for patch in (
+            mock.patch.object(codex_profiles, "discover", return_value=[]),
+            mock.patch.object(codex_profiles, "session_links", return_value=codex_profiles.SessionLinks()),
             mock.patch.object(hub, "ROOT", self.root),
             mock.patch.object(exporter, "ROOT", self.root),
             mock.patch.object(hub.hub_config, "enabled", return_value=True),
@@ -52,6 +54,17 @@ class GuiQuotaTests(unittest.TestCase):
     def run_collector(self):
         with mock.patch.object(rollup, "run", return_value={}), mock.patch.object(quota_service, "rate_limits", return_value=self.limits):
             hub.collect()
+
+    def test_collector_marks_only_timer_work_automatic(self):
+        for manual in (False, True):
+            with self.subTest(manual=manual):
+                if manual:
+                    hub._write_quota_message(self.request, {"nonce": "c" * 32})
+                with mock.patch.object(hub, "quota_due", return_value=True), \
+                        mock.patch.object(rollup, "run", return_value={}), \
+                        mock.patch.object(quota_service, "rate_limits", return_value=self.limits) as query:
+                    hub.collect()
+                self.assertEqual(query.call_args.kwargs["automatic"], not manual)
 
     def test_managed_only_collector_round_keeps_native_deadline(self):
         (self.state / "quota-collection-at").write_text("100")

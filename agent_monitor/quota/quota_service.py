@@ -16,6 +16,7 @@ from pathlib import Path
 
 from agent_monitor.quota import quota_applicability
 from agent_monitor.quota import quota_refresh
+from agent_monitor.network import automatic_egress
 from agent_monitor.contracts.usage import RateLimits
 from parsers import accounts, claude_status, codex
 from agent_monitor.paths import PROJECT_ROOT
@@ -75,7 +76,7 @@ def gui_rate_limits(*, requester, request_error, blocked_accounts=None, root=Non
 
 
 def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=None,
-                managed_refresh=False, scheduled=False):
+                managed_refresh=False, scheduled=False, automatic=False):
     root = Path(root) if root is not None else ROOT
     from parsers import codex_profiles
     links = codex_profiles.session_links()
@@ -83,6 +84,7 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
     # The last active observation belongs to this machine, including standalone.
     cached = read_cache(cache_path)
     deadline = time.monotonic() + 100
+    automatic_batch = automatic_egress.Batch() if automatic else None
     rejected_codex_cache = not links.accepts_cached_quota(cached.get("codex"))
     if rejected_codex_cache:
         cached["codex"] = {"managed_accounts": (cached.get("codex") or {}).get("managed_accounts", [])}
@@ -159,6 +161,9 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
                     # A newer local reading does not make another active query.
                     block["refresh_error"] = previous["refresh_error"]
                     block["refresh_failure"] = previous.get("refresh_failure")
+                    for field in ("query_state", "refresh_skip", "refresh_attempted_at"):
+                        if field in previous:
+                            block[field] = previous[field]
             if block is not None:
                 # `refresh_error` is deliberately not defaulted alongside it.
                 # Absent means "this export ran no active query"; null means "it
@@ -179,13 +184,18 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
         failure = None
         signed_out = False
         state = "succeeded"
+        skipped = None
         try:
             exclusions = (blocked_accounts or {}).get(provider, [])
             if "*" in exclusions or quota_refresh.account_fingerprint(provider, account) in exclusions:
                 block = rate_limit_block(passive() or RateLimits(None, None, None, None), account)
                 block.update(refresh_error="本轮同服务账号已有失败或结果未知；本机未再次查询。", query_state="blocked", signed_out=False)
                 return provider, query_state(provider, account, block)
-            value = quota_refresh.load_rate_limits(provider, account, root=root)
+            value = quota_refresh.load_rate_limits(provider, account, root=root,
+                **({"automatic_batch": automatic_batch} if automatic_batch else {}))
+        except automatic_egress.Skipped as exc:
+            state, error, skipped = "skipped", str(exc), exc.details
+            value = passive() or RateLimits(None, None, None, None)
         except quota_refresh.NoSubscription:
             # The confirmation may have arrived after this export's precheck.
             value = passive() or RateLimits(None, None, None, None)
@@ -218,10 +228,15 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
         block["refresh_failure"] = failure
         block["signed_out"] = signed_out
         block["query_state"] = state
-        block["refresh_attempted_at"] = datetime.now(timezone.utc).isoformat()
+        block["refresh_skip"] = skipped
         previous = cached.get(provider)
+        if skipped:
+            if previous and accounts.quota_identity(provider, previous.get("account_id"), previous.get("account_label")) == accounts.quota_identity(provider, account.account_id, account.label):
+                block["refresh_attempted_at"] = previous.get("refresh_attempted_at")
+        else:
+            block["refresh_attempted_at"] = datetime.now(timezone.utc).isoformat()
         if previous and account and accounts.quota_identity(provider, previous.get("account_id"), previous.get("account_label")) == accounts.quota_identity(provider, account.account_id, account.label) and quota_time(previous, provider) > quota_time(block, provider):
-            block = {**previous, **{key: block.get(key) for key in ("refresh_error", "refresh_failure", "signed_out", "query_state", "refresh_attempted_at")}}
+            block = {**previous, **{key: block.get(key) for key in ("refresh_error", "refresh_failure", "signed_out", "query_state", "refresh_attempted_at", "refresh_skip")}}
         if provider == "codex" and account:
             block = _with_credential_plan(block, {"credential_plan": account.plan})
         return provider, query_state(provider, account, block)
@@ -240,7 +255,7 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
     managed_enabled = managed_refresh or any(row["enabled"] for row in quota_settings.read(root)["accounts"])
     managed = managed_codex_rate_limits(
         links, refresh=refresh and managed_enabled, root=root, blocked_accounts=blocked_accounts,
-        deadline=deadline, scheduled=scheduled, enrollment=True,
+        deadline=deadline, scheduled=scheduled, enrollment=True, automatic_batch=automatic_batch,
     )
     if managed:
         result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
@@ -249,7 +264,7 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
     return result
 
 
-def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, blocked_accounts=None, deadline=None, scheduled=False, enrollment=False):
+def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, blocked_accounts=None, deadline=None, scheduled=False, enrollment=False, automatic_batch=None):
     """Read managed profiles, optionally using the shared account quota reader.
 
     Passive log observations remain the default.  Active reads are bounded,
@@ -269,7 +284,7 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
     deadline = deadline if deadline is not None else time.monotonic() + 100
     result = []
     profiles = sorted(codex_profiles.discover(), key=lambda p: (
-        (cached.get((p.account or {}).get("name")) or {}).get("refresh_attempted_at", ""), str(p.home)))
+        refresh_check_time(cached.get((p.account or {}).get("name")) or {}), str(p.home)))
     for profile in profiles:
         if profile.account is None:
             continue
@@ -294,7 +309,7 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
         from agent_monitor.quota import quota_settings
         from agent_monitor import hub_config
         enrolled = not enrollment or quota_settings.selected(profile, root)
-        last_attempt = (cached_block or {}).get("refresh_attempted_at") if same_identity else None
+        last_attempt = refresh_check_time(cached_block or {}) if same_identity else None
         try:
             fresh = (datetime.now(timezone.utc) - datetime.fromisoformat(last_attempt)).total_seconds() < hub_config.quota_interval()
         except (ValueError, TypeError):
@@ -303,7 +318,7 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
         # A configured native home may itself be one of the discovered profiles.
         native = read_cache(root / "state/quota_snapshot.json").get("codex") or {}
         same_home = profile.home.resolve() == accounts.CODEX_AUTH.parent.resolve()
-        if same_home and native.get("refresh_attempted_at") and accounts.quota_identity("codex", native.get("account_id"), native.get("account_label")) == accounts.quota_identity("codex", account.account_id, account.label):
+        if same_home and refresh_check_time(native) and accounts.quota_identity("codex", native.get("account_id"), native.get("account_label")) == accounts.quota_identity("codex", account.account_id, account.label):
             block = dict(native)
             block.pop("managed_accounts", None)
             block["account_profile"] = profile.account["name"]
@@ -327,14 +342,19 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
             block.update(query_state="pending", refresh_error="本轮查询时间已用完，此账号尚未查询；后续采集将继续。")
         elif do_refresh:
             attempted = datetime.now(timezone.utc).isoformat()
+            skipped = None
             try:
-                active = quota_refresh.load_rate_limits("codex", account, codex_home=profile.home, root=root, account_profile=profile.account["name"])
+                active = quota_refresh.load_rate_limits("codex", account, codex_home=profile.home, root=root, account_profile=profile.account["name"],
+                    **({"automatic_batch": automatic_batch} if automatic_batch else {}))
                 current = accounts.codex_account(profile.home / "auth.json")
                 if current is None or accounts.quota_identity("codex", current.account_id, current.label) != accounts.quota_identity("codex", account.account_id, account.label):
                     raise quota_refresh.LocalUnavailable("查询期间账号已变化；未保存读数，请核对登录状态。")
                 block = rate_limit_block(active, account)
                 block.update(account_profile=profile.account["name"], signed_out=False,
                             query_state="succeeded", refresh_error=None, refresh_failure=None)
+            except automatic_egress.Skipped as exc:
+                skipped = exc.details
+                block.update(query_state="skipped", refresh_error=str(exc), refresh_failure=None, refresh_pause=None)
             except Exception as exc:
                 # Keep the newest passive or prior active reading while exposing
                 # this attempt's bounded failure to the dashboard.
@@ -345,7 +365,9 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
                 pause = Controls(root / "state/upstream_controls").read("codex").get("pause")
                 block.update(query_state="local_unavailable" if isinstance(exc, quota_refresh.LocalUnavailable) else "failed",
                              refresh_error=detail, refresh_failure=getattr(exc, "failure", None), refresh_pause=pause)
-            block["refresh_attempted_at"] = attempted
+            block["refresh_skip"] = skipped
+            if not skipped:
+                block["refresh_attempted_at"] = attempted
             # Preserve each finished attempt even if the outer caller times out.
             save_cache(root / "state/quota_snapshot.json", {"codex": {"managed_accounts": [block]}},
                        session_links=links)
@@ -394,6 +416,8 @@ def save_cache(cache_path, result, *, session_links=None):
                     "refresh_failure": block.get("refresh_failure"),
                     "refresh_pause": block.get("refresh_pause"),
                     "query_state": block.get("query_state"),
+                    "refresh_skip": block.get("refresh_skip"),
+                    "refresh_attempted_at": block.get("refresh_attempted_at"),
                     "subscription_confirmation": block.get("subscription_confirmation"),
                 }
             if provider == "codex" and block is not None and ("managed_accounts" in block or "managed_accounts" in (old or {})):
@@ -429,6 +453,11 @@ def _with_credential_plan(reading, metadata):
     return result
 
 
+def refresh_check_time(block):
+    """Scheduling/outcome clock; never substitute it for quota observation time."""
+    return max(block.get("refresh_attempted_at") or "", (block.get("refresh_skip") or {}).get("checked_at") or "")
+
+
 def _merge_managed_accounts(old_rows, new_rows, *, incoming_metadata=True):
     """Merge managed rows without losing nested reads or crossing identities."""
     if not isinstance(new_rows, list):
@@ -456,8 +485,8 @@ def _merge_managed_accounts(old_rows, new_rows, *, incoming_metadata=True):
             row if incoming_metadata and "credential_plan" in row else previous)
         # A failed attempt has no newer quota observation, but its outcome must
         # remain visible beside the retained reading.
-        attempt = max((row, previous), key=lambda r: r.get("refresh_attempted_at") or "")
-        for field in ("refresh_attempted_at", "refresh_error", "refresh_failure", "refresh_pause", "query_state", "pre_pause_query"):
+        attempt = max((row, previous), key=refresh_check_time)
+        for field in ("refresh_attempted_at", "refresh_skip", "refresh_error", "refresh_failure", "refresh_pause", "query_state", "pre_pause_query"):
             if field in attempt:
                 newest[field] = attempt[field]
         merged[profile] = newest
@@ -526,7 +555,7 @@ def record_codex_reading(cache_path, account, reading, *, account_profile=None, 
                        spend_control_reached=reading.get("spend_control_reached"),
                        rate_limit_reached_type=reading.get("rate_limit_reached_type"))
     fresh = rate_limit_block(value, account)
-    fresh.update(refresh_attempted_at=reading["observed_at"], refresh_error=None, refresh_failure=None,
+    fresh.update(refresh_attempted_at=reading["observed_at"], refresh_skip=None, refresh_error=None, refresh_failure=None,
                  signed_out=False, query_state="succeeded")
     previous = read_cache(cache_path).get("codex") or {}
     identity = accounts.quota_identity("codex", account.account_id, account.label)
@@ -617,7 +646,7 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     block = rate_limit_block(value, account)
     if not quota_applicability.current_window(block):
         raise quota_refresh.RefreshError("探测未返回当前有效额度窗口；暂停保留。")
-    block.update(refresh_error=None, refresh_failure=None, refresh_pause=None, query_state="succeeded", signed_out=False)
+    block.update(refresh_error=None, refresh_failure=None, refresh_pause=None, refresh_skip=None, query_state="succeeded", signed_out=False)
     block["refresh_attempted_at"] = datetime.now(timezone.utc).isoformat()
     if profile:
         block["account_profile"] = profile

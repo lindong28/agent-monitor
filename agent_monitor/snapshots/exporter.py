@@ -91,11 +91,11 @@ def exporter_version():
     return commit
 
 
-def export_quota(*, gui_quota=False, blocked_accounts=None):
+def export_quota(*, gui_quota=False, blocked_accounts=None, automatic_quota=False):
     """Collect quota without rebuilding or transferring a statistics snapshot."""
     commit = exporter_version()
-    limits = (_gui_rate_limits(blocked_accounts=blocked_accounts) if gui_quota and hub_config.enabled()
-              else _rate_limits(refresh=True, blocked_accounts=blocked_accounts))
+    limits = (_gui_rate_limits(blocked_accounts=blocked_accounts) if gui_quota and not automatic_quota and hub_config.enabled()
+              else _rate_limits(refresh=True, blocked_accounts=blocked_accounts, **({"automatic": True, "scheduled": True} if automatic_quota else {})))
     return {
         "schema_version": 1,
         "source_host_identity": generation.self_certified_host_identity(),
@@ -116,6 +116,7 @@ def export_bundle(
     rollup_now=None,
     quota_refresh=True,
     gui_quota=False,
+    automatic_quota=False,
 ):
     db_path = Path(db_path)
     if output_path is None:
@@ -151,7 +152,7 @@ def export_bundle(
         transfer_digest = _file_digest(snapshot_path)
         stats = _validated_snapshot_stats(snapshot_path)
         _require_snapshot_unchanged(snapshot_path, signature)
-        if rate_limits is None and gui_quota and refresh and quota_refresh:
+        if rate_limits is None and gui_quota and not automatic_quota and refresh and quota_refresh:
             if hub_config.enabled():
                 rate_limits = _gui_rate_limits()
         manifest = {
@@ -161,7 +162,7 @@ def export_bundle(
             # cannot prove which historical aggregate row came from a path, so v1
             # exports no alias coverage rather than self-declaring it.
             "aliases": [],
-            "rate_limits": _rate_limits(refresh=refresh and quota_refresh, scheduled=True) if rate_limits is None else rate_limits,
+            "rate_limits": _rate_limits(refresh=refresh and quota_refresh, scheduled=True, **({"automatic": True} if automatic_quota else {})) if rate_limits is None else rate_limits,
             "exporter_commit": resolved_exporter_commit,
             "generated_at": generated_at or _timestamp(),
             "transfer_digest": transfer_digest,
@@ -343,11 +344,11 @@ def _gui_rate_limits(*, blocked_accounts=None):
     )
 
 
-def _rate_limits(refresh=False, *, blocked_accounts=None, scheduled=False):
+def _rate_limits(refresh=False, *, blocked_accounts=None, scheduled=False, automatic=False):
     from agent_monitor.runtime import hub
     native_requested = refresh and (not scheduled or hub.native_quota_due(root=ROOT))
     limits = quota_service.rate_limits(
-        refresh, blocked_accounts=blocked_accounts, use_cache=hub_config.enabled(), root=ROOT, scheduled=scheduled,
+        refresh, blocked_accounts=blocked_accounts, use_cache=hub_config.enabled(), root=ROOT, scheduled=scheduled, **({"automatic": True} if automatic else {}),
         managed_refresh=hub_config.managed_quota_auto_refresh(),
     )
     if native_requested:

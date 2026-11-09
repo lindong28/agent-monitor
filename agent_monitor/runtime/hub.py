@@ -82,7 +82,7 @@ def quota_due(*, root=None, now=None):
             continue
         previous = next((row for row in rows if (row.get("account_profile"), row.get("account_id"), row.get("account_label")) == (item["profile"], item["account_id"], item["account_label"])), {})
         try:
-            age = (time.time() if now is None else now) - datetime.fromisoformat(previous["refresh_attempted_at"]).timestamp()
+            age = (time.time() if now is None else now) - datetime.fromisoformat(quota_service.refresh_check_time(previous)).timestamp()
             if age < hub_config.quota_interval():
                 continue
         except (KeyError, ValueError, TypeError):
@@ -244,7 +244,7 @@ def collect():
         native_requested = request is not None or native_quota_due(root=ROOT)
         # Provider refresh has its own deadlines and persists its observed state.
         limits = quota_service.rate_limits(refresh=True, use_cache=enabled(), root=ROOT,
-                                           managed_refresh=hub_config.managed_quota_auto_refresh(), scheduled=request is None,
+                                           managed_refresh=hub_config.managed_quota_auto_refresh(), scheduled=request is None, automatic=request is None,
                                            **({"blocked_accounts": exclusions} if exclusions else {}))
         if nonce is not None:
             _write_quota_message(ROOT / "state" / ("quota-refresh-receipt" + version + ".json"),
@@ -277,7 +277,7 @@ def collect():
     if failures:
         raise failures[0]
     print("agent-monitor collection: local statistics saved; Quota %s. Central transfer is independent."
-          % ("queried" if queried.is_set() else "using its hourly schedule"))
+          % ("cycle processed (see account outcomes)" if queried.is_set() else "using its hourly schedule"))
     return result
 
 
