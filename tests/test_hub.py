@@ -16,7 +16,7 @@ from component_fixtures import reset_collection
 from agent_monitor.snapshots import sync
 from agent_monitor.quota import quota_service
 from agent_monitor.snapshots import generation
-from parsers import RateLimits
+from parsers import RateLimits, codex_profiles
 
 
 class HubTests(unittest.TestCase):
@@ -37,6 +37,8 @@ class HubTests(unittest.TestCase):
         config_patch.start()
         self.addCleanup(config_patch.stop)
         for patch in (
+            mock.patch.object(codex_profiles, "discover", return_value=[]),
+            mock.patch.object(codex_profiles, "session_links", return_value=codex_profiles.SessionLinks()),
             mock.patch('agent_monitor.runtime.hub.service_runtime.wait_for_identity'),
             mock.patch('agent_monitor.runtime.hub.service_runtime.read_health', side_effect=lambda _url: {
                 'source_root': str(hub.ROOT), 'deployment_signature': hub.service_runtime.signature(hub.ROOT)}),
@@ -386,7 +388,7 @@ class HubTests(unittest.TestCase):
                 for provider in ("claude", "codex"):
                     self.assertEqual(result[provider]["refresh_errors"], [{
                         "machine": "node-c", "reason": "offline", "account_id": "fixture-account",
-                        "account_label": "Fixture", "account_profile": "",
+                        "account_label": "Fixture", "account_profile": "", "query_state": "failed",
                     }])
                     self.assertEqual(cached[provider]["updated_at"], later.updated_at)
                 self.assertEqual(live.call_count, active_calls)
