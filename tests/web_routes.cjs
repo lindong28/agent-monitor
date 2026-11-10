@@ -260,7 +260,7 @@ async function run() {
   const returnUrl = '/?range=7d&quota_provider=codex&quota_search=fixture';
   await enter('/collection?range=7d&return=' + encodeURIComponent(returnUrl));
   assert.equal(ui.qs('#collection-return').href, returnUrl);
-  assert.match(ui.qs('#cost-diagnostics-status').textContent, /没有金额未知记录/);
+  assert.match(ui.qs('#cost-diagnostics-status').textContent, /当前范围无金额未知记录/);
   assert.equal(env.intervals.size, 1);
   const beforeStaleTick = env.requests.length;
   await firstOverviewTimer.handler();

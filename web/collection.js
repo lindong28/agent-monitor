@@ -300,7 +300,7 @@
     const groups = data.groups;
     qs("#cost-diagnostics-status").textContent = groups.length
       ? `已留存明细中 ${integer(groups.reduce((total, row) => total + row.entries, 0))} 条金额未知记录`
-      : "所选范围的已留存明细中，没有金额未知记录。";
+      : "当前范围无金额未知记录。";
     const incomplete = groups.filter(row => row.reason === "usage_incomplete");
     const other = groups.filter(row => row.reason !== "usage_incomplete");
     const rows = items => items.map(row => {
