@@ -220,8 +220,14 @@ assert(table.textContent.includes('读数来源：会话日志'));
 assert(table.textContent.includes('自动查询已暂停'));
 assert(table.textContent.includes('alpha 自动查询已暂停'));
 assert(!table.textContent.includes('更新延迟'));
+const explorer=nodes['#quota-explorer'];
+delete nodes['#quota-explorer'];
+ui.renderQuotaAccounts(ui.quotaSnapshot());
 const recoverButton=descendants(table).find(n=>n.tagName==='BUTTON' && n.textContent==='查看当前状态与恢复');
-assert(recoverButton, 'read-only recovery entry is available');
+assert(recoverButton, 'Collection retains the read-only recovery entry');
+nodes['#quota-explorer']=explorer;
+ui.renderQuotaAccounts(ui.quotaSnapshot());
+assert(!descendants(table).some(n=>n.tagName==='BUTTON' && n.textContent==='查看当前状态与恢复'), 'Overview omits historical diagnostic controls');
 
 // A machine pause for another account must not be projected onto this row.
 const unrelated={...account('other'),updated_at:new Date().toISOString(),
@@ -336,11 +342,11 @@ const fixedNow=Date.parse('2026-10-16T12:00:00Z'), realNow=Date.now;
 Date.now=()=>fixedNow;
 for (const [machines, source, expected] of [
   [['alpha'], 'alpha', 'alpha'],
-  [['alpha','beta'], 'beta', 'alpha · beta（读数）'],
-  [['alpha','alpha','beta'], 'beta', 'alpha · beta（读数）'],
+  [['alpha','beta'], 'beta', 'alpha · beta'],
+  [['alpha','alpha','beta'], 'beta', 'alpha · beta'],
   [['alpha','alpha'], 'alpha', 'alpha'],
-  [['alpha'], 'beta', 'alpha · 读数：beta'],
-  [[], 'beta', '— · 读数：beta'],
+  [['alpha'], 'beta', 'alpha'],
+  [[], 'beta', '—'],
   [['alpha'], null, 'alpha'],
 ]) {
   const sample={...account('source-context'), machines, reading_from:source, updated_at:'2026-10-16T11:57:00Z'};
@@ -349,6 +355,7 @@ for (const [machines, source, expected] of [
   assert(!row.cells[0].textContent.includes('观测'), 'quota time must leave identity');
   assert.equal(row.cells[7].textContent,expected,JSON.stringify({machines,source}));
   assert.equal(row.cells[8].dataset.label,'配额更新');
+  if (source) assert(row.cells[8].textContent.includes('来源机器：'+source));
   assert(descendants(row.cells[8]).some(n=>n.tagName==='SUMMARY'&&n.textContent==='3 分钟前'));
   assert(!row.cells[8].textContent.includes('配额来源未知'));
   assert.equal(descendants(row.cells[8]).filter(n=>n.tagName==='DETAILS').some(n=>n.textContent.includes('未取得读数来源机器')),source===null);
@@ -380,7 +387,8 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
     assert(!inline.includes('保留旧值'));
     assert(!inline.includes('读数可能过期'));
     if (kind==='account-action') {
-      assert(inline.includes('账号操作读数'));
+      assert(!inline.includes('账号操作读数'));
+      assert(detail.textContent.includes('读数来源：账号操作中的配额查询'));
     }
     if (affected) {
       assert(inline.endsWith('来源机器未登录'));
@@ -394,7 +402,8 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
 const staleAction = {...account('stale-action'), updated_at:'2026-10-14T12:00:00Z', quota_source:'account_action'};
 ui.renderQuotaAccounts({codex:{accounts:[staleAction]}});
 const staleRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='stale-action');
-assert(staleRow.cells[8].textContent.includes('账号操作读数'));
+assert(staleRow.cells[8].textContent.includes('读数来源：账号操作中的配额查询'));
+assert(staleRow.cells[8].textContent.includes('读数过期'));
 assert(!staleRow.cells[8].textContent.includes('读数可能过期'));
 Date.now=realNow;
 const original=JSON.stringify(data);
@@ -461,7 +470,11 @@ assert(rows()[1].cells[5].textContent.includes('91%'),'same workspace different 
 assert(rows()[2].cells[5].textContent.includes('91%'),'same email different workspace stays separate');
 assert(rows()[1].cells[6].textContent.includes('上次重置时间已过'));
 assert.equal(JSON.stringify(projection),frozen,'projection must not mutate machine input');
-assert(table.textContent.includes('fixture collection failure'));
+assert(!table.textContent.includes('fixture collection failure'));
+delete nodes['#quota-explorer'];
+ui.renderQuotaAccounts(projection);
+assert(table.textContent.includes('fixture collection failure'), 'historical diagnostics remain on Collection');
+nodes['#quota-explorer']=explorer;
 // A newer machine observation and an equal timestamp both beat Web observations.
 for (const newer of [observed,'2099-01-01T00:00:00Z']) {
   ui.renderQuotaAccounts({codex:{accounts:[{...past,updated_at:newer,seven_day_used_pct:42}]}});
@@ -501,18 +514,18 @@ assert(!document.querySelector('#quota-past-accounts').hidden,'new action observ
 descendants(table).find(n=>n.className.includes('quota-past-toggle')).click();
 ui.updateCodexQuotaReadings([]);
 ui.renderQuotaAccounts(data);
-assert(!count().includes('匹配')); assert(count().includes('机器关联 2')); assert(count().includes('历史账号 1')); assert(!count().includes('机器记录'));
+assert(!count().includes('匹配')); assert.equal(count(),'2 个当前账号'); assert(!count().includes('机器记录'));
 assert(!table.tBodies.some(b=>b.className==='quota-unknown')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
 assert(table.tBodies.find(b=>b.className==='quota-history').hidden);
 buttons[2].click();
 assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'bob');
-assert(table.textContent.includes('fixture failure')); assert(nodes['#quota-signed-out'].hidden, 'unrelated signed-out machines belong in diagnostics');
+assert(!table.textContent.includes('fixture failure')); assert(nodes['#quota-signed-out'].hidden, 'unrelated signed-out machines belong in diagnostics');
 assert(!table.textContent.includes('账号操作')); assert(!table.textContent.includes('查询配额')); assert(table.textContent.includes('37%'));
 ui.renderQuotaAccounts(data); assert.equal(rows().length,1); assert.equal(buttons[2].attributes['aria-pressed'],'true');
-search('nobody'); assert(table.textContent.includes('没有匹配的配额记录')); assert(table.textContent.includes('fixture failure'));
+search('nobody'); assert(table.textContent.includes('没有匹配的账号')); assert(!table.textContent.includes('fixture failure'));
 nodes['#quota-clear'].click(); assert.equal(nodes['#quota-search'].value,''); assert(!count().includes('匹配'));
 search('PRO alice'); assert.equal(rows().length,1); assert.equal(rows()[0].dataset.accountId,'alice');
-search('old-b'); assert(count().includes('匹配 0 / 3')); assert(count().includes('机器关联 0')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
+search('old-b'); assert(count().includes('匹配 0 / 3')); assert(!count().includes('当前账号')); assert(nodes['#quota-machine-records'].textContent.includes('old-b'));
 search('past'); assert(table.textContent.includes('移除')); assert.strictEqual(ui.quotaSnapshot(),data);
 // The delete request can finish after the user hides its row with a filter.
 search('bob'); assert.equal(rows().length,1);

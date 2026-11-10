@@ -115,11 +115,13 @@ assert(!html.includes('举报次数</div>'));
 html=render({public:{ok:true,ip:'192.0.2.1',proxy:true,hosting:false},risk:null,spam:{raw_lines:['未收录']},errors:[{section:'risk',message:'fixture timeout'}]});
 assert(html.includes('fixture timeout')); assert(html.includes('未收录')); assert(!html.includes('未查询：'));
 ui.renderNetworkBanner({verdict:'high',timestamp:'observation',coverage:{missing:['dns']},refresh:{reused:true,retry_in_seconds:50},conclusions:[{level:'bad'}]});
-assert(nodes['#network-refresh-status'].textContent.includes('缓存结果'));
-assert(nodes['#network-refresh-status'].textContent.includes('最早可重新检测于'));
+assert(!nodes['#network-refresh-status'].textContent.includes('缓存结果'));
+assert(nodes['#network-refresh-status'].textContent.includes('可再次检测：'));
 assert(nodes['#network-updated'].textContent.includes('观测于'));
 ui.renderNetworkBanner({verdict:'low',coverage:{missing:[]},refresh:{reused:false,retry_in_seconds:60}});
-assert(nodes['#network-refresh-status'].textContent.includes('新检测'));
+assert(nodes['#network-refresh-status'].textContent.includes('可再次检测：'));
+ui.renderNetworkBanner({verdict:'low',coverage:{missing:[]},refresh:{reused:true,retry_in_seconds:0}});
+assert.equal(nodes['#network-refresh-status'].textContent,'');
 ui.renderNetworkBanner({verdict:'unknown',error:'fixture failure'});
 assert(!nodes['#network-refresh-status'].textContent.includes('取得新检测结果'));
 '''

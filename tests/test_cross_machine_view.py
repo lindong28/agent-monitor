@@ -2031,7 +2031,7 @@ process.stdout.write(JSON.stringify({ combined, excluded, recent, cleanup, unche
             "数据过期",
             "用的是上次的数据",
             "ssh timeout",
-            "本机",
+            "node-b",
             "最后尝试",
             "最后联系",
         ):
