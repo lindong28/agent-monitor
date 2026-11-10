@@ -582,7 +582,7 @@
         key: "identity",
         label: "身份变化",
         summary: "账号身份变化",
-        action: "先确认这台机器当前登录的是目标账号；页面不能替你切换机器账号。确认后打开恢复卡片更新状态。",
+        action: "先打开“查看当前状态与恢复”，核对暂停原账号及这台机器的可用凭据来源。可以使用原账号的独立配置，无需切换默认登录；来源缺失时按卡片提示恢复。",
       };
     }
     const tokenCode = ["token_revoked", "token_expired"].find(code => detail.upstream_code === code || reason.includes(`upstream_code=${code}`));
@@ -804,7 +804,7 @@
         "account-blocked": ["此账号有本地限制，不执行恢复查询", a.blocked_reason || "请在账号卡片核对状态；已停用账号不应作为其他账号继续查询的前置条件。"],
         unreadable: ["暂停记录无法读取", "发送仍暂停。先按排查步骤修复状态记录，再更新状态；不能直接清除暂停。"],
         used: ["本次暂停的检查机会已使用", "先更新状态查看已有结果。若仍未结束，按下方排查步骤处理；此处不能重复检查或重置机会。"],
-        identity: ["查询账号身份需要确认", "发送仍暂停。先在目标机器确认当前登录的是这个账号；页面不能替你切换机器账号。确认后更新状态。"],
+        identity: ["查询账号身份需要确认", "暂停保留。先核对目标机器上的原账号凭据来源；可恢复原账号的独立配置，无需切换默认登录。确认后更新状态。"],
         "source-mismatch": ["恢复状态来源不一致，需要核对", `${mismatchEvidence}；两份记录不一致，页面不能据此判断根因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
         "upstream-auth": ["上游认证响应需要核对", `已记录${authEvidence}；这条读数不能区分凭据、权限或服务端原因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
         "read-error": ["配额读取失败，需要一次受控检查", "已记录读取阶段失败，但原因未核实。先通过目标机器的 Agent Monitor 路由桥只检查一次；仍失败时复制诊断交由管理员排查。"],
@@ -854,9 +854,11 @@
       if (!["local-commit","auth-unresolved","failed","unreadable","identity","source-mismatch","upstream-auth","read-error","used"].includes(mode)) {
         steps.hidden = true; help.textContent = "查看排查步骤";
       }
-      target.textContent = value ? `检查对象：${value.machine} · ${a.account_label || "账号未识别"}` : "";
+      target.textContent = value && mode !== "ready" ? `检查对象：${value.machine} · ${a.account_label || "账号未识别"}` : "";
+      const checkedTarget = lastRequest?.machine && lastRequest?.account_label
+        ? `${lastRequest.machine} · ${lastRequest.account_label}` : "检查对象未记录";
       result.textContent = value ? (last
-        ? `最近检查：${when(last.observed_at)} · ${last.ok ? "当次成功" : "未成功"}。当前状态以本卡片为准。`
+        ? `最近检查：${when(last.observed_at)} · ${checkedTarget} · ${last.ok ? "当次成功" : "未成功"}。当前状态以本卡片为准。`
         : `暂停记录：${when(pause?.at ? pause.at * 1000 : null)}。`) : "";
       if (last && pause?.at && Date.parse(last.observed_at) < pause.at * 1000) result.textContent += " 该检查早于本次暂停，不能证明本次故障已恢复。";
       if (value && !pause && !last) result.textContent = `状态更新：${when(value.observed_at)}。`;

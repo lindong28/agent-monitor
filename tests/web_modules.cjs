@@ -169,6 +169,19 @@ assert.match(resetUi.resetText(3, 2000), /预计/);
     assert.equal(action(legacy, 'probe').hidden, true);
     assert.match(legacy.textContent, /已有用量/);
   }
+  value = {...value, pause:null, account:{account_id:'current', account_label:'current@example.test'},
+    last_recovery:{ok:true, observed_at:'2026-11-10T00:00:00Z',
+      request:{machine:'self', account_id:'original', account_label:'original@example.test'}}};
+  await legacy.refresh();
+  assert.match(legacy.children[3].textContent, /original@example.test/);
+  assert.doesNotMatch(legacy.textContent, /检查对象：self · current@example.test/);
+  value = {...value, pause:{id:'new-pause'}, last_recovery:{...value.last_recovery, ok:false}};
+  await legacy.refresh();
+  assert.match(legacy.textContent, /检查对象：self · current@example.test/);
+  assert.match(legacy.children[3].textContent, /original@example.test/);
+  value = {...value, pause:null, last_recovery:{ok:true, observed_at:'2026-11-10T00:00:00Z'}};
+  await legacy.refresh();
+  assert.match(legacy.textContent, /检查对象未记录/);
   panel.dispose(); legacy.dispose();
 
   global.document = {createElement:element};
