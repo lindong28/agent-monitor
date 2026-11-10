@@ -279,7 +279,7 @@ export function init({ autoLoad = true } = {}) {
       quotaBatch = data.quota_batch || null;
       upstreamPause = data.upstream_pause || null;
       unavailable = data.unavailable_accounts || [];
-      window.AgentMonitor.updateCodexQuotaReadings?.(accounts);
+      window.AgentMonitor.updateCodexQuotaReadings?.(accounts, upstreamPause);
       notice.textContent = "";
       render();
       updateRefreshAllButton();

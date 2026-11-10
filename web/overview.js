@@ -25,6 +25,7 @@
         : "本周";
     }
     renderQuotaAccounts(data.rate_limits);
+    window.AgentMonitor.refreshQuotaMachineStates?.(data.rate_limits);
     // After the quota table, and guarded: a cached copy of the older HTML has no
     // #range-label, and an unguarded write here would throw before the table,
     // charts and sync panel rendered — turning "one card is missing" into a
@@ -282,11 +283,12 @@
         if (!response.ok) throw new Error('账号状态未取得');
         const data = await response.json();
         if (!initializationCurrent() || generation !== profileGeneration) return;
-        window.AgentMonitor.updateCodexQuotaReadings(data.accounts || []);
+        window.AgentMonitor.updateCodexQuotaReadings(data.accounts || [], data.upstream_pause || null);
         const notice = qs('#quota-profile-status');
         if (notice) notice.textContent = '';
       } catch (error) {
         if (initializationCurrent() && generation === profileGeneration && error.name !== 'AbortError') {
+          window.AgentMonitor.updateCodexQuotaReadings(null);
           const notice = qs('#quota-profile-status');
           if (notice) notice.textContent = '账号操作状态未取得，保留上次状态；可前往账号管理更新。';
         }

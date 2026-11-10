@@ -41,6 +41,14 @@
   ];
   let renderedQuotaRateLimits = null;
   let codexQuotaReadings = [];
+  let codexProfileStateKnown = false;
+  let codexSharedPause = null;
+  let quotaMachineStates = new Map();
+  let quotaMachineReads = new Map();
+  let quotaStateController = new AbortController();
+  let quotaStatePending = null;
+  let quotaStateReadAt = 0;
+  let quotaStateTargets = "";
   let initialQuotaHistoryExpanded = false;
   const quotaFilter = { provider: "all", search: "", window: "five_hour", sort: "default" };
   let boundQuotaExplorer = null;
@@ -51,13 +59,85 @@
       .sort((a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at))[0];
   }
 
-  function updateCodexQuotaReadings(accounts) {
+  function updateCodexQuotaReadings(accounts, sharedPause = null) {
+    const known = Array.isArray(accounts);
+    const stateChanged = known !== codexProfileStateKnown || JSON.stringify(sharedPause) !== JSON.stringify(codexSharedPause);
+    codexProfileStateKnown = known;
+    codexSharedPause = sharedPause;
+    accounts = known ? accounts : codexQuotaReadings;
     const signature = (profiles) => JSON.stringify(profiles.map((account) => [
-      account.id, account.account_id, account.email.toLowerCase(), Boolean(account.disabled), latestCodexQuotaReading(account),
+      account.id, account.account_id, account.email.toLowerCase(), Boolean(account.disabled), account.quota_query_allowed, typeof account.quota_query_allowed === "boolean" ? Boolean(account.busy) : null, account.restrictions, latestCodexQuotaReading(account),
     ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
     const changed = signature(accounts) !== signature(codexQuotaReadings);
     codexQuotaReadings = accounts;
-    if (changed && renderedQuotaRateLimits) renderQuotaAccounts(renderedQuotaRateLimits);
+    if ((changed || stateChanged) && renderedQuotaRateLimits) renderQuotaAccounts(renderedQuotaRateLimits);
+  }
+
+  function beginQuotaMachineRead(machine) {
+    const read = Symbol(machine);
+    quotaMachineReads.set(machine, read);
+    return read;
+  }
+
+  function updateQuotaMachineState(machine, value, read) {
+    // This map is machine-scoped. Account recovery replies must never clear it.
+    if (value?.pause_scope === "account") return;
+    if (read && quotaMachineReads.get(machine) !== read) return;
+    if (!read) beginQuotaMachineRead(machine);
+    const valid = value && value.machine === machine && Number.isFinite(Date.parse(value.observed_at))
+      && Object.hasOwn(value, "active") && (value.pause === null
+        || (typeof value.pause?.id === "string" && value.pause.id && value.pause.id !== "unreadable"));
+    quotaMachineStates.set(machine, valid ? value : null);
+    if (renderedQuotaRateLimits) renderQuotaAccounts(renderedQuotaRateLimits);
+  }
+
+  async function refreshQuotaMachineStates(rateLimits) {
+    const machines = [...new Set((rateLimits?.codex?.accounts || [])
+      .filter(account => quotaPresence(account) === "in_use").flatMap(account => account.machines || []))].sort();
+    const targets = JSON.stringify(machines);
+    if (quotaStatePending) return quotaStatePending;
+    if (targets === quotaStateTargets && Date.now() - quotaStateReadAt < 30000) return;
+    quotaStateTargets = targets;
+    quotaStateReadAt = Date.now();
+    const controller = quotaStateController;
+    const pending = (async () => {
+      let next = 0;
+      await Promise.all(machines.slice(0, 8).map(async () => {
+        while (next < machines.length && !controller.signal.aborted) {
+          const machine = machines[next++];
+          const attempt = new AbortController();
+          const abort = () => attempt.abort();
+          controller.signal.addEventListener("abort", abort, {once:true});
+          const timer = setTimeout(abort, 20000);
+          const read = beginQuotaMachineRead(machine);
+          try {
+            const response = await fetch(`/api/quota-recovery?${new URLSearchParams({machine})}`,
+              {headers:{"X-Agent-Monitor":"action"}, signal:attempt.signal});
+            if (!response.ok) throw new Error("状态读取失败");
+            const value = await response.json();
+            if (!controller.signal.aborted) updateQuotaMachineState(machine, value, read);
+          } catch (error) {
+            if (!controller.signal.aborted) updateQuotaMachineState(machine, null, read);
+          } finally {
+            clearTimeout(timer);
+            controller.signal.removeEventListener("abort", abort);
+          }
+        }
+      }));
+    })();
+    quotaStatePending = pending;
+    try { await pending; } finally { if (quotaStatePending === pending) quotaStatePending = null; }
+  }
+
+  function codexProfile(account) {
+    const matches = codexQuotaReadings.filter(profile => profile.account_id === account.account_id
+      && profile.email.toLowerCase() === account.account_label?.toLowerCase());
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function codexQueryPermission(profile) {
+    if (!codexProfileStateKnown || typeof profile?.quota_query_allowed !== "boolean") return null;
+    return profile.quota_query_allowed && !codexSharedPause && !profile.busy;
   }
 
   function quotaDisplayReading(provider, account) {
@@ -429,7 +509,7 @@
     const overviewStatus = qs('#quota-overview-status');
     if (overviewStatus) {
       const affected = QUOTA_PROVIDERS.flatMap(provider => (rateLimits?.[provider.key]?.refresh_errors || []).map(f => f.machine).filter(Boolean));
-      overviewStatus.textContent = affected.length ? `${new Set(affected).size} 台机器的配额更新有异常，已有读数保留。查看采集与诊断了解原因。` : '';
+      overviewStatus.textContent = affected.length ? `${new Set(affected).size} 台机器保留了上次配额采集异常记录；当前暂停状态见账号行，原始记录见采集与诊断。` : '';
     }
     QUOTA_PROVIDERS.forEach((provider) => {
       if (overviewStatus) return;
@@ -866,6 +946,7 @@
       busy = true; read.disabled = probe.disabled = true;
       panel.setAttribute("aria-busy", "true");
       notice.textContent = "正在读取状态，不查询上游…";
+      const readVersion = pauseScope !== "account" ? beginQuotaMachineRead(machine) : null;
       try {
         const query = new URLSearchParams({machine});
         if (pauseScope === "account") { query.set("profile", profile); query.set("pause_scope", "account"); }
@@ -874,6 +955,7 @@
         if (pauseScope === "account" && (value.pause_scope !== "account" || value.account?.quota_profile !== profile)) throw new Error("账号恢复状态与所选对象不一致");
         if (controller.signal.aborted) return;
         state = value;
+        if (pauseScope !== "account") updateQuotaMachineState(machine, value, readVersion);
         if (pendingPauseId && value.last_recovery?.request?.pause_id === pendingPauseId) pendingPauseId = null;
         if (pendingPauseId && !value.active && !value.pause) {
           pendingPauseId = null;
@@ -884,6 +966,7 @@
         document.dispatchEvent?.(new Event("agent-monitor:recovery-state"));
       } catch (error) {
         state = null; busy = false; render(null);
+        if (pauseScope !== "account") updateQuotaMachineState(machine, null, readVersion);
         notice.textContent = `状态读取失败：${error.message}`;
       } finally {
         busy = false; read.disabled = false; panel.setAttribute("aria-busy", "false");
@@ -1120,9 +1203,25 @@
     const block = renderedQuotaRateLimits?.[provider.key];
     const failures = (block?.refresh_errors || []).filter((failure) => quotaFailureMatchesAccount(
       failure, account, block?.accounts || []));
-    if (quotaPresence(account) !== "in_use" || !failures.length) {
-      return null;
+    if (quotaPresence(account) !== "in_use") return null;
+    if (provider.key === "codex") {
+      const notes = [];
+      for (const machine of account.machines || []) {
+        const state = quotaMachineStates.get(machine);
+        const history = failures.some(failure => failure.machine === machine);
+        if (state?.pause) notes.push(`${machine} 自动查询已暂停`);
+        else if ((history || quotaMachineStates.has(machine)) && !state) notes.push(`${machine} 暂停状态未核实`);
+      }
+      if (concise) return notes.join("；") || null;
+      const times = (account.machines || []).flatMap(machine => {
+        const state = quotaMachineStates.get(machine);
+        return state ? [`${machine}：${formatDate(state.observed_at)}`] : [];
+      });
+      if (times.length) notes.push(`暂停状态核对时间：${times.join("；")}`);
+      if (failures.length) notes.push(`历史采集：${[...new Set(failures.map(failure => failure.machine))].join("、")} 曾有查询异常；原始记录见“采集与诊断”，不代表当前仍暂停`);
+      return notes.join("。") || null;
     }
+    if (!failures.length) return null;
     const failed = new Set(failures.map((failure) => failure.machine));
     const hasValue = provider.windows.some((spec) => quotaUsage(account[spec.used]).known);
     const sourceHealthy = account.reading_from && !failed.has(account.reading_from)
@@ -1273,8 +1372,7 @@
       row.appendChild(quotaResetCell(provider, spec, display));
     });
     row.appendChild(quotaMachinesCell(account, display));
-    row.appendChild(quotaUpdatedCell(provider, display, stale, display.quota_source === "account_action"
-      ? null : quotaRefreshNotice(provider, account)));
+    row.appendChild(quotaUpdatedCell(provider, display, stale, quotaRefreshNotice(provider, account)));
     Array.from(row.children).forEach((cell, index) => {
       cell.dataset.label = ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间", "机器", "配额更新"][index];
     });
@@ -1415,9 +1513,16 @@
       actions.appendChild(open);
       const refresh = document.createElement('button');
       refresh.type = 'button'; refresh.className = 'btn'; refresh.textContent = '刷新配额';
+      const permission = codexQueryPermission(profiles[0]);
+      refresh.disabled = permission !== true;
       refresh.setAttribute('aria-label', `${quotaAccountName(account)}（${account.account_id}）的配额刷新`);
       refresh.addEventListener('click', () => window.AgentMonitor?.openCodexAccount?.(profiles[0].id, 'refresh'));
       if (!quotaAccountDisabled(provider, account)) actions.appendChild(refresh);
+      const status = document.createElement("span");
+      status.className = "quota-scope";
+      status.textContent = permission === null ? "查询权限未核实" : permission ? "可查询配额" : "查询受限，请在账号管理查看";
+      if (codexProfileStateKnown && profiles[0].restrictions?.quota) status.textContent = "额度已用尽，发送受限；" + status.textContent;
+      wrap.appendChild(status);
     }
 
     if (quotaPresence(account) === "remembered") {
@@ -1842,7 +1947,6 @@
         : "配额来自此次账号操作查询；机器归属与可用的凭据套餐来自机器采集。套餐信息不代表当前订阅权益。";
       details.appendChild(context);
       note("账号操作读数");
-      return cell;
     }
     if (!account.reading_from) {
       const source = document.createElement("span");
@@ -1852,7 +1956,7 @@
       details.appendChild(source);
     }
     if (quotaPresence(account) !== "remembered") {
-      if (sourceUnavailable) {
+      if (sourceUnavailable && account.quota_source !== "account_action") {
         note("来源机器未登录");
         const recovery = document.createElement("span");
         recovery.className = "quota-history-note";
@@ -1860,7 +1964,8 @@
         details.appendChild(recovery);
       }
       if (refreshNotice) {
-        note(quotaRefreshNotice(provider, account, true));
+        const currentNotice = quotaRefreshNotice(provider, account, true);
+        if (currentNotice) note(currentNotice);
         const cause = document.createElement("span");
         cause.className = "quota-history-note";
         cause.textContent = refreshNotice;
@@ -2061,10 +2166,19 @@
   }
 
   function resetQuotaReadings(options = {}) {
+    quotaStateController.abort();
+    quotaStateController = new AbortController();
+    quotaMachineStates = new Map();
+    quotaMachineReads = new Map();
+    quotaStatePending = null;
+    quotaStateReadAt = 0;
+    quotaStateTargets = "";
+    codexProfileStateKnown = false;
+    codexSharedPause = null;
     codexQuotaReadings = [];
     renderedQuotaRateLimits = null;
     initialQuotaHistoryExpanded = Boolean(options.rememberedExpanded);
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
-  return { renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaResetCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
+  return { updateQuotaMachineState, refreshQuotaMachineStates, renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaResetCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
 });
