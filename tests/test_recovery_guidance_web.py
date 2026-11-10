@@ -109,6 +109,7 @@ async function render(changes={}, error=false) {
   const second = {...own,machine:'beta',pause:{id:'pause-b'}};
   const grouped = ui.quotaFailureDetails(provider,[own,{...own,account_profile:'profile-a'},affected,second]);
   assert.match(grouped.quotaDiagnostics.summary.textContent,/2 台暂停/);
+  assert.match(grouped.quotaDiagnostics.summary.textContent,/上次采集记录/);
   assert.match(grouped.quotaDiagnostics.summary.textContent,/涉及 2 个账号/);
   assert.doesNotMatch(grouped.quotaDiagnostics.summary.textContent,/读取失败 [234]/);
   assert.equal(grouped.quotaDiagnostics.entries.length,2,'one card per machine pause');
@@ -145,6 +146,9 @@ async function render(changes={}, error=false) {
     const claude=ui.quotaFailureDetails({key:'claude',label:'Claude'},[
       {...own,account_label:labels[0]}, {...second,account_label:labels[1]}]);
     assert.match(claude.quotaDiagnostics.summary.textContent,/涉及 1 个账号/);
+    assert.match(claude.quotaDiagnostics.summary.textContent,/上次采集记录/);
+    assert.match(claude.quotaDiagnostics.entries[0].note.textContent,/当前暂停状态需另行核对/);
+    assert.match(claude.quotaDiagnostics.entries[0].note.textContent,/agent-monitor upstream-holds status claude/);
     assert.doesNotMatch(claude.quotaDiagnostics.summary.textContent,/身份未确认/);
   }
   const classified = ui.quotaFailureDetails(provider, [

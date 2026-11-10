@@ -1124,7 +1124,7 @@
     const identities = new Set(failures.map(f => failureAccountKey(provider, f)).filter(Boolean));
     const unknown = failures.some(failure => !failureAccountKey(provider, failure));
     const accountsText = identities.size ? `；涉及 ${identities.size} 个账号${unknown ? "，另有账号身份未确认" : ""}` : "；账号身份未确认";
-    saved.summary.textContent = failures.length ? `${provider.label} 采集详情（配额查询：${status || "机器未确认"}${accountsText}）` : `${provider.label} 最近恢复记录`;
+    saved.summary.textContent = failures.length ? `${provider.label} 采集详情（上次采集记录：${status || "机器未确认"}${accountsText}）` : `${provider.label} 最近恢复记录`;
     const remaining = [...saved.entries], next = [];
     const currentKeys = new Set(groups.map(group => group.key));
     for (const group of groups) {
@@ -1193,7 +1193,8 @@
         record.note.dataset.failureCategory = guidance.key;
         record.note.textContent = failure.machine + "：上次配额采集" + statusText + "；"
           + (group.kind === "paused" ? "下列账号受该机器暂停影响，不代表每个账号均查询失败。暂停关联的采集记录：" : "") + guidance.summary + "。" + guidance.action;
-      } else record.note.textContent = `${failure.machine}：${[...new Set(group.failures.map(f => f.reason))].join("；")}`;
+      } else record.note.textContent = `${failure.machine}：上次配额采集记录；当前暂停状态需另行核对。${[...new Set(group.failures.map(f => f.reason))].join("；")}`
+        + (provider.key === "claude" && failure.machine ? ` 在该机器运行 agent-monitor upstream-holds status claude 可只读核对当前保护。先确认账号、订阅与原始失败原因，不直接清除暂停或重复请求。` : "");
       if (provider.key === "codex" && failure.pause?.id) {
         record.entry.dataset.codexPauseId = failure.pause.id; record.entry.tabIndex = -1;
       } else delete record.entry.dataset.codexPauseId;
