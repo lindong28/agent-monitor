@@ -94,6 +94,10 @@
           </details>
           <div class="controls sessions-controls">
             <div class="field">
+              <label for="session-search">查找会话</label>
+              <input id="session-search" type="search" placeholder="会话 ID 或标题" aria-describedby="session-search-scope" disabled>
+            </div>
+            <div class="field">
               <label for="filter-machine">机器</label>
               <select id="filter-machine" disabled><option value="">全部机器</option></select>
             </div>
@@ -114,7 +118,7 @@
               <select id="filter-cost-status" disabled><option value="">全部成本状态</option><option value="unknown">仅未知成本条目</option></select>
             </div>
           </div>
-          <p class="scope-note">列表与详情默认仅计匹配记录；详情可切换全部留存记录。费用仅合计可计价记录，非账单。</p>
+          <p id="session-search-scope" class="scope-note">在当前日期与筛选范围内，按主会话 ID 或标题查找。列表与详情默认仅计匹配记录；详情可切换全部留存记录。费用仅合计可计价记录，非账单。</p>
           <div class="pager pager-top">
             <button id="page-prev-top" type="button" disabled>上一页</button>
             <span id="page-status-top" class="status-line">加载中…</span>

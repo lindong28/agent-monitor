@@ -64,6 +64,20 @@ const incomplete = platform();
 vm.createContext(incomplete.context);
 assert.throws(() => vm.runInContext(fs.readFileSync(path.join(root, 'web/app.js'), 'utf8'), incomplete.context));
 console.log('browser scripts: 9 pages; lifetime: 2 timers, 2 teardowns; independent app instances: 2; missing dependency: rejected');
+two.sessionsView.rows = Array.from({length:151}, (_, index) => ({session_id:`id-${index}`, title:index === 150 ? '中文 Recovery Task' : 'other'}));
+two.sessionsView.search = 'ID-150';
+assert.deepEqual(two.filteredSessions().map(row=>row.session_id), ['id-150']);
+two.sessionsView.search = '中文 recovery';
+assert.deepEqual(two.filteredSessions().map(row=>row.session_id), ['id-150']);
+two.sessionsView.search = 'missing';
+assert.equal(two.filteredSessions().length, 0);
+two.sessionsView.search = ' ';
+assert.equal(two.filteredSessions().length, 151);
+const resetUi = require('../web/quota.js')({platform:second.context, fmtAbs:()=>'recorded-time'});
+assert.match(resetUi.resetText(1, 2000), /预计.*已过/);
+assert.doesNotMatch(resetUi.resetText(1, 2000), /已于.*重置/);
+assert.match(resetUi.resetText(3, 2000), /预计/);
+
 
 // Exercise the shared recovery consumer with scoped and legacy HTTP contracts.
 (async () => {
@@ -148,6 +162,13 @@ console.log('browser scripts: 9 pages; lifetime: 2 timers, 2 teardowns; independ
   value = {...value, pause: {id:'f'.repeat(32)}, account:{...value.account, blocked_reason:'account hold', account_quota_pause:{id:'local-pause'}}};
   await legacy.refresh();
   assert.equal(action(legacy, 'help').hidden, false, 'global panel explains the same layered condition');
+  for (const [reason, expected] of [['missing', /未找到.*原账号/], ['identity_changed', /当前登录.*不同/], ['ambiguous', /多个.*来源/], ['source_inconsistent', /配置与凭据身份不一致/]]) {
+    value = {...value, pause:{id:'f'.repeat(32)}, account:{account_id:null, account_label:null, resolution_reason:reason}};
+    await legacy.refresh();
+    assert.match(legacy.textContent, expected);
+    assert.equal(action(legacy, 'probe').hidden, true);
+    assert.match(legacy.textContent, /已有用量/);
+  }
   panel.dispose(); legacy.dispose();
 
   global.document = {createElement:element};

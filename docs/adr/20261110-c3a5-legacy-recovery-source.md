@@ -1,0 +1,13 @@
+# Resolve legacy quota recovery against the original local identity
+
+Accepted2026-11-10 after one independent L1 decision review. The user requested completion of core usage, quota and recovery tasks. A legacy shared Codex pause can record an identity fingerprint without a profile; when the default login changes, status loses the original account even if the same machine has its independent profile.
+
+Use a shared local resolver for status and recovery admission. Preserve an exact native match; otherwise use exactly one discovered profile whose parsed credential identity matches the original fingerprint. Profile metadata alone is insufficient. Explicit-profile pauses retain their exact source; missing and ambiguous legacy sources remain blocked with distinct guidance. Re-resolve before admission and require the approved profile/native source to remain identical. Do not switch global login, copy credentials, rewrite original pause provenance, enable automatic enrollment or clear protection merely because a candidate was found.
+
+Switching default login disrupts unrelated work; taking the first duplicate hides different credential generations; clearing or reattributing an unclassified failure loses shared protection. These alternatives are rejected. Existing account holds, owning-machine routing, one-time action confirmation, bounded quota-only query, post-query identity check and save-before-release remain. No new persistent state or API endpoint is introduced; status gains an optional source-resolution explanation for the existing UI.
+
+The decision covers missing-profile shared recovery, not a general administrative resume policy. Missing original credentials require the operator to restore a legitimate independent source or investigate the existing administrative disposition; local usage browsing remains available. A different currently signed-in identity cannot establish recovery of the original incident. Legacy administrative resume remains separately tracked in ISSUE-RECOVERY-20261028-8c27.
+
+At decision time the two observed machines had changed native identity; one had a matching profile, one had none. No provider check established the old failure's current cause or restored either incident. Fixture regressions and deployed consumer acceptance remain execution obligations; no authentication-expiry diagnosis is inferred from a generic RPC failure.
+
+Implementation review clarification: a discovered profile must also have metadata identity equal to its parsed credential identity. The normal collection consumer uses that metadata; accepting a mismatch would discard the saved reading on the next pass. Such a source is rejected with a distinct explanation, without modifying either identity.

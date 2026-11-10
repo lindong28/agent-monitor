@@ -613,6 +613,44 @@ def recovery_home(profile, root=None):
     return match.home
 
 
+def resolve_recovery_source(failure, root=None):
+    """Resolve existing credentials, never alter the pause or current login."""
+    profile = failure.get("account_profile")
+    fingerprint = failure.get("account_fingerprint")
+    auth = accounts.CODEX_AUTH
+    if profile:
+        try:
+            auth = recovery_home(profile, root) / "auth.json"
+        except quota_refresh.RefreshError:
+            return profile, None, None, "missing"
+    account = accounts.codex_account(auth)
+    if account and (not fingerprint or quota_refresh.account_fingerprint("codex", account) == fingerprint):
+        return profile, auth, account, None
+    reason = "identity_changed" if account else "missing"
+    # An explicit source never falls back, nor can an unidentified legacy pause
+    # establish which independent profile is allowed to repair it.
+    if profile or not fingerprint:
+        return profile, auth, None, reason
+    from parsers import codex_profiles
+    candidates = {}
+    inconsistent = False
+    for candidate in codex_profiles.discover():
+        if not candidate.account:
+            continue
+        path = candidate.home / "auth.json"
+        identity = accounts.codex_account(path)
+        if identity and quota_refresh.account_fingerprint("codex", identity) == fingerprint:
+            if accounts.quota_identity("codex", candidate.account["account_id"], candidate.account["email"]) != accounts.quota_identity("codex", identity.account_id, identity.label):
+                inconsistent = True
+                continue
+            candidates.setdefault(path.resolve(), (candidate.account["name"], path, identity, None))
+    if inconsistent:
+        return None, auth, None, "source_inconsistent"
+    if len(candidates) == 1:
+        return next(iter(candidates.values()))
+    return None, auth, None, "ambiguous" if candidates else reason
+
+
 def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None, profile=None, renew_auth=False, pause_scope=None):
     """One operator-approved probe; retain the pause until its reading is saved."""
     root = Path(root) if root is not None else ROOT
@@ -628,8 +666,13 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     pause = selected_controls.read("codex").get("pause") or {}
     failure = pause.get("failure") or {}
     fingerprint = quota_refresh.account_fingerprint("codex", account)
+    legacy_source = bool(failure.get("account_fingerprint") and not failure.get("account_profile") and pause_scope != "account")
+    if legacy_source:
+        resolved_profile, _, resolved_account, _ = resolve_recovery_source(failure, root)
+        if resolved_account is None or (resolved_profile or "") != (profile or ""):
+            raise quota_refresh.LocalUnavailable("暂停账号来源缺失、有歧义或已变化；未开始探测，请更新状态。")
     if (pause.get("id") != pause_id or
-            (profile and (failure.get("account_profile") != profile or failure.get("account_fingerprint") != fingerprint)) or
+            (profile and not legacy_source and (failure.get("account_profile") != profile or failure.get("account_fingerprint") != fingerprint)) or
             (not profile and failure.get("account_profile")) or
             (failure.get("account_fingerprint") and failure["account_fingerprint"] != fingerprint)):
         raise quota_refresh.LocalUnavailable("暂停来源或账号已变化；未开始探测，请更新状态。")

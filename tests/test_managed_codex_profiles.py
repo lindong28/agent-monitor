@@ -443,6 +443,103 @@ class ManagedCodexTests(unittest.TestCase):
         self.assertEqual(saved["managed_accounts"][0]["seven_day_pct"], 30)
         self.assertIsNone(controls.read("codex").get("pause"))
 
+    def test_legacy_recovery_finds_original_profile_without_switching_native(self):
+        from agent_monitor.quota import quota_recovery, quota_refresh
+        from agent_monitor.snapshots import generation
+        from agent_monitor.accounts.upstream_controls import Controls
+        from parsers.accounts import Account
+        home = self.profile("alpha")
+        other = self.profile("beta")
+        self.default.mkdir()
+        native_bytes = (other / "auth.json").read_bytes()
+        (self.default / "auth.json").write_bytes(native_bytes)
+        account = Account("shared-workspace", "alpha@example.test")
+        controls = Controls(self.root / "state/upstream_controls")
+        lease = controls.acquire("codex")
+        lease.pause("fixture", failure={"account_fingerprint": quota_refresh.account_fingerprint("codex", account)})
+        lease.close()
+        pause = controls.read("codex")["pause"]
+        with mock.patch.object(exporter, "ROOT", self.root), mock.patch.object(generation, "self_certified_host_identity", return_value="fixture"):
+            status = quota_recovery.local_status()
+        self.assertEqual(status["account"]["quota_profile"], "alpha")
+        self.assertEqual(status["account"]["account_label"], account.label)
+        self.assertEqual(controls.read("codex")["pause"], pause)
+        reading = RateLimits(10, 4102444800, 30, 4102444800, updated_at="2026-11-10T00:00:00Z", quota_observation={"source": "active_query"})
+        with mock.patch.object(quota_refresh, "load_rate_limits", return_value=reading) as run:
+            quota_service.recover_codex_quota(account.label, pause["id"], expected_id=account.account_id, root=self.root, profile="alpha")
+        self.assertEqual(run.call_args.kwargs["codex_home"], home)
+        self.assertIsNone(controls.read("codex").get("pause"))
+        self.assertEqual((self.default / "auth.json").read_bytes(), native_bytes)
+        self.assertEqual(quota_service.read_cache(self.root / "state/quota_snapshot.json")["codex"]["managed_accounts"][0]["account_label"], account.label)
+        subsequent = next(row for row in quota_service.managed_codex_rate_limits(root=self.root) if row["account_profile"] == "alpha")
+        self.assertEqual(subsequent["account_label"], account.label)
+        self.assertEqual(subsequent["seven_day_pct"], 30)
+
+    def test_legacy_recovery_rejects_missing_ambiguous_and_changed_sources(self):
+        from agent_monitor.quota import quota_recovery, quota_refresh
+        from agent_monitor.snapshots import generation
+        from agent_monitor.accounts.upstream_controls import Controls
+        from parsers.accounts import Account
+        account = Account("shared-workspace", "alpha@example.test")
+        controls = Controls(self.root / "state/upstream_controls")
+        lease = controls.acquire("codex")
+        lease.pause("fixture", failure={"account_fingerprint": quota_refresh.account_fingerprint("codex", account)})
+        lease.close()
+        pause = controls.read("codex")["pause"]
+        with mock.patch.object(exporter, "ROOT", self.root), mock.patch.object(generation, "self_certified_host_identity", return_value="fixture"):
+            status = quota_recovery.local_status()
+            self.assertEqual(status["account"]["resolution_reason"], "missing")
+            alpha = self.profile("alpha")
+            beta = self.profile("beta")
+            self.default.mkdir()
+            (self.default / "auth.json").write_bytes((beta / "auth.json").read_bytes())
+            (alpha / "auth.json").unlink()
+            status = quota_recovery.local_status()
+            self.assertEqual(status["account"]["resolution_reason"], "identity_changed")
+            (alpha / "auth.json").write_text(json.dumps({"tokens": {"account_id": "shared-workspace", "id_token": "fixture." + base64.urlsafe_b64encode(json.dumps({"email": account.label}).encode()).decode().rstrip("=") + ".fixture"}}))
+            # Two independently registered sources for the same full identity.
+            (beta / "auth.json").write_bytes((alpha / "auth.json").read_bytes())
+            metadata = json.loads((beta.parent / "profile.json").read_text())
+            metadata["identity"]["email"] = account.label
+            (beta.parent / "profile.json").write_text(json.dumps(metadata))
+            status = quota_recovery.local_status()
+            self.assertEqual(status["account"]["resolution_reason"], "ambiguous")
+            self.assertIsNone(status["account"]["account_id"])
+            with mock.patch.object(quota_refresh, "load_rate_limits") as run:
+                with self.assertRaises(quota_refresh.LocalUnavailable):
+                    quota_service.recover_codex_quota(account.label, pause["id"], expected_id=account.account_id, root=self.root, profile="alpha")
+                # A new exact native source must not silently replace approved alpha.
+                (self.default / "auth.json").write_bytes((alpha / "auth.json").read_bytes())
+                with self.assertRaises(quota_refresh.LocalUnavailable):
+                    quota_service.recover_codex_quota(account.label, pause["id"], expected_id=account.account_id, root=self.root, profile="alpha")
+                run.assert_not_called()
+        self.assertEqual(controls.read("codex")["pause"], pause)
+
+    def test_legacy_recovery_refuses_inconsistent_profile_metadata(self):
+        from agent_monitor.quota import quota_recovery, quota_refresh
+        from agent_monitor.snapshots import generation
+        from agent_monitor.accounts.upstream_controls import Controls
+        from parsers.accounts import Account
+        home = self.profile("alpha")
+        metadata = json.loads((home.parent / "profile.json").read_text())
+        metadata["identity"]["email"] = "different@example.test"
+        (home.parent / "profile.json").write_text(json.dumps(metadata))
+        account = Account("shared-workspace", "alpha@example.test")
+        controls = Controls(self.root / "state/upstream_controls")
+        lease = controls.acquire("codex")
+        lease.pause("fixture", failure={"account_fingerprint": quota_refresh.account_fingerprint("codex", account)})
+        lease.close()
+        pause = controls.read("codex")["pause"]
+        with mock.patch.object(exporter, "ROOT", self.root), mock.patch.object(generation, "self_certified_host_identity", return_value="fixture"):
+            status = quota_recovery.local_status()
+        self.assertEqual(status["account"]["resolution_reason"], "source_inconsistent")
+        self.assertIsNone(status["account"]["account_id"])
+        with mock.patch.object(quota_refresh, "load_rate_limits") as run:
+            with self.assertRaises(quota_refresh.LocalUnavailable):
+                quota_service.recover_codex_quota(account.label, pause["id"], expected_id=account.account_id, root=self.root, profile="alpha")
+            run.assert_not_called()
+        self.assertEqual(controls.read("codex")["pause"], pause)
+
     def test_recovery_rejects_another_profile_before_provider_admission(self):
         from agent_monitor.quota import quota_refresh
         from agent_monitor.accounts.upstream_controls import Controls

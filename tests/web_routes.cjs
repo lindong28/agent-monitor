@@ -287,6 +287,16 @@ async function run() {
     assert(env.requests.slice(begin).some(request => request.pathname === endpoint), `${url}: route did not call its API`);
     assert.equal(ui.qs(selector).textContent, reading, `${url}: route did not render`);
   }
+  await enter('/sessions?range=30d&q=missing');
+  assert.equal(ui.qs('#session-search').value, 'missing');
+  assert.match(ui.qs('#session-count').textContent, /0.*匹配/);
+  assert.equal(env.requests.filter(url=>url.pathname === '/api/sessions').at(-1).searchParams.has('q'), false);
+  const beforeSearch = env.requests.length;
+  ui.qs('#session-search').value = '';
+  ui.qs('#session-search').listeners.input();
+  assert.equal(new URL(env.window.location).searchParams.has('q'), false);
+  assert.equal(env.requests.length, beforeSearch, 'searching loaded data does not issue API requests');
+  assert.equal(ui.qs('#session-search').disabled, false, 'empty results can still be cleared');
   await checkPivotBehavior(env, ui, enter);
   for (const url of ['/guide/sources', '/guide/collection', '/guide/setup', '/guide/questions']) {
     const begin = env.requests.length;

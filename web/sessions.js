@@ -25,6 +25,7 @@
     dayLimits: new Map(),
     page: 0,
     status: "loading",
+    search: "",
     filters: { agent: "", project: "", model: "", machine: "", cost_status: "" },
   };
   let sessionsGeneration = 0;
@@ -49,6 +50,18 @@
     }
     if (params().has("session")) return initSessionDetail();
     SESSION_FILTERS.forEach(({key}) => { sessionsView.filters[key] = params().get(key) || ""; });
+    sessionsView.search = params().get("q") || "";
+    const search = qs("#session-search");
+    if (search) {
+      search.value = sessionsView.search;
+      search.addEventListener("input", () => {
+        sessionsView.search = search.value;
+        sessionsView.page = 0;
+        sessionsView.dayLimits.clear();
+        sessionsView.expandedDays.clear();
+        if (sessionsView.status === "ready") renderSessions();
+      });
+    }
     sessionsView.page = Math.max(0, parseInt(params().get("page"), 10) || 0);
     const initialSort = qs("#sort");
     if (initialSort && params().has("sort")) initialSort.value = params().get("sort");
@@ -208,6 +221,8 @@
   }
 
   function setSessionFiltersDisabled(disabled) {
+    const search = qs("#session-search");
+    if (search) search.disabled = disabled;
     SESSION_FILTERS.forEach((filter) => {
       const select = qs(filter.select);
       if (select) {
@@ -269,7 +284,9 @@
   }
 
   function filteredSessions() {
-    return sessionsView.rows;
+    const term = sessionsView.search.trim().toLocaleLowerCase();
+    return term ? sessionsView.rows.filter(row => [row.session_id, row.title].some(
+      value => typeof value === "string" && value.toLocaleLowerCase().includes(term))) : sessionsView.rows;
   }
 
   // Group the complete filtered result before rendering: a date total must not
@@ -300,11 +317,13 @@
       if (sessionsView.filters[key]) listParams.set(key, sessionsView.filters[key]);
       else listParams.delete(key);
     });
+    if (sessionsView.search) listParams.set("q", sessionsView.search);
+    else listParams.delete("q");
     listParams.set("page", String(sessionsView.page));
     listParams.set("sort", qs("#sort")?.value || "time");
     replaceCurrentUrl("/sessions?" + listParams);
     const start = sessionsView.page * SESSIONS_PAGE_SIZE;
-    const filtering = Object.values(sessionsView.filters).some(Boolean);
+    const filtering = Boolean(sessionsView.search.trim()) || Object.values(sessionsView.filters).some(Boolean);
     if (!matched.length) {
       renderSessionState("empty", filtering ? "没有符合筛选条件的会话。" : "此范围内没有会话。");
       qs("#session-count").textContent = filtering ? "找到 0 个匹配会话" : "0 个会话";
@@ -497,6 +516,7 @@
         if (force === true) await refreshStatistics({isCurrent: () => current() && ticket === generation});
         if (!current() || ticket !== generation) return;
         const detailQuery = Object.fromEntries(params());
+        delete detailQuery.q; // Page-only search state; Hub API keeps its strict contract.
         detailQuery.machine = machine;
         const all = detailQuery.scope === "all";
         qs("#session-scope").textContent = all ? "全部留存记录" : "与列表相同的日期和筛选";

@@ -12,9 +12,9 @@
     }
     const resetAt = new Date(epoch * 1000);
     if (resetAt.getTime() <= nowMs) {
-      return "已于 " + fmtAbs(resetAt) + " 重置";
+      return "上次预计重置时间 " + fmtAbs(resetAt) + " 已过；尚未确认重置后的额度";
     }
-    return "将于 " + fmtAbs(resetAt) + " 重置";
+    return "预计于 " + fmtAbs(resetAt) + " 重置";
   }
 
   // Provider identity reuses the neutral .pill treatment from session tables.
@@ -814,6 +814,19 @@
         paused: ["Codex 请求已暂停", "此前请求异常触发本机通道保护，不表示所有账号不可用。已确认仅某账号异常时，可在账号卡片停用该账号并核对暂停归属；其他情况先检查下面的目标与诊断。"],
       };
       [title.textContent, guidance.textContent] = copyText[mode];
+      if (mode === "identity" && value?.pause_scope !== "account" && a.resolution_reason) {
+        const resolutionCopy = {
+          missing: ["未找到暂停原账号的凭据", "在目标机器恢复原账号的独立配置后更新状态；无需切换默认登录。"],
+          identity_changed: ["当前登录与暂停原账号不同", "同机未找到可匹配的原账号配置。请恢复原账号的独立配置后更新状态，不要用当前账号替代原事故目标。"],
+          ambiguous: ["找到多个原账号凭据来源", "请在目标机器核对重复配置，保留明确的恢复来源后更新状态；页面不会代选凭据。"],
+          source_inconsistent: ["原账号配置与凭据身份不一致", "请先在目标机器修复独立配置的身份记录，再更新状态；不能将读数保存到另一个账号名下。"],
+        };
+        const resolved = resolutionCopy[a.resolution_reason];
+        if (resolved) {
+          title.textContent = resolved[0];
+          guidance.textContent = resolved[1] + " 仍可查看已有用量与历史配额；本机共享查询暂停保留，其他机器分别核对。原账号不再使用时，请维护者核对本次通道故障和暂停处置。";
+        }
+      }
       if (mode === "account-blocked" && layeredPause) {
         title.textContent = "账号与本机通道均已暂停";
         guidance.textContent = "先由维护者核对并处理通道故障，再明确解除通道暂停；此账号的暂停继续保留。查看下方排查步骤。";
@@ -894,8 +907,8 @@
         "修复后点击“更新状态”。需要协助时，展开技术详情并复制诊断。"
       ] : mode === "identity" ? [
         "展开技术详情，确认页面读取到的账号来源、工作区和机器是否与目标账号一致。",
-        `页面不能替你切换 ${host} 的登录账号；请在该机器按既有登录流程确认目标账号，不要在浏览器所在设备换出口绕过。`,
-        "账号确认后点击“更新状态”。如果仍显示身份变化，这一步需要 Agent Monitor 管理员核对账号目录和同步状态。"
+        `请在 ${host} 核对原账号的独立配置及凭据，不必切换默认登录；不要复制其他身份的凭据或换出口绕过。`,
+        "恢复明确的原账号来源后点击“更新状态”。原来源无法恢复时，将本次暂停诊断交给维护者核对处置；本地留存用量仍可查看，共享暂停不因此自动清除。"
       ] : mode === "source-mismatch" ? [
         "保留两份记录，不要删除暂停或自行切换出口。",
         `下一次检查将在 ${host} 执行，并使用该机器的 Agent Monitor 路由桥；预览失败时不会发送配额检查请求。`,

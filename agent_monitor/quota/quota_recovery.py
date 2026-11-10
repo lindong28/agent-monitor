@@ -89,17 +89,8 @@ def local_status(*, profile=None, pause_scope=None):
             raise ValueError("账号来源已变化。")
         state = account_holds.controls(exporter.ROOT / "state", record["account_id"], record["email"]).read("codex")
     failure = (state.get("pause") or {}).get("failure") or {}
-    profile = profile if pause_scope == "account" else failure.get("account_profile")
-    auth = accounts.CODEX_AUTH
-    if profile:
-        try:
-            auth = quota_service.recovery_home(profile, exporter.ROOT) / "auth.json"
-        except quota_refresh.RefreshError:
-            auth = None
-    account = accounts.codex_account(auth) if auth is not None else None
-    fingerprint = failure.get("account_fingerprint")
-    if fingerprint and account and quota_refresh.account_fingerprint("codex", account) != fingerprint:
-        account = None
+    profile, auth, account, resolution_reason = quota_service.resolve_recovery_source(
+        {**failure, **({"account_profile": profile} if pause_scope == "account" else {})}, exporter.ROOT)
     auth = auth or accounts.CODEX_AUTH
     home = auth.parent
     source = "default" if home == Path.home() / ".codex" else "configured"
@@ -148,6 +139,7 @@ def local_status(*, profile=None, pause_scope=None):
                         "account_quota_pause": (account_holds.controls(exporter.ROOT / "state", account.account_id,
                             account.label).read("codex").get("pause") if account else None),
                         "blocked_reason": blocked_reason,
+                        "resolution_reason": resolution_reason,
                         "credential_path": str(auth), "quota_profile": profile or ""},
             "last_recovery": state.get("last_recovery")}
 
