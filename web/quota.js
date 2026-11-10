@@ -1550,7 +1550,7 @@
       const status = document.createElement("span");
       status.className = "quota-scope";
       const sendPaused = codexProfileStateKnown && Boolean(profiles[0].restrictions?.quota);
-      status.textContent = permission === null ? "查询权限未核实" : permission ? (sendPaused ? "发送已暂停，仍可查配额" : "") : "查询受限，请查看账号";
+      status.textContent = permission === null ? "查询权限未核实" : permission ? "" : "查询受限，请查看账号";
       if (sendPaused && permission !== true) status.textContent = "发送已暂停；" + status.textContent;
       if (status.textContent) wrap.appendChild(status);
     }
