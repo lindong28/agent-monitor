@@ -44,7 +44,7 @@ test('page exposes only server results and explains automatic detection',()=>{
   const html=fs.readFileSync(require.resolve('../web/network.html'),'utf8');
   assert.doesNotMatch(html,/process-network|local-network|服务端系统网络诊断（独立于本机 Agent）/);
   assert.match(html,/id="refresh"/); assert.match(html,/id="network-conclusion"/);
-  assert.match(html,/自动检测/);
+  assert.match(html,/无结果或结果过期时自动请求公网诊断服务/);
 });
 
 test('expired result refreshes once, cooldown suppresses automatic retries',async()=>{
