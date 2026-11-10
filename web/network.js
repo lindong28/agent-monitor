@@ -65,7 +65,7 @@
 
   function renderNetwork(data, retry) {
     const target = qs("#network-checked-host");
-    if (target) target.textContent = `检测对象：${data.checked_host || "主机身份未取得"} · 系统网络，不代表各个 Agent 的连接。`;
+    if (target) target.textContent = `检测对象：${data.checked_host || "主机身份未取得"} · 系统网络；不代表 Agent 的连接或账号可用性。`;
     renderNetworkBanner(data);
     if (data.installed === false) {
       renderNetworkError({
@@ -110,8 +110,8 @@
       const next = Number.isFinite(remaining) && remaining > 0
         ? `；最早可重新检测于 ${formatDate(new Date(Date.now() + remaining * 1000).toISOString())}` : "";
       refreshStatus.textContent = typeof refresh?.reused === "boolean"
-        ? `${data.last_attempt?.error ? "最近一次检测失败，继续展示历史结果" : refresh.reused ? "本次读取复用上次结果，未重新探测" : data.error || data.installed === false ? "本次检测未完成" : "本次读取取得新检测结果"}${next}。缓存期内点击不会增加探测请求；上游限流可能延长等待。`
-        : "本次读取是否复用缓存未记录。重新检测受服务端缓存与上游等待要求约束。";
+        ? `${data.last_attempt?.error ? "最近一次检测失败，继续展示历史结果" : refresh.reused ? "显示缓存结果，未重新探测" : data.error || data.installed === false ? "本次检测未完成" : "检测结果已更新"}${next}。`
+        : "缓存使用情况未记录。";
     }
     const coverage = data.coverage;
     const missing = coverage?.missing;
@@ -239,7 +239,7 @@
     const riskRows = [];
     if (present(risk?.score)) riskRows.push(kvRow("风险分", score(risk)));
     if (present(risk?.type)) riskRows.push(kvRow("类型", escapeHtml(risk.type)));
-    if (present(risk?.display)) riskRows.push(kvRow("供应商读数", escapeHtml(risk.display)));
+    if (!present(risk?.score) && present(risk?.display)) riskRows.push(kvRow("供应商读数", escapeHtml(risk.display)));
     const spamRows = [];
     const spamPlaceholder = spam?.frequency === 255;
     if (present(spam?.score)) spamRows.push(kvRow("滥用置信度", `${escapeHtml(String(spam.score))}%`));
@@ -250,11 +250,11 @@
       ? proxyEnvEntries.map(([key, value]) => `${escapeHtml(key)} = ${escapeHtml(value)}`).join("<br>")
       : "未记录代理环境变量";
     qs("#network-risk").innerHTML = [
-      provider("proxycheck · 风险", "risk", riskRows, risk?.raw_lines || [], [!present(risk?.score) && "风险分", !present(risk?.type) && "类型"].filter(Boolean)),
+      provider("proxycheck · 风险", "risk", riskRows, [...new Set([...(risk?.raw_lines || []), ...(risk?.display ? [risk.display] : [])])], [!present(risk?.score) && "风险分", !present(risk?.type) && "类型"].filter(Boolean)),
       '<div class="network-provider"><h3>代理与机房标记</h3>',
       kvRow("标记为代理", booleanReading(markedProxy)),
       kvRow("机房 IP", booleanReading(pub.hosting)),
-      '<p class="scope-note">代理标记与机房判定来自 ip-api 的 IP 分类；「否」不表示请求没有经过代理，也不证明账号可用。</p></div>',
+      '<p class="scope-note">标记来自 ip-api 分类；「否」不代表连接未经过代理。</p></div>',
       provider("stopforumspam · 举报", "spam", spamRows, spam?.raw_lines || [], [!present(spam?.score) && "滥用置信度", !present(spam?.frequency) && "举报次数", !present(spam?.last_seen) && "最近举报"].filter(Boolean)),
       present(spam?.score) ? '<p class="scope-note">滥用置信度是 stopforumspam 根据举报频次与时间计算的估计，不是 proxycheck 风险分，也不是账号封禁概率。</p>' : "",
       '<div class="network-provider"><h3>服务端出站策略</h3>',
@@ -262,7 +262,7 @@
         ? "执行主机的系统代理，按每个目标解析"
         : data.proxy_effective?.source === "published" ? "旧记录：个人代理文件指定" : "旧记录未保存有效系统策略"),
       kvRow("环境变量", sectionMessage(data, "proxy_envs") ? escapeHtml(sectionMessage(data, "proxy_envs")) : envs),
-      `<p class="scope-note">这里是诊断子进程的代理变量，内部代理桥已隐藏；不代表服务原始环境或本机 Agent 的配置。${data.proxy_effective?.source === "system" ? "诊断使用服务端系统策略，目标不同仍可能使用不同出口。" : "这条旧记录不能确认当前请求的出口。"}</p></div>`,
+      `<p class="scope-note">这里是诊断子进程的代理变量，内部代理桥已隐藏；不代表服务原始环境或本机 Agent 的配置。${data.proxy_effective?.source === "system" ? "" : "这条旧记录不能确认当前请求的出口。"}</p></div>`,
     ].join("");
   }
 
@@ -282,13 +282,13 @@
       kvRow("服务端主机时区", `${escapeHtml(tz.cli_tz || "—")} (${escapeHtml(tz.cli_offset || "—")})`),
       kvRow("公网时区", pub.timezone ? `${escapeHtml(pub.timezone)} (${escapeHtml(pub.tz_offset || "—")})` : "—"),
       kvRow("是否一致", match),
-      '<p class="scope-note">优先比较时区名称，取不到名称时比较当时的 UTC 偏移；名称不同也可能偏移相同。差异只触发本地规则，不证明网络故障，无需仅据此修改主机时区。</p>',
+      '<p class="scope-note">优先比较时区名称，取不到名称时比较当时的 UTC 偏移；名称不同也可能偏移相同。无需仅据此修改主机时区。</p>',
     ].join("");
   }
 
   function renderConclusions(data) {
     const items = (data.conclusions || []).slice().sort((a, b) => ({bad: 0, warn: 1, ok: 2}[a.level] ?? 3) - ({bad: 0, warn: 1, ok: 2}[b.level] ?? 3));
-    const note = '<p class="scope-note">「异常」表示命中本地启发式规则，不等于网络故障或账号不可用。请结合具体读数判断；本页不验证服务可用性。</p><details class="note-disclosure"><summary>规则与检测边界</summary><p><strong>异常条件</strong></p><p>本地规则将以下任一情况标为「异常」：</p><ul><li>取得本地 IPv6 路由源地址。</li><li>命中国内 DNS 服务静态名单。</li><li>proxycheck 风险分不低于 70（低于 30 为低，30–69 为中）。</li><li>服务端主机与公网 IP 的时区名称或 UTC 偏移比较不一致。</li></ul><p><strong>检测不完整</strong></p><ul><li>未命中上述规则，但缺少公网、DNS 名单归属或时区结果时，风险状态为未知。</li><li>公网 IP 被标记为代理或机房时才查询 proxycheck 和 stopforumspam；此时缺少风险分则标为部分检测。</li></ul><p><strong>结论范围</strong></p><p>本地源地址不证明公网泄漏，DNS 名单不证明实际解析地域，IP 分类不证明真实连接路线。未命中上述规则不保证服务可用。</p></details>';
+    const note = '<p class="scope-note">「异常」仅表示命中本地规则，不等于网络故障。</p><details class="note-disclosure"><summary>规则与检测边界</summary><p><strong>异常条件</strong></p><p>本地规则将以下任一情况标为「异常」：</p><ul><li>取得本地 IPv6 路由源地址。</li><li>命中国内 DNS 服务静态名单。</li><li>proxycheck 风险分不低于 70（低于 30 为低，30–69 为中）。</li><li>服务端主机与公网 IP 的时区名称或 UTC 偏移比较不一致。</li></ul><p><strong>检测不完整</strong></p><ul><li>未命中上述规则，但缺少公网、DNS 名单归属或时区结果时，风险状态为未知。</li><li>公网 IP 被标记为代理或机房时才查询 proxycheck 和 stopforumspam；此时缺少风险分则标为部分检测。</li></ul><p><strong>结论范围</strong></p><p>本地源地址不证明公网泄漏，DNS 名单不证明实际解析地域，IP 分类不证明真实连接路线。</p></details>';
     if (!items.length) {
       qs("#network-conclusion").innerHTML = `<div class="empty-state">—</div>${note}`;
       return;

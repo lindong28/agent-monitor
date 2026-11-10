@@ -184,7 +184,7 @@ assert(html.includes('机房 IP</div><div class="value"><span class="status-pill
 html=render({risk:{type:'<type>'},spam:{score:12,raw_lines:['<raw>']},errors:[{section:'risk',message:'<failed>'},{section:'spam',message:'partial'}]});
 for(const v of ['&lt;type&gt;','&lt;raw&gt;','&lt;failed&gt;','partial','12%']) assert(html.includes(v),v);
 assert(!html.includes('<raw>'));assert(!html.includes('<failed>'));
-assert(html.includes('代理标记与机房判定来自 ip-api'));
+assert(html.includes('标记来自 ip-api 分类'));
 html=render({spam:{raw_lines:['未收录 低风险 ✓']},risk:{score:0,type:'住宅'},errors:[]});
 assert(html.includes('未收录 低风险 ✓'));assert(!html.includes('未取得读数'));
 html=render({spam:{raw_lines:['查询失败']},risk:{score:0,type:'住宅'},errors:[]});
@@ -693,7 +693,8 @@ values[0].operation.recovery_pause_id = "pause";
 delete values[0].operation.failure;
 renderAccounts(values);
 assert(!visible(list.children[0]).includes("最近查询完成"));
-assert(text(list.children[0]).includes("最近查询已完成"));
+assert(!text(list.children[0]).includes("最近查询已完成"), "completed quota result is already on the card");
+assert(text(list.children[0]).includes("最近配额查询：已完成"));
 assert(visible(list.children[0]).includes("发送受限"), "successful query does not imply send permission");
 const sections = list.children[0].querySelector("details").querySelector("div").children;
 assert(sections.find(s=>text(s.children[0]) === "历史记录") && text(sections.find(s=>text(s.children[0]) === "历史记录")).includes("历史请求错误摘要（已脱敏）：session expired"));
@@ -1148,7 +1149,7 @@ process.stdout.write(JSON.stringify({
         self.assertIn("${worst.spec.key} 已用 ${worst.used}%", js)
         # The one thing the numbers cannot say for themselves: rows are per
         # account and must not be added up.
-        self.assertIn("配额按账号计量，不跨账号求和。", prose)
+        self.assertIn("按账号展示当前配额窗口，不随页面日期变化。", prose)
 
     def test_overview_quota_reads_as_consumption(self):
         """The section states what has been used directly, without making the
@@ -2365,7 +2366,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
 
     def test_network_and_sessions_explain_their_scope(self):
         html = (ROOT / "web" / "network.html").read_text()
-        self.assertIn("检测此页面服务所在主机的系统网络，不代表各个 Agent 的连接", html)
+        self.assertIn("检测服务端系统网络；不代表 Agent 的连接或账号可用性", html)
         self.assertIn('id="network-conclusion"', html)
         self.assertNotIn('id="process-network', html)
         self.assertNotIn("<details", html)
@@ -2377,7 +2378,7 @@ const provider = { key: "claude", label: "Claude", pill: "agent-claude-code", wi
         html = (ROOT / "web" / "explore.html").read_text()
 
         self.assertIn("Codex 按已识别模型估算", html)
-        self.assertIn("用量按已采集日志统计；费用仅汇总可计价记录，非服务商账单", html)
+        self.assertIn("费用仅含可计价记录，非账单", html)
         self.assertIn("GLM-5.1/5.2 按随程序提供的 GLM-5 定价推算", html)
 
     def test_usage_event_labels_do_not_call_codex_events_messages(self):
@@ -2549,7 +2550,7 @@ console.log(JSON.stringify({
   noteText: note.textContent,
   tableText: table.textContent,
   rows: all(table).filter(n => n.dataset.accountId).map(n => n.textContent),
-  details: all(table).filter(n => n.tagName === "DETAILS" && n.className !== "quota-observation-details").map(n => ({text: n.textContent, open: !!n.open})),
+  details: all(table).filter(n => n.tagName === "DETAILS" && n.className.split(" ").includes("quota-failure-details")).map(n => ({text: n.textContent, open: !!n.open})),
 }));
 '''
         payload = {
@@ -2716,7 +2717,8 @@ console.log(JSON.stringify({
                     self.assertNotIn("暂不可用", row)
                 self.assertEqual(len(rendered["details"]), 1)
                 self.assertFalse(rendered["details"][0]["open"])
-                self.assertIn("node-b：上次配额采集记录；当前暂停状态需另行核对。timed out", rendered["details"][0]["text"])
+                self.assertIn("node-b：上次配额采集记录；当前暂停状态需另行核对。", rendered["details"][0]["text"])
+                self.assertIn("timed out", rendered["details"][0]["text"])
                 self.assertNotIn("此前读数", rendered["tableText"])
 
         recovered = self.render_with([], [], failure, [{**account, "reading_from": "node-b"}], recover=True)

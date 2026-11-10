@@ -184,7 +184,15 @@ ui.renderQuotaAccounts(currentSnapshot);
 ui.updateQuotaMachineState('alpha', {machine:'alpha',observed_at:new Date().toISOString(),pause:{id:'still-held'},active:null});
 ui.updateQuotaMachineState('beta', {machine:'beta',observed_at:new Date().toISOString(),pause:null,active:null});
 let currentRow = () => table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='current');
-assert(currentRow().textContent.includes('可查询配额'));
+assert(currentRow().textContent.includes('发送已暂停，仍可查配额'));
+assert(!currentRow().textContent.includes('额度已用尽'));
+// A quota observation alone must not become a sending restriction.
+ui.updateCodexQuotaReadings([{id:'profile-current',account_id:'current',email:'current@example.test',quota_query_allowed:true,restrictions:{}}]);
+assert(currentRow().textContent.includes('100%'));
+assert(!currentRow().textContent.includes('发送已暂停'));
+assert(!descendants(currentRow()).some(n=>n.className==='quota-scope' && n.textContent==='可查询配额'));
+assert.equal(descendants(currentRow()).find(n=>n.textContent==='刷新配额').disabled,false);
+ui.updateCodexQuotaReadings([{id:'profile-current',account_id:'current',email:'current@example.test',quota_query_allowed:true,restrictions:{quota:{}}}]);
 assert(currentRow().textContent.includes('alpha 自动查询已暂停'));
 assert(!currentRow().textContent.includes('beta 自动查询已暂停'));
 assert(currentRow().textContent.includes('历史采集'));

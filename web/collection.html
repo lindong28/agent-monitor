@@ -56,10 +56,11 @@
         <div class="page-toolbar"><div class="page-location"><span class="workspace-label">控制台</span><span class="breadcrumb-separator" aria-hidden="true">/</span><h1 class="page-title">采集与诊断</h1></div><button id="refresh" class="btn" type="button">重新读取采集状态</button></div>
         <p><a id="collection-return" href="/">返回总览</a></p>
         <p id="collection-context" class="scope-note"></p>
-        <p class="scope-note">下方机器采集与账号观测展示全部机器的最新状态，不受来源页日期或筛选影响。重新读取不会启动采集。</p>
+        <p class="scope-note">机器与账号状态不受日期筛选影响；重新读取不会启动采集。</p>
         <section id="sync-panel" class="panel" aria-label="机器采集状态">
           <div class="panel-head"><h2>机器采集</h2><span id="sync-coverage" class="status-line">机器快照可读：—/— 台</span></div>
           <p id="sync-summary" class="status-line" aria-live="polite">检查中…</p>
+          <p class="scope-note">机器详情统计全部留存的 Claude 记录；结束标记不保证最终用量完整。</p>
           <div id="sync-machines" class="sync-machines"></div>
         </section>
         <section class="panel" id="quota-diagnostics"><h2>配额更新</h2>
@@ -70,7 +71,7 @@
         <section class="panel" id="cost-diagnostics" aria-labelledby="cost-diagnostics-title">
           <div class="panel-head"><h2 id="cost-diagnostics-title">费用记录诊断</h2><button id="reload-cost-diagnostics" type="button">重新读取费用诊断</button></div>
           <p id="cost-diagnostics-scope" class="scope-note"></p>
-          <p class="scope-note">按来源页日期与筛选检查当前可读明细；原因和数量可能与历史汇总不同。缺少用量或价格依据的记录仍保留，金额不按零计算。</p>
+          <p class="scope-note">按当前日期与筛选检查留存明细，可能与历史汇总不同；缺失金额不按零计。</p>
           <p id="cost-diagnostics-status" role="status">读取中…</p>
           <div id="cost-diagnostics-table" class="table-wrap"><table class="cost-diagnostic-table"><thead><tr><th>原因</th><th>机器</th><th>Agent / 模型</th><th class="numeric">记录数</th><th>明细</th></tr></thead><tbody id="cost-diagnostics-body"></tbody></table></div>
           <details id="incomplete-cost-records" class="note-disclosure" hidden>
@@ -80,9 +81,9 @@
           </details>
         </section>
         <section class="panel" aria-labelledby="machine-quota-title"><h2 id="machine-quota-title">未归属账号的机器观测</h2>
-          <p class="scope-note">未识别账号的观测不能用于选择可用账号；已知账号及其历史读数见<a href="/#quota-explorer">总览配额表</a>。</p>
+          <p class="scope-note"><span id="quota-unattributed-help" hidden>这些观测未绑定账号，不能用于选择账号。</span>已知账号见<a href="/#quota-explorer">总览配额表</a>。</p>
           <p id="quota-signed-out" class="scope-note" hidden></p>
-          <p id="collection-quota-empty" class="scope-note" hidden>没有未归属账号的机器观测。</p>
+          <p id="collection-quota-empty" class="scope-note" hidden>无未归属账号观测。</p>
 
           <details id="quota-machine-records" class="note-disclosure" open hidden></details>
         </section>

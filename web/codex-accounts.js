@@ -40,7 +40,7 @@ function quotaHoldMessage(account, pause) {
     ? `最近成功观测（${timestamp(reading.observed_at)}）：${explanation}。` : "";
   const next = pause ? "请先查看本页的通道暂停与检查。"
     : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "可仅刷新配额。";
-  return `发送仍因此前额度限制暂停${since ? `（记录于 ${timestamp(since)}）` : ""}。${evidence}${next}只有服务端明确允许使用后才解除额度暂停，0% 或重置时间经过不代表恢复。`;
+  return `发送仍因此前额度限制暂停${since ? `（记录于 ${timestamp(since)}）` : ""}。${evidence}${next}`;
 }
 
 export function quotaFailureExplanation(account, sharedPause, accounts = []) {
@@ -618,6 +618,8 @@ export function init({ autoLoad = true } = {}) {
   function render() {
     renderBatch();
     updateRefreshAllButton();
+    const quotaHelp = root.querySelector("#codex-quota-help");
+    if (quotaHelp) quotaHelp.hidden = !accounts.some(account => account.restrictions?.quota);
     const warnings = root.querySelector("#codex-account-unavailable");
     if (warnings) {
       warnings.replaceChildren(...unavailable.map((account) => element("p", `未纳入发送：${account.account_id}。${account.detail}`)));
@@ -722,7 +724,7 @@ export function init({ autoLoad = true } = {}) {
         }
       }
       if (op) {
-        if (op.stage === "succeeded") currentDetail.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "查询" : "发送"}已完成：${op.detail || "操作完成"}`, "quota-scope"));
+        if (op.stage === "succeeded" && !op.refresh_only) currentDetail.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "查询" : "发送"}已完成：${op.detail || "操作完成"}`, "quota-scope"));
         if (op.stage !== "succeeded" && !(account.restriction_details || []).includes(op.detail)) currentDetail.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送操作"}（${timestamp(op.started_at)}）：${op.detail}`));
         if (!op.refresh_only && !op.login_only) currentDetail.append(element("p", `消息结果：${MESSAGE_STATUS[op.message_status]}`, "quota-scope"));
         if (op.message) currentDetail.append(element("p", `本次抽取的消息：${op.message}`, "quota-scope"));
@@ -1026,7 +1028,7 @@ export function renderAccountBatch(state, controls) {
     batchRetry.hidden = statuses.unsent === 0;
     batchRetry.disabled = submittingBatch || busy || Boolean(upstreamPause);
     batchRetry.textContent = `继续 ${statuses.unsent} 个未发送账号`;
-    if (observation) observation.textContent = `本轮开始于 ${timestamp(batch.created_at)}。7 天窗口重置时间已知 ${resetRead}/${batch.items.length}；这是配额读数，不代表发送结果。`;
+    if (observation) observation.textContent = `7 天窗口重置时间已知 ${resetRead}/${batch.items.length}；配额读数不代表发送结果。`;
     const quotaUnsent = batch.items.flatMap(item => {
       const account = accounts.find(value => value.id === item.profile_id);
       return account && account.eligible !== false && (!item.operation || item.operation.message_status === "not_sent") && account.restrictions?.quota ? [account] : [];
@@ -1052,7 +1054,7 @@ export function renderAccountBatch(state, controls) {
       const nextStep = prerequisites
         ? `其中 ${prerequisites} 个需先完成登录或处理其他限制，再「仅刷新配额」。${prerequisites < quotaUnsent.length ? "其余可在对应账号「仅刷新配额」。" : ""}`
         : "请先在对应账号「仅刷新配额」。";
-      blockedReason.textContent += `未发送账号中有 ${quotaUnsent.length} 个受额度限制。${nextStep}只有服务端明确允许额度使用，才会解除额度限制；解除后再继续发送。`;
+      blockedReason.textContent += `未发送账号中有 ${quotaUnsent.length} 个受额度限制。${nextStep}解除后再继续发送。`;
       blockedReason.hidden = false;
     }
     const help = [

@@ -1158,6 +1158,14 @@
           sourceDetails.append(sourceSummary, record.sourceText);
           entry.appendChild(sourceDetails);
         }
+        if (!record.sourceText) {
+          const details = document.createElement("details"), summary = document.createElement("summary");
+          summary.textContent = "采集记录与错误详情";
+          record.rawText = document.createElement("p");
+          details.appendChild(summary);
+          details.appendChild(record.rawText);
+          entry.appendChild(details);
+        }
       }
       record.key = group.key; record.kind = group.kind; record.failure = failure;
       if (record.open) {
@@ -1193,8 +1201,11 @@
         record.note.dataset.failureCategory = guidance.key;
         record.note.textContent = failure.machine + "：上次配额采集" + statusText + "；"
           + (group.kind === "paused" ? "下列账号受该机器暂停影响，不代表每个账号均查询失败。暂停关联的采集记录：" : "") + guidance.summary + "。" + guidance.action;
-      } else record.note.textContent = `${failure.machine}：上次配额采集记录；当前暂停状态需另行核对。${[...new Set(group.failures.map(f => f.reason))].join("；")}`
-        + (provider.key === "claude" && failure.machine ? ` 在该机器运行 agent-monitor upstream-holds status claude 可只读核对当前保护。先确认账号、订阅与原始失败原因，不直接清除暂停或重复请求。` : "");
+      } else {
+        record.note.textContent = `${failure.machine}：上次配额采集记录；当前暂停状态需另行核对。`
+          + (provider.key === "claude" && failure.machine ? "只读核对：agent-monitor upstream-holds status claude。" : "");
+        record.rawText.textContent = [...new Set(group.failures.map(f => f.reason))].join("；");
+      }
       if (provider.key === "codex" && failure.pause?.id) {
         record.entry.dataset.codexPauseId = failure.pause.id; record.entry.tabIndex = -1;
       } else delete record.entry.dataset.codexPauseId;
@@ -1538,9 +1549,10 @@
       if (!quotaAccountDisabled(provider, account)) actions.appendChild(refresh);
       const status = document.createElement("span");
       status.className = "quota-scope";
-      status.textContent = permission === null ? "查询权限未核实" : permission ? "可查询配额" : "查询受限，请在账号管理查看";
-      if (codexProfileStateKnown && profiles[0].restrictions?.quota) status.textContent = "额度已用尽，发送受限；" + status.textContent;
-      wrap.appendChild(status);
+      const sendPaused = codexProfileStateKnown && Boolean(profiles[0].restrictions?.quota);
+      status.textContent = permission === null ? "查询权限未核实" : permission ? (sendPaused ? "发送已暂停，仍可查配额" : "") : "查询受限，请查看账号";
+      if (sendPaused && permission !== true) status.textContent = "发送已暂停；" + status.textContent;
+      if (status.textContent) wrap.appendChild(status);
     }
 
     if (quotaPresence(account) === "remembered") {

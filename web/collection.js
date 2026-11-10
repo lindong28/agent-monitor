@@ -130,7 +130,7 @@
     facts.push(observedAt ? `数据更新于 ${formatDate(observedAt)} · ${updatedText(observedAt)}` : "尚无数据");
     const quality = machine.statistics?.usage_quality_counts;
     const qualityDetail = quality == null ? "Claude 用量记录完整性未知" :
-      `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}（全部留存，非当前日期范围；结束标记不保证最终用量完整）`;
+      `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}`;
     if (["unreachable", "unknown"].includes(machine.availability) && machine.last_successful_contact_ts) {
       facts.push(`最后联系 ${formatDate(machine.last_successful_contact_ts)}`);
     }
@@ -358,6 +358,7 @@
         window.AgentMonitor.renderQuotaDiagnostics?.(data.rate_limits);
         renderQuotaSignedOut(data.rate_limits, true);
         qs("#collection-quota-empty").hidden = !qs("#quota-machine-records").hidden;
+        qs("#quota-unattributed-help").hidden = qs("#quota-machine-records").hidden;
       } catch (error) {
         if (current()) qs("#sync-summary").textContent = `读取失败：${error.message}；保留上次显示的观测，可重新读取。`;
       }

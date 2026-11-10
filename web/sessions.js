@@ -582,7 +582,7 @@
     qs("#session-times").textContent = `最近用量：${last === null ? "时间未知" : formatDate(last)}`;
     content.innerHTML = `<div class="session-metrics">
       <article><h3>记录费用</h3><strong>${sessionEntryCost(cost)}</strong><p>${cost === null ? "当前记录均无法计价" : unknown ? "部分未计价 · 仅合计可计价记录 · 非账单" : "仅合计可计价记录 · 非账单"}</p></article>
-      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>已记录的输入、输出与缓存合计</p></article></div>
+      <article><h3>Token</h3><strong>${integer(tokens)}</strong><p>输入＋输出＋缓存</p></article></div>
       <details class="panel session-metadata" ${readingState.metadata ? "open" : ""}><summary>会话信息 · ${models.length} 个模型</summary><dl class="session-fields">
         ${field("Agent", distinct("agent_id").join("、"))}
         ${field("会话目录", meta.project || distinct("project").join("、"))}

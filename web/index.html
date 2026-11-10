@@ -72,7 +72,7 @@
         <div class="kpi-sections">
           <section class="panel kpi-group overview-cost" aria-labelledby="kpi-spend-title">
             <h2 id="kpi-spend-title" class="kpi-group-title">成本概况</h2>
-            <p class="quota-scope">估算费用，非服务商账单。日期按 GMT+8；今日与本周不随时间范围改变。</p>
+            <p class="quota-scope">费用为估算，非账单。日期按 GMT+8；今日、本周不随所选范围变化。</p>
             <p id="spend-coverage" class="quota-scope" hidden></p>
             <div class="kpi-grid">
               <article class="kpi-card">
@@ -147,8 +147,7 @@
           </section>
           <section class="kpi-group panel" aria-labelledby="kpi-quota-title">
             <h2 id="kpi-quota-title" class="kpi-group-title">配额用量</h2>
-            <p class="quota-scope">配额按账号计量，不跨账号求和。5 小时与 7 天窗口不受页面日期影响。</p>
-            <p class="quota-scope">套餐优先采用配额记录；其他来源在行内标注。原始记录见“配额更新”。</p>
+            <p class="quota-scope">按账号展示当前配额窗口，不随页面日期变化。</p>
             <div id="quota-explorer" class="quota-explorer">
               <div class="quota-provider-filter" role="group" aria-label="配额服务商">
                 <button type="button" class="btn" data-quota-provider="all" aria-pressed="true">全部</button>
@@ -186,7 +185,7 @@
             </div>
           <p id="quota-profile-status" class="quota-scope" role="status"></p>
           <p id="quota-overview-status" class="quota-scope" role="status"></p>
-          <p><a data-nav href="/accounts#account-query">刷新配额</a> · <a data-nav href="/accounts">管理账号</a> · <a data-collection-link href="/collection#quota-diagnostics">查看配额更新与自动刷新设置</a></p>
+          <p><a data-nav href="/accounts#account-query">批量查询配额</a> · <a data-collection-link href="/collection#quota-diagnostics">自动刷新与诊断</a></p>
             <div id="quota-machine-notice" class="quota-scope" hidden></div>
 
           </section>

@@ -262,7 +262,7 @@
       matched ||= active;
     });
     const state = AgentMonitor.qs("#preset-state");
-    if (state) state.textContent = matched ? "预设只改变指标与分组，保留当前日期和筛选。" : "自定义指标与分组 · 日期和筛选仍适用";
+    if (state) state.textContent = matched ? "切换预设保留日期与筛选。" : "自定义指标与分组 · 日期和筛选仍适用";
   }
 
   function syncFilterQuery() {
