@@ -148,6 +148,45 @@ export function init({ autoLoad = true } = {}) {
   const searchInput = root.querySelector("#codex-account-search");
   const stateFilter = root.querySelector("#codex-account-filter");
   const batchToggle = root.querySelector("#codex-batch-mode");
+  const draftNotice = root.querySelector("#codex-account-draft-status");
+  const draftKey = "agent-monitor:account-draft:v1";
+  let draft = null;
+  let selectedBindings = new Map();
+  const identity = account => JSON.stringify([account.id, account.account_id, account.email]);
+  const completeIdentity = account => account && [account.id, account.account_id, account.email]
+    .every(value => typeof value === "string" && value.length > 0);
+  function draftFeedback(failed, stale = false) {
+    if (draftNotice) {
+      draftNotice.hidden = !failed;
+      draftNotice.textContent = failed ? (stale
+        ? "浏览器无法保留当前筛选和选择，也无法清除旧草稿；刷新后旧草稿仍可能恢复，请重新核对已选账号。"
+        : "浏览器无法保留当前筛选和选择；离开或刷新页面后需重新选择。") : "";
+    }
+  }
+  try {
+    const value = JSON.parse(window.sessionStorage?.getItem(draftKey) || "null");
+    if (value && typeof value.search === "string" && ["all", "login", "restricted", "busy", "disabled"].includes(value.filter)
+        && typeof value.batchMode === "boolean" && Array.isArray(value.selected) && value.selected.every(completeIdentity)) {
+      draft = value;
+    }
+  } catch (_) { draftFeedback(true); }
+  function saveDraft() {
+    draft = null; // A new explicit choice supersedes any not-yet-restored draft.
+    const selected = accounts.filter(a => selectedIds.has(a.id) && completeIdentity(a))
+      .map(({id, account_id, email}) => ({id, account_id, email}));
+    selectedBindings = new Map(selected.map(a => [a.id, identity(a)]));
+    try {
+      if (!window.sessionStorage) throw new Error("Browser storage unavailable");
+      window.sessionStorage.setItem(draftKey, JSON.stringify({search: searchInput?.value || "",
+        filter: stateFilter?.value || "all", batchMode, selected}));
+      draftFeedback(false);
+    } catch (_) {
+      // A failed replacement must not silently revive a previously cancelled choice.
+      let stale = false;
+      try { window.sessionStorage?.removeItem(draftKey); } catch (_) { stale = true; }
+      draftFeedback(true, stale);
+    }
+  }
   let lastBatchStatus = "";
   let hasSnapshot = false;
   let locatePending = new URLSearchParams(window.location?.search || "").get("profile");
@@ -273,8 +312,17 @@ export function init({ autoLoad = true } = {}) {
 
   function update(data) {
       accounts = data.accounts;
-      if (selectedIds === null) selectedIds = new Set();
-      else selectedIds = new Set([...selectedIds].filter(id => accounts.some(a => a.id === id && a.eligible !== false && !a.disabled)));
+      if (draft) {
+        if (searchInput) searchInput.value = draft.search;
+        if (stateFilter) stateFilter.value = draft.filter;
+        batchMode = draft.batchMode;
+        selectedBindings = new Map(draft.selected.map(a => [a.id, identity(a)]));
+        selectedIds = new Set(batchMode ? selectedBindings.keys() : []);
+        draft = null;
+        renderBatchMode();
+      }
+      selectedIds = new Set([...selectedIds].filter(id => accounts.some(a => a.id === id
+        && a.eligible !== false && !a.disabled && (!selectedBindings.has(id) || selectedBindings.get(id) === identity(a)))));
       batch = data.batch;
       quotaBatch = data.quota_batch || null;
       upstreamPause = data.upstream_pause || null;
@@ -295,6 +343,7 @@ export function init({ autoLoad = true } = {}) {
         }
       }
       if (window.location?.pathname === '/accounts') window.AgentMonitor.restoreReaderState?.();
+      saveDraft();
   }
 
   function updateRefreshAllButton() {
@@ -514,10 +563,12 @@ export function init({ autoLoad = true } = {}) {
   root.querySelector("#codex-select-all").addEventListener("click", () => {
     selectedIds = new Set(accounts.filter(a => a.eligible !== false && !a.disabled && matchesAccount(a)).map(a => a.id));
     render();
+    saveDraft();
   });
   root.querySelector("#codex-select-none").addEventListener("click", () => {
     selectedIds.clear();
     render();
+    saveDraft();
   });
   refreshSelected?.addEventListener("click", () => refreshAllQuotas("refresh-selected"));
   quotaRetry?.addEventListener("click", () => refreshAllQuotas("refresh-retry"));
@@ -548,15 +599,19 @@ export function init({ autoLoad = true } = {}) {
     const empty = root.querySelector("#codex-account-empty");
     if (empty) empty.hidden = visible > 0 || !accounts.length;
   }
-  searchInput?.addEventListener("input", filterAccounts);
-  stateFilter?.addEventListener("change", filterAccounts);
-  function setBatchMode(value) {
-    batchMode = value;
+  searchInput?.addEventListener("input", () => { filterAccounts(); saveDraft(); });
+  stateFilter?.addEventListener("change", () => { filterAccounts(); saveDraft(); });
+  function renderBatchMode() {
     root.querySelector("#codex-batch-panel").hidden = !batchMode;
     batchToggle?.setAttribute("aria-expanded", String(batchMode));
     if (batchToggle) batchToggle.textContent = batchMode ? "结束选择" : "批量操作";
+  }
+  function setBatchMode(value) {
+    batchMode = value;
+    renderBatchMode();
     if (!batchMode) { selectedIds.clear(); render(); }
     else filterAccounts();
+    saveDraft();
   }
   batchToggle?.addEventListener("click", () => setBatchMode(!batchMode));
 
@@ -622,6 +677,7 @@ export function init({ autoLoad = true } = {}) {
           renderBatch();
           updateRefreshAllButton();
           filterAccounts();
+          saveDraft();
         });
         label.append(checkbox);
         heading.prepend(label);

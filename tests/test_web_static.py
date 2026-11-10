@@ -526,6 +526,9 @@ const nodes = Object.fromEntries(["#codex-account-list", "#codex-account-notice"
 const root = new Node(); root.querySelector = id => nodes[id];
 global.document = {hidden: false, querySelector: () => root, addEventListener() {}, createElement: tag => new Node(tag), createTextNode: text => {const n=new Node();n.textContent=text;return n;}};
 global.window = {AgentMonitor: {pageScope: () => () => true, onPageCleanup() {}, formatDate: x => x, latestCodexQuotaReading: () => null}};
+const draftStore = new Map();
+nodes["#codex-account-draft-status"] = new Node();
+window.sessionStorage = {getItem: k => draftStore.get(k) ?? null, setItem: (k,v) => draftStore.set(k,v), removeItem: k => draftStore.delete(k)};
 const controller = require("./web/codex-accounts.js").init({autoLoad: false});
 nodes["#codex-account-search"].value = "";
 nodes["#codex-account-filter"].value = "all";
@@ -697,6 +700,80 @@ assert(sections.find(s=>text(s.children[0]) === "历史记录") && text(sections
 assert(!sections.find(s=>text(s.children[0]) === "技术细节"), "recovered operation must not show stale failure as current diagnostics");
 assert(!cardButtons(list.children[0]).find(button => button.textContent === "仅刷新配额").disabled);
 assert(cardButtons(list.children[0]).find(button => button.textContent === "向此账号发送一条消息").disabled);
+
+// Recreating the controller models both a document reload and SPA re-entry.
+values[0].account_id = "workspace-a";
+values[1].account_id = "workspace-b";
+renderAccounts(values);
+nodes["#codex-batch-mode"].listeners.click();
+nodes["#codex-account-search"].value = "a@example";
+nodes["#codex-account-search"].listeners.input();
+nodes["#codex-select-all"].listeners.click();
+assert.deepEqual(selected(), [true, false]);
+function reload() {
+  delete root.dataset.initialized;
+  list.replaceChildren();
+  nodes["#codex-account-search"].value = "";
+  nodes["#codex-account-filter"].value = "all";
+  nodes["#codex-batch-panel"].hidden = true;
+  const next = require("./web/codex-accounts.js").init({autoLoad: false});
+  next.update({accounts: values});
+  return next;
+}
+let next = reload();
+assert.equal(nodes["#codex-account-search"].value, "a@example", "reload retains the reader filter");
+assert(!nodes["#codex-batch-panel"].hidden);
+assert.deepEqual(selected(), [true, false], "reload retains the exact selected identity");
+const inherited = new Map(draftStore);
+values[0] = {...values[0], email: "changed@example.test"};
+next.update({accounts: values});
+assert.deepEqual(selected(), [false, false], "same profile with changed email is not the selected identity");
+values[0] = {...values[0], email: "a@example.test"};
+draftStore.clear(); for (const entry of inherited) draftStore.set(...entry);
+next = reload();
+assert.deepEqual(selected(), [true, false], "browser-copied valid drafts still undergo restoration");
+values[0] = {...values[0], account_id: "different-workspace"};
+next.update({accounts: values});
+assert.deepEqual(selected(), [false, false]);
+nodes["#codex-select-all"].listeners.click();
+values[0] = {...values[0], disabled: true};
+next.update({accounts: values});
+assert.deepEqual(selected(), [false, false]);
+values[0] = {...values[0], disabled: false};
+nodes["#codex-select-all"].listeners.click();
+values[0] = {...values[0], eligible: false};
+next.update({accounts: values});
+assert(!nodes["#codex-selection-count"].textContent.includes("已选 1"));
+values[0] = {...values[0], eligible: true};
+next.update({accounts: values});
+nodes["#codex-select-all"].listeners.click();
+next.update({accounts: [values[1]]});
+assert(nodes["#codex-selection-count"].textContent.includes("已选 0"), "removed identities leave selection");
+next.update({accounts: values});
+nodes["#codex-select-all"].listeners.click();
+nodes["#codex-batch-mode"].listeners.click();
+reload();
+assert.deepEqual(selected(), [false, false], "ending selection survives reload");
+assert(nodes["#codex-batch-panel"].hidden);
+for (const key of draftStore.keys()) draftStore.set(key, "{bad json");
+reload();
+assert.deepEqual(selected(), [false, false], "malformed storage cannot invent selection");
+nodes["#codex-batch-mode"].listeners.click();
+nodes["#codex-select-all"].listeners.click();
+const retained = new Map(draftStore);
+window.sessionStorage.setItem = () => {throw Error("storage blocked");};
+nodes["#codex-batch-mode"].listeners.click();
+reload();
+assert.deepEqual(selected(), [false, false], "failed draft write must remove the earlier cancelled selection");
+assert(nodes["#codex-batch-panel"].hidden);
+nodes["#codex-account-search"].value = "b@example";
+nodes["#codex-account-search"].listeners.input();
+assert.deepEqual(list.children.map(n => n.hidden), [true, false], "storage failure does not break filtering");
+assert(nodes["#codex-account-draft-status"].textContent.includes("无法保留"));
+for (const entry of retained) draftStore.set(...entry);
+window.sessionStorage.removeItem = () => {throw Error("all storage mutations blocked");};
+nodes["#codex-account-search"].listeners.input();
+assert(nodes["#codex-account-draft-status"].textContent.includes("旧草稿仍可能恢复"));
 
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)

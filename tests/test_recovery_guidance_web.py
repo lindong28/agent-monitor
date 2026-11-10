@@ -156,7 +156,7 @@ async function render(changes={}, error=false) {
   ]);
   assert.match(classified.quotaDiagnostics.summary.textContent,/3 台暂停；账号身份未确认/);
   assert.doesNotMatch(classified.quotaDiagnostics.summary.textContent,/读取失败 \d/);
-  assert.match(classified.quotaDiagnostics.entries[0].note.textContent,/账号身份变化.*确认这台机器当前登录的是目标账号/);
+  assert.match(classified.quotaDiagnostics.entries[0].note.textContent,/账号身份变化.*核对暂停原账号.*独立配置.*无需切换默认登录/);
   assert.match(classified.quotaDiagnostics.entries[1].note.textContent,/配额读取失败，原因未核实.*目标机器的 Agent Monitor 路由桥/);
   assert.match(classified.quotaDiagnostics.entries[2].note.textContent,/上游返回 401\/token_revoked，原因未核实.*目标机器的 Agent Monitor 路由桥/);
   p=await render({pause:{...base.pause,failure:{stage:'quota_read',upstream_code:'token_revoked',http_status:401,detail:'invalidated oauth token'}}});
