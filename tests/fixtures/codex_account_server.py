@@ -97,7 +97,7 @@ for line in sys.stdin:
         if scenario.startswith("scoped_"):
             status = 500 if scenario == "scoped_500" else 403 if scenario == "scoped_403" else 401
             phrase = {500: "Internal Server Error", 403: "Forbidden", 401: "Unauthorized"}[status]
-            code = "other" if scenario == "scoped_generic" else "token_revoked"
+            code = "other" if scenario == "scoped_generic" else "token_expired" if scenario == "scoped_expired" else "token_revoked"
             if scenario == "scoped_changed":
                 auth = json.loads((home / "auth.json").read_text())
                 auth["tokens"]["access_token"] = "changed-fixture"

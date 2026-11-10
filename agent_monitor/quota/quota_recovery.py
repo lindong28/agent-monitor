@@ -114,7 +114,7 @@ def local_status(*, profile=None, pause_scope=None):
     login_recovery = None
     local_commit = None
     if source == "managed" and profile and profile.startswith("monitor-"):
-        from agent_monitor.quota.codex_quota import revoked_quota_failure
+        from agent_monitor.quota.codex_quota import authentication_quota_failure
         try:
             record = json.loads((home.parent / "profile.json").read_text())
             from agent_monitor import hub_config
@@ -128,7 +128,7 @@ def local_status(*, profile=None, pause_scope=None):
                         if binding:
                             binding["pause_scope"] = "account"
             operation = record.get("operation") or {}
-            auth_recovery_available = bool(account and not blocked_reason and revoked_quota_failure(failure)
+            auth_recovery_available = bool(account and not blocked_reason and authentication_quota_failure(failure)
                 and record.get("account_id") == account.account_id
                 and record.get("email", "").casefold() == (account.label or "").casefold()
                 and operation.get("stage") in {"failed", "interrupted"} and operation.get("refresh_only")

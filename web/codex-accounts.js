@@ -43,6 +43,26 @@ function quotaHoldMessage(account, pause) {
   return `发送仍因此前额度限制暂停${since ? `（记录于 ${timestamp(since)}）` : ""}。${evidence}${next}只有服务端明确允许使用后才解除额度暂停，0% 或重置时间经过不代表恢复。`;
 }
 
+export function quotaFailureExplanation(account, sharedPause, accounts = []) {
+  const op = account.operation;
+  if (!op?.refresh_only || op.stage !== "failed") return "";
+  if (op.failure?.category === "locallyPaused") {
+    const source = accounts.find(a => a.id === sharedPause?.source?.profile_id);
+    const history = "本账号上次未发出请求：当时被本地保护暂停。";
+    if (sharedPause) return history + (source ? `当前 ${source.email} 的查询触发的共享暂停仍在生效。` : "当前共享暂停仍在生效。") + "请先处理共享暂停。";
+    return history + "当前无共享暂停；" + (account.account_quota_pause ? "本账号仍有配额暂停，请打开登录修复。"
+      : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "可继续查询此未完成项。");
+  }
+  const failure = op.diagnostics?.rpc_failure;
+  if (failure?.http_status === 401 && ["token_expired", "token_revoked"].includes(failure.upstream_code)) {
+    const next = sharedPause ? "共享暂停仍在生效，请先处理共享暂停，再分别修复认证和继续未完成项。"
+      : account.account_quota_pause ? "此账号的配额暂停仍保留，其他未受限账号可继续查询。"
+      : "当前无共享暂停；请按此账号的当前限制和登录修复提示继续处理。";
+    return `配额接口返回 401/${failure.upstream_code}，本次未取得配额；认证原因尚未核实。${next}`;
+  }
+  return "";
+}
+
 export function accountQuotaPauseGuidance(account) {
   return account.disabled
     ? "恢复此账号前，请先重新启用；启用后仍需处理配额暂停。"
@@ -369,7 +389,7 @@ export function init({ autoLoad = true } = {}) {
     if (action === "set-disabled" && !window.confirm(account?.disabled
       ? `重新启用 ${account.email}？仅改变本机 Monitor 的停用状态；其他限制保留，不会自动查询、登录或发送。`
       : `停用 ${account.email}？此账号将从本机 Monitor 的查询、登录和发送中排除，已有身份、登录态与配额记录保留。`)) return;
-    if (action === "attribute-account-pause" && !window.confirm(`我已确认本次暂停来自已停用账号 ${account.email} 的账号自身问题。\n暂停：${upstreamPause?.id}\n失败操作：${account?.operation?.id}\n\n只解除这个共享暂停，账号停用及其他限制保留。这不证明网络或服务已恢复，不发起任何请求。`)) return;
+    if (action === "attribute-account-pause" && !window.confirm(`我已确认本次暂停仅属于 ${account.email} 的账号问题。\n暂停：${upstreamPause?.id}\n失败操作：${account?.operation?.id}\n\n将本次共享暂停归属到此账号，保留此账号的保护及其他限制，允许其他账号另行查询。这不证明认证、网络或服务已恢复，不发起任何请求。`)) return;
     if (action === "resume" && !window.confirm("我已核对此账号已记录的失败信息、账号状态及服务端要求，确认解除此账号的本地限制。\n\n这不证明上游已恢复；不会自动登录、查询或发送。额度限制和本机 Codex 通道暂停仍保留。")) return;
     if (action === "release-rate-limit" && !window.confirm("仅解除此账号在本页的限流暂停，不会发送消息或查询配额。\n\n这不证明服务端限流已解除；请按服务端指引等待后再尝试。认证和额度限制仍会保留。")) return;
     const upstream = ["refresh", "login"].includes(action);
@@ -584,7 +604,7 @@ export function init({ autoLoad = true } = {}) {
         ? "需要重新登录" : !account.busy && loginRequired ? "需要登录" : op?.failure?.category === "needsLogin"
         ? "需要重新登录" : op?.stage === "succeeded" ? ""
         : op?.failure?.category === "needsReauth"
-        ? "需要重新认证"
+        ? "配额认证被拒绝"
         : op?.refresh_only && op.stage === "failed"
         ? (op.failure?.category === "locallyPaused" ? "配额查询未执行" : "配额查询失败")
         : op ? STAGES[op.stage] || op.stage : "";
@@ -683,6 +703,8 @@ export function init({ autoLoad = true } = {}) {
           if (latestReading.seven_day_resets_at != null && latestReading.seven_day_resets_at * 1000 <= Date.now()) quotaDetail.append(element("p", `这份重置时间已过去，不代表额度已恢复。${upstreamPause ? "请先查看本页的通道暂停与检查。" : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "请仅刷新配额获取当前读数。"}`, "quota-scope"));
         }
       }
+      const failureExplanation = quotaFailureExplanation(account, upstreamPause, accounts);
+      if (failureExplanation) card.append(element("p", failureExplanation, "quota-scope"));
       const controls = element("div", undefined, "codex-account-controls");
       if (account.account_quota_pause) {
         heading.append(element("span", "此账号配额查询已暂停", "codex-batch-result"));
@@ -725,7 +747,9 @@ export function init({ autoLoad = true } = {}) {
         managementDetail.append(maintenance);
       }
       if (!account.busy) controls.append(button(account.disabled ? "重新启用此账号" : "停用此账号", "set-disabled", account));
-      if (account.disabled && upstreamPause?.reason === "operationFailed" && op?.refresh_only
+      if ((account.disabled || ["token_expired", "token_revoked"].includes(op?.diagnostics?.rpc_failure?.upstream_code)
+          && op.diagnostics.rpc_failure.http_status === 401 && op.diagnostics.rpc_failure.stage === "quota_read"
+          && op.diagnostics.rpc_failure.kind === "rpc_error") && upstreamPause?.reason === "operationFailed" && op?.refresh_only
           && op.stage === "failed" && op.message_status === "not_sent" && op.diagnostics?.last_request
           && (!upstreamPause.source || upstreamPause.source.profile_id === account.id && upstreamPause.source.operation_id === op.id)) {
         controls.append(button("确认仅此账号异常，解除本次通道暂停", "attribute-account-pause", account));

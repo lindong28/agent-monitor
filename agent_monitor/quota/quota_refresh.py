@@ -158,6 +158,7 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
     failure = None
     stage = "child_start"
     bridge_explainable = False
+    account_rejection = None
     try:
         auth_failure = None
         if renew_auth:
@@ -167,7 +168,7 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                     or not (account_profile or "").startswith("monitor-")
                     or first.get("account_profile") != account_profile
                     or first.get("account_fingerprint") != account_fingerprint(provider, account)
-                    or not codex_quota.revoked_quota_failure(first)):
+                    or not codex_quota.authentication_quota_failure(first)):
                 raise LocalUnavailable("认证修复与当前暂停不匹配，未发出上游请求。")
             auth_failure = diagnostics.safe_failure(first)
         if provider == "codex":
@@ -215,6 +216,14 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 admitted_probe["authentication_recovery"] = safe_auth_recovery(payload.get("authentication_recovery"))
             if child.returncode or payload.get("error"):
                 detail = diagnostics.safe_failure(payload.get("failure"))
+                if provider == "codex" and pause_scope == "account":
+                    from agent_monitor.quota import codex_quota
+                    proof = payload.get("account_quota_rejection")
+                    if (isinstance(proof, str) and len(proof) == 64
+                            and all(c in "0123456789abcdef" for c in proof)
+                            and proof == codex_quota.credential_digest(auth_path)):
+                        codex_quota.check_identity(auth_path, account.account_id, account.label)
+                        account_rejection = proof
                 # A sibling can revoke this batch after our provider has already
                 # answered. Retain that result and its existing pause semantics.
                 # RPC transport errors alone do not prove an upstream response.
@@ -253,7 +262,9 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
             try:
                 no_new = (pause_scope == "account" and renew_auth and admitted_probe is not None
                     and (admitted_probe.get("authentication_recovery") or {}).get("outcome") == "no_new_credentials")
-                pause = lease.pause_local if no_new else lease.pause
+                if account_rejection:
+                    lease.state.setdefault("rejected_credentials", {}).setdefault(account_rejection, datetime.now(timezone.utc).isoformat())
+                pause = lease.pause_local if no_new or account_rejection else lease.pause
                 pause("quotaRefreshFailed", failure=facts)
             except OSError as error:
                 save_error = diagnostics.failure_summary(diagnostics.failure_details(error, stage="pause_save"))
@@ -410,8 +421,8 @@ def _codex_rpc_error(error, request_id):
                 body = None
             if isinstance(body, dict) and body.get("status") == 401:
                 detail = body.get("error")
-                if isinstance(detail, dict) and detail.get("code") == "token_revoked":
-                    return "上游返回 401/token_revoked，本次未取得配额；原因尚未核实，请保留诊断信息并排查目标机器。"
+                if isinstance(detail, dict) and detail.get("code") in {"token_revoked", "token_expired"}:
+                    return f"上游返回 401/{detail['code']}，本次未取得配额；原因尚未核实，请保留诊断信息并排查目标机器。"
     return "Codex 配额请求失败，本次未取得新读数；请查看诊断信息后处理。"
 
 
@@ -504,7 +515,11 @@ def _codex(account, *, recovery=None):
                             redactions + codex_quota.credential_secrets(auth_path))
                         if method == "account/read":
                             facts["stage"] = "account_check"
-                        raise RefreshError(_codex_rpc_error(message["error"], request_id), failure=facts)
+                        error = RefreshError(_codex_rpc_error(message["error"], request_id), failure=facts)
+                        error.authentication_quota_transport = codex_quota.authentication_quota_transport(message["error"], method)
+                        if error.authentication_quota_transport:
+                            error.failure["http_status"] = 401
+                        raise error
                     return message["result"]
             remaining = deadline - time.monotonic()
             ready = selector.select(max(0, remaining)) if remaining > 0 else []
@@ -608,10 +623,12 @@ if __name__ == "__main__":
         # different process and only sees this line.
         print(json.dumps({"error": str(exc), "signed_out": isinstance(exc, NotSignedIn),
                           "local_unavailable": isinstance(exc, LocalUnavailable),
-                          "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery}))
+                          "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery,
+                          "account_quota_rejection": getattr(exc, "account_quota_rejection", None)}))
         sys.exit(1)
     except Exception as exc:
         # External errors can contain request headers or provider payloads.
         print(json.dumps({"error": "配额请求失败，请检查这台机器的网络与登录状态后刷新。",
-                          "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery}))
+                          "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery,
+                          "account_quota_rejection": getattr(exc, "account_quota_rejection", None)}))
         sys.exit(1)

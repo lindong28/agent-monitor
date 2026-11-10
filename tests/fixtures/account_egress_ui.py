@@ -104,7 +104,7 @@ def main():
         return dict(codex=dict(accounts=[], refresh_errors=failures), claude=dict(accounts=[]))
     def account_pause(profile_id):
         return dict(id='account-pause-' + profile_id, at=1793004570,
-                    failure=dict(stage='quota_read', kind='rpc_error', http_status=401, upstream_code='token_revoked'))
+                    failure=dict(stage='quota_read', kind='rpc_error', http_status=401, upstream_code='token_expired' if profile_id == '0' else 'token_revoked'))
     source = (ROOT / 'web/accounts.html').read_text()
     panel = re.search(r'<main\b[^>]*>(.*?)</main>', source, re.S).group(1)
     html = ('<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'

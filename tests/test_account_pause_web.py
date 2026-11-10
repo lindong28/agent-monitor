@@ -11,6 +11,25 @@ class AccountPauseWebTests(unittest.TestCase):
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_quota_refusal_and_unattempted_reason_stay_distinct(self):
+        self.run_js(r'''const assert = require('assert');
+const {quotaFailureExplanation} = require('./web/codex-accounts.js');
+const failed = {id:'a',email:'a@example.test',operation:{refresh_only:true,stage:'failed',diagnostics:{rpc_failure:{http_status:401,upstream_code:'token_expired'}}}};
+assert.match(quotaFailureExplanation(failed),/401\/token_expired.*原因尚未核实/);
+assert.doesNotMatch(quotaFailureExplanation(failed),/认证已过期|token_revoked/);
+const held = {...failed,account_quota_pause:{id:'p'}};
+assert.match(quotaFailureExplanation(held),/其他未受限账号可继续查询/);
+assert.match(quotaFailureExplanation(held,{source:{profile_id:'b'}}),/共享暂停仍在生效/);
+assert.doesNotMatch(quotaFailureExplanation(held,{source:{profile_id:'b'}}),/其他.*可继续查询/);
+const skipped = {operation:{refresh_only:true,stage:'failed',failure:{category:'locallyPaused'}}};
+assert.match(quotaFailureExplanation(skipped,{source:{profile_id:'a'}},[failed]),/未发出请求.*a@example.test.*共享暂停/);
+assert.match(quotaFailureExplanation(skipped),/上次未发出请求.*当前无共享暂停/);
+assert.doesNotMatch(quotaFailureExplanation(skipped),/处理暂停后/);
+assert.match(quotaFailureExplanation({...skipped,account_quota_pause:{id:'p'}}),/本账号仍有配额暂停/);
+assert.doesNotMatch(quotaFailureExplanation(failed),/本次共享暂停/);
+assert.equal(quotaFailureExplanation({operation:{refresh_only:true,stage:'succeeded'}}),'');
+''')
+
     def test_batch_explains_pause_and_other_disabled_states(self):
         self.run_js(r'''
 const assert = require("assert");

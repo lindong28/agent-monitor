@@ -108,7 +108,7 @@ class NativeAuthRecoveryTests(unittest.TestCase):
     setUp = AuthRecoveryTests.setUp
     write_auth = AuthRecoveryTests.write_auth
 
-    def run_native(self, *, slow=False, noisy=False, fail_initialize=False):
+    def run_native(self, *, slow=False, noisy=False, fail_initialize=False, refusal=None):
         from agent_monitor.quota import quota_refresh
         self.script = Path(self.temp.name) / "fixture-codex"
         self.script.write_text("#!" + sys.executable + "\n" + '''import json,os,sys,time
@@ -128,6 +128,11 @@ for line in sys.stdin:
   if os.environ.get('SLOW_AUTH_FIXTURE'):time.sleep(.3)
   result={'account':{'type':'chatgpt','email':'one@example.test'}}
  elif method=='account/rateLimits/read':
+  if os.environ.get('AUTH_REFUSAL'):
+   code=os.environ['AUTH_REFUSAL']
+   body=json.dumps({'error':{'code':code}})
+   prefix='body=' if code=='body_only' else 'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; content-type=application/json; body='
+   print(json.dumps({'id':m['id'],'error':{'code':-32603,'message':prefix+body}}),flush=True);continue
   if os.environ.get('SLOW_AUTH_FIXTURE'):time.sleep(.3)
   result={'accountId':'workspace','rateLimits':{'primary':{'windowDurationMins':300,'usedPercent':17}}}
  else:result={}
@@ -143,6 +148,8 @@ for line in sys.stdin:
                 kwargs['env']['SLOW_AUTH_FIXTURE'] = '1'
             if noisy:
                 kwargs['env']['NOISY_AUTH_FIXTURE'] = '1'
+            if refusal:
+                kwargs['env']['AUTH_REFUSAL'] = refusal
             if fail_initialize:
                 kwargs['env']['FAIL_AUTH_INITIALIZE'] = '1'
             process = real_popen(command, **kwargs)
@@ -156,6 +163,20 @@ for line in sys.stdin:
             return quota_refresh._codex({"account_id": "workspace", "label": "one@example.test",
                 "codex_home": str(self.auth.parent), "renew_auth": True,
                 "auth_failure": {"kind": "rpc_error", "stage": "quota_read", "http_status": 401, "upstream_code": "token_revoked"}}, recovery=self.recovery)
+
+    def test_native_refusal_proof_requires_exact_transport_and_bound_credential(self):
+        for code in ("token_expired", "token_revoked", "body_only", "unknown"):
+            with self.subTest(code=code):
+                self.write_auth("before")
+                with self.assertRaises(RefreshError) as raised:
+                    self.run_native(refusal=code)
+                proof = getattr(raised.exception, "account_quota_rejection", None)
+                if code in ("token_expired", "token_revoked"):
+                    self.assertEqual(proof, quota.credential_digest(self.auth))
+                    self.assertEqual(raised.exception.failure["http_status"], 401)
+                    self.assertEqual(raised.exception.failure["upstream_code"], code)
+                else:
+                    self.assertIsNone(proof)
 
     def test_native_transport_uses_unique_ids_and_file_credentials(self):
         self.assertEqual(self.run_native().five_hour_pct, 17)
@@ -376,11 +397,12 @@ class PersistedRecoveryTests(unittest.TestCase):
             self.assertTrue((root / 'state/quota_snapshot.json').is_file())
 
     def test_unknown_failure_does_not_admit_auth_repair(self):
-        from agent_monitor.quota.codex_quota import revoked_quota_failure
+        from agent_monitor.quota.codex_quota import authentication_quota_failure
         known = {"kind": "rpc_error", "stage": "quota_read", "http_status": 401, "upstream_code": "token_revoked"}
-        self.assertTrue(revoked_quota_failure(known))
+        self.assertTrue(authentication_quota_failure(known))
+        self.assertTrue(authentication_quota_failure({**known, "upstream_code": "token_expired"}))
         for changed in ({"stage": "account_check"}, {"http_status": 403}, {"http_status": None}, {"upstream_code": "unknown"}, {"kind": "timeout"}):
-            self.assertFalse(revoked_quota_failure({**known, **changed}))
+            self.assertFalse(authentication_quota_failure({**known, **changed}))
 
 
 class ReauthorizationTests(unittest.TestCase):

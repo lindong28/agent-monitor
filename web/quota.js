@@ -505,12 +505,13 @@
         action: "先确认这台机器当前登录的是目标账号；页面不能替你切换机器账号。确认后打开恢复卡片更新状态。",
       };
     }
-    const hasTokenCode = detail.upstream_code === "token_revoked" || reason.includes("upstream_code=token_revoked");
+    const tokenCode = ["token_revoked", "token_expired"].find(code => detail.upstream_code === code || reason.includes(`upstream_code=${code}`));
+    const hasTokenCode = Boolean(tokenCode);
     const hasHttp401 = detail.http_status === 401 || reason.includes("http_status=401");
     const hasAuthHint = reason.includes("invalidated oauth token");
     if (hasTokenCode || hasHttp401 || hasAuthHint) {
-      const signal = hasTokenCode && hasHttp401 ? "401/token_revoked"
-        : hasHttp401 ? "HTTP 401" : hasTokenCode ? "token_revoked" : "认证错误摘要";
+      const signal = hasTokenCode && hasHttp401 ? `401/${tokenCode}`
+        : hasHttp401 ? "HTTP 401" : hasTokenCode ? tokenCode : "认证错误摘要";
       return {
         key: "upstream_auth",
         label: "上游认证响应",
@@ -606,10 +607,8 @@
 
   function createRecoveryPanel(machine = "self", {onContinue, onSaved, sourceFailure = null, profile = "", pauseScope = ""} = {}) {
     function canRenewAuth(value) {
-      const failure = value?.pause?.failure;
-      return Boolean(value?.account?.auth_recovery_available === true && value.account.source === "managed" && value.account.quota_profile?.startsWith("monitor-")
-        && failure?.stage === "quota_read" && failure.kind === "rpc_error"
-        && failure.http_status === 401 && failure.upstream_code === "token_revoked");
+      // Recovery eligibility belongs to the server; do not duplicate its code list.
+      return value?.account?.auth_recovery_available === true;
     }
     const make = (tag, text, className) => {
       const node = document.createElement(tag);

@@ -640,8 +640,8 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
         options["pause_scope"] = "account"
     recovery_operation = None
     if renew_auth:
-        from agent_monitor.quota.codex_quota import revoked_quota_failure
-        if not profile or not profile.startswith("monitor-") or not revoked_quota_failure(failure):
+        from agent_monitor.quota.codex_quota import authentication_quota_failure
+        if not profile or not profile.startswith("monitor-") or not authentication_quota_failure(failure):
             raise quota_refresh.LocalUnavailable("当前暂停不支持此认证修复；未发出上游请求。")
         options["renew_auth"] = True
         from agent_monitor.accounts.codex_accounts import Manager

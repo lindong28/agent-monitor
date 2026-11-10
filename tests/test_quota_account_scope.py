@@ -16,18 +16,128 @@ class AccountScopeTests(unittest.TestCase):
     calls = test_codex_accounts.AccountActionsTests.calls
 
     def test_scope_parser_requires_actual_transport_and_rpc_context(self):
-        from agent_monitor.quota.codex_quota import revoked_quota_transport
+        from agent_monitor.quota.codex_quota import authentication_quota_transport
         message = 'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; content-type=application/json; body='
         body = {"error": {"code": "token_revoked"}}
         error = {"code": -32603, "message": message + json.dumps(body)}
-        self.assertTrue(revoked_quota_transport(error, "account/rateLimits/read"))
-        self.assertTrue(revoked_quota_transport({**error, "message": error["message"].replace("application/json;", "application/json; charset=utf-8;")}, "account/rateLimits/read"))
+        self.assertTrue(authentication_quota_transport(error, "account/rateLimits/read"))
+        self.assertTrue(authentication_quota_transport({**error, "message": error["message"].replace("application/json;", "application/json; charset=utf-8;")}, "account/rateLimits/read"))
         for candidate, method in ((error, "account/read"), (error, "other"),
                 ({**error, "code": -32601}, "account/rateLimits/read"),
                 ({**error, "message": message + json.dumps({**body, "status": 500})}, "account/rateLimits/read"),
                 ({**error, "message": message + "not-json"}, "account/rateLimits/read")):
             with self.subTest(candidate=candidate, method=method):
-                self.assertFalse(revoked_quota_transport(candidate, method))
+                self.assertFalse(authentication_quota_transport(candidate, method))
+
+    def test_expired_account_does_not_block_following_account(self):
+        rows = self.accounts()[:2]
+        def peer(directory, cancelled):
+            self.scenario = "scoped_expired" if self.manager.read(directory)["email"].startswith("a@") else "success"
+            return ca.Rpc(directory, cancelled)
+        self.manager.rpc_factory = peer
+        self.manager.start_refresh_batch([r["id"] for r in rows])
+        failed, succeeded = [self.wait(r["id"]) for r in rows]
+        self.assertEqual(failed["operation"]["failure"]["category"], "needsReauth")
+        self.assertEqual(failed["operation"]["diagnostics"]["rpc_failure"]["upstream_code"], "token_expired")
+        self.assertIsNotNone(failed["account_quota_pause"])
+        self.assertIsNone(self.manager.controls.read("codex").get("pause"))
+        self.assertEqual(succeeded["operation"]["stage"], "succeeded")
+        self.assertEqual(len(self.spawned), 2)
+        self.assertNotIn("account/read", [c["method"] for c in self.calls(rows[0])])
+
+    def test_historical_auth_refusal_can_be_explicitly_isolated_without_disabling(self):
+        rows = self.accounts()[:2]
+        # Simulates a pre-upgrade refusal: diagnostics exist, strict admission
+        # evidence was not retained. Only operator attribution may narrow it.
+        self.scenario = "quota_rpc_diagnostic"
+        self.manager.start_refresh_batch([r["id"] for r in rows])
+        failed, skipped = [self.wait(r["id"]) for r in rows]
+        pause = self.manager.controls.read("codex")["pause"]
+        self.assertEqual(skipped["operation"]["failure"]["category"], "locallyPaused")
+        before_calls = len(self.spawned)
+        self.manager.attribute_account_pause(failed["id"], failed["operation"]["id"], pause["id"])
+        result = self.manager.view(self.manager.directory(failed["id"]))
+        self.assertFalse(result.get("disabled"))
+        self.assertIsNotNone(result["account_quota_pause"])
+        self.assertIsNone(self.manager.controls.read("codex").get("pause"))
+        self.assertEqual(len(self.spawned), before_calls, "attribution is local only")
+        local = account_holds.controls(self.root, failed["account_id"], failed["email"]).read("codex")
+        self.assertFalse(local.get("rejected_credentials"), "historical credential proof must not be invented")
+        self.scenario = "success"
+        self.manager.start_refresh_batch([r["id"] for r in rows])
+        succeeded = self.wait(rows[1]["id"])
+        self.assertEqual(succeeded["operation"]["stage"], "succeeded")
+        self.assertEqual(len(self.spawned), before_calls + 1)
+        self.assertEqual(self.manager.view(self.manager.directory(failed["id"]))["operation"], failed["operation"])
+
+    def test_attribution_rejects_stale_source_and_existing_account_hold(self):
+        row = self.accounts()[0]
+        self.scenario = "quota_rpc_diagnostic"
+        self.manager.start(row["id"], refresh_only=True)
+        failed = self.wait(row["id"])
+        state = self.manager.controls.read("codex")
+        pause = state["pause"]
+        for bad in ("source", "identity", "code"):
+            with self.subTest(bad=bad):
+                modified = copy.deepcopy(state)
+                if bad == "source": modified["pause"]["source"]["operation_id"] = "other"
+                if bad == "identity": modified["pause"]["failure"]["account_fingerprint"] = "other"
+                if bad == "code": modified["pause"]["failure"]["upstream_code"] = "unknown"
+                self.manager.controls._save("codex", modified)
+                with self.assertRaises(ca.ActionError):
+                    self.manager.attribute_account_pause(row["id"], failed["operation"]["id"], pause["id"])
+                self.assertEqual(self.manager.controls.read("codex")["pause"], modified["pause"])
+        self.manager.controls._save("codex", state)
+        local = account_holds.controls(self.root, row["account_id"], row["email"])
+        lease = local.acquire("codex")
+        lease.pause("anotherHold")
+        lease.close()
+        previous = local.read("codex")
+        with self.assertRaises(ca.ActionError):
+            self.manager.attribute_account_pause(row["id"], failed["operation"]["id"], pause["id"])
+        self.assertEqual(local.read("codex"), previous)
+        self.assertEqual(self.manager.controls.read("codex")["pause"], pause)
+
+    def test_scoped_recovery_uses_private_rejection_proof_not_diagnostics(self):
+        from agent_monitor.quota import quota_refresh, codex_quota
+        from parsers.accounts import Account
+        for proof_mode in ("valid", "missing", "changed"):
+            with self.subTest(proof_mode=proof_mode):
+                root = self.root / proof_mode
+                manager = ca.Manager(root / "state/codex-accounts")
+                self.addCleanup(manager.close)
+                row = manager.add("one@example.test", "workspace")
+                test_codex_accounts.seed_auth(manager, row)
+                home = manager.directory(row["id"]) / "codex"
+                account = Account(row["account_id"], row["email"])
+                profile = "monitor-" + row["id"]
+                facts = dict(stage="quota_read", kind="rpc_error", http_status=401, upstream_code="token_expired",
+                    account_profile=profile, account_fingerprint=quota_refresh.account_fingerprint("codex", account))
+                local = account_holds.controls(root / "state", account.account_id, account.label)
+                lease = local.acquire("codex")
+                lease.pause("quotaAuthenticationFailed", failure=facts)
+                lease.close()
+                original = local.read("codex")["pause"]
+                child = mock.Mock(returncode=1)
+                digest = codex_quota.credential_digest(home / "auth.json")
+                payload = dict(error="refused", failure=facts, authentication_recovery={"outcome":"quota_failed"})
+                if proof_mode != "missing": payload["account_quota_rejection"] = digest if proof_mode == "valid" else "0" * 64
+                child.communicate.return_value = json.dumps(payload), ""
+                with mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child), \
+                     mock.patch.object(quota_refresh.network_policy, "child_environment", return_value={}):
+                    with self.assertRaises(quota_refresh.RefreshError):
+                        quota_refresh.load_rate_limits("codex", account, root=root, codex_home=home,
+                            probe_pause_id=original["id"], account_profile=profile, pause_scope="account", renew_auth=True, admitted_probe={})
+                shared = manager.controls.read("codex")
+                if proof_mode == "valid":
+                    self.assertIsNone(shared.get("pause"))
+                    self.assertIn(digest, local.read("codex")["rejected_credentials"])
+                    # A different identity can still acquire the shared lane.
+                    independent = manager.controls.acquire("codex")
+                    independent.close()
+                else:
+                    self.assertIsNotNone(shared.get("pause"))
+                    self.assertFalse(local.read("codex").get("rejected_credentials"))
 
     def test_unreadable_rejected_credential_history_blocks_alias_and_login(self):
         rows = self.accounts()

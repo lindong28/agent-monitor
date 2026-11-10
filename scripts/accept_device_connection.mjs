@@ -188,6 +188,7 @@ try {
     await click('#codex-batch-mode',"document.querySelector('#codex-batch-panel').hidden");
     const repair=id=>`[data-reader-state="codex-account:${id}:repair-login"]`;
     await click(repair('0'),`document.querySelector('${panel} .recovery-target')?.textContent.includes('fixture0@example.test')`);
+    assert.equal(await read(`document.querySelector('${panel} [data-recovery-action=probe]').textContent`),'刷新认证并检查配额','expired refusal offers explicit auth recovery');
     await click(repair('1'),`document.querySelector('${panel} .recovery-target')?.textContent.includes('fixture1@example.test')`);
     await click(repair('0'),`document.querySelector('${panel} .recovery-target')?.textContent.includes('fixture0@example.test')`);
     assert.deepEqual((await stats()).scoped_reads,['monitor-0','monitor-1','monitor-0']);
@@ -199,6 +200,7 @@ try {
     assert.equal(observed.recoveries.length,1);
     assert.equal(observed.recoveries[0].profile,'monitor-0');
     assert.equal(observed.recoveries[0].pause_scope,'account');
+    assert.equal(observed.recoveries[0].mode,'renew_auth');
     assert.deepEqual(observed.cleared_scopes,['0']);
     await until('saved recovery refreshes account card',()=>read("document.querySelectorAll('[data-reader-state$=\":repair-login\"]').length===1"));
     await bt('open',url);

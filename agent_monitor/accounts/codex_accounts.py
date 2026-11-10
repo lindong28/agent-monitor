@@ -411,9 +411,9 @@ class Rpc:
                         detail = ("当前 Codex 不支持配额查询接口，请核对 CLI 版本。" if code == -32601 else
                                   "Codex 配额查询失败，本次未取得新读数；请查看技术详情中的错误摘要。")
                         failure = ActionError(detail, 502)
-                        failure.revoked_quota_transport = codex_quota.revoked_quota_transport(error, method)
-                        if failure.revoked_quota_transport:
-                            self.diagnostics["rpc_failure"].update(http_status=401, upstream_code="token_revoked")
+                        failure.authentication_quota_transport = codex_quota.authentication_quota_transport(error, method)
+                        if failure.authentication_quota_transport:
+                            self.diagnostics["rpc_failure"].update(http_status=401)
                         raise failure
                     # Upstream messages can contain tokens, URLs or configuration.
                     if (method == "account/login/start" and value["error"].get("message") ==
@@ -1230,13 +1230,14 @@ class Manager:
             with lock_file(directory / ".lock"):
                 record = self.read(directory)
                 op = record.get("operation") or {}
-                if (not record.get("disabled") or op.get("id") != operation_id
+                known_refusal = codex_quota.authentication_quota_failure((op.get("diagnostics") or {}).get("rpc_failure"))
+                if (not (record.get("disabled") or known_refusal) or op.get("id") != operation_id
                         or not op.get("refresh_only") or op.get("login_only")
                         or op.get("stage") != "failed" or op.get("message_status") != "not_sent"
                         or (op.get("failure") or {}).get("category") in ("locallyPaused", "loginRateLimited", "rateLimitExceeded", "clientNetworkDisconnected", "networkPolicyUnavailable", "missingCli")
                         or (op.get("diagnostics") or {}).get("last_request") not in ("account/read", "account/rateLimits/read")
                         or any(k in record.get("restrictions", {}) for k in ("unknown", "rate_limit", "login_rate_limit"))):
-                    raise ActionError("只能将已尝试的配额查询失败归属到已停用账号；未解除暂停。", 409)
+                    raise ActionError("只支持已停用账号或已记录的配额认证拒绝；未解除暂停。", 409)
                 try:
                     handle = self.controls._lock("codex", threading.Event(), 0)
                 except Busy as exc:
@@ -1250,6 +1251,27 @@ class Manager:
                             or state.get("active") or pause.get("probe_attempt")
                             or source is not None and source != expected):
                         raise ActionError("暂停已变化、存在其他来源或恢复操作；未解除暂停。", 409)
+                    if not record.get("disabled"):
+                        from parsers.accounts import Account
+                        from agent_monitor.quota.quota_refresh import account_fingerprint
+                        facts = pause.get("failure") or {}
+                        if (source != expected or not codex_quota.authentication_quota_failure(facts)
+                                or facts.get("account_profile") != "monitor-" + profile_id
+                                or facts.get("account_fingerprint") != account_fingerprint("codex", Account(record["account_id"], record["email"]))):
+                            raise ActionError("原认证拒绝与暂停来源不匹配；未解除暂停。", 409)
+                        local_controls = account_holds.controls(self.root.parent, record["account_id"], record["email"])
+                        try:
+                            local = local_controls.acquire("codex")
+                        except (Paused, Busy) as exc:
+                            raise ActionError("此账号已有保护或在办操作；未解除共享暂停。", 409) from exc
+                        try:
+                            # This is operator attribution, not retrospective
+                            # proof that today's credential was rejected.
+                            local.state["account_attribution"] = {"pause_id": pause_id, **expected,
+                                "at": now(), "basis": "operatorConfirmedAccountScope"}
+                            local.pause("quotaAuthenticationFailed", failure=facts, source=expected)
+                        finally:
+                            local.close()
                     state["last_pause"] = pause
                     state["account_attribution"] = {"pause_id": pause_id, **expected,
                         "at": now(), "basis": "operatorConfirmedAccountScope"}
@@ -1572,7 +1594,7 @@ class Manager:
             # Preserve the exact structured upstream fact as an actionable
             # account state; generic 401s remain unclassified.
             rpc_failure = (getattr(rpc, "diagnostics", {}) or {}).get("rpc_failure")
-            if codex_quota.revoked_quota_failure(rpc_failure):
+            if codex_quota.authentication_quota_failure(rpc_failure):
                 failure["category"] = "needsReauth"
             digest = getattr(exc, "account_quota_rejection", None)
             scoped_rejection = bool(digest and lease and record["operation"].get("refresh_only")

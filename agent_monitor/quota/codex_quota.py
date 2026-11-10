@@ -73,13 +73,14 @@ def check_identity(auth_path, account_id, label):
     return current
 
 
-def revoked_quota_failure(failure):
+def authentication_quota_failure(failure):
+    """Reported refusal for explicit recovery, not proof of expiry or scope."""
     return (isinstance(failure, dict) and failure.get("stage") == "quota_read"
             and failure.get("kind") == "rpc_error" and failure.get("http_status") == 401
-            and failure.get("upstream_code") == "token_revoked")
+            and failure.get("upstream_code") in {"token_revoked", "token_expired"})
 
 
-def revoked_quota_transport(error, method):
+def authentication_quota_transport(error, method):
     """Validate the fixed Codex RequestError wire format, not diagnostic facts."""
     if method != "account/rateLimits/read" or not isinstance(error, dict) or error.get("code") != -32603:
         return False
@@ -95,7 +96,7 @@ def revoked_quota_transport(error, method):
     except ValueError:
         return False
     return (isinstance(body, dict) and ("status" not in body or type(body["status"]) is int and body["status"] == 401)
-            and isinstance(body.get("error"), dict) and body["error"].get("code") == "token_revoked")
+            and isinstance(body.get("error"), dict) and body["error"].get("code") in {"token_revoked", "token_expired"})
 
 
 def credential_digest(auth_path):
@@ -130,7 +131,7 @@ def reauthorization_context(record, state):
     fingerprint = hashlib.sha256(quota_identity("codex", record.get("account_id"), record.get("email")).encode()).hexdigest()
     if (last.get("ok") is not False or request.get("mode") != "renew_auth"
             or auth.get("outcome") != "no_new_credentials"
-            or not revoked_quota_failure(auth.get("initial_failure"))
+            or not authentication_quota_failure(auth.get("initial_failure"))
             or not pause.get("id") or pause["id"] == "unreadable"
             or pause["id"] not in (last.get("pause_id"), request.get("pause_id"))
             or failure.get("account_profile") != request.get("profile")
@@ -232,7 +233,7 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
             unchanged = before_digest and before_digest == credential_digest(auth_path)
         except ReadingError:
             unchanged = False
-        if unchanged and getattr(exc, "revoked_quota_transport", False):
+        if unchanged and getattr(exc, "authentication_quota_transport", False):
             exc.account_quota_rejection = before_digest
         if renew_auth:
             recovery["outcome"] = "quota_failed"
