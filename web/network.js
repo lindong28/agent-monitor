@@ -108,10 +108,8 @@
       const refresh = data.refresh;
       const remaining = refresh?.retry_in_seconds;
       const next = Number.isFinite(remaining) && remaining > 0
-        ? `；最早可重新检测于 ${formatDate(new Date(Date.now() + remaining * 1000).toISOString())}` : "";
-      refreshStatus.textContent = typeof refresh?.reused === "boolean"
-        ? `${data.last_attempt?.error ? "最近一次检测失败，继续展示历史结果" : refresh.reused ? "显示缓存结果，未重新探测" : data.error || data.installed === false ? "本次检测未完成" : "检测结果已更新"}${next}。`
-        : "缓存使用情况未记录。";
+        ? `可再次检测：${formatDate(new Date(Date.now() + remaining * 1000).toISOString())}` : "";
+      refreshStatus.textContent = next;
     }
     const coverage = data.coverage;
     const missing = coverage?.missing;
@@ -190,10 +188,10 @@
     qs("#network-local").innerHTML = [
       kvRow("IPv4 路由源地址", escapeHtml(local.lan_ip || "—")),
       kvRow("IPv6 路由源地址", ipv6),
-      '<p class="scope-note">地址来自系统向固定目标选路的结果，并未枚举全部网卡；未取得 IPv6 源地址不代表没有 IPv6，公网泄漏未核实。</p>',
+      '<p class="scope-note">地址来自系统选路，并非全部网卡；未取得 IPv6 源地址不代表没有 IPv6。</p>',
       kvRow("DNS 服务器", `<div class="dns-list">${dns}</div>`),
       kvRow("DNS 名单归属", local.dns_has_cn ? statusPill("bad", "命中国内 DNS 服务名单") : dnsUnknown ? statusPill("warn", "DNS 服务归属未知或部分未知") : statusPill("ok", "未命中国内 DNS 服务名单")),
-      '<p class="scope-note">这里只读取 DNS 配置和静态服务商名单，国家标注不是解析节点的实测位置。本机代理或内网地址的上游未核实，也未验证目标请求实际使用的解析器。</p>',
+      '<p class="scope-note">DNS 国家标注来自静态名单，非实测位置；代理上游与实际使用的解析器未核实。</p>',
     ].join("");
   }
 
@@ -212,7 +210,7 @@
       kvRow("运营商", escapeHtml(pub.isp || "—")),
       kvRow("机构", escapeHtml(pub.org || "—")),
       kvRow("时区", timezone),
-      '<p class="scope-note">这个 IP 属于本次探测。不同目标可能走不同代理，不能据此确认账号请求的公网 IP。</p>',
+      '<p class="scope-note">不同目标可能走不同代理，此 IP 不代表账号请求的出口。</p>',
     ].join("");
   }
 

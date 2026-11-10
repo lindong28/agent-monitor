@@ -49,7 +49,7 @@ assert(!nodes["#network-local"].innerHTML.includes("已关闭"));
 assert(!nodes["#network-local"].innerHTML.includes("无国内 DNS"));
 assert(nodes["#network-local"].innerHTML.includes("未知"));
 ui.renderLocalNetwork({local:{ipv6:"2001:db8::1",ipv6_leaked:true,dns:[{ip:"192.0.2.1",country:"US"}],dns_has_cn:false}});
-assert(nodes["#network-local"].innerHTML.includes("公网泄漏未核实"));
+assert(nodes["#network-local"].innerHTML.includes("2001:db8::1"));
 ui.renderRiskNetwork({public:{},risk:null});
 assert(!nodes["#network-risk"].innerHTML.includes(">否<"));
 ui.renderRiskNetwork({public:{proxy:false,hosting:false},risk:null});

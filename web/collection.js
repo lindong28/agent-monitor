@@ -124,10 +124,9 @@
     if (!chips.length) {
       chips.push(statusChip("ok", "快照可读"));
     }
-    const marker = machine.this_machine ? ' <span class="status-pill identity">本机</span>' : "";
     const facts = [];
     const observedAt = machine.statistics?.observed_at || machine.generated_at;
-    facts.push(observedAt ? `数据更新于 ${formatDate(observedAt)} · ${updatedText(observedAt)}` : "尚无数据");
+    facts.push(observedAt ? updatedText(observedAt) : "尚无数据");
     const quality = machine.statistics?.usage_quality_counts;
     const qualityDetail = quality == null ? "Claude 用量记录完整性未知" :
       `留存 Claude 记录：有结束标记 ${integer(quality.observed)} · 不完整 ${integer(quality.incomplete)} · 未知 ${integer(quality.unknown)}`;
@@ -147,24 +146,24 @@
       consequence = `用的是上次的数据${age}。检查这台机器的连接和采集状态，恢复后返回业务页更新统计与配额。`;
     } else if (refreshAttemptFailed) {
       const age = machine.stale ? "（已过期）" : "";
-      consequence = `用的是上次的数据${age}。检查这台机器的采集状态和技术详情，处理后返回业务页更新统计与配额。`;
+      consequence = `用的是上次的数据${age}。查看采集详情，处理后返回业务页更新统计与配额。`;
     } else if (machine.availability === "unknown") {
       consequence = machine.syncing ? "正在进行首次检查，暂用上次的数据；完成后会自动更新。" : "用的是上次的数据；本服务启动后还没检查过这台机器，可返回业务页更新统计与配额。";
     } else if (machine.stale) {
       consequence = "用的是较旧的数据。返回业务页更新统计与配额；若仍未更新，请检查这台机器的采集状态。";
     } else if (machine.last_attempt_outcome === "cleanup_failed") {
-      consequence = "数据已更新，但刷新后的清理未完成；请查看技术详情和该机采集日志。";
+      consequence = "数据已更新，但刷新后的清理未完成；请查看采集详情和该机采集日志。";
     } else if (machine.reason && !machine.syncing) {
-      consequence = "数据已更新，采集另有提示，见技术详情。";
+      consequence = "数据已更新，另有提示，见采集详情。";
     }
     const consequenceElement = consequence
       ? `<div class="sync-machine-reason">${escapeHtml(consequence)}</div>`
       : "";
     return `<article class="sync-machine ${machine.admitted ? "included" : "excluded"}">
-      <div class="sync-machine-title"><strong>${escapeHtml(machine.name)}</strong>${marker}<span class="sync-chips">${chips.join("")}</span></div>
+      <div class="sync-machine-title"><strong>${escapeHtml(machine.name)}</strong><span class="sync-chips">${chips.join("")}</span></div>
       <div class="sync-machine-time">${facts.join(" · ")}</div>
       ${consequenceElement}
-      <details class="note-disclosure" data-machine="${escapeHtml(machine.name)}" ${expanded ? "open" : ""}><summary>质量、历史范围与技术详情</summary><p>${qualityDetail}</p>${machine.data_start_date ? `<p>历史自 ${escapeHtml(machine.data_start_date)}</p>` : ""}${machine.reason ? `<p>${escapeHtml(machine.reason)}</p>` : ""}</details>
+      <details class="note-disclosure" data-machine="${escapeHtml(machine.name)}" ${expanded ? "open" : ""}><summary>采集详情</summary>${observedAt ? `<p>数据更新于 ${formatDate(observedAt)}</p>` : ""}<p>${qualityDetail}。结束标记不保证最终用量完整。</p>${machine.data_start_date ? `<p>历史自 ${escapeHtml(machine.data_start_date)}</p>` : ""}${machine.reason ? `<p>${escapeHtml(machine.reason)}</p>` : ""}</details>
     </article>`;
   }
 
@@ -265,7 +264,7 @@
     }
     const diffMs = Date.now() - updatedAt;
     if (diffMs < 0) {
-      return "刚刚";
+      return "更新时间超前";
     }
     const mins = Math.floor(diffMs / 60000);
     if (mins < 1) {

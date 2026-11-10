@@ -900,11 +900,6 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
   vertical-align: middle;
 }
 
-.quota-machine-self {
-  color: var(--ink);
-  font-weight: 500;
-}
-
 /* Machines behind on agent-monitor collapse into one row: their count tracks the fleet,
    not the account list, and every one of them carries the same instruction. */
 .quota-toggle {

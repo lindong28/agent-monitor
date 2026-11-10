@@ -38,9 +38,11 @@ function quotaHoldMessage(account, pause) {
     : reason ? `额度限制（${reason}）` : "服务端限制了额度使用";
   const evidence = reading && (reading.ordinary_usage_allowed === false || reading.spend_control_reached === true || reason)
     ? `最近成功观测（${timestamp(reading.observed_at)}）：${explanation}。` : "";
+  const recorded = since && !(evidence && since === reading.observed_at)
+    ? `（记录于 ${timestamp(since)}）` : "";
   const next = pause ? "请先查看本页的通道暂停与检查。"
-    : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "可仅刷新配额。";
-  return `发送仍因此前额度限制暂停${since ? `（记录于 ${timestamp(since)}）` : ""}。${evidence}${next}`;
+    : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "";
+  return `发送仍因此前额度限制暂停${recorded}。${evidence}${next}`;
 }
 
 export function quotaFailureExplanation(account, sharedPause, accounts = []) {
@@ -689,7 +691,7 @@ export function init({ autoLoad = true } = {}) {
         heading.append(element('span', '当前账号', 'codex-batch-result'));
       }
       card.append(heading);
-      if (account.disabled) card.append(element("p", "用户已确认此账号不可用；本机 Monitor 已跳过查询、登录和发送，历史记录保留。", "quota-scope"));
+      if (account.disabled) card.append(element("p", "已跳过查询、登录和发送；历史记录保留。", "quota-scope"));
       const restrictionDetails = account.restriction_messages
         ? Object.entries(account.restriction_messages).map(([key, detail]) => key === "quota" ? quotaHoldMessage(account, upstreamPause) : detail)
         : account.restriction_details || [];

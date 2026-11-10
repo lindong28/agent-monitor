@@ -33,7 +33,7 @@ const quota = require('./web/quota.js')({
 const codex = {key: 'codex'}, claude = {key: 'claude'};
 const known = {account_id: 'acct', account_label: 'fixture@example.test', account_state: 'known',
   account_plan: 'promax', reading_plan: 'promax', credential_plan: 'pro',
-  updated_at: '2026-11-05T10:01:42Z', quota_observation: {source: 'active_query'}};
+  updated_at: '2026-11-05T10:01:42Z', reading_from: 'source-machine', quota_observation: {source: 'active_query'}};
 for (const [raw, label] of [['pro', 'Pro (More)'], ['prolite', 'Pro'], ['promax', 'Pro (Max)']]) {
   assert.equal(quota.quotaPlanLabel(raw, codex), label);
 }
@@ -53,6 +53,7 @@ assert.ok(details && !details.open);
 assert.ok(!details.textContent.includes('套餐来源'));
 assert.equal(details.textContent.split(known.updated_at).length - 1, 1);
 assert.equal(details.textContent.split('主动查询').length - 1, 1);
+assert.ok(details.textContent.includes('来源机器：source-machine'));
 assert.ok(details.textContent.includes('promax'));
 assert.ok(details.textContent.includes('本地登录信息'));
 assert.ok(details.textContent.includes('更新时间未知'));
@@ -502,7 +503,7 @@ assert(nodes["#sync-machines"].innerHTML.includes("failed"));
 assert(nodes["#sync-machines"].innerHTML.includes("healthy"));
 window.AgentMonitor.renderSyncStatus({machines: [healthy, {...failed, syncing: true}]});
 assert(nodes["#sync-machines"].innerHTML.includes("刷新中 · 显示上次快照"));
-assert(nodes["#sync-machines"].innerHTML.includes("质量、历史范围与技术详情"));
+assert(nodes["#sync-machines"].innerHTML.includes("采集详情"));
 '''
         result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -679,6 +680,13 @@ assert(visible(failed).includes("发送受限"));
 assert(text(failed).includes("发送仍因此前额度限制暂停"));
 assert(text(failed).includes("工作区成员额度已耗尽") && text(failed).includes(oldTime));
 assert(text(failed).includes("通道暂停与检查"));
+assert(!text(failed).includes("记录于"), "same restriction and observation time is shown once in the explanation");
+values[0].restrictions.quota.created_at = "2026-11-04T08:27:21Z";
+renderAccounts(values);
+assert(text(list.children[0]).includes("记录于"), "a separate restriction time must remain available");
+values[0].restrictions.quota.created_at = oldTime;
+controller.update({accounts: values, upstream_pause: {id: "pause"}});
+failed = list.children[0];
 assert(!visible(failed).includes("可仅刷新配额"), "paused channel must not recommend a disabled refresh action");
 assert(text(failed).includes("最近成功配额观测") && text(failed).includes("100%"), "failed read retains dated last successful quota");
 assert(text(failed).includes("RPC -32603 · 上游 HTTP 401 · 上游代码 token_revoked"));
@@ -939,7 +947,7 @@ const excluded = Object.assign(base("node-a"), { admitted: false, availability: 
 window.AgentMonitor.renderSyncStatus(status([behind, base("node-c"), excluded]));
 require("assert").equal(nodes["#sync-panel"].open, false, "failure summary must not push the KPI below the fold");
 require("assert").match(nodes["#sync-summary"].textContent, /node-b/);
-require("assert").match(nodes["#sync-machines"].innerHTML, /技术详情/);
+require("assert").match(nodes["#sync-machines"].innerHTML, /采集详情/);
 require("assert").match(nodes["#sync-machines"].innerHTML, /检查.*采集/);
 const shown = { text: nodes["#spend-coverage"].textContent, hidden: nodes["#spend-coverage"].hidden };
 // Stale after a server restart: reachable is unknown and nothing has failed,
@@ -949,6 +957,12 @@ window.AgentMonitor.renderSyncStatus(status([restarted]));
 const staleOnly = { text: nodes["#spend-coverage"].textContent, hidden: nodes["#spend-coverage"].hidden };
 window.AgentMonitor.renderSyncStatus(status([base("node-b"), base("node-c")]));
 const healthy = { text: nodes["#spend-coverage"].textContent, hidden: nodes["#spend-coverage"].hidden };
+const future = Object.assign(base("clock-ahead"), {generated_at: new Date(Date.now() + 86400000).toISOString()});
+window.AgentMonitor.renderSyncStatus(status([future]));
+require("assert").match(nodes["#sync-machines"].innerHTML, /更新时间超前/);
+window.AgentMonitor.renderSyncStatus(status([Object.assign(base("recent"), {generated_at: new Date(Date.now() - 10000).toISOString()})]));
+require("assert").match(nodes["#sync-machines"].innerHTML, /刚刚/);
+require("assert").doesNotMatch(nodes["#sync-machines"].innerHTML, /更新时间超前/);
 process.stdout.write(JSON.stringify({ shown, staleOnly, healthy }));
 '''
         self.assertIn('id="spend-coverage"', (ROOT / "web" / "index.html").read_text())

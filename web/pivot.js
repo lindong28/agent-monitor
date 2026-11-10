@@ -262,7 +262,7 @@
       matched ||= active;
     });
     const state = AgentMonitor.qs("#preset-state");
-    if (state) state.textContent = matched ? "切换预设保留日期与筛选。" : "自定义指标与分组 · 日期和筛选仍适用";
+    if (state) state.textContent = matched ? "" : "自定义指标与分组";
   }
 
   function syncFilterQuery() {
@@ -315,7 +315,7 @@
       const dates = dateParams();
       summary.textContent = `${metricName} · ${dates.start ? dates.start + " 至 " + dates.end : rangeName} · ${dimensions.length ? "按 " + dimensions.map(dim => dimLabels[dim]).join(" × ") : "不分组"}${filters.length ? " · 筛选：" + filters.join("、") : " · 全部来源"}`;
     }
-    AgentMonitor.qs("#pivot-status").textContent = (data.rows.length ? `已加载 ${data.rows.length} 条分组结果` : "当前日期与筛选范围内无记录");
+    AgentMonitor.qs("#pivot-status").textContent = data.rows.length ? "" : "当前日期与筛选范围内无记录";
   }
 
   function chartData(data, metric) {
