@@ -2716,7 +2716,7 @@ console.log(JSON.stringify({
                     self.assertNotIn("暂不可用", row)
                 self.assertEqual(len(rendered["details"]), 1)
                 self.assertFalse(rendered["details"][0]["open"])
-                self.assertIn("node-b：timed out", rendered["details"][0]["text"])
+                self.assertIn("node-b：上次配额采集记录；当前暂停状态需另行核对。timed out", rendered["details"][0]["text"])
                 self.assertNotIn("此前读数", rendered["tableText"])
 
         recovered = self.render_with([], [], failure, [{**account, "reading_from": "node-b"}], recover=True)
