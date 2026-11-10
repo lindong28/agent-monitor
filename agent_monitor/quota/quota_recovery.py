@@ -26,14 +26,20 @@ def validate_exclusions(value):
 
 def validate_request(value):
     fields = {"machine", "account_id", "account_label", "pause_id"}
-    if (not isinstance(value, dict) or set(value) - {"profile", "mode", "operation_id", "pause_scope"} != fields
+    if (not isinstance(value, dict) or set(value) - {"profile", "mode", "operation_id", "pause_scope", "source_digest"} != fields
             or any(not isinstance(value[k], str) or not value[k] or len(value[k]) > 256 for k in fields)
             or not re.fullmatch(r"[0-9a-f]{32}", value["pause_id"])):
         raise ValueError("请指定机器、完整账号身份和当前暂停标识。")
     if "profile" in value and (not isinstance(value["profile"], str) or (value["profile"] and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", value["profile"]))):
         raise ValueError("账号来源无效。")
-    if "mode" in value and (not isinstance(value["mode"], str) or value["mode"] not in {"renew_auth", "reauthorize"} or not value.get("profile", "").startswith("monitor-")):
+    if "mode" in value and (not isinstance(value["mode"], str) or value["mode"] not in {"renew_auth", "reauthorize"}
+            or value["mode"] == "reauthorize" and not value.get("profile", "").startswith("monitor-")):
         raise ValueError("认证修复模式或账号来源无效。")
+    if "source_digest" in value and (value.get("mode") != "renew_auth" or not isinstance(value["source_digest"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", value["source_digest"])):
+        raise ValueError("认证来源标识无效。")
+    if value.get("mode") == "renew_auth" and not value.get("profile", "").startswith("monitor-") and not value.get("source_digest"):
+        raise ValueError("认证修复必须绑定原凭据来源，请更新状态。")
     if value.get("mode") == "reauthorize":
         try:
             if str(uuid.UUID(value["operation_id"])) != value["operation_id"]:
@@ -62,7 +68,8 @@ def approval_scope(value):
     scope = scope + [value["account_label"], value["profile"] or "native"] if "profile" in value else scope
     scope = scope + [value["mode"]] if "mode" in value else scope
     scope = scope + [value["operation_id"]] if "operation_id" in value else scope
-    return scope + ["account"] if value.get("pause_scope") == "account" else scope
+    scope = scope + ["account"] if value.get("pause_scope") == "account" else scope
+    return scope + [value["source_digest"]] if "source_digest" in value else scope
 
 
 def approval_action(value):
@@ -102,8 +109,10 @@ def local_status(*, profile=None, pause_scope=None):
     if pause_scope == "account" and (shared.get("pause") or shared.get("active")):
         blocked_reason = "本机共享通道仍有暂停或在办操作，请先核对共享保护。"
     auth_recovery_available = False
+    source_digest = None
     login_recovery = None
     local_commit = None
+    from agent_monitor.quota import codex_quota
     if source == "managed" and profile and profile.startswith("monitor-"):
         from agent_monitor.quota.codex_quota import authentication_quota_failure
         try:
@@ -126,6 +135,15 @@ def local_status(*, profile=None, pause_scope=None):
                 and not operation.get("login_only") and operation.get("message_status") == "not_sent")
         except (OSError, ValueError, AttributeError):
             pass  # A capability cannot be granted from unreadable local state.
+    elif (account and not blocked_reason and not resolution_reason
+            and codex_quota.authentication_quota_failure(failure)
+            and failure.get("account_fingerprint") == quota_refresh.account_fingerprint("codex", account)):
+        try:
+            codex_quota.file_auth_recovery_preflight(auth)
+            source_digest = codex_quota.recovery_source_digest(auth)
+            auth_recovery_available = True
+        except codex_quota.ReadingError:
+            pass
     return {**({"pause_scope": "account", "shared_pause": shared.get("pause")} if pause_scope == "account" else {}),
             "source_host_identity": generation.self_certified_host_identity(),
             "observed_at": datetime.now(timezone.utc).isoformat(),
@@ -134,6 +152,7 @@ def local_status(*, profile=None, pause_scope=None):
                         "account_label": account.label if account else None,
                         "source": source, "profile": home.parent.name if source == "managed" else None,
                         "auth_recovery_available": auth_recovery_available,
+                        "source_digest": source_digest,
                         "login_recovery": login_recovery,
                         "local_commit": local_commit,
                         "account_quota_pause": (account_holds.controls(exporter.ROOT / "state", account.account_id,
@@ -246,6 +265,8 @@ def local_recovery(value):
         route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
         with network_policy.using_route(route):
             options = {"renew_auth": True} if value.get("mode") == "renew_auth" else {}
+            if "source_digest" in value:
+                options["source_digest"] = value["source_digest"]
             if value.get("pause_scope") == "account":
                 options["pause_scope"] = "account"
             block = quota_service.recover_codex_quota(value["account_label"], value["pause_id"], expected_id=value["account_id"], root=exporter.ROOT, admitted_probe=admitted_probe, profile=value.get("profile"), **options)

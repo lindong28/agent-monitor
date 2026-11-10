@@ -138,6 +138,26 @@ assert.match(resetUi.resetText(3, 2000), /预计/);
   assert.equal(JSON.parse(commit.options.body).pause_scope, 'account');
   assert.equal(approvals.length, 1, 'local save needs no upstream preview');
   assert.equal(saved, 1);
+  const managedState = value;
+  const managedCalls = [...calls];
+  for (const source of ['default', 'configured']) {
+    calls.length = 0;
+    value = {...managedState, pause_scope: undefined, pause: {id: 'pause-native', failure: {
+      stage: 'quota_read', kind: 'rpc_error', http_status: 401, upstream_code: 'token_expired'}}, account: {
+      account_id: 'native-workspace', account_label: 'native@example.test', source,
+      quota_profile: '', auth_recovery_available: true, source_digest: 'a'.repeat(64)}};
+    const native = ui.createRecoveryPanel('self');
+    await tick();
+    assert.equal(action(native, 'probe').textContent, '刷新认证并检查配额');
+    await action(native, 'probe').click();
+    const posted = JSON.parse(calls.find(call => call.options.method === 'POST').options.body);
+    assert.equal(posted.source_digest, 'a'.repeat(64));
+    assert.equal(posted.mode, 'renew_auth');
+    assert.deepEqual(approvals.at(-1).options.approval_scope,
+      ['self', 'native-workspace', 'native@example.test', 'native', 'renew_auth', 'a'.repeat(64)]);
+  }
+  value = managedState;
+  calls.splice(0, calls.length, ...managedCalls);
   value = {...value, pause: {id:'local-pause'}, shared_pause: {id:'f'.repeat(32)},
     account: {...value.account, blocked_reason:'shared protection', account_quota_pause:{id:'local-pause'}}};
   await panel.refresh();

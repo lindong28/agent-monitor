@@ -1010,8 +1010,10 @@
       const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id,profile:state.account.quota_profile || ""};
       if (state.pause_scope === "account") request.pause_scope = "account";
       if (canRenewAuth(state)) request.mode = "renew_auth";
+      if (request.mode === "renew_auth" && state.account.source_digest) request.source_digest = state.account.source_digest;
       if (reauthorize) {
         request.mode = "reauthorize";
+        delete request.source_digest;
         request.operation_id = state.account.login_recovery.operation_id;
       }
       unrecordedOutcome = false;
@@ -1024,7 +1026,7 @@
       try {
         const approval = await window.AgentMonitor.previewUpstream?.(
           [{email: request.account_label, account_id: request.account_id}],
-          {approval_action: request.mode === "reauthorize" ? "quota-login-recovery" : request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : []), ...(request.operation_id ? [request.operation_id] : []), ...(request.pause_scope ? [request.pause_scope] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
+          {approval_action: request.mode === "reauthorize" ? "quota-login-recovery" : request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : []), ...(request.operation_id ? [request.operation_id] : []), ...(request.pause_scope ? [request.pause_scope] : []), ...(request.source_digest ? [request.source_digest] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
           controller.signal);
         if (!approval) throw new Error("已取消检查；未发出上游请求。");
         attempted = true;

@@ -95,8 +95,8 @@ def _bridge_explainable_failure(detail):
 
 
 def load_rate_limits(provider, account, *, codex_home=None, **options):
-    if codex_home is None:
-        return _load_rate_limits(provider, account, **options)
+    if codex_home is None or (options.get("renew_auth") and not options.get("account_profile")):
+        return _load_rate_limits(provider, account, codex_home=codex_home, **options)
     import fcntl
     # Preserve the account-action reader's profile-parent operation lock. Keep it through child cleanup, in addition to provider admission.
     try:
@@ -112,7 +112,7 @@ def load_rate_limits(provider, account, *, codex_home=None, **options):
 
 
 def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None,
-                     codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None, automatic_batch=None):
+                     codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None, automatic_batch=None, source_digest=None):
     root = Path(root) if root is not None else ROOT
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
@@ -164,12 +164,20 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
         if renew_auth:
             from agent_monitor.quota import codex_quota
             first = (lease.state.get("pause") or {}).get("failure") or {}
+            managed_auth = (account_profile or "").startswith("monitor-")
             if (provider != "codex" or probe_pause_id is None or not admitted_probe
-                    or not (account_profile or "").startswith("monitor-")
-                    or first.get("account_profile") != account_profile
+                    or managed_auth and first.get("account_profile") != account_profile
                     or first.get("account_fingerprint") != account_fingerprint(provider, account)
                     or not codex_quota.authentication_quota_failure(first)):
                 raise LocalUnavailable("认证修复与当前暂停不匹配，未发出上游请求。")
+            if not managed_auth:
+                from agent_monitor.quota import quota_service
+                resolved_profile, resolved_auth, resolved_account, reason = quota_service.resolve_recovery_source(first, root)
+                if (reason or resolved_account is None or resolved_auth is None or not source_digest
+                        or (resolved_profile or "") != (account_profile or "")
+                        or codex_quota.recovery_source_digest(resolved_auth) != source_digest
+                        or codex_quota.recovery_source_digest(auth_path) != source_digest):
+                    raise LocalUnavailable("认证来源已变化，请更新状态；未发出请求。")
             auth_failure = diagnostics.safe_failure(first)
         if provider == "codex":
             from agent_monitor.accounts import account_holds
@@ -195,6 +203,9 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
             if renew_auth:
                 target["renew_auth"] = True
                 target["auth_failure"] = auth_failure
+                target["managed_auth"] = managed_auth
+                if not managed_auth:
+                    target["source_digest"] = source_digest
             if codex_home is not None:
                 target["codex_home"] = str(Path(codex_home).absolute())
             output, _ = child.communicate(json.dumps(target),
@@ -455,6 +466,10 @@ def _codex(account, *, recovery=None):
         codex_quota.check_identity(auth_path, account["account_id"], account.get("label"))
         if account.get("renew_auth"):
             codex_quota.managed_access_token(auth_path)
+            if not account.get("managed_auth"):
+                if account.get("source_digest") != codex_quota.recovery_source_digest(auth_path):
+                    raise codex_quota.ReadingError("认证来源已变化，未启动认证进程。")
+                codex_quota.file_auth_recovery_preflight(auth_path)
     except codex_quota.ReadingError as exc:
         raise LocalUnavailable(str(exc), failure=exc.failure) from None
     if account.get("renew_auth"):
@@ -463,6 +478,10 @@ def _codex(account, *, recovery=None):
         # The helper keeps the selected Monitor route but excludes alternate
         # tokens and parent Codex configuration before starting the supplier.
         env = child_environment(home.parent)
+        if not account.get("managed_auth"):
+            # Existing native/profile configuration remains owned by this user.
+            # Reuse the transport allowlist, but not Monitor's isolated HOME.
+            env["HOME"] = str(Path.home())
     env["CODEX_HOME"] = str(home)
     redactions = codex_quota.credential_secrets(auth_path)
     # SSH/launchd do not load shell rc files. Supply installed user binary paths
@@ -476,8 +495,9 @@ def _codex(account, *, recovery=None):
     try:
         arguments = [command, "app-server", "--listen", "stdio://", "-c", "features.respect_system_proxy=false"]
         if account.get("renew_auth"):
-            arguments += ["-c", 'cli_auth_credentials_store="file"',
-                          "-c", 'forced_login_method="chatgpt"']
+            arguments += ["-c", 'cli_auth_credentials_store="file"']
+            if account.get("managed_auth"):
+                arguments += ["-c", 'forced_login_method="chatgpt"']
         process = subprocess.Popen(arguments,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE if account.get("renew_auth") else subprocess.DEVNULL, env=env)

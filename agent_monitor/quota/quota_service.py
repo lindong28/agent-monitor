@@ -651,7 +651,7 @@ def resolve_recovery_source(failure, root=None):
     return None, auth, None, "ambiguous" if candidates else reason
 
 
-def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None, profile=None, renew_auth=False, pause_scope=None):
+def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None, profile=None, renew_auth=False, pause_scope=None, source_digest=None):
     """One operator-approved probe; retain the pause until its reading is saved."""
     root = Path(root) if root is not None else ROOT
     from agent_monitor.accounts.upstream_controls import Controls
@@ -683,22 +683,35 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
         options["pause_scope"] = "account"
     recovery_operation = None
     if renew_auth:
-        from agent_monitor.quota.codex_quota import authentication_quota_failure
-        if not profile or not profile.startswith("monitor-") or not authentication_quota_failure(failure):
+        from agent_monitor.quota import codex_quota
+        if not codex_quota.authentication_quota_failure(failure):
             raise quota_refresh.LocalUnavailable("当前暂停不支持此认证修复；未发出上游请求。")
         options["renew_auth"] = True
-        from agent_monitor.accounts.codex_accounts import Manager
-        manager = Manager(root / "state/codex-accounts")
-        record = manager.read(manager.directory(profile.removeprefix("monitor-")))
-        operation = record.get("operation") or {}
-        if (record.get("account_id") != account.account_id or record.get("email", "").casefold() != account.label.casefold()
-                or not operation.get("refresh_only") or operation.get("login_only")
-                or operation.get("message_status") != "not_sent" or operation.get("stage") not in {"failed", "interrupted"}):
-            raise quota_refresh.LocalUnavailable("此账号没有可接续的配额操作，未开始认证修复。")
-        recovery_operation = operation.get("id")
+        if profile and profile.startswith("monitor-"):
+            from agent_monitor.accounts.codex_accounts import Manager
+            manager = Manager(root / "state/codex-accounts")
+            record = manager.read(manager.directory(profile.removeprefix("monitor-")))
+            operation = record.get("operation") or {}
+            if (record.get("account_id") != account.account_id or record.get("email", "").casefold() != account.label.casefold()
+                    or not operation.get("refresh_only") or operation.get("login_only")
+                    or operation.get("message_status") != "not_sent" or operation.get("stage") not in {"failed", "interrupted"}):
+                raise quota_refresh.LocalUnavailable("此账号没有可接续的配额操作，未开始认证修复。")
+            recovery_operation = operation.get("id")
+        else:
+            auth = home / "auth.json" if home else accounts.CODEX_AUTH
+            if not source_digest or source_digest != codex_quota.recovery_source_digest(auth):
+                raise quota_refresh.LocalUnavailable("认证来源已变化，请更新状态；未发出请求。")
+            try:
+                codex_quota.file_auth_recovery_preflight(auth)
+            except codex_quota.ReadingError as exc:
+                raise quota_refresh.LocalUnavailable(str(exc), failure=exc.failure) from None
+            home = auth.absolute().parent
+            options["source_digest"] = source_digest
     value = quota_refresh.load_rate_limits("codex", account, probe_pause_id=pause_id, root=root,
                                            codex_home=home, account_profile=profile or None, **options)
     current = accounts.codex_account(home / "auth.json") if home else accounts.codex_account()
+    if source_digest and codex_quota.recovery_source_digest(home / "auth.json") != source_digest:
+        raise quota_refresh.LocalUnavailable("探测期间认证来源已变化；未保存读数，暂停保留。")
     if current is None or accounts.quota_identity("codex", current.account_id, current.label) != accounts.quota_identity(
             "codex", account.account_id, account.label):
         raise quota_refresh.RefreshError("探测期间账号已变化；未保存读数，暂停保留。")

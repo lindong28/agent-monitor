@@ -46,6 +46,7 @@ class RecoveryStatusTests(unittest.TestCase):
                     return {'account_id':'a'}
                 with mock.patch.object(exporter, 'ROOT', root), \
                         mock.patch.object(exporter, 'exporter_version', return_value='fixture'), \
+                        mock.patch.object(accounts, 'CODEX_AUTH', root / 'fixture/auth.json'), \
                         mock.patch.object(accounts, 'codex_account', return_value=accounts.Account('a', 'a@example.test')), \
                         mock.patch('agent_monitor.snapshots.generation.self_certified_host_identity', return_value='host'), \
                         mock.patch.object(quota_recovery.network_policy, 'child_environment', return_value={quota_recovery.network_policy.INTERNAL:'fixture'}), \

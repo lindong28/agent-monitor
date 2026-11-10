@@ -108,7 +108,7 @@ class NativeAuthRecoveryTests(unittest.TestCase):
     setUp = AuthRecoveryTests.setUp
     write_auth = AuthRecoveryTests.write_auth
 
-    def run_native(self, *, slow=False, noisy=False, fail_initialize=False, refusal=None):
+    def run_native(self, *, slow=False, noisy=False, fail_initialize=False, refusal=None, managed=True):
         from agent_monitor.quota import quota_refresh
         self.script = Path(self.temp.name) / "fixture-codex"
         self.script.write_text("#!" + sys.executable + "\n" + '''import json,os,sys,time
@@ -162,6 +162,7 @@ for line in sys.stdin:
                 mock.patch.object(quota_refresh, "CODEX_RPC_SECONDS", .5 if slow else 28):
             return quota_refresh._codex({"account_id": "workspace", "label": "one@example.test",
                 "codex_home": str(self.auth.parent), "renew_auth": True,
+                "managed_auth": managed, "source_digest": quota.recovery_source_digest(self.auth),
                 "auth_failure": {"kind": "rpc_error", "stage": "quota_read", "http_status": 401, "upstream_code": "token_revoked"}}, recovery=self.recovery)
 
     def test_native_refusal_proof_requires_exact_transport_and_bound_credential(self):
@@ -209,6 +210,46 @@ for line in sys.stdin:
                 self.assertEqual(self.child_env['AGENT_MONITOR_PROXY_INTERNAL'],
                                  'http://agent-monitor:fixture@127.0.0.1:9')
 
+    def test_existing_file_recovery_keeps_owning_home_and_excludes_oauth_overrides(self):
+        names = ('CODEX_ACCESS_TOKEN', 'CODEX_API_KEY', 'OPENAI_API_KEY',
+                 'CODEX_REFRESH_TOKEN_URL_OVERRIDE', 'CODEX_APP_SERVER_LOGIN_CLIENT_ID')
+        for present in (False, True):
+            with self.subTest(ambient_auth=present), mock.patch.dict(os.environ):
+                for name in names:
+                    os.environ.pop(name, None)
+                if present:
+                    os.environ.update({name: 'synthetic-alternate' for name in names})
+                self.write_auth('before')
+                self.assertEqual(self.run_native(managed=False).five_hour_pct, 17)
+                self.assertEqual(self.child_env['HOME'], self.temp.name)
+                self.assertEqual(self.child_env['CODEX_HOME'], str(self.auth.parent))
+                self.assertNotIn('forced_login_method="chatgpt"', self.command)
+                self.assertTrue(all(name not in self.child_env for name in names))
+                self.assertEqual(self.child_env['AGENT_MONITOR_PROXY_INTERNAL'],
+                                 'http://agent-monitor:fixture@127.0.0.1:9')
+
+    def test_file_recovery_refuses_nonstandard_provenance_before_spawn(self):
+        from agent_monitor.quota import quota_refresh
+        cases = [None, {'issuer': 'https://auth.openai.com', 'client_id': 'app_EMoamEEZ73f0CkXaXp7hrann'},
+                 {'issuer': 'https://other.test', 'client_id': 'app_EMoamEEZ73f0CkXaXp7hrann'},
+                 {'issuer': 'https://auth.openai.com', 'client_id': 'other'}, {}, 'invalid']
+        for index, provenance in enumerate(cases):
+            with self.subTest(provenance=index):
+                self.write_auth('before')
+                auth = json.loads(self.auth.read_text())
+                auth['tokens']['oauth_provenance'] = provenance
+                self.auth.write_text(json.dumps(auth))
+                if index < 2:
+                    quota.file_auth_recovery_preflight(self.auth)
+                else:
+                    with mock.patch.object(quota_refresh.subprocess, 'Popen') as spawn, \
+                            mock.patch.object(quota_refresh.network_policy, 'child_environment', return_value={}):
+                        with self.assertRaises(quota_refresh.LocalUnavailable):
+                            quota_refresh._codex({'account_id': 'workspace', 'label': 'one@example.test',
+                                'codex_home': str(self.auth.parent), 'renew_auth': True,
+                                'source_digest': quota.recovery_source_digest(self.auth)}, recovery={})
+                    spawn.assert_not_called()
+
 
     def test_native_phases_share_deadline_and_child_is_reaped(self):
         with self.assertRaises(RefreshError) as caught:
@@ -244,6 +285,48 @@ for line in sys.stdin:
 
 
 class RecoveryApprovalTests(unittest.TestCase):
+    def test_existing_source_digest_survives_http_adapter_and_one_time_approval(self):
+        import io
+        from email.message import Message
+        from types import SimpleNamespace
+        from agent_monitor import http_server as server
+        from agent_monitor.network.client_network import ApprovalStore
+        machine = SimpleNamespace(name='fixture-owner')
+        for profile in ('', 'existing'):
+            with self.subTest(profile=profile):
+                request = dict(machine=machine.name, account_id='workspace', account_label='one@example.test',
+                    profile=profile, pause_id='a' * 32, mode='renew_auth', source_digest='b' * 64)
+                approvals = ApprovalStore()
+                manager = mock.MagicMock()
+                manager.recovery_scope.return_value.__enter__.return_value = True
+                manager.recover.return_value = ({'ok': True}, 200)
+                def post(payload):
+                    raw = json.dumps(payload).encode()
+                    handler = object.__new__(server.Handler)
+                    handler.headers = Message()
+                    handler.headers['Content-Length'] = str(len(raw))
+                    handler.headers['Content-Type'] = 'application/json'
+                    handler.rfile = io.BytesIO(raw)
+                    handler._send_json = mock.Mock()
+                    handler._handle_quota_recovery()
+                    return handler._send_json.call_args.kwargs['status']
+                scope = quota_recovery.approval_scope(request)
+                with mock.patch.object(server, 'UPSTREAM_APPROVALS', approvals), \
+                        mock.patch.object(server, 'QUOTA_REFRESH', manager), \
+                        mock.patch.object(server.sync, 'load_machine_config', return_value=SimpleNamespace(by_name={machine.name: machine})):
+                    valid = approvals.issue('quota-auth-recovery', scope, request['pause_id'])
+                    missing = dict(request)
+                    del missing['source_digest']
+                    self.assertEqual(post({**missing, 'confirmation': valid}), 400)
+                    self.assertEqual(post({**request, 'source_digest': 'c' * 64, 'confirmation': valid}), 409)
+                    old = approvals.issue('quota-recovery', scope[:-2], request['pause_id'])
+                    self.assertEqual(post({**request, 'confirmation': old}), 409)
+                    manager.recover.assert_not_called()
+                    valid = approvals.issue('quota-auth-recovery', scope, request['pause_id'])
+                    self.assertEqual(post({**request, 'confirmation': valid}), 200)
+                    manager.recover.assert_called_once_with(machine, request)
+                    self.assertEqual(post({**request, 'confirmation': valid}), 409)
+
     def test_reauthorization_has_distinct_confirmation_and_original_task_scope(self):
         import http.client
         import threading
@@ -403,6 +486,116 @@ class PersistedRecoveryTests(unittest.TestCase):
         self.assertTrue(authentication_quota_failure({**known, "upstream_code": "token_expired"}))
         for changed in ({"stage": "account_check"}, {"http_status": 403}, {"http_status": None}, {"upstream_code": "unknown"}, {"kind": "timeout"}):
             self.assertFalse(authentication_quota_failure({**known, **changed}))
+
+
+class ExistingSourceRecoveryTests(unittest.TestCase):
+    # Includes a positive guard rejecting every real provider discovery root.
+    from tests.test_quota_refresh import ProviderTests as _Isolation
+    setUp = _Isolation.setUp
+    write_auth = AuthRecoveryTests.write_auth
+
+    def source(self, kind):
+        from contextlib import ExitStack
+        from types import SimpleNamespace
+        from agent_monitor.accounts.upstream_controls import Controls
+        from agent_monitor.quota import quota_refresh
+        from parsers import accounts, codex_profiles
+        root = self.root / kind
+        home = root / ('.codex' if kind == 'native' else 'custom/codex')
+        home.mkdir(parents=True)
+        self.auth = home / 'auth.json'
+        self.write_auth('before')
+        profile = 'existing' if kind == 'profile' else ''
+        account = accounts.Account('workspace', 'one@example.test')
+        controls = Controls(root / 'state/upstream_controls')
+        lease = controls.acquire('codex')
+        failure = dict(stage='quota_read', kind='rpc_error', http_status=401, upstream_code='token_expired',
+                       account_fingerprint=quota_refresh.account_fingerprint('codex', account))
+        if profile:
+            failure['account_profile'] = profile
+        lease.pause('quotaRefreshFailed', failure=failure)
+        lease.close()
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(mock.patch.object(accounts, 'CODEX_AUTH', self.auth if not profile else root / 'absent/auth.json'))
+        stack.enter_context(mock.patch.object(codex_profiles, 'discover', return_value=[SimpleNamespace(home=home,
+            account=dict(name=profile, account_id=account.account_id, email=account.label))] if profile else []))
+        stack.enter_context(mock.patch('agent_monitor.snapshots.exporter.ROOT', root))
+        stack.enter_context(mock.patch('agent_monitor.snapshots.generation.self_certified_host_identity', return_value='fixture-host'))
+        request = dict(machine='fixture', account_id=account.account_id, account_label=account.label,
+            profile=profile, pause_id=controls.read('codex')['pause']['id'], mode='renew_auth',
+            source_digest=quota.recovery_source_digest(self.auth))
+        return root, controls, request
+
+    def test_existing_sources_recover_into_normal_cache_without_monitor_enrollment(self):
+        from datetime import datetime, timezone
+        from dataclasses import asdict
+        from agent_monitor.contracts.usage import RateLimits
+        from agent_monitor.quota import quota_service, quota_refresh
+        for kind in ('native', 'configured', 'profile'):
+            with self.subTest(source=kind):
+                root, controls, request = self.source(kind)
+                status = quota_recovery.local_status()
+                self.assertTrue(status['account']['auth_recovery_available'])
+                self.assertEqual(status['account']['source_digest'], request['source_digest'])
+                quota_recovery.validate_request(request)
+                reading = RateLimits(17, 4102444800, None, None, updated_at=datetime.now(timezone.utc).isoformat())
+                child = mock.Mock(returncode=0)
+                child.communicate.return_value = (json.dumps(dict(reading=asdict(reading),
+                    authentication_recovery=dict(outcome='quota_confirmed'))), '')
+                carrier = {}
+                with mock.patch.object(quota_refresh.subprocess, 'Popen', return_value=child):
+                    block = quota_service.recover_codex_quota(request['account_label'], request['pause_id'],
+                        expected_id=request['account_id'], root=root, profile=request['profile'], renew_auth=True,
+                        source_digest=request['source_digest'], admitted_probe=carrier)
+                target = json.loads(child.communicate.call_args.args[0])
+                self.assertFalse(target['managed_auth'])
+                self.assertEqual(target['codex_home'], str(self.auth.parent))
+                self.assertEqual(target['source_digest'], request['source_digest'])
+                saved = json.loads((root / 'state/quota_snapshot.json').read_text())['codex']
+                observed = saved['managed_accounts'][0] if kind == 'profile' else saved
+                self.assertEqual(observed['five_hour_pct'], 17)
+                self.assertEqual(observed['quota_observation']['source'], 'active_query')
+                self.assertEqual(observed['account_id'], request['account_id'])
+                self.assertIsNone(controls.read('codex').get('pause'))
+                self.assertEqual((self.auth.parent.parent / '.lock').exists(), kind == 'profile')
+                self.assertFalse((root / 'state/codex-accounts').exists())
+                self.assertEqual(block['five_hour_pct'], 17)
+
+    def test_changed_source_or_missing_binding_never_starts_provider(self):
+        from agent_monitor.quota import quota_service, quota_refresh
+        for kind in ('native', 'profile'):
+            with self.subTest(source=kind):
+                root, controls, request = self.source(kind)
+                for digest in (None, '0' * 64):
+                    before = controls.read('codex')
+                    with mock.patch.object(quota_refresh.subprocess, 'Popen') as child:
+                        with self.assertRaises(quota_refresh.LocalUnavailable):
+                            quota_service.recover_codex_quota(request['account_label'], request['pause_id'],
+                                expected_id=request['account_id'], root=root, profile=request['profile'], renew_auth=True,
+                                source_digest=digest, admitted_probe={})
+                    child.assert_not_called()
+                    self.assertEqual(controls.read('codex'), before)
+                missing = dict(request)
+                del missing['source_digest']
+                with self.assertRaises(ValueError):
+                    quota_recovery.validate_request(missing)
+                changed = {**request, 'source_digest': '0' * 64}
+                self.assertNotEqual(quota_recovery.approval_scope(request), quota_recovery.approval_scope(changed))
+
+    def test_save_failure_retains_pause_after_valid_reading(self):
+        from datetime import datetime, timezone
+        from agent_monitor.contracts.usage import RateLimits
+        from agent_monitor.quota import quota_service, quota_refresh
+        root, controls, request = self.source('native')
+        reading = RateLimits(17, 4102444800, None, None, updated_at=datetime.now(timezone.utc).isoformat())
+        with mock.patch.object(quota_refresh, 'load_rate_limits', return_value=reading), \
+                mock.patch.object(quota_service, 'save_cache', side_effect=OSError('fixture disk failure')):
+            with self.assertRaises(OSError):
+                quota_service.recover_codex_quota(request['account_label'], request['pause_id'],
+                    expected_id=request['account_id'], root=root, renew_auth=True,
+                    source_digest=request['source_digest'], admitted_probe={})
+        self.assertEqual(controls.read('codex')['pause']['id'], request['pause_id'])
 
 
 class ReauthorizationTests(unittest.TestCase):

@@ -188,6 +188,30 @@ def managed_access_token(auth_path):
     return before
 
 
+def recovery_source_digest(auth_path):
+    """Bind a credential location without disclosing its contents."""
+    return hashlib.sha256(str(Path(auth_path).resolve()).encode()).hexdigest()
+
+
+def file_auth_recovery_preflight(auth_path):
+    """Accept the official file OAuth source, without contacting its issuer."""
+    managed_access_token(auth_path)
+    try:
+        auth = json.loads(Path(auth_path).read_text())
+        provenance = auth["tokens"].get("oauth_provenance")
+        # Official Codex 0.166.0 login/server.rs DEFAULT_ISSUER and
+        # login/auth/manager.rs CLIENT_ID; legacy files may omit provenance.
+        standard = provenance is None or (isinstance(provenance, dict)
+            and provenance.get("issuer") in {"https://auth.openai.com", "https://auth.openai.com/"}
+            and provenance.get("client_id") == "app_EMoamEEZ73f0CkXaXp7hrann")
+        valid = standard and not any(auth.get(key) for key in (
+            "OPENAI_API_KEY", "personal_access_token", "bedrock_api_key"))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        valid = False
+    if not valid:
+        raise ReadingError("此来源未确认使用标准文件 OAuth 凭据，未开始认证修复。", "invalid_result", "credentials")
+
+
 def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recovery=None):
     """One quota RPC, bound to the same local identity before and after it.
 

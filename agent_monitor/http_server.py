@@ -786,7 +786,7 @@ class Handler(BaseHTTPRequestHandler):
             raw = json.loads(self.rfile.read(length))
             if not isinstance(raw, dict):
                 raise ValueError()
-            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile", "mode", "operation_id", "pause_scope") if k in raw})
+            value = quota_recovery.validate_request({k: raw[k] for k in ("machine", "account_id", "account_label", "pause_id", "profile", "mode", "operation_id", "pause_scope", "source_digest") if k in raw})
             machine = sync.load_machine_config().by_name.get(value["machine"])
             if machine is None:
                 raise ValueError()
