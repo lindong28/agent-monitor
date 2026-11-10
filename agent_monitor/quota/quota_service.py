@@ -252,10 +252,11 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
     if refresh:
         save_cache(cache_path, result, session_links=links)
     from agent_monitor.quota import quota_settings
-    managed_enabled = managed_refresh or any(row["enabled"] for row in quota_settings.read(root)["accounts"])
+    settings = quota_settings.read(root, activity_records=True)
+    managed_enabled = managed_refresh or any(row.get("effective_enabled", row["enabled"]) for row in settings["accounts"])
     managed = managed_codex_rate_limits(
         links, refresh=refresh and managed_enabled, root=root, blocked_accounts=blocked_accounts,
-        deadline=deadline, scheduled=scheduled, enrollment=True, automatic_batch=automatic_batch,
+        deadline=deadline, scheduled=scheduled, enrollment=True, automatic_batch=automatic_batch, settings=settings,
     )
     if managed:
         result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
@@ -264,7 +265,7 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
     return result
 
 
-def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, blocked_accounts=None, deadline=None, scheduled=False, enrollment=False, automatic_batch=None):
+def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, blocked_accounts=None, deadline=None, scheduled=False, enrollment=False, automatic_batch=None, settings=None):
     """Read managed profiles, optionally using the shared account quota reader.
 
     Passive log observations remain the default.  Active reads are bounded,
@@ -283,6 +284,10 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
                 cached[block["account_profile"]] = block
     deadline = deadline if deadline is not None else time.monotonic() + 100
     result = []
+    from agent_monitor.quota import quota_settings
+    settings = settings if settings is not None else quota_settings.read(root, activity_records=True)
+    queried = {}
+    native = read_cache(root / "state/quota_snapshot.json").get("codex") or {}
     profiles = sorted(codex_profiles.discover(), key=lambda p: (
         refresh_check_time(cached.get((p.account or {}).get("name")) or {}), str(p.home)))
     for profile in profiles:
@@ -306,23 +311,33 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
             block = _merge_managed_accounts([cached_block], [block])[0]
         block.update(signed_out=False)
         block.setdefault("query_state", "passive")
-        from agent_monitor.quota import quota_settings
         from agent_monitor import hub_config
-        enrolled = not enrollment or quota_settings.selected(profile, root)
-        last_attempt = refresh_check_time(cached_block or {}) if same_identity else None
+        selection = next((row for row in settings['accounts']
+                          if (row['profile'], row['account_id'], row['account_label']) ==
+                          (profile.account['name'], account.account_id, account.label)), {})
+        fixed = selection.get('enabled', False)
+        enrolled = not enrollment or selection.get('effective_enabled', fixed)
+        identity_key = accounts.quota_identity('codex', account.account_id, account.label)
+        same_account = [row for row in [native, *cached.values(), *queried.values()]
+                        if accounts.quota_identity('codex', row.get('account_id'), row.get('account_label')) == identity_key]
+        latest = max(same_account, key=lambda row: refresh_check_time(row) or '', default={})
+        last_attempt = refresh_check_time(latest)
         try:
             fresh = (datetime.now(timezone.utc) - datetime.fromisoformat(last_attempt)).total_seconds() < hub_config.quota_interval()
         except (ValueError, TypeError):
             fresh = False
-        do_refresh = refresh and enrolled and not (scheduled and fresh)
+        do_refresh = refresh and enrolled and identity_key not in queried and not (scheduled and fresh)
         # A configured native home may itself be one of the discovered profiles.
-        native = read_cache(root / "state/quota_snapshot.json").get("codex") or {}
         same_home = profile.home.resolve() == accounts.CODEX_AUTH.parent.resolve()
         if same_home and refresh_check_time(native) and accounts.quota_identity("codex", native.get("account_id"), native.get("account_label")) == accounts.quota_identity("codex", account.account_id, account.label):
             block = dict(native)
             block.pop("managed_accounts", None)
             block["account_profile"] = profile.account["name"]
             do_refresh = False
+        if (scheduled and fresh) or identity_key in queried:
+            shared = dict(latest, account_profile=profile.account['name'])
+            shared.pop('managed_accounts', None)
+            block = _merge_managed_accounts([shared], [block])[0]
         block = _with_credential_plan(block, {"credential_plan": account.plan})
         pause = Controls(root / "state/upstream_controls").read("codex").get("pause")
         if not pause:
@@ -340,7 +355,7 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
                 block["refresh_error"] = "本机已暂停该服务的自动请求；" + upstream_controls.pause_summary(pause)
         elif do_refresh and time.monotonic() + quota_refresh.TIMEOUT + 2 > deadline:
             block.update(query_state="pending", refresh_error="本轮查询时间已用完，此账号尚未查询；后续采集将继续。")
-        elif do_refresh:
+        elif do_refresh and (not enrollment or quota_settings.dispatch_selected(profile, selection.get('_records', []), root)):
             attempted = datetime.now(timezone.utc).isoformat()
             skipped = None
             try:
@@ -368,6 +383,7 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
             block["refresh_skip"] = skipped
             if not skipped:
                 block["refresh_attempted_at"] = attempted
+            queried[identity_key] = block
             # Preserve each finished attempt even if the outer caller times out.
             save_cache(root / "state/quota_snapshot.json", {"codex": {"managed_accounts": [block]}},
                        session_links=links)

@@ -273,17 +273,35 @@
     }
     function render(value) {
       state = value; form.textContent = "";
-      intro.hidden = !value.accounts.length;
+      intro.hidden = false;
       intro.textContent = `原生 Codex 继续按现有采集周期更新。下列额外登录账号可每 ${Math.round(value.interval_seconds / 60)} 分钟查询一次配额；请求通过 ${machine} 的 Agent Monitor 路由桥。不会发送消息。`;
+      const followLabel = document.createElement("label"), follow = document.createElement("input");
+      follow.type = "checkbox"; follow.dataset.followRunning = ""; follow.checked = Boolean(value.follow_running);
+      followLabel.append(follow, document.createTextNode(" 自动跟随运行中的 codex-account 账号（含以后新增的账号）"));
+      const followLine = document.createElement("p"); followLine.append(followLabel); form.append(followLine);
+      const explanation = document.createElement("p");
+      explanation.textContent = "任务运行期间按上述周期查询，最后一个任务退出后停止跟随。下列固定勾选的账号退出后仍会查询。只检测新版启动器登记的任务。";
+      form.append(explanation);
       for (const row of value.accounts) {
         const label = document.createElement("label"), checkbox = document.createElement("input");
-        checkbox.type = "checkbox"; checkbox.value = row.key; checkbox.checked = row.enabled;
+        checkbox.type = "checkbox"; checkbox.dataset.quotaProfile = ""; checkbox.value = row.key; checkbox.checked = row.enabled;
         label.appendChild(checkbox);
-        label.appendChild(document.createTextNode(` ${row.account_label} · ${row.profile}`));
+        const running = Number(row.running_tasks || 0);
+        const activity = running ? `${running} 个任务运行中` : "未检测到运行任务";
+        const following = value.follow_running && running ? " · 自动跟随中" : "";
+        label.appendChild(document.createTextNode(` ${row.account_label} · ${row.profile} — ${activity}${following}`));
+        if (row.activity_checked_at) {
+          const observed = document.createElement("small");
+          observed.textContent = `（检测于 ${new Date(row.activity_checked_at).toLocaleTimeString()}）`;
+          label.append(observed);
+        }
+        if (row.activity_error) label.append(document.createTextNode(` · ${row.activity_error}`));
         const line = document.createElement("p"); line.appendChild(label); form.appendChild(line);
       }
-      if (!value.accounts.length) form.textContent = "这台机器未发现额外登录账号，无需设置。";
-      save.hidden = !value.accounts.length;
+      if (!value.accounts.length) {
+        const empty = document.createElement("p"); empty.textContent = "这台机器尚未发现额外登录账号；开启跟随后，新注册账号运行任务时也会加入。"; form.append(empty);
+      }
+      save.hidden = false;
     }
     async function refresh() {
       if (busy) return;
@@ -296,23 +314,24 @@
     read.addEventListener("click", refresh);
     save.addEventListener("click", async () => {
       if (busy || !state) return;
-      const selected = Array.from(form.querySelectorAll("input:checked")).map(node => node.value).sort();
+      const selected = Array.from(form.querySelectorAll("input[data-quota-profile]:checked")).map(node => node.value).sort();
       const previous = state.accounts.filter(row => row.enabled).map(row => row.key).sort();
-      if (JSON.stringify(selected) === JSON.stringify(previous)) { notice.textContent = "设置未变化。"; return; }
+      const follow_running = form.querySelector("[data-follow-running]").checked;
+      if (follow_running === Boolean(state.follow_running) && JSON.stringify(selected) === JSON.stringify(previous)) { notice.textContent = "设置未变化。"; return; }
       busy = true; read.disabled = save.disabled = true;
       let submitted = false;
       try {
         let confirmation;
-        if (selected.some(key => !previous.includes(key))) {
+        if (selected.some(key => !previous.includes(key)) || (follow_running && !state.follow_running)) {
           const rows = state.accounts.filter(row => selected.includes(row.key));
           confirmation = await window.AgentMonitor.previewUpstream?.(
             rows.map(row => ({email: row.account_label, account_id: row.account_id})),
-            {approval_action: "quota-settings", approval_scope: [machine, ...selected], approval_expected: state.revision, approval_machine: machine});
+            {approval_action: "quota-settings", approval_scope: [machine, ...selected, ...(follow_running ? ["follow-running"] : [])], approval_expected: state.revision, approval_machine: machine});
           if (!confirmation) { notice.textContent = "已取消，设置未改变。"; return; }
         }
         submitted = true;
-        render(await request({method: "POST", body: JSON.stringify({machine, revision: state.revision, selected, confirmation})}));
-        notice.textContent = "设置已保存；取消勾选会停止后续自动查询，正在进行的查询会完成。新账号需另行选择。";
+        render(await request({method: "POST", body: JSON.stringify({machine, revision: state.revision, selected, follow_running, confirmation})}));
+        notice.textContent = "设置已保存；固定勾选或运行跟随中的账号将按周期查询。关闭后停止后续查询，已发出的请求会完成。";
       } catch (error) {
         notice.textContent = submitted ? "保存结果未确认；请先更新设置状态，勿重复提交。" : error.message;
         if (submitted) state = null;

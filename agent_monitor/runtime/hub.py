@@ -76,11 +76,12 @@ def quota_due(*, root=None, now=None):
     if Controls(root / "state/upstream_controls").read("codex").get("pause"):
         return False
     cached = quota_service.read_cache(root / "state/quota_snapshot.json").get("codex") or {}
-    rows = cached.get("managed_accounts", [])
+    rows = [cached, *cached.get("managed_accounts", [])]
     for item in quota_settings.read(root)["accounts"]:
-        if not item["enabled"]:
+        if not item.get("effective_enabled", item["enabled"]):
             continue
-        previous = next((row for row in rows if (row.get("account_profile"), row.get("account_id"), row.get("account_label")) == (item["profile"], item["account_id"], item["account_label"])), {})
+        matching = [row for row in rows if (row.get('account_id'), row.get('account_label')) == (item['account_id'], item['account_label'])]
+        previous = max(matching, key=lambda row: quota_service.refresh_check_time(row) or '', default={})
         try:
             age = (time.time() if now is None else now) - datetime.fromisoformat(quota_service.refresh_check_time(previous)).timestamp()
             if age < hub_config.quota_interval():

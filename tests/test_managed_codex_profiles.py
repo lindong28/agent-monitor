@@ -797,3 +797,151 @@ assert.equal(ui.quotaAccountName({account_id:'abcdefghijk',account_profile:'work
 '''
         result = subprocess.run(["node", "-e", script], cwd=Path(__file__).parents[1], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def activity(self, name, pid=None, **changes):
+        from agent_monitor.runtime.process_identity import identity
+        pid = os.getpid() if pid is None else pid
+        folder = self.registry / name
+        directory = folder / 'running-tasks'; directory.mkdir(exist_ok=True)
+        value = dict(version=1, profile=name, account=json.loads((folder / 'profile.json').read_text())['identity'],
+                     pid=pid, process_identity=identity(pid), started_at='2026-11-10T00:00:00+00:00')
+        value.update(changes)
+        path = directory / (str(len(list(directory.iterdir()))) + '.json')
+        path.write_text(json.dumps(value))
+        return path
+
+    def test_running_activity_identity_and_stable_settings_revision(self):
+        from parsers import codex_activity
+        from agent_monitor.quota import quota_settings
+        self.profile('alpha')
+        profile = codex_profiles.discover()[0]
+        initial = quota_settings.read(self.root)
+        self.assertFalse(initial['follow_running'])
+        record = self.activity('alpha')
+        self.assertEqual(codex_activity.observe(profile)['running_tasks'], 1)
+        # A duplicate record is still one process; a reused PID is not live activity.
+        self.activity('alpha')
+        self.activity('alpha', process_identity={'uid': os.getuid(), 'start': 'reused'})
+        self.assertEqual(codex_activity.observe(profile)['running_tasks'], 1)
+        current = quota_settings.read(self.root)
+        self.assertEqual(initial['revision'], current['revision'])
+        self.assertFalse(current['accounts'][0]['effective_enabled'])
+        enabled = quota_settings.change(dict(revision=current['revision'], selected=[], follow_running=True), self.root)
+        self.assertTrue(enabled['accounts'][0]['effective_enabled'])
+        self.assertNotIn('_records', enabled['accounts'][0])
+        # Subject changes invalidate activity even when workspace/email stay the same.
+        path = self.registry / 'alpha/profile.json'
+        changed = json.loads(path.read_text()); changed['identity']['subject'] = 'other'
+        path.write_text(json.dumps(changed))
+        observed = codex_activity.observe(profile)
+        self.assertEqual(observed['running_tasks'], 0)
+        self.assertIsNotNone(observed['activity_error'])
+        record.write_text('{broken')
+        self.assertIsNotNone(codex_activity.observe(profile)['activity_error'])
+
+    def test_follow_running_hourly_multi_account_and_exit_before_dispatch(self):
+        from datetime import datetime, timezone
+        from agent_monitor.quota import quota_settings
+        from agent_monitor.runtime import hub
+        from parsers import codex_activity
+        self.profile('alpha'); self.profile('beta')
+        self.activity('alpha'); self.activity('alpha'); self.activity('beta')
+        current = quota_settings.read(self.root)
+        quota_settings.change(dict(revision=current['revision'], selected=[], follow_running=True), self.root)
+        reading = RateLimits(12, 4102444800, 23, 4102444800,
+                            updated_at=datetime.now(timezone.utc).isoformat(), quota_observation={'source': 'active_query'})
+        with mock.patch('agent_monitor.hub_config.quota_interval', return_value=3600), \
+             mock.patch('agent_monitor.quota.quota_refresh.load_rate_limits', return_value=reading) as query:
+            quota_service.managed_codex_rate_limits(refresh=True, scheduled=True, enrollment=True, root=self.root)
+            self.assertEqual(query.call_count, 2)
+            quota_service.managed_codex_rate_limits(refresh=True, scheduled=True, enrollment=True, root=self.root)
+            self.assertEqual(query.call_count, 2)
+            cached = quota_service.read_cache(self.root / 'state/quota_snapshot.json')['codex']['managed_accounts']
+            last = max(datetime.fromisoformat(row['refresh_attempted_at']).timestamp() for row in cached)
+            with mock.patch.object(hub, 'native_quota_due', return_value=False):
+                self.assertFalse(hub.quota_due(root=self.root, now=last + 3599))
+                self.assertTrue(hub.quota_due(root=self.root, now=last + 3601))
+            # Snapshot was live, but both tasks exit before their queries dispatch.
+            settings = quota_settings.read(self.root, activity_records=True)
+            with mock.patch.object(codex_activity, 'live', return_value=False):
+                quota_service.managed_codex_rate_limits(refresh=True, enrollment=True, root=self.root, settings=settings)
+            self.assertEqual(query.call_count, 2)
+            # Manual selection continues even after the last task exits.
+            for path in self.registry.glob('*/running-tasks/*.json'): path.unlink()
+            current = quota_settings.read(self.root)
+            alpha = next(row['key'] for row in current['accounts'] if row['profile'] == 'alpha')
+            quota_settings.change(dict(revision=current['revision'], selected=[alpha], follow_running=True), self.root)
+            quota_service.managed_codex_rate_limits(refresh=True, enrollment=True, root=self.root)
+            self.assertEqual(query.call_count, 3)
+            self.assertEqual(query.call_args.args[1].label, 'alpha@example.test')
+
+    def test_native_identity_reading_deduplicates_followed_profile(self):
+        from datetime import datetime, timezone
+        from agent_monitor.quota import quota_settings
+        from agent_monitor.runtime import hub
+        self.profile('alpha'); self.activity('alpha')
+        current = quota_settings.read(self.root)
+        quota_settings.change(dict(revision=current['revision'], selected=[], follow_running=True), self.root)
+        now = datetime.now(timezone.utc).isoformat()
+        native = dict(account_id='shared-workspace', account_label='alpha@example.test', five_hour_pct=44,
+                      updated_at=now, refresh_attempted_at=now, quota_observation={'source': 'active_query'})
+        quota_service.save_cache(self.root / 'state/quota_snapshot.json', {'codex': native})
+        with mock.patch('agent_monitor.quota.quota_refresh.load_rate_limits') as query, \
+             mock.patch.object(hub, 'native_quota_due', return_value=False):
+            rows = quota_service.managed_codex_rate_limits(refresh=True, scheduled=True, enrollment=True, root=self.root)
+            self.assertEqual(rows[0]['five_hour_pct'], 44)
+            self.assertFalse(hub.quota_due(root=self.root))
+        query.assert_not_called()
+
+    def test_http_follow_requires_exact_confirmation_and_revision(self):
+        from email.message import Message
+        from urllib.parse import urlsplit
+        from agent_monitor.quota import quota_settings
+        from agent_monitor.network.client_network import ApprovalStore
+        self.profile('alpha')
+        approvals = ApprovalStore()
+        machine = SimpleNamespace(name='fixture', is_self=True)
+        def call(payload):
+            data = json.dumps(payload).encode()
+            headers = Message(); headers['Content-Type'] = 'application/json'; headers['Content-Length'] = str(len(data))
+            results = []
+            handler = SimpleNamespace(headers=headers, rfile=io.BytesIO(data),
+                                      _send_json=lambda value, **kw: results.append((kw.get('status', 200), value)))
+            server.Handler._handle_quota_settings(handler, urlsplit('/api/quota-settings'), post=True)
+            return results[0]
+        with mock.patch.object(quota_settings, 'PROJECT_ROOT', self.root), \
+             mock.patch.object(server, 'UPSTREAM_APPROVALS', approvals), \
+             mock.patch.object(server.sync, 'load_machine_config', return_value=SimpleNamespace(by_name={'fixture': machine})):
+            current = quota_settings.read(self.root)
+            payload = dict(machine='fixture', revision=current['revision'], selected=[], follow_running=True)
+            self.assertNotEqual(call(payload)[0], 200)
+            static_token = approvals.issue('quota-settings', ['fixture'], current['revision'])
+            self.assertNotEqual(call(dict(payload, confirmation=static_token))[0], 200)
+            self.assertFalse(quota_settings.read(self.root)['follow_running'])
+            token = approvals.issue('quota-settings', ['fixture', 'follow-running'], current['revision'])
+            status, enabled = call(dict(payload, confirmation=token))
+            self.assertEqual(status, 200)
+            self.assertTrue(enabled['follow_running'])
+            self.assertNotEqual(call(dict(payload, confirmation=token))[0], 200)
+            # Disabling uses no upstream confirmation and leaves fixed selection unchanged.
+            status, disabled = call(dict(payload, revision=enabled['revision'], follow_running=False))
+            self.assertEqual(status, 200); self.assertFalse(disabled['follow_running'])
+
+    def test_settings_disabled_during_batch_stop_undispatched_requests(self):
+        from agent_monitor.quota import quota_settings
+        from datetime import datetime, timezone
+        self.profile('alpha'); self.profile('beta')
+        self.activity('alpha'); self.activity('beta')
+        reading = RateLimits(5, None, 6, None, updated_at=datetime.now(timezone.utc).isoformat(),
+                            quota_observation={'source': 'active_query'})
+        for follow in (False, True):
+            current = quota_settings.read(self.root)
+            quota_settings.change(dict(revision=current['revision'], follow_running=follow,
+                selected=[] if follow else [row['key'] for row in current['accounts']]), self.root)
+            def query(*args, **kwargs):
+                current = quota_settings.read(self.root)
+                quota_settings.change(dict(revision=current['revision'], selected=[], follow_running=False), self.root)
+                return reading
+            with mock.patch('agent_monitor.quota.quota_refresh.load_rate_limits', side_effect=query) as call:
+                quota_service.managed_codex_rate_limits(refresh=True, enrollment=True, root=self.root)
+                self.assertEqual(call.call_count, 1, 'latest setting must stop the next account')

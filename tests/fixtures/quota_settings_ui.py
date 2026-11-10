@@ -86,6 +86,15 @@ def main():
                 value = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))))
                 if value.get('add'): profile(value['add'])
                 if value.get('empty'): counts['empty'] = True
+                if value.get('running'):
+                    from agent_monitor.runtime.process_identity import identity
+                    name = value['running']; folder = registry / name
+                    directory = folder / 'running-tasks'; directory.mkdir(exist_ok=True)
+                    (directory / 'fixture.json').write_text(json.dumps(dict(version=1, profile=name,
+                        account=json.loads((folder / 'profile.json').read_text())['identity'],
+                        pid=os.getpid(), process_identity=identity(os.getpid()), started_at=observed)))
+                if value.get('stopped'):
+                    (registry / value['stopped'] / 'running-tasks/fixture.json').unlink()
                 self._send_json({'ok': True}); return
             if self.path == '/api/quota-settings': counts['writes'] += 1
             return super().do_POST()
@@ -95,7 +104,7 @@ def main():
     with contextlib.ExitStack() as stack:
         for patch in (mock.patch.object(hub_reads, 'origin', return_value=None),
                       mock.patch.object(quota_settings, 'PROJECT_ROOT', args.artifacts),
-                      mock.patch.object(quota_settings, 'catalog', side_effect=lambda: [] if counts.get('empty') else catalog()),
+                      mock.patch.object(quota_settings, 'catalog', side_effect=lambda **kw: [] if counts.get('empty') else catalog(**kw)),
                       mock.patch.object(server.sync, 'load_machine_config', return_value=SimpleNamespace(by_name={machine.name: machine})),
                       mock.patch.object(account_egress, 'preview', side_effect=preview),
                       mock.patch.object(hub_config, 'quota_interval', return_value=3600),

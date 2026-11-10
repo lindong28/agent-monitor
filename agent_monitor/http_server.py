@@ -761,10 +761,13 @@ class Handler(BaseHTTPRequestHandler):
                         or not set(selected).issubset({row["key"] for row in current["accounts"]})):
                     raise ValueError("账号或设置已变化，请更新状态后重新选择。")
                 previous = {row["key"] for row in current["accounts"] if row["enabled"]}
-                if set(selected) - previous:
+                follow = raw.get('follow_running', current.get('follow_running', False))
+                if type(follow) is not bool:
+                    raise ValueError('运行账号跟随设置必须为布尔值。')
+                if set(selected) - previous or (follow and not current.get('follow_running', False)):
                     UPSTREAM_APPROVALS.consume(raw.get("confirmation"), "quota-settings",
-                                              [name, *sorted(selected)], current["revision"])
-                current = quota_settings.on_machine(machine, {"revision": current["revision"], "selected": selected})
+                                              [name, *sorted(selected), *(["follow-running"] if follow else [])], current["revision"])
+                current = quota_settings.on_machine(machine, {"revision": current["revision"], "selected": selected, "follow_running": follow})
             self._send_json({**current, "machine": machine.name}, send_body=send_body)
         except (ValueError, UnicodeDecodeError) as exc:
             self._send_json({"error": str(exc)}, status=400, send_body=send_body)

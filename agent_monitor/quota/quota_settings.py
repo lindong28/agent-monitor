@@ -12,8 +12,8 @@ from agent_monitor.paths import PROJECT_ROOT
 from agent_monitor.quota.quota_messages import write_message
 
 
-def catalog():
-    from parsers import codex_profiles
+def catalog(*, activity_records=False, include_activity=True):
+    from parsers import codex_profiles, codex_activity
     result = []
     for profile in codex_profiles.discover():
         if not profile.account:
@@ -21,11 +21,14 @@ def catalog():
         account = profile.account
         identity = [account['name'], account['account_id'], account['email']]
         key = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
-        result.append({'key': key, 'profile': identity[0], 'account_id': identity[1], 'account_label': identity[2]})
+        activity = codex_activity.observe(profile) if include_activity else {}
+        if not activity_records:
+            activity.pop('_records', None)
+        result.append({'key': key, 'profile': identity[0], 'account_id': identity[1], 'account_label': identity[2], **activity})
     return sorted(result, key=lambda item: item['key'])
 
 
-def read(root=None):
+def read(root=None, *, activity_records=False, include_activity=True):
     from agent_monitor import hub_config
     root = Path(root) if root is not None else PROJECT_ROOT
     path = root / 'state/quota-settings.json'
@@ -36,15 +39,21 @@ def read(root=None):
             raise ValueError('invalid quota settings')
     except FileNotFoundError:
         state = {'version': 1, 'revision': 'initial', 'selected': None}
-    rows = catalog()
+    rows = catalog(activity_records=activity_records, include_activity=include_activity)
     # An explicit empty selection overrides legacy operator configuration.
     selected = state['selected']
     if selected is None:
         selected = [row['key'] for row in rows] if hub_config.managed_quota_auto_refresh() else []
+    follow = state.get('follow_running', False)
+    if type(follow) is not bool:
+        raise ValueError('invalid follow-running setting')
     for row in rows:
         row['enabled'] = row['key'] in selected
-    fingerprint = hashlib.sha256(json.dumps([state['revision'], rows, hub_config.quota_interval()], sort_keys=True).encode()).hexdigest()
-    return {'revision': fingerprint, 'accounts': rows, 'interval_seconds': hub_config.quota_interval()}
+        row['effective_enabled'] = row['enabled'] or (follow and row.get('running_tasks', 0) > 0)
+    # Live activity changes must not invalidate a user's pending settings edit.
+    configuration = [{key: row[key] for key in ('key', 'profile', 'account_id', 'account_label', 'enabled')} for row in rows]
+    fingerprint = hashlib.sha256(json.dumps([state['revision'], configuration, follow, hub_config.quota_interval()], sort_keys=True).encode()).hexdigest()
+    return {'revision': fingerprint, 'accounts': rows, 'follow_running': follow, 'interval_seconds': hub_config.quota_interval()}
 
 
 def selected(profile, root=None):
@@ -53,6 +62,16 @@ def selected(profile, root=None):
     return any(row['enabled'] and (row['profile'], row['account_id'], row['account_label']) ==
                (profile.account['name'], profile.account['account_id'], profile.account['email'])
                for row in read(root)['accounts'])
+
+
+def dispatch_selected(profile, records, root=None):
+    """Settings can change while a prior account query is still running."""
+    from parsers import codex_activity
+    current = read(root, include_activity=False)
+    row = next((row for row in current['accounts'] if
+                (row['profile'], row['account_id'], row['account_label']) ==
+                (profile.account['name'], profile.account['account_id'], profile.account['email'])), None)
+    return bool(row and (row['enabled'] or (current['follow_running'] and codex_activity.live(records))))
 
 
 def change(request, root=None):
@@ -67,7 +86,10 @@ def change(request, root=None):
                 or any(not isinstance(key, str) for key in keys) or len(set(keys)) != len(keys)
                 or not set(keys).issubset({row['key'] for row in current['accounts']})):
             raise ValueError('账号或设置已变化，请更新状态后重新选择。')
-        write_message(path, {'version': 1, 'revision': uuid.uuid4().hex, 'selected': sorted(keys)})
+        follow = request.get('follow_running', current['follow_running'])
+        if type(follow) is not bool:
+            raise ValueError('运行账号跟随设置必须为布尔值。')
+        write_message(path, {'version': 1, 'revision': uuid.uuid4().hex, 'selected': sorted(keys), 'follow_running': follow})
         return read(root)
 
 
