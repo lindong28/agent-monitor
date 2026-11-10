@@ -97,7 +97,7 @@ am.renderCostDiagnostics({groups:[price]});
 assert.equal(nodes['#incomplete-cost-records'].hidden,true);
 assert.equal(nodes['#cost-diagnostics-table'].hidden,false);
 am.renderCostDiagnostics({groups:[]});
-assert(nodes['#cost-diagnostics-status'].textContent.includes('没有金额未知记录'));
+assert.equal(nodes['#cost-diagnostics-status'].textContent,'当前范围无金额未知记录。');
 assert.equal(nodes['#cost-diagnostics-table'].hidden,true);
 assert.equal(nodes['#incomplete-cost-records'].hidden,true);
 '''
