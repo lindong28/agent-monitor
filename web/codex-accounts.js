@@ -38,7 +38,9 @@ function quotaHoldMessage(account, pause) {
     : reason ? `额度限制（${reason}）` : "服务端限制了额度使用";
   const evidence = reading && (reading.ordinary_usage_allowed === false || reading.spend_control_reached === true || reason)
     ? `最近成功观测（${timestamp(reading.observed_at)}）：${explanation}。` : "";
-  const recorded = since && !(evidence && since === reading.observed_at)
+  const sameDisplayedTime = evidence && Number.isFinite(new Date(since).getTime())
+    && timestamp(since) === timestamp(reading.observed_at);
+  const recorded = since && !sameDisplayedTime
     ? `（记录于 ${timestamp(since)}）` : "";
   const next = pause ? "请先查看本页的通道暂停与检查。"
     : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "";
