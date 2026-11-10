@@ -14,7 +14,7 @@ const {values:args} = parseArgs({options:{
   'account-scopes-only':{type:'boolean'}, 'automatic-egress-only':{type:'boolean'},
 }});
 if (args.help) {
-  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--automatic-egress-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks passive entry and explicit system diagnostics. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --automatic-egress-only checks automatic-region skips and retained readings without provider requests. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
+  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--automatic-egress-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks automatic system diagnostics, cache reuse, restart restoration and failure recovery using synthetic probes. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --automatic-egress-only checks automatic-region skips and retained readings without provider requests. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
   process.exit(0);
 }
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -128,7 +128,7 @@ async function click(selector, expect) {
 async function stats() { return (await fetch(url+'/fixture/stats',{signal:AbortSignal.timeout(3000)})).json(); }
 async function configure(value) { const r=await fetch(url+'/fixture/config',{method:'POST',body:JSON.stringify(value),signal:AbortSignal.timeout(3000)}); assert.equal(r.status,200); }
 async function startFixture() {
-  const command=(args['quota-settings-only'] || args['automatic-egress-only']) ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor'), ...(args['automatic-egress-only'] ? ['--automatic-egress'] : [])] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
+  const command=args['network-only'] ? [path.join(repo,'tests/fixtures/network_cache_ui.py'),'--artifacts',root] : (args['quota-settings-only'] || args['automatic-egress-only']) ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor'), ...(args['automatic-egress-only'] ? ['--automatic-egress'] : [])] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
   fixture=spawn(python,command,{env,cwd:repo,stdio:['ignore','pipe','pipe']});
   children.push(fixture);
   let line='',error='';
@@ -333,12 +333,13 @@ try {
     console.log('PASS: full overview keeps local origin, renders account controls, cancels/removes history with persisted readback, and refreshes owner data.');
   } else if (args['network-only']) {
     await bt('open',url+'/network');
-    await bt('snapshot','-i');
-    assert.equal((await stats()).server_reads,0,'local page never automatically probes Hub');
+    await until('automatic network result',()=>read("document.querySelector('#network-checked-host').textContent.includes('fixture-server-device')"));
+    assert.equal((await stats()).server_reads,1,'first entry probes once');
     assert.equal(await read("document.querySelector('#process-network')"),null);
-    assert.match(await read("document.querySelector('#network-verdict').textContent"),/尚未检测/);
-    await click('#refresh',"document.querySelector('#network-checked-host').textContent.includes('fixture-server-device')");
-    assert.equal((await stats()).server_reads,1,'explicit detection issues one request');
+    assert.match(await read("document.querySelector('#network-verdict').textContent"),/未发现已知高风险信号/);
+    await bt('click','#refresh');
+    await until('cached detection receipt',()=>read("document.querySelector('#network-refresh-status').textContent.includes('复用')"));
+    assert.equal((await stats()).server_reads,1,'manual click respects cache');
     assert.equal((await stats()).process_reads,0,'network page does not collect processes');
     assert.equal((await stats()).pair_requests,0,'network page does not open connector');
     await bt('screenshot',path.join(root,'system-network.png'));
@@ -346,9 +347,27 @@ try {
     assert.equal(await read('document.documentElement.scrollWidth<=innerWidth'),true,'system report fits narrow viewport');
     await bt('screenshot',path.join(root,'system-network-390.png'));
     await bt('open',url+'/network');
-    assert.equal((await stats()).server_reads,1,'reentry does not probe');
+    await until('cached reentry',()=>read("document.querySelector('#network-refresh-status').textContent.includes('复用')"));
+    assert.equal((await stats()).server_reads,1,'fresh reentry does not probe');
+    await configure({restart:true});
+    await bt('open',url+'/network');
+    await until('restored result',()=>read("document.querySelector('#network-refresh-status').textContent.includes('复用')"));
+    assert.equal((await stats()).server_reads,1,'recreated view restores persisted cooldown');
+    await configure({advance:61,failure:true});
+    await bt('open',url+'/network');
+    await until('retained result after failure',()=>read("document.querySelector('#network-error').textContent.includes('保留上次结果')"));
+    assert.match(await read("document.querySelector('#network-verdict').textContent"),/历史结果/);
+    assert.equal((await stats()).server_reads,2,'expired entry tries once');
+    await configure({restart:true});
+    await bt('open',url+'/network');
+    await until('restored failure',()=>read("document.querySelector('#network-error').textContent.includes('保留上次结果')"));
+    assert.equal((await stats()).server_reads,2,'failure cooldown survives recreated view');
+    await configure({advance:61,failure:false});
+    await bt('open',url+'/network');
+    await until('recovery',()=>read("document.querySelector('#network-error').hidden && !document.querySelector('#network-verdict').textContent.includes('历史结果')"));
+    assert.equal((await stats()).server_reads,3,'next eligible entry recovers');
     fs.writeFileSync(path.join(root,'network-evidence.json'),JSON.stringify(await stats(),null,2));
-    console.log('PASS: cache-only entry/reentry, explicit server diagnostic, zero process scans/popups, narrow layout.');
+    console.log('PASS: automatic entry, cache reuse, persisted result/cooldown, failure retention, recovery, zero process scans/popups, narrow layout (synthetic probes).');
   } else {
   assert.doesNotMatch(await read('document.body.innerText'),/前往 Hub|到 Hub/);
   const primary='#codex-batch-next', dialog='dialog.account-egress-dialog';

@@ -88,7 +88,9 @@ class ScopeTests(unittest.TestCase):
         clock[0] = 61.0
         failed = report.read()
         self.assertEqual(failed["checked_host"], "fixture-host")
-        self.assertFalse(failed["installed"])
+        self.assertFalse(failed["last_attempt"]["installed"])
+        self.assertEqual(failed['verdict'], 'low')
+        self.assertTrue(failed['stale'])
 
     def test_large_session_detail_negotiates_lossless_compression(self):
         import gzip

@@ -309,11 +309,11 @@ ROUTES = {
 }
 
 
-def create_views(*, usage_source=None):
+def create_views(*, usage_source=None, network=None):
     """Build fresh view/cache owners without replacing process-wide services."""
     return ViewServices(OverviewView(COLLECTION, QUOTA_VIEW, rollup),
                         SessionsView(COLLECTION, ingestion if usage_source is None else usage_source),
-                        NetworkReport())
+                        NetworkReport() if network is None else network)
 
 
 def create_routes(views):
@@ -325,7 +325,8 @@ def create_routes(views):
 
 class ThreadingHTTPServer(_ThreadingHTTPServer):
     def __init__(self, *args, views=None, **kwargs):
-        self.views = views if views is not None else create_views()
+        self.views = views if views is not None else create_views(
+            network=NetworkReport(state_path=ROOT / 'state' / 'network_report.json'))
         self.routes = create_routes(self.views)
         self.local_network = LocalNetwork()
         super().__init__(*args, **kwargs)

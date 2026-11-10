@@ -322,6 +322,13 @@ def render_headline(snapshot, source_note, lines):
     verdict = snapshot.get("verdict") or "unknown"
     lines.append("出口网络检查 · 本机")
     lines.append("")
+    if snapshot.get('stale'):
+        lines.append('历史结果：以下结论属于上次观测，不代表当前网络状态。')
+    attempt = snapshot.get('last_attempt') or {}
+    if attempt.get('error'):
+        lines.append('最近检测失败：%s；保留上次结果。' % attempt['error'])
+    if snapshot.get('persistence_error'):
+        lines.append(snapshot['persistence_error'])
     gaps = _gaps(snapshot)
     uncovered = [name for name, _, feeds_verdict in gaps if feeds_verdict]
     if verdict == "high":
@@ -353,7 +360,7 @@ def render_headline(snapshot, source_note, lines):
     lines.append("来源  %s" % source_note)
     refresh = snapshot.get("refresh") or {}
     if isinstance(refresh.get("reused"), bool):
-        receipt = "复用缓存观测" if refresh["reused"] else "本次取得新观测"
+        receipt = "最近检测失败，保留历史观测" if attempt.get('error') else "复用缓存观测" if refresh["reused"] else "本次取得新观测"
         lines.append("读取  %s；至少等待 %s 秒后才可再次探测" % (receipt, refresh.get("retry_in_seconds", "未知")))
     lines.append("范围  仅本机；其它机器不在本结论内，需分别在该机器上运行 ip-check")
     return gaps

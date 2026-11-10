@@ -2,6 +2,8 @@
 
 Accepted 2026-10-31 following the user request to show only system diagnostics and complete account tasks without Hub navigation. Supersedes the presentation and account-entry decisions in [local network UI](20261031-b71a-local-network-ui.md); account ownership, identity, pause protection and egress policy remain.
 
+Partially superseded 2026-11-10 by [cached-first automatic network detection](20261110-network-auto-detection.md): the network entry trigger and result lifetime changed; the other decisions below remain.
+
 The network page directly shows existing server system diagnostics. Entry reads only cached evidence; explicit detection retains its existing request policy. The process CLI and technical APIs remain, but no process UI, browser process scan or connector popup is triggered by this page.
 
 Existing account controls operate on the current origin. A fixed-target allowlist forwards their actions to the configured owner without redirects, ambient credentials, retries or local fallback. Existing account identities, pause IDs and application capabilities pass intact. Unknown write outcomes require a state read before another submission. Statistics reads and local health/network ownership remain separate.

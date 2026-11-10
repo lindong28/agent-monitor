@@ -281,10 +281,8 @@ async function run() {
     const begin = env.requests.length;
     await enter(url);
     if (url === '/network') {
-      assert(!env.requests.slice(begin).some(request => request.pathname === endpoint), 'local network view must not automatically probe the server');
+      assert.equal(env.requests.slice(begin).filter(request => request.pathname === endpoint).length, 1, 'empty network entry automatically requests one detection');
       assert(!ui.qs('#process-network'), 'network page is server-only');
-      await ui.qs('#refresh').listeners.click();
-      await new Promise(resolve => setImmediate(resolve));
     }
     assert(env.requests.slice(begin).some(request => request.pathname === endpoint), `${url}: route did not call its API`);
     assert.equal(ui.qs(selector).textContent, reading, `${url}: route did not render`);

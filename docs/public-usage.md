@@ -100,7 +100,7 @@ The optional connector supports `./agent-monitor connect --server URL` in the fo
 <a id="local-agent-network"></a>
 ## Network and account actions
 
-Run `./agent-monitor open` and choose **网络**. This page displays only the system diagnostics of the host serving the page, independently of individual Codex/Claude processes. Entry and reentry read cached evidence, including its observation time; they do not launch an expired diagnostic, scan processes or connect a browser-device popup. With no result, the page says “尚未检测”. Click **检测网络** to request the existing public IP and reputation diagnostics. The result is not the actual exit of an Agent request or a date-range history.
+Run `./agent-monitor open` and choose **网络**. This page displays only the system diagnostics of the host serving the page, independently of individual Codex/Claude processes. Entry and reentry show cached evidence immediately, including its observation time. Missing or expired results trigger one automatic public IP/reputation diagnostic; **检测网络** requests a manual check through the same cache and upstream cooldown. There is no periodic probe while the page remains open, process scan or browser-device popup. The server retains its latest attempt, last usable result and retry deadline across restarts. Failed refreshes preserve the last usable result with a visible historical label and failure reason; an installation with no usable result shows the failure. The result is not the actual exit of an Agent request or a date-range history.
 
 Configured Hub clients retain aggregate statistics through the fixed read adapter. Account management, pairing, explicit refresh, recovery and remembered-account removal remain in the current page. A fixed-target action adapter executes them at the configured owner, preserving account identities, pause IDs and connection capabilities. No local account copy is created. Service failure never substitutes local statistics or replays an action. If a write receipt is unavailable, its outcome is unknown: read the current state before submitting another action.
 
@@ -112,7 +112,7 @@ Update the local dashboard and an existing connector together through the normal
 
 | Capability | Entry and scope | Missing condition / next step |
 | --- | --- | --- |
-| System network diagnostics | **网络 → 检测网络**; explicit external IP/reputation requests from the page service host | With no cached evidence, request a diagnostic explicitly. Failure remains visible; it does not switch to process or browser-device observations. |
+| System network diagnostics | **网络** automatically checks missing/expired results; **检测网络** shares the same cache/cooldown and page-service-host egress | Failure remains visible alongside the last usable historical result when available. It does not switch to process or browser-device observations. |
 | Account management, refresh and recovery | The account-management page, reached from Overview or the sidebar; provider actions first show the one-time egress approval and execute at the configured owner through the agent-monitor proxy bridge | Keep the displayed account, machine and pause scope unchanged. Unknown outcomes require state reconciliation, not replay. |
 | Passive process observations | `./agent-monitor process-network` or `--json`; same-user supported native Codex/Claude processes on macOS/Linux | Missing tools, permissions, sockets or context remain unknown. This CLI makes no public request; it does not prove the exit of past Agent traffic. |
 

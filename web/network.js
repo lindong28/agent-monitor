@@ -8,24 +8,44 @@
   async function initNetwork() {
     let active = true;
     let generation = 0;
+    let lastResult = null;
+    let pending = null;
     onPageCleanup?.(() => { active = false; });
     async function load(force) {
+      if (!active) return;
       const requestGeneration = ++generation;
+      qs('#network-refresh-status').textContent = lastResult
+        ? '正在检测，暂时展示上次结果。' : '正在检测网络…';
+      if (!lastResult) {
+        qs('#network-verdict').textContent = '正在检测';
+        qs('#network-updated').textContent = '正在获取首次检测结果';
+        setNetworkCardsUnavailable('正在检测…');
+      }
       try {
         const data = await api("/api/network", force ? { force: "1" } : {});
         if (!active || requestGeneration !== generation) return;
-        renderNetwork(data, () => load(true));
+        if ((data.error || data.installed === false) && lastResult) {
+          lastResult = {...lastResult, stale: true, last_attempt: data, refresh: data.refresh};
+        } else lastResult = data.error || data.installed === false ? null : data;
+        renderNetwork(lastResult || data, detect);
       } catch (error) {
         if (!active || requestGeneration !== generation) return;
-        renderNetwork({
+        const failure = {
           error: error && error.message ? error.message : String(error),
           verdict: "unknown",
-        }, () => load(true));
+        };
+        if (lastResult) lastResult = {...lastResult, stale: true, last_attempt: failure};
+        renderNetwork(lastResult || failure, detect);
       }
     }
     const refresh = qs("#refresh");
+    function detect() {
+      if (!active) return Promise.resolve();
+      if (!pending) pending = withRefresh(refresh, () => load(true)).finally(() => { pending = null; });
+      return pending;
+    }
     if (refresh) {
-      refresh.addEventListener("click", () => withRefresh(refresh, () => load(true)));
+      refresh.addEventListener("click", detect);
     }
     updateNavLinks();
     try {
@@ -33,14 +53,13 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const cached = await response.json();
       if (!active || generation !== 0) return;
-      if (cached?.available) renderNetwork(cached, () => load(true));
-      else {
-        qs('#network-verdict').textContent = '尚未检测';
-        qs('#network-updated').textContent = '点击「检测网络」获取结果';
-        setNetworkCardsUnavailable('尚无检测结果。');
+      if (cached?.available) {
+        if (!cached.error && cached.installed !== false) lastResult = cached;
+        renderNetwork(cached, detect);
       }
+      if ((!cached?.available || cached.stale) && !(cached?.refresh?.retry_in_seconds > 0)) await detect();
     } catch (_) {
-      if (active && generation === 0) renderNetworkError({title: '上次检测结果暂不可用', message: '可点击「检测网络」发起一次新检测。'});
+      if (active && generation === 0) await detect();
     }
   }
 
@@ -67,6 +86,12 @@
       return;
     }
     clearNetworkError();
+    if (data.last_attempt?.error || data.last_attempt?.installed === false) {
+      renderNetworkError({title: '本次检测失败，保留上次结果',
+        message: data.last_attempt.error || 'ip-check 未安装', retry: true}, retry);
+    } else if (data.persistence_error) {
+      renderNetworkError({title: '检测记录保存或恢复异常', message: data.persistence_error});
+    }
     renderLocalNetwork(data);
     renderPublicNetwork(data);
     renderRiskNetwork(data);
@@ -85,7 +110,7 @@
       const next = Number.isFinite(remaining) && remaining > 0
         ? `；最早可重新检测于 ${formatDate(new Date(Date.now() + remaining * 1000).toISOString())}` : "";
       refreshStatus.textContent = typeof refresh?.reused === "boolean"
-        ? `${refresh.reused ? "本次读取复用上次结果，未重新探测" : data.error || data.installed === false ? "本次检测未完成" : "本次读取取得新检测结果"}${next}。缓存期内点击不会增加探测请求；上游限流可能延长等待。`
+        ? `${data.last_attempt?.error ? "最近一次检测失败，继续展示历史结果" : refresh.reused ? "本次读取复用上次结果，未重新探测" : data.error || data.installed === false ? "本次检测未完成" : "本次读取取得新检测结果"}${next}。缓存期内点击不会增加探测请求；上游限流可能延长等待。`
         : "本次读取是否复用缓存未记录。重新检测受服务端缓存与上游等待要求约束。";
     }
     const coverage = data.coverage;
@@ -111,6 +136,7 @@
     } else {
       verdict.textContent = "网络状态未知";
     }
+    if (data.stale) verdict.textContent = `历史结果 · ${verdict.textContent}`;
     updated.textContent = data.timestamp ? `观测于 ${formatDate(data.timestamp)}` : "观测时间未记录";
     const names = {public: "公网", dns: "DNS 名单归属", risk: "风险分", timezone: "时区"};
     updated.textContent += !Array.isArray(missing) ? " · 检测覆盖未知" : missing.length ? " · 缺测：" + missing.map(key => names[key] || key).join("、") : "";
