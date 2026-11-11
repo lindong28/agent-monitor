@@ -103,6 +103,12 @@ def inspect_all(config):
         return dict(pool.map(inspect, config.machines))
 
 
+def show_identity(record):
+    print(f"Release ID: {record['id']}")
+    print(f"Revision: {record['revision']}")
+    print("Targets: " + json.dumps(record['targets'], sort_keys=True), flush=True)
+
+
 def show(record):
     print(f"Topology release {record['revision']}:")
     for name, value in record['nodes'].items():
@@ -111,9 +117,11 @@ def show(record):
     if record['status'] == 'installed':
         print(f"All configured nodes installed the fixed release; verified at {record['verified_at']}. Browser workflows and provider availability were not checked.")
         if record.get('cleanup_pending'):
-            print('Reservation cleanup pending: ' + ', '.join(record['cleanup_pending']) + '. Rerun the same release to finish cleanup; installation will not repeat.')
+            print('Reservation cleanup pending: ' + ', '.join(record['cleanup_pending']) + '. Installation will not repeat.')
+            print(f"Resume: service release resume --id {record['id']} --expect {record['revision']}")
     else:
-        print('Topology release incomplete. Retained node results are in state/release.json; resolve the listed failure and rerun service deploy with the same --expect SHA.')
+        print('Topology release incomplete. Retained node results are in state/release.json; resolve the listed failure before resuming.')
+        print(f"Resume: service release resume --id {record['id']} --expect {record['revision']}")
 
 
 def cleanup(config, path, record):
@@ -135,9 +143,11 @@ def cleanup(config, path, record):
     return 0
 
 
-def execute(config, expected):
+def execute(config, expected, *, new_only=False, receipt=False, strict_resume=False):
     path = ROOT / 'state' / 'release.json'
     previous = rollout_node.read_record(path)
+    if new_only and previous and (previous.get('status') not in ('installed', 'abandoned') or previous.get('cleanup_pending')):
+        raise deploy.PreflightError('A release is unfinished; use service release status, then resume or abandon its exact ID before starting a new release.')
     if previous and previous.get('status') == 'abandoning':
         raise deploy.PreflightError('Release abandonment is unfinished; resume service release abandon first.')
     targets = {m.name: m.ssh_host for m in config.machines}
@@ -156,6 +166,8 @@ def execute(config, expected):
     record = active or {'id': uuid.uuid4().hex, 'revision': revision, 'targets': targets,
                         'status': 'incomplete', 'nodes': {}}
     fresh = inspect_all(config)
+    if strict_resume:
+        verify_original_nodes(record, fresh)
     completed = set()
     for name, value in fresh.items():
         old = record['nodes'].get(name, {}).get('observed')
@@ -171,8 +183,14 @@ def execute(config, expected):
             value['observed'] = old
         value['required_runtime'] = record['nodes'].get(name, {}).get('required_runtime',
             [k for k, v in (current or {}).get('runtime', {}).items() if v is not None])
+        if name in completed:
+            value['status'] = 'installed'
         record['nodes'][name] = value
+    if active is None and previous and previous.get('status') == 'installed':
+        archive_installed(previous)
     rollout_node.write_record(path, record)
+    if receipt:
+        show_identity(record)
     if any(n['status'] == 'unverified' for n in record['nodes'].values()):
         show(record)
         return 1
@@ -187,7 +205,8 @@ def execute(config, expected):
                 if (value['observed']['revision'] != revision or
                         any(value['observed']['runtime'].get(k) is not True for k in value['required_runtime'])):
                     raise ValueError('Installed source or required runtime identity did not converge; inspect service status and resume.')
-            value['status'] = {'reserve': 'reserved', 'apply': 'installed', 'release': 'installed'}[action]
+            value['status'] = ('installed' if action == 'reserve' and machine.name in completed
+                               else {'reserve': 'reserved', 'apply': 'installed', 'release': 'installed'}[action])
             value.pop('error', None)
             ok = True
         except (ValueError, OSError) as error:
@@ -234,7 +253,15 @@ def execute(config, expected):
     return cleanup(config, path, record)
 
 
-def run(expected=None, *, check_only=False, installer_args=()):
+def run(expected=None, *, check_only=False, installer_args=(), new_only=False):
+    if new_only:
+        if not expected or check_only or installer_args:
+            raise deploy.PreflightError('--new requires --expect and cannot be combined with --check-only or installer arguments.')
+        with release_lock():
+            config = topology()
+            if len(config.machines) < 2:
+                raise deploy.PreflightError('--new requires a persistent multi-node topology release; standalone installations use service deploy without --new.')
+            return execute(config, expected, new_only=True, receipt=True)
     previous = rollout_node.read_record(ROOT / 'state' / 'release.json')
     if previous and previous.get('status') == 'abandoning':
         raise deploy.PreflightError('Release abandonment is unfinished; resume service release abandon with its original ID, revision and reason.')
@@ -297,6 +324,54 @@ def validate_release(record):
                 raise deploy.PreflightError('Node reservation history is inconsistent; no reservations were released.')
         elif not isinstance(observed, dict) or not isinstance(observed.get('root'), str) or not Path(observed['root']).is_absolute():
             raise deploy.PreflightError('Original node installation is unverified; no reservations were released.')
+
+
+def archive_installed(record):
+    """Preserve the old receipt before a new release replaces current."""
+    validate_release(record)
+    if record.get('status') != 'installed' or record.get('cleanup_pending'):
+        raise deploy.PreflightError('Only a completed, cleaned release can be archived for replacement.')
+    path = history_path(record['id'])
+    if path.parent.is_symlink() or (path.parent.exists() and not path.parent.is_dir()) or path.is_symlink():
+        raise deploy.PreflightError('Release history must be a real directory with regular receipt files.')
+    view = {'original': record, 'abandonment': None}
+    existing = rollout_node.read_record(path)
+    if existing is not None and existing != view:
+        raise deploy.PreflightError('Release history conflicts with the completed receipt; current was preserved.')
+    if existing is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rollout_node.write_record(path, view)
+
+
+def resume(identity, expected):
+    with release_lock():
+        record = rollout_node.read_record(ROOT / 'state' / 'release.json')
+        validate_release(record)
+        if record['id'] != identity or record['revision'] != expected:
+            raise deploy.PreflightError('Release ID or revision does not match the current receipt; nothing was resumed.')
+        if record.get('status') not in ('incomplete', 'installed'):
+            raise deploy.PreflightError('Only an incomplete or installed release can be resumed; abandonment cannot resume installation.')
+        deploy.check_local()
+        config = topology()
+        if len(config.machines) < 2 or record['targets'] != {m.name: m.ssh_host for m in config.machines}:
+            raise deploy.PreflightError('Restore the original multi-node topology before resuming this release.')
+        if record['status'] == 'installed':
+            verify_original_nodes(record, inspect_all(config))
+            show_identity(record)
+            if record.get('cleanup_pending'):
+                return cleanup(config, ROOT / 'state' / 'release.json', record)
+            show(record)
+            return 0
+        return execute(config, expected, strict_resume=True, receipt=True)
+
+
+def verify_original_nodes(record, fresh):
+    """Refuse an unknown or changed binding before rewriting any progress."""
+    for name, value in fresh.items():
+        current = value.get('observed')
+        old = record['nodes'][name].get('observed')
+        if current is None or (old is not None and any(old.get(k) != current.get(k) for k in ('root', 'machine', 'members', 'hub', 'config'))):
+            raise deploy.PreflightError('Original node identity or configuration could not be confirmed; current receipt was preserved.')
 
 
 def validate_progress(progress, record):
@@ -364,6 +439,7 @@ def show_release(view):
     if record.get('cleanup_pending'):
         state += ' (reservation cleanup pending)'
     print(f"Release {record['id']} @ {record['revision']}: {state}")
+    print('Targets: ' + json.dumps(record['targets'], sort_keys=True))
     if progress:
         print('Reason: ' + progress['reason'])
         pending = set(progress['pending'])
@@ -381,7 +457,7 @@ def show_release(view):
             print(f"  {name}: {value['status']}" + (f" — {error}" if error else ''))
         if record.get('cleanup_pending'):
             print('Reservation cleanup pending: ' + ', '.join(record['cleanup_pending']))
-            print(f"Resume cleanup: service deploy --expect {record['revision']}; installation will not repeat.")
+            print(f"Resume cleanup: service release resume --id {record['id']} --expect {record['revision']}; installation will not repeat.")
     print('Recorded release state only; current service health and browser workflows were not checked.')
 
 
@@ -452,17 +528,22 @@ def abandon(identity, revision, reason):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Inspect or explicitly abandon a topology release without rolling back source or services.')
+    parser = argparse.ArgumentParser(description='Inspect, resume or explicitly abandon a topology release without rolling back source or services.')
     commands = parser.add_subparsers(dest='action', required=True)
     status = commands.add_parser('status', help='read a current or historical local release receipt')
     status.add_argument('--id', help='read a retained historical release ID')
     status.add_argument('--json', action='store_true', help='print the complete receipt as JSON')
+    continuing = commands.add_parser('resume', help='resume only the matching current release, or finish its cleanup')
+    continuing.add_argument('--id', required=True, help='exact current release ID')
+    continuing.add_argument('--expect', required=True, help='exact current release revision')
     cancel = commands.add_parser('abandon', help='archive an incomplete release and release only its matching reservations')
     cancel.add_argument('--id', required=True, help='exact current release ID')
     cancel.add_argument('--expect', required=True, help='exact current release revision')
     cancel.add_argument('--reason', required=True, help='record why this release is being abandoned')
     args = parser.parse_args(argv)
     try:
+        if args.action == 'resume':
+            return resume(args.id, args.expect)
         if args.action == 'abandon':
             return abandon(args.id, args.expect, args.reason)
         view = release_status(args.id)

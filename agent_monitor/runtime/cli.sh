@@ -41,7 +41,7 @@ fi
 usage() {
   echo "Offline catalog projection: agent-monitor catalog-export --help"
   echo "Archive maintenance: agent-monitor archive [stats|compact --backup NEW_PERSISTENT_PATH] [--archive PATH] [--rollup-db PATH] [--budget-seconds N] [--json]"
-  echo "Service management: agent-monitor service {status|restart local-web|restart hub|restart collector|restart connector|deploy [--expect SHA]|release {status|abandon}|rebuild-runtime --python /absolute/python}"
+  echo "Service management: agent-monitor service {status|restart local-web|restart hub|restart collector|restart connector|deploy [--new] [--expect SHA]|release {status|resume|abandon}|rebuild-runtime --python /absolute/python}"
   echo "Local dashboard: agent-monitor local {start|stop|restart|status|open}"
   echo "Component status: agent-monitor service status [web|rollup-daemon|connector]"
   echo "Local Agent network: agent-monitor process-network [--json] (read-only process observations)"

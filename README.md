@@ -185,3 +185,5 @@ docs/                                   使用、架构、运维与核算指南
 ## 作者与来源
 
 由 Dong Lin 创建。agent-monitor 延续了从 ai-agent-config 提交 `3d61487d5386dfe9bb6ba7d26807005bbf0bd7f2` 中提取的 `tt-web` 实现。这一来源关系不构成运行时依赖。第三方包保留各自的许可证。
+
+For reusable deployment automation, use the [release interface and command mapping](docs/public-usage.md#release-interface) (`service-release/v1`, mapped).

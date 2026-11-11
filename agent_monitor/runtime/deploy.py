@@ -87,6 +87,7 @@ def preflight(expected=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--new", action="store_true", help="start a new topology release; refuse unfinished releases (requires --expect)")
     parser.add_argument("--expect", help="full published release SHA; remains fixed if origin/main advances")
     parser.add_argument("--check-only", action="store_true", help="check source identity without installing")
     parser.add_argument("--local", action="store_true", help="repair only this node; not a complete topology deployment")
@@ -98,8 +99,10 @@ def main():
         installer_args = installer_args[1:]
     try:
         from agent_monitor.runtime import rollout
+        if args.new and args.local:
+            raise PreflightError("--new cannot be combined with --local.")
         if not args.local:
-            return rollout.run(args.expect, check_only=args.check_only, installer_args=installer_args)
+            return rollout.run(args.expect, check_only=args.check_only, installer_args=installer_args, new_only=args.new)
         def admission():
             head = preflight(args.expect)
             rollout.check_reservation(ROOT, head, args.rollout_id)

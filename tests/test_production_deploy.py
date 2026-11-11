@@ -54,6 +54,25 @@ class ProductionDeploymentTests(unittest.TestCase):
         return subprocess.check_output(["git", "-C", str(root), *args], env=self.env,
                                        stderr=subprocess.DEVNULL, text=True, timeout=20).strip()
 
+    def test_public_strict_parameters_and_help(self):
+        entry = str(self.repo / 'agent-monitor')
+        for argv, expected in [(['service', 'deploy', '--help'], '--new'),
+                               (['service', 'release', '--help'], 'resume'),
+                               (['service', 'release', 'resume', '--help'], '--id')]:
+            result = subprocess.run([entry, *argv], env=self.env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(expected, result.stdout)
+        for argv in [ ['service', 'deploy', '--new'],
+                      ['service', 'deploy', '--new', '--expect', self.head],
+                      ['service', 'deploy', '--new', '--local', '--expect', self.head],
+                      ['service', 'deploy', '--new', '--check-only', '--expect', self.head],
+                      ['service', 'release', 'resume', '--id', '1' * 32],
+                      ['service', 'release', 'resume', '--id', '1' * 32, '--expect', self.head] ]:
+            result = subprocess.run([entry, *argv], env=self.env, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertFalse((self.repo / 'installed').exists())
+            self.assertFalse((self.repo / 'state/release.json').exists())
+
     def test_public_abandon_preserves_ahead_source_and_recovers_from_conflict_and_lock(self):
         identity = '1' * 32
         state = self.repo / 'state'; state.mkdir()

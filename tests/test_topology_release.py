@@ -80,6 +80,135 @@ class TopologyReleaseTests(unittest.TestCase):
     def record(self):
         return json.loads((self.root / 'state/release.json').read_text())
 
+    def test_strict_new_returns_own_identity_and_preserves_same_sha_history(self):
+        self.assertEqual(rollout.run(self.revision, new_only=True), 0)
+        first = self.record()
+        self.assertIn('Release ID: ' + first['id'], self.output.getvalue())
+        self.assertIn('Targets: ' + json.dumps(first['targets'], sort_keys=True), self.output.getvalue())
+        self.assertEqual(rollout.run(self.revision, new_only=True), 0)
+        self.assertNotEqual(first['id'], self.record()['id'])
+        self.assertEqual(rollout.release_status(first['id']), {'original': first, 'abandonment': None})
+        calls = list(self.calls)
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            rollout.resume(first['id'], self.revision)
+        self.assertEqual(calls, self.calls)
+
+    def test_strict_new_refuses_active_and_pending_cleanup_without_node_calls(self):
+        for failure in ('apply', 'release'):
+            with self.subTest(failure=failure):
+                self.failures.add(('mini', failure))
+                self.assertEqual(rollout.run(self.revision, new_only=True), 1)
+                before = self.record()
+                calls = list(self.calls)
+                with self.assertRaisesRegex(ValueError, 'unfinished'):
+                    rollout.run(self.revision, new_only=True)
+                self.assertEqual(before, self.record())
+                self.assertEqual(calls, self.calls)
+                self.failures.clear()
+                self.assertEqual(rollout.resume(before['id'], self.revision), 0)
+
+    def test_resume_identity_conflict_and_partial_recovery(self):
+        self.failures.add(('mini', 'apply'))
+        self.assertEqual(rollout.run(self.revision, new_only=True), 1)
+        before = self.record()
+        for identity, revision in [('0' * 32, self.revision), (before['id'], 'c' * 40)]:
+            with self.subTest(identity=identity, revision=revision):
+                calls = list(self.calls)
+                with self.assertRaisesRegex(ValueError, 'does not match'):
+                    rollout.resume(identity, revision)
+                self.assertEqual(before, self.record())
+                self.assertEqual(calls, self.calls)
+        self.failures.clear()
+        self.calls.clear()
+        self.assertEqual(rollout.resume(before['id'], self.revision), 0)
+        self.assertEqual(before['id'], self.record()['id'])
+        self.assertEqual([n for n, a in self.calls if a == 'apply'], ['mini'])
+        self.calls.clear()
+        self.assertEqual(rollout.resume(before['id'], self.revision), 0)
+        self.assertTrue(all(a == 'inspect' for _, a in self.calls))
+
+    def test_resume_cleanup_only_and_configuration_conflict_preserve_receipt(self):
+        self.failures.add(('mini', 'release'))
+        self.assertEqual(rollout.run(self.revision, new_only=True), 1)
+        before = self.record()
+        self.observations['mini']['config'] = 'changed'
+        self.calls.clear()
+        with self.assertRaisesRegex(ValueError, 'configuration'):
+            rollout.resume(before['id'], self.revision)
+        self.assertEqual(before, self.record())
+        self.assertTrue(all(a == 'inspect' for _, a in self.calls))
+        self.observations['mini']['config'] = 'config-mini'
+        self.failures.clear()
+        self.calls.clear()
+        self.assertEqual(rollout.resume(before['id'], self.revision), 0)
+        self.assertFalse(any(a in ('reserve', 'apply') for _, a in self.calls))
+
+    def test_resume_config_conflict_at_execute_keeps_success_and_receipt(self):
+        self.failures.add(('mini', 'apply'))
+        self.assertEqual(rollout.run(self.revision, new_only=True), 1)
+        before = self.record()
+        self.assertEqual(before['nodes']['hub']['status'], 'installed')
+        self.failures.clear()
+        self.observations['mini']['config'] = 'changed'
+        self.calls.clear()
+        with self.assertRaisesRegex(ValueError, 'configuration'):
+            rollout.resume(before['id'], self.revision)
+        self.assertEqual(before, self.record())
+        self.assertTrue(all(a == 'inspect' for _, a in self.calls))
+        self.observations['mini']['config'] = 'config-mini'
+        self.failures.add(('mini', 'reserve'))
+        self.assertEqual(rollout.resume(before['id'], self.revision), 1)
+        self.assertEqual(self.record()['nodes']['hub']['status'], 'installed')
+        self.assertIn(f"service release resume --id {before['id']} --expect {self.revision}", self.output.getvalue())
+        self.failures.clear()
+        self.calls.clear()
+        self.assertEqual(rollout.resume(before['id'], self.revision), 0)
+        self.assertEqual([n for n, a in self.calls if a == 'apply'], ['mini'])
+
+    def test_strict_operations_respect_coordinator_lock(self):
+        self.assertEqual(rollout.run(self.revision, new_only=True), 0)
+        record = self.record()
+        calls = list(self.calls)
+        with rollout.release_lock():
+            for action in (lambda: rollout.run(self.revision, new_only=True),
+                           lambda: rollout.resume(record['id'], self.revision)):
+                with self.assertRaisesRegex(ValueError, 'Another topology release'):
+                    action()
+        self.assertEqual(calls, self.calls)
+        self.assertEqual(record, self.record())
+
+    def test_archive_failure_preserves_completed_current(self):
+        self.assertEqual(rollout.run(self.revision, new_only=True), 0)
+        before = self.record()
+        path = rollout.history_path(before['id'])
+        path.parent.mkdir()
+        path.write_text('{}')
+        self.calls.clear()
+        with self.assertRaisesRegex(ValueError, 'conflicts'):
+            rollout.run(self.revision, new_only=True)
+        self.assertEqual(before, self.record())
+        self.assertTrue(all(a == 'inspect' for _, a in self.calls))
+        path.unlink()
+        with mock.patch.object(rollout.rollout_node, 'write_record', side_effect=OSError('archive write failed')):
+            with self.assertRaisesRegex(OSError, 'archive write failed'):
+                rollout.run(self.revision, new_only=True)
+        self.assertEqual(before, self.record())
+
+    def test_abandoned_cannot_resume_and_allows_new(self):
+        self.failures.add(('mini', 'apply'))
+        self.assertEqual(rollout.run(self.revision, new_only=True), 1)
+        record = self.record()
+        self.failures.clear()
+        self.assertEqual(rollout.abandon(record['id'], self.revision, 'replace'), 0)
+        before = self.record()
+        calls = list(self.calls)
+        with self.assertRaisesRegex(ValueError, 'abandonment'):
+            rollout.resume(record['id'], self.revision)
+        self.assertEqual(before, self.record())
+        self.assertEqual(calls, self.calls)
+        self.assertEqual(rollout.run(self.revision, new_only=True), 0)
+        self.assertNotEqual(record['id'], self.record()['id'])
+
     def test_complete_topology_includes_mini_and_excludes_retired(self):
         self.assertEqual(rollout.run(self.revision), 0)
         self.assertEqual(set(self.record()['nodes']), {'laptop', 'mini', 'hub'})
@@ -338,7 +467,7 @@ class TopologyReleaseTests(unittest.TestCase):
             self.assertEqual(rollout.main(['status']), 0)
         self.assertIn('reservation cleanup pending', output.getvalue())
         self.assertIn('fixture failure', output.getvalue())
-        self.assertIn('service deploy --expect ' + self.revision, output.getvalue())
+        self.assertIn(f"service release resume --id {self.record()['id']} --expect {self.revision}", output.getvalue())
         before = self.record()
         with self.assertRaisesRegex(deploy.PreflightError, 'Only incomplete'):
             self.abandon(before)
