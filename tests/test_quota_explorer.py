@@ -108,7 +108,7 @@ ui.renderQuotaAccounts({codex:{accounts:[missingPlan]}});
 assert(descendants(table).find(n => n.dataset.observationKey === planDetails.dataset.observationKey).open);
 assert(descendants(table).find(n => n.className === 'quota-observation-details').open);
 assert(!table.textContent.includes('套餐未核实'));
-assert(table.textContent.includes('配额与读数套餐来自此次账号操作查询'));
+assert(table.textContent.includes('配额与套餐来自此次账号操作查询'));
 ui.quotaFilter.search='Pro (Max)';
 assert(ui.quotaMatches({key:'codex'},missingPlan));
 ui.quotaFilter.search='';

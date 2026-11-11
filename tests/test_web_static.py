@@ -13,7 +13,7 @@ def app_source():
 
 
 class WebStaticTests(unittest.TestCase):
-    def test_codex_plan_sources_keep_tiers_and_observation_clocks_separate(self):
+    def test_codex_latest_plan_replaces_old_login_plan(self):
         script = r'''
 const assert = require('assert');
 function node(tag) {
@@ -46,7 +46,7 @@ for (const value of ['toString', '__proto__', 'constructor']) {
 const cell = quota.quotaPlanCell(known, codex);
 assert.equal(cell.children[0].textContent, 'Pro (Max)');
 assert.ok(!cell.children.some(child => child.tagName === 'DETAILS'));
-assert.ok(cell.textContent.includes('记录不同'));
+assert.equal(cell.textContent, 'Pro (Max)');
 const detailText = account => quota.quotaUpdatedCell(codex, account, false, null).textContent;
 const details = quota.quotaUpdatedCell(codex, known, false, null).children[0];
 assert.ok(details && !details.open);
@@ -55,10 +55,10 @@ assert.equal(details.textContent.split(known.updated_at).length - 1, 1);
 assert.equal(details.textContent.split('主动查询').length - 1, 1);
 assert.ok(details.textContent.includes('来源机器：source-machine'));
 assert.ok(details.textContent.includes('promax'));
-assert.ok(details.textContent.includes('本地登录信息'));
-assert.ok(details.textContent.includes('更新时间未知'));
+assert.ok(!details.textContent.includes('本地登录信息'));
+assert.ok(!details.textContent.includes('更新时间未知'));
 assert.ok(details.textContent.includes(known.updated_at));
-assert.ok(details.textContent.includes('原因尚未核实'));
+assert.ok(!details.textContent.includes('原因尚未核实'));
 assert.ok(!cell.textContent.includes('plan 不一致'));
 for (const reading_plan of ['pro', null]) {
   const text = detailText({...known, account_plan: 'pro', reading_plan});
@@ -75,7 +75,7 @@ assert.ok(quota.quotaPlanCell(legacyAccount, codex).textContent.includes('来源
 assert.ok(!quota.quotaPlanCell({...known, reading_plan:null}, codex).textContent.includes('登录信息'));
 assert.ok(quota.quotaPlanCell({...known, presence:'remembered'}, codex).textContent.includes('历史记录'));
 assert.ok(legacy.includes('来源未记录'));
-assert.ok(legacy.includes('配额记录中的套餐未取得'));
+assert.ok(!legacy.includes('配额记录中的套餐未取得'));
 assert.ok(!legacy.includes('未提供套餐'));
 // A newer account-action observation replaces the plan and numbers together.
 quota.updateCodexQuotaReadings([{account_id: 'acct', email: 'fixture@example.test',
@@ -86,13 +86,13 @@ assert.equal(after.account_plan, 'promax');
 assert.equal(after.seven_day_used_pct, 1);
 assert.equal(after.updated_at, '2026-11-05T11:00:00Z');
 assert.equal(after.credential_plan, 'pro');
-assert.ok(detailText(after).includes('更新时间未知'));
+assert.ok(!detailText(after).includes('更新时间未知'));
 for (const presence of ['in_use', 'remembered']) {
   const fresh = quota.quotaDisplayReading(codex, {...before, presence});
-  assert.ok(quota.quotaPlanCell(fresh, codex).textContent.includes('记录不同'));
+  assert.equal(quota.quotaPlanCell(fresh, codex).textContent, 'Pro (Max)');
   assert.ok(!quota.quotaPlanCell(fresh, codex).textContent.includes('历史记录'));
   assert.ok(detailText(fresh).includes('原始值：promax'));
-  assert.ok(detailText(fresh).includes('原始值：pro'));
+  assert.ok(!detailText(fresh).includes('原始值：pro）'));
   const loginOnly = {...fresh, reading_plan:null, account_plan:'pro'};
   assert.ok(!quota.quotaPlanCell(loginOnly, codex).textContent.includes('登录信息'));
 }
@@ -102,6 +102,20 @@ quota.quotaFilter.search = 'Pro (Max)';
 assert.ok(quota.quotaMatches(codex, before));
 quota.quotaFilter.search = 'Pro (More)';
 assert.ok(!quota.quotaMatches(codex, before));
+quota.quotaFilter.search = 'prolite';
+assert.ok(!quota.quotaMatches(codex, {...before, credential_plan: 'prolite'}));
+// A later downgrade is also authoritative; an older receipt cannot undo it.
+quota.updateCodexQuotaReadings([{account_id: 'acct', email: 'fixture@example.test',
+  operation: {before: {observed_at:'2026-11-05T11:00:00Z', plan:'promax'}},
+  last_quota: {observed_at:'2026-11-05T13:00:00Z', plan:'prolite', seven_day_used_pct:4}}]);
+const downgraded = quota.quotaDisplayReading(codex, after);
+assert.equal(downgraded.account_plan, 'prolite');
+assert.equal(quota.quotaPlanCell(downgraded, codex).textContent, 'Pro');
+assert.equal(downgraded.updated_at, '2026-11-05T13:00:00Z');
+quota.quotaFilter.search = 'promax';
+assert.ok(!quota.quotaMatches(codex, {...after, credential_plan:'promax'}));
+quota.quotaFilter.search = 'prolite';
+assert.ok(quota.quotaMatches(codex, after));
 '''
         result = subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1196,8 +1210,8 @@ process.stdout.write(JSON.stringify({
         self.assertNotIn("quotaBandPill", cell)
         self.assertIn('cell.appendChild(reset)', cell)
 
-    def test_plan_source_details_explain_only_actual_raw_record_differences(self):
-        """Missing, historical and equal sources must not imply a conflict."""
+    def test_plan_details_show_only_the_selected_source(self):
+        """Old login metadata must not compete with the selected quota plan."""
         script = r'''
 const fs = require("fs");
 
@@ -1252,7 +1266,7 @@ global.document = {
 require("./web/app.js")();
 
 function reading(account) {
-  const cell = window.AgentMonitor.quotaUpdatedCell({}, account, false, null);
+  const cell = window.AgentMonitor.quotaUpdatedCell({key:"codex"}, account, false, null);
   const marker = descendants(cell)
     .find((node) => node.tagName === "SPAN" && node.textContent.includes("两份套餐记录不同"));
   return {
@@ -1276,9 +1290,7 @@ process.stdout.write(JSON.stringify({
   agree: reading({
     ...known, account_plan: "pro", reading_plan: "pro", credential_plan: "pro",
   }),
-  // Only the credential has a plan, and the derived value copies it. Comparing
-  // account_plan against the credential here would compare "prolite" with
-  // itself — silent for the wrong reason, and indistinguishable from working.
+  // Login metadata is a fallback only when the quota reading has no plan.
   credentialOnly: reading({
     ...known, account_plan: "prolite", reading_plan: null, credential_plan: "prolite",
   }),
@@ -1321,36 +1333,20 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
 
-        # The raw difference remains accessible, without prescribing recovery.
-        disagree = payload["disagree"]
-        self.assertIsNotNone(disagree["marker"])
-        visible = disagree["text"]
-        self.assertIn("原因尚未核实", visible)
-        self.assertIn("Pro Lite", visible)
-        self.assertIn("Pro", visible)
-        self.assertIn("配额记录", visible)
-        self.assertIn("本地登录信息", visible)
-        self.assertNotIn("plan 不一致", visible)
-        # The claim is that they differ, not that one of them is stale: which
-        # is older is not knowable from the pair, and the sample that prompted
-        # this had the reading newer than the credential file.
-        for word in ("早于", "过期", "陈旧", "stale"):
-            self.assertNotIn(word, disagree["marker"]["title"])
-
-        # Every other state is silent — and silence here is not a claim of
-        # agreement, which is exactly why none of them may raise the marker.
-        for case in (
-            "agree",
-            "credentialOnly",
-            "readingOnly",
-            "olderExporter",
-            "signedOut",
-            "unstamped",
-            "remembered",
-            "nonString",
-        ):
+        selected = payload["disagree"]
+        self.assertIsNone(selected["marker"])
+        self.assertIn("配额记录中的套餐：Pro (More)", selected["text"])
+        self.assertNotIn("原始值：prolite", selected["text"])
+        self.assertNotIn("本地登录信息", selected["text"])
+        self.assertNotIn("记录不同", selected["planText"])
+        fallback = payload["credentialOnly"]["text"]
+        self.assertIn("本地登录信息中的套餐：Pro（原始值：prolite）", fallback)
+        self.assertIn("更新时间未知", fallback)
+        self.assertNotIn("配额记录中的套餐", fallback)
+        for case, value in payload.items():
             with self.subTest(case=case):
-                self.assertIsNone(payload[case]["marker"])
+                self.assertIsNone(value["marker"])
+                self.assertNotIn("记录不同", value["planText"])
 
         # No plan at all keeps the existing placeholder (ux-contract G4c);
         # a credential-side plan does not get promoted into the empty slot.

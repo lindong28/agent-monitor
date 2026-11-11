@@ -200,7 +200,7 @@
     account = quotaDisplayReading(provider, account);
     const text = [account.account_label, account.account_id, account.account_profile, quotaAccountName(account),
       account.account_plan, quotaPlanLabel(account.account_plan, provider),
-      account.reading_plan, account.credential_plan, ...(account.machines || [])]
+      ...(account.machines || [])]
       .filter(Boolean).join(" ").toLowerCase();
     return terms.every((term) => text.includes(term));
   }
@@ -1551,7 +1551,6 @@
       source.className = "quota-history-note";
       source.textContent = (quotaPresence(account) === "remembered" && account.quota_source !== "account_action")
         || (account.quota_status && account.quota_status !== "current") ? "历史记录"
-        : quotaPlanSourcesDisagree(account) ? "记录不同"
         : typeof account.reading_plan === "string" && account.reading_plan ? ""
         : typeof account.credential_plan === "string" && account.credential_plan ? ""
         : "来源未记录";
@@ -1565,7 +1564,7 @@
         || (quotaPresence(account) === "remembered" && account.quota_source !== "account_action")
         || !account.account_plan || account.quota_status === "no_subscription"
         || account.plan_verification === "unverified"
-        || (provider.key !== "codex" && !quotaPlanSourcesDisagree(account))) return;
+        || provider.key !== "codex") return;
     const note = (text) => {
       const item = document.createElement("span");
       item.className = "quota-history-note";
@@ -1575,42 +1574,9 @@
     const rawPlan = (value) => typeof value === "string" && value ? value : null;
     const reading = rawPlan(account.reading_plan), credential = rawPlan(account.credential_plan);
     const describe = (value) => `${quotaPlanLabel(value, provider)}（原始值：${value}）`;
-    // Observation time and source are already shown by this disclosure.
-    note(reading ? `配额记录中的套餐：${describe(reading)}。` : "配额记录中的套餐未取得。");
-    note(credential ? `本地登录信息：${describe(credential)}；更新时间未知。` : "本地登录信息中的套餐未取得。");
-    if (!reading && !credential) note("保存的套餐来源未记录，不代表当前订阅。");
-    if (quotaPlanSourcesDisagree(account)) {
-      note("两份套餐记录不同，原因尚未核实；不能据此判断升级失败或需要重新登录。");
-    }
-  }
-
-  // Whether the row's two plan facts are both present and disagree.
-  //
-  // Three states, not two, and the third one is why this reads the two raw
-  // fields rather than comparing `account_plan` against the credential: a
-  // reading that carries no plan falls back to the credential one, which would
-  // make a lone source compare equal to itself and be indistinguishable from
-  // two sources that agree. Signed out, an unreadable credential file and an
-  // API-key machine leave one source; a remembered row and an exporter older
-  // than this field leave none. Fewer than two either way, so nothing is
-  // compared.
-  //
-  // This is a raw-record difference, not a subscription or login failure.
-  // Missing sources are stated separately in the accessible source details.
-  // See docs/references/metrics.md#account-attribution-and-quota-plans.
-  function quotaPlanSourcesDisagree(account) {
-    if (account.account_state !== "known") {
-      return false;
-    }
-    const reading = account.reading_plan;
-    const credential = account.credential_plan;
-    if (typeof reading !== "string" || !reading) {
-      return false;
-    }
-    if (typeof credential !== "string" || !credential) {
-      return false;
-    }
-    return reading !== credential;
+    if (reading) note(`配额记录中的套餐：${describe(reading)}。`);
+    else if (credential) note(`本地登录信息中的套餐：${describe(credential)}；更新时间未知。`);
+    else note("保存的套餐来源未记录，不代表当前订阅。");
   }
 
   function quotaAccountCell(provider, account) {
@@ -2073,8 +2039,8 @@
       const context = document.createElement("span");
       context.className = "quota-history-note";
       context.textContent = account.reading_plan
-        ? "配额与读数套餐来自此次账号操作查询；机器归属与凭据套餐来自机器采集。套餐信息不代表当前订阅权益。"
-        : "配额来自此次账号操作查询；机器归属与可用的凭据套餐来自机器采集。套餐信息不代表当前订阅权益。";
+        ? "配额与套餐来自此次账号操作查询；机器归属来自机器采集。套餐信息不代表当前订阅权益。"
+        : "配额来自此次账号操作查询；未取得查询套餐时使用机器采集的登录信息。套餐信息不代表当前订阅权益。";
       details.appendChild(context);
     }
     if (!account.reading_from) {
@@ -2309,5 +2275,5 @@
     initialQuotaHistoryExpanded = Boolean(options.rememberedExpanded);
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
-  return { updateQuotaMachineState, refreshQuotaMachineStates, renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaPlanSourcesDisagree, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaResetCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
+  return { updateQuotaMachineState, refreshQuotaMachineStates, renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaResetCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
 });
