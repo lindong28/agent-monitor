@@ -36,6 +36,16 @@ state.batch = {id:'batch',created_at:'2026-01-01T00:00:00Z',items:[{profile_id:'
 render();
 assert(controls.batchNext.disabled && controls.batchRetry.disabled);
 assert(nodes['#codex-batch-continuation-blocked'].textContent.includes('刷新配额'));
+account.last_quota={observed_at:'2020-01-01T00:00:00Z',seven_day_resets_at:1600000000,seven_day_used_pct:100};
+account.restrictions.quota.created_at='2020-01-01T00:00:00Z'; render();
+assert(!controls.batchNext.disabled && !controls.batchRetry.disabled, 'expired history permits a fresh send preflight');
+account.last_quota.observed_at=new Date().toISOString();render();
+assert(controls.batchNext.disabled && controls.batchRetry.disabled, 'a fresh denial stays effective even with an old reset timestamp');
+account.last_quota={observed_at:'2020-01-01T00:00:00Z',five_hour_used_pct:100,five_hour_resets_at:1600000000,
+ seven_day_used_pct:20,seven_day_resets_at:4102444800};render();
+assert(!controls.batchNext.disabled && !controls.batchRetry.disabled, 'an unfilled weekly window does not block an expired five-hour hold');
+account.last_quota.seven_day_used_pct=100;render();assert(controls.batchNext.disabled);
+account.last_quota=null;
 state.selectedIds.add('b'); render();
 assert(controls.batchNext.disabled, 'mixed selection must explain held members');
 for (const restrictions of [{authentication:{}},{unknown:{}},{rate_limit:{}},{login_rate_limit:{}}]) {

@@ -64,6 +64,56 @@ class AccountActionsTests(unittest.TestCase):
         pause = self.manager.list().get("upstream_pause")
         return self.manager.resume(account["id"], account["operation"]["id"], pause["id"] if pause else None)
 
+    def test_expired_quota_hold_rechecks_before_sending(self):
+        for index, scenario in enumerate(("quota_allowed", "quota_denied", "prequota_failure", "success")):
+            with self.subTest(scenario=scenario):
+                self.manager = ca.Manager(self.root / f"expired-{index}" / "profiles")
+                self.addCleanup(self.manager.close)
+                self.spawned = []
+                account = self.account()
+                directory = self.manager.directory(account["id"])
+                record = self.manager.read(directory)
+                record["restrictions"] = {"quota": {"created_at": "2020-01-01T00:00:00Z"}}
+                record["last_quota"] = {"observed_at": "2020-01-01T00:00:00Z",
+                    "seven_day_resets_at": 1600000000, "seven_day_used_pct": 100,
+                    "codex_quota_available": True, "ordinary_usage_allowed": False}
+                self.manager.save(directory, record)
+                self.scenario = scenario
+                self.manager.start(account["id"])
+                result = self.wait(account["id"])
+                self.assertTrue(self.spawned, "expired history must reach the fresh quota preflight")
+                methods = [c.get("method") for c in self.calls(account)]
+                self.assertIn("account/rateLimits/read", methods)
+                if scenario == "quota_allowed":
+                    self.assertEqual(result["operation"]["message_status"], "succeeded")
+                    self.assertNotIn("quota", result.get("restrictions", {}))
+                    self.assertLess(methods.index("account/rateLimits/read"), methods.index("turn/start"))
+                else:
+                    self.assertNotIn("turn/start", methods)
+                    self.assertEqual(result["operation"]["message_status"], "not_sent")
+                    self.assertIn("quota", result["restrictions"])
+
+    def test_expired_quota_admission_uses_only_exhausted_windows(self):
+        record = {"restrictions": {"quota": {}}, "operation": {"refresh_only": False},
+                  "last_quota": {"observed_at": "2020-01-01T00:00:00Z",
+                    "five_hour_used_pct": 100, "five_hour_resets_at": 1600000000,
+                    "seven_day_used_pct": 20, "seven_day_resets_at": 4102444800}}
+        record["restrictions"]["quota"] = {"category": "usageLimitExceeded"}
+        ca.Manager.check_restrictions(record)
+        record["last_quota"]["seven_day_used_pct"] = 100
+        with self.assertRaises(ca.ActionError):
+            ca.Manager.check_restrictions(record)
+        record["last_quota"]["seven_day_resets_at"] = 1600000000
+        ca.Manager.check_restrictions(record)
+        for restriction in ("authentication", "unknown", "rate_limit", "login_rate_limit"):
+            record["restrictions"][restriction] = {"category": restriction}
+            with self.assertRaises(ca.ActionError):
+                ca.Manager.check_restrictions(record)
+            record["restrictions"].pop(restriction)
+        record["last_quota"]["observed_at"] = "2026-11-11T00:00:00Z"
+        with self.assertRaises(ca.ActionError):
+            ca.Manager.check_restrictions(record)
+
     def test_shutdown_refuses_new_account_work(self):
         account = self.account()
         self.manager.close()

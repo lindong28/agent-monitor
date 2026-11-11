@@ -103,7 +103,7 @@ TURN_FAILURES = {
 RESTRICTION_DETAILS = {
     "authentication": "认证被拒绝，已暂停此账号操作。请先核对账号状态；清除登录态不会解除暂停。",
     "unknown": "上次操作结果未能安全确认，已暂停此账号。请核对原始结果后明确解除本地暂停；不会自动重发。",
-    "quota": "服务端明确限制了额度使用，已暂停发送。可仅刷新配额；只有服务端明确允许使用后才解除此暂停，0% 或重置时间经过不代表恢复。",
+    "quota": "服务端明确限制了额度使用，已暂停发送。可仅刷新配额；旧读数的重置时间已过时可发起发送并复查配额；仅在服务端明确允许后发送，0% 或时间经过不代表恢复。",
     "rate_limit": "消息请求遇到限流，已暂停此账号操作。请按服务端指引等待，再解除本地限流暂停。",
     "login_rate_limit": "登录服务遇到限流，已暂停此账号操作。请按服务端指引等待，再解除本地限流暂停。",
 }
@@ -125,6 +125,25 @@ def restriction_key(failure):
 def quota_denied(reading):
     return (reading.get("ordinary_usage_allowed") is False or reading.get("spend_control_reached") is True
             or reading.get("rate_limit_reached_type") is not None)
+
+
+def expired_quota_hold(record):
+    """An old denial can require a fresh preflight without denying admission."""
+    reading = record.get("last_quota") or {}
+    if "quota" not in record.get("restrictions", {}):
+        return False
+    resets = [reading.get(prefix + "_resets_at") for prefix in ("five_hour", "seven_day")
+              if type(reading.get(prefix + "_used_pct")) in (int, float)
+              and reading[prefix + "_used_pct"] >= 100]
+    if not resets:
+        reset = reading.get("seven_day_resets_at")
+        resets = [reset if reset is not None else reading.get("five_hour_resets_at")]
+    try:
+        observed = datetime.fromisoformat(reading["observed_at"].replace("Z", "+00:00")).timestamp()
+        return all(type(reset) in (int, float) and math.isfinite(reset)
+                   and observed < reset <= time.time() for reset in resets)
+    except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+        return False
 
 
 def safe_protocol_id(value):
@@ -575,7 +594,7 @@ class Manager:
             raise ActionError("此账号已由用户停用，未发出上游请求。", 409, "accountDisabled")
         restrictions = record.get("restrictions", {})
         for key in RESTRICTION_DETAILS:
-            if key in restrictions and not (key == "quota" and (record["operation"]["refresh_only"] or record["operation"].get("login_only"))):
+            if key in restrictions and not (key == "quota" and (record["operation"]["refresh_only"] or record["operation"].get("login_only") or expired_quota_hold(record))):
                 raise ActionError(RESTRICTION_DETAILS[key], 409, "locallyPaused")
 
     def directory(self, profile_id):
@@ -1445,6 +1464,7 @@ class Manager:
                         migration.pause("previousAccountFailure")
                     finally:
                         migration.close()
+            recheck_quota = expired_quota_hold(record)
             self.check_restrictions(record)
             recovery = job.get("login_recovery") or {}
             def check_account_hold():
@@ -1586,11 +1606,13 @@ class Manager:
             deadline = time.monotonic() + SEND_SECONDS
             before = quota_reading(rpc.request("account/rateLimits/read", {}, min(deadline, time.monotonic() + 15)), record["account_id"])
             self.update(directory, record, before=before)
-            self.observe_permission(directory, record, before)
+            self.observe_permission(directory, record, before, explicit=recheck_quota)
             if not before["codex_quota_available"]:
                 raise ActionError("发送前未取得目标 Codex 配额，未发送消息。可仅刷新配额重查。", 502)
             if quota_denied(before):
                 raise ActionError("发送前服务端明确限制了额度使用；本次未发送消息，可仅刷新配额查看。", 409, "usageLimitExceeded")
+            if recheck_quota and before.get("ordinary_usage_allowed") is not True:
+                raise ActionError("本次配额查询未明确允许使用，未发送消息；已有额度限制保留。", 502, "quotaPermissionUnknown")
             if any(before.get(key) is not None and before[key] >= 100 for key in ("five_hour_used_pct", "seven_day_used_pct")):
                 raise ActionError("发送前目标窗口已显示 100%，本次保守跳过发送；这不是服务端明确拒绝。可稍后仅刷新配额。", 409, "quotaAtCapacity")
             configuration = rpc.request("config/read", {"includeLayers": True, "cwd": str(directory / "work")},

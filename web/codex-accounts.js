@@ -38,9 +38,20 @@ export function accountNeedsLogin(account) {
     || account?.operation?.failure?.category === "needsLogin");
 }
 
+export function expiredQuotaHold(account) {
+  const reading = account.last_quota;
+  const resets = ["five_hour", "seven_day"].filter(prefix =>
+    typeof reading?.[prefix + "_used_pct"] === "number" && reading[prefix + "_used_pct"] >= 100)
+    .map(prefix => reading[prefix + "_resets_at"]);
+  if (!resets.length) resets.push(reading?.seven_day_resets_at ?? reading?.five_hour_resets_at);
+  const observed = Date.parse(reading?.observed_at);
+  return Boolean(account.restrictions?.quota && resets.every(reset => typeof reset === "number"
+    && Number.isFinite(reset) && observed < reset * 1000 && reset * 1000 <= Date.now()));
+}
+
 export function accountSendBlocked(account) {
   return Boolean(account.disabled || account.account_quota_pause || accountNeedsLogin(account)
-    || Object.keys(account.restrictions || {}).length);
+    || Object.keys(account.restrictions || {}).some(key => key !== "quota" || !expiredQuotaHold(account)));
 }
 
 function quotaWindowExpired(reading) {
@@ -74,7 +85,8 @@ function quotaHoldMessage(account, pause) {
     ? `（记录于 ${timestamp(since)}）` : "";
   const next = pause ? "请先查看本页的通道暂停与检查。"
     : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "";
-  return `发送仍因此前额度限制暂停${recorded}。${evidence}${next}`;
+  return expiredQuotaHold(account) ? `此前额度限制${recorded}的窗口已过。${evidence}发起发送时将先复查当前配额。${next}`
+    : `发送仍因此前额度限制暂停${recorded}。${evidence}${next}`;
 }
 
 export function quotaFailureExplanation(account, sharedPause, accounts = []) {
@@ -673,12 +685,14 @@ export function init({ autoLoad = true } = {}) {
         const next = upstreamPause ? "请先查看本页的通道暂停与检查。"
           : accountRefreshBlocked(account) ? "请先处理此账号的其他限制，再刷新配额。"
           : "请点击「刷新配额」检查是否恢复；确认可用后再发送。";
-        card.append(element("p", `${windowExpired ? "上次配额窗口已过，当前额度待复查。" : "此前额度受限，发送已暂停。"}${next}`, "quota-scope account-send-guidance"));
+        card.append(element("p", expiredQuotaHold(account) && !upstreamPause && !accountRefreshBlocked(account)
+          ? "上次配额窗口已过，可发起发送；发送前将查询当前配额，确认可用后发送。"
+          : `${windowExpired ? "上次配额窗口已过，当前额度待复查。" : "此前额度受限，发送已暂停。"}${next}`, "quota-scope account-send-guidance"));
       }
       if (op?.failure?.category === "locallyPaused" && op.failure.stage === "queued" && !op.refresh_only && !op.login_only && op.message_status === "not_sent") {
         card.append(element("p", "本次未发送：被已有的本地限制拦截，未查询新配额。", "quota-scope"));
       }
-      if (restrictionDetails.length) heading.append(element("span", (accountNeedsLogin(account) || account.restrictions?.authentication) ? "登录态不可用" : account.restrictions?.quota ? "发送受限" : "账号有限制", "codex-batch-result"));
+      if (restrictionDetails.length) heading.append(element("span", (accountNeedsLogin(account) || account.restrictions?.authentication) ? "登录态不可用" : account.restrictions?.quota ? (expiredQuotaHold(account) ? "发送前复查" : "发送受限") : "账号有限制", "codex-batch-result"));
       if (op && !(op.refresh_only && op.stage === "succeeded")) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送"}：${sendResultLabel(op)} · ${timestamp(op.recovery_pause_id && op.stage === "succeeded" ? op.after?.observed_at : op.started_at)}`, "quota-scope account-last-result"));
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "详情与维护"));
@@ -1033,7 +1047,7 @@ export function renderAccountBatch(state, controls) {
     if (continuationReason) { continuationReason.textContent = ""; continuationReason.hidden = true; }
     const quotaUnsent = batch.items.flatMap(item => {
       const account = accounts.find(value => value.id === item.profile_id);
-      return account && account.eligible !== false && (!item.operation || item.operation.message_status === "not_sent") && account.restrictions?.quota ? [account] : [];
+      return account && account.eligible !== false && (!item.operation || item.operation.message_status === "not_sent") && account.restrictions?.quota && !expiredQuotaHold(account) ? [account] : [];
     });
     const loginUnsent = batch.items.flatMap(item => {
       const account = accounts.find(value => value.id === item.profile_id);
