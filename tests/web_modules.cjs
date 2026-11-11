@@ -213,7 +213,7 @@ assert.match(resetUi.resetText(3, 2000), /预计/);
     selectedIds:new Set(['paused']),batch:null,busy:false,upstreamPause:null};
   renderAccountBatch(state,controls);
   assert.equal(controls.batchStart.disabled,true);
-  assert.match(controls.blockedReason.textContent,/修复登录/);
+  assert.match(controls.blockedReason.textContent,/恢复此账号的额度查询/);
   state.batch={id:'b',created_at:'2026-11-07T00:00:00Z',items:[{profile_id:'paused',operation:{message_status:'not_sent'}}]};
   renderAccountBatch(state,controls);
   assert.equal(controls.batchRetry.disabled,true);

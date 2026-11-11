@@ -561,7 +561,18 @@ const text = n => n.textContent + n.children.map(text).join(" ");
 const visible = n => n.tag === "details" && !n.open ? text(n.children[0]) : n.textContent + n.children.map(visible).join(" ");
 renderAccounts(values);
 const list = nodes["#codex-account-list"]; let card = list.children[0];
-assert(!visible(card).includes("7 天"), "quota comparison belongs in the table");
+values[0].last_quota={observed_at:"2026-11-10T00:00:00Z",seven_day_used_pct:19};
+renderAccounts(values);
+assert(visible(list.children[0]).includes("7 天 19%"), "a newer saved quota wins over an older operation reading");
+const originalNow=Date.now; let now=Date.now(); Date.now=()=>now;
+values[0].last_quota.five_hour_resets_at=(now+1000)/1000;
+renderAccounts(values);
+assert(!visible(list.children[0]).includes("窗口已过期"));
+now+=2000; renderAccounts(values);
+assert(visible(list.children[0]).includes("窗口已过期"), "unchanged snapshot refreshes the five-hour expiry state");
+Date.now=originalNow;
+delete values[0].last_quota; renderAccounts(values); card=list.children[0];
+assert(visible(card).includes("7 天 8%"), "latest quota result is readable without opening details");
 assert(text(card.querySelector("details")).includes(oldTime), "operation observation time remains in details");
 assert(text(card.querySelector("details")).includes("本次抽取的消息：现在几点了？"));
 assert(!text(list.children[1].querySelector("details")).includes("抽取的消息"), "legacy records must not invent selected text");
@@ -576,13 +587,15 @@ const cardButtons = n => {
 };
 const loginButtons = cardButtons(list.children[1]);
 assert(loginButtons.some(button => button.textContent === "单独登录"), "invalid saved login must expose re-login");
-assert(loginButtons.filter(button => ["向此账号发送一条消息", "刷新配额"].includes(button.textContent)).every(button => button.disabled), "invalid saved login must block upstream actions");
+assert(loginButtons.filter(button => ["发送一条消息", "刷新配额"].includes(button.textContent)).every(button => button.disabled), "invalid saved login must block upstream actions");
 assert(visible(list.children[1]).includes("需要重新登录"), "invalid saved login must be visible in the account status");
 assert(text(list.children[1]).includes("最近配额查询") || text(list.children[1]).includes("最近发送操作"));
-assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（0）");
+assert.equal(nodes["#codex-refresh-selected"].textContent, "刷新所选配额（0）");
 assert.equal(loginButtons.find(button => button.textContent === "单独登录").disabled, false);
 assert.equal(cardButtons(list.children[0]).filter(button => button.textContent === "停用此账号").length, 1, "account toggle is visible without opening details");
-assert(!visible(list.children[0].querySelector("details")).includes("停用此账号"), "account toggle is not duplicated in the maintenance disclosure");
+assert(text(list.children[0].querySelector("details")).includes("停用此账号"), "disabling stays in maintenance");
+assert(!visible(list.children[0]).includes("停用此账号"), "disabling does not compete with frequent actions");
+assert(visible(list.children[0]).includes("发送一条消息"), "single-account send is discoverable on the card");
 values[0].disabled = true; renderAccounts(values);
 assert(visible(list.children[0]).includes("重新启用此账号"), "disabled account exposes the enable action");
 assert.equal(cardButtons(list.children[0]).filter(button => button.textContent === "重新启用此账号").length, 1);
@@ -621,7 +634,7 @@ values[1].operation = {stage: "succeeded", login_only: true, message_status: "no
 renderAccounts(values);
 assert(!cardButtons(list.children[1]).some(button => button.textContent === "单独登录"));
 assert(!cardButtons(list.children[1]).find(button => button.textContent === "刷新配额").disabled);
-assert.equal(nodes["#codex-refresh-selected"].textContent, "查询所选配额（0）");
+assert.equal(nodes["#codex-refresh-selected"].textContent, "刷新所选配额（0）");
 assert(!text(list).includes("将在操作时检查有效性"), "common saved-login explanation belongs outside the repeated records");
 card.querySelector("details").open = true;
 renderAccounts(values);
@@ -728,7 +741,7 @@ const sections = list.children[0].querySelector("details").querySelector("div").
 assert(sections.find(s=>text(s.children[0]) === "历史记录") && text(sections.find(s=>text(s.children[0]) === "历史记录")).includes("历史请求错误摘要（已脱敏）：session expired"));
 assert(!sections.find(s=>text(s.children[0]) === "技术细节"), "recovered operation must not show stale failure as current diagnostics");
 assert(!cardButtons(list.children[0]).find(button => button.textContent === "刷新配额").disabled);
-assert(cardButtons(list.children[0]).find(button => button.textContent === "向此账号发送一条消息").disabled);
+assert(cardButtons(list.children[0]).find(button => button.textContent === "发送一条消息").disabled);
 
 // Recreating the controller models both a document reload and SPA re-entry.
 values[0].account_id = "workspace-a";
@@ -833,7 +846,8 @@ assert(nodes["#codex-account-draft-status"].textContent.includes("旧草稿仍�
         tree = Tree()
         tree.feed((ROOT / "web/accounts.html").read_text())
         parents, attrs = tree.locations["codex-batch-status"]
-        self.assertEqual(parents[-1][1]["id"], "codex-batch-panel")
+        self.assertEqual(parents[-1][1]["id"], "codex-batch-continuation")
+        self.assertIn("codex-batch-panel", [attrs.get("id") for _, attrs in parents])
         self.assertEqual(attrs["aria-live"], "polite")
         tree = Tree()
         tree.feed((ROOT / "web/index.html").read_text())
