@@ -63,6 +63,8 @@ class RateLimits:
     ordinary_usage_allowed: Optional[bool] = None
     spend_control_reached: Optional[bool] = None
     rate_limit_reached_type: Optional[str] = None
+    # Same observation clock as the quota windows; absent in passive/old data.
+    reset_credits: Optional[dict] = None
 
 
 USAGE_QUALITIES = frozenset(("unknown", "incomplete", "observed"))

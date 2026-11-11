@@ -1150,7 +1150,7 @@ process.stdout.write(JSON.stringify({
         header = re.search(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", prose).group(1)
         self.assertEqual(
             [re.sub(r"<[^>]+>", "", cell).replace("↕", "").strip() for cell in re.findall(r"<th[^>]*>(.*?)</th>", header)],
-            ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间", "机器", "配额更新"],
+            ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间", "reset 额度", "机器", "配额更新"],
         )
         # Two files decide one thing. The header row is static markup; the cells
         # under it are emitted in QUOTA_COLUMNS order. Reorder one and every
@@ -1467,7 +1467,7 @@ function reading(row) {
     providerPillClass: byClass(row.cells[1], "pill")[0]?.className || "",
     planText: row.cells[2].textContent,
     accountText: row.cells[0].textContent,
-    updateText: row.cells[8].textContent,
+    updateText: row.cells[9].textContent,
     warningTexts: byClass(row, "status-pill")
       .map((node) => node.textContent)
       .filter((text) => text === "余量偏低" || text === "即将用尽"),
@@ -1594,7 +1594,7 @@ process.stdout.write(JSON.stringify({
             },
         )
 
-        self.assertEqual(future["cellCount"], 9)
+        self.assertEqual(future["cellCount"], 10)
         self.assertEqual(future["providerText"], "Claude")
         self.assertIn("agent-claude-code", future["providerPillClass"])
         self.assertEqual(future["planText"], "Max 20×历史记录")
@@ -1965,9 +1965,9 @@ process.stdout.write(JSON.stringify({
             payload["unavailable"],
             payload["onlyRemembered"],
         ):
-            with self.subTest("every rendered row spans nine columns"):
+            with self.subTest("every rendered row spans ten columns"):
                 self.assertTrue(state)
-                self.assertEqual({row["columnTotal"] for row in state}, {9})
+                self.assertEqual({row["columnTotal"] for row in state}, {10})
 
     def test_only_remembered_rows_offer_confirmed_removal(self):
         script = r'''

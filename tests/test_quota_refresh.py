@@ -495,6 +495,15 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(reading.plan, "pro")
         self.assertTrue(reading.updated_at)
 
+    def test_native_and_explicit_home_preserve_reset_credit_response(self):
+        for explicit in (False, True):
+            with self.subTest(explicit_home=explicit):
+                reading = self.codex_cli({"accountId": "account-a", "rateLimits": {
+                    "primary": {"usedPercent": 12, "windowDurationMins": 300}},
+                    "rateLimitResetCredits": {"availableCount": 2, "credits": [
+                        {"status": "available", "expiresAt": 1900000000}]}}, explicit_home=explicit)
+                self.assertEqual(reading.reset_credits, {"available_count": 2, "credits": [{"expires_at": 1900000000}]})
+
     def test_codex_auth_response_retains_uncertainty_without_exposing_upstream_text(self):
         # Shape captured from the node-c CLI's failed quota RPC, with no secrets.
         error = {"code": -32603, "message":

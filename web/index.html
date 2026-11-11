@@ -165,7 +165,7 @@
             <p id="quota-signed-out" class="quota-scope" hidden></p>
             <!-- Focusable and named: on narrower viewports this box is the only
                  way to reach the later columns, and a scroller a keyboard
-                 cannot enter hides part of the nine-column comparison. -->
+                 cannot enter hides part of the ten-column comparison. -->
             <div class="quota-table-wrap" tabindex="0" role="region" aria-label="按账号的配额">
             <table id="quota-accounts" class="quota-table">
               <thead>
@@ -177,6 +177,7 @@
                   <th scope="col"><button type="button" class="quota-sort-button" data-quota-sort="reset" data-quota-window="five_hour">5 小时重置时间 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
                   <th scope="col" class="numeric"><button type="button" class="quota-sort-button" data-quota-sort="usage" data-quota-window="seven_day">7 天已用 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
                   <th scope="col"><button type="button" class="quota-sort-button" data-quota-sort="reset" data-quota-window="seven_day">7 天重置时间 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="numeric">reset 额度</th>
                   <th scope="col">机器</th>
                   <th scope="col"><button type="button" class="quota-sort-button" data-quota-sort="observed">配额更新 <span class="quota-sort-icon" aria-hidden="true">↕</span></button></th>
                 </tr>

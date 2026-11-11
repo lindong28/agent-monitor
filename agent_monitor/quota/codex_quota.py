@@ -8,6 +8,7 @@ from pathlib import Path
 from parsers.accounts import codex_account, quota_identity
 from parsers.codex import select_codex_rate_limit
 from agent_monitor import diagnostics
+from agent_monitor.quota import reset_credits
 
 REACHED_LIMITS = {"rate_limit_reached", "workspace_owner_credits_depleted",
                   "workspace_member_credits_depleted", "workspace_owner_usage_limit_reached",
@@ -292,5 +293,6 @@ def decode(result, account_id):
             value = window.get(source)
             reading[prefix + "_" + target] = value if type(value) in (int, float) and math.isfinite(value) else None
     reading["plan"] = limit.get("planType") if isinstance(limit.get("planType"), str) else None
+    reading["reset_credits"] = reset_credits.normalize(result.get("rateLimitResetCredits"), wire=True)
     return reading
 

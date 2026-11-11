@@ -20,8 +20,10 @@ function node(tag = 'div') {
     querySelector(selector) { return selector === '.quota-sort-icon' ? this.children[0] : null; },
     setAttribute(k,v) { this.attributes[k] = String(v); }, getAttribute(k) { return this.attributes[k]; },
     addEventListener(k,f) { this.listeners[k] = f; }, click() { this.listeners.click?.(); },
+    focus() { document.activeElement=this; this.parentNode?.listeners.focusin?.(); },
     querySelectorAll(selector) {
       if (selector === 'button[data-quota-sort]') return descendants(this).filter(c => c.tagName === 'BUTTON' && c.dataset.quotaSort);
+      if (selector === '.quota-reset-credit-count') return descendants(this).filter(c => c.className === 'quota-reset-credit-count');
       if (selector.startsWith('.quota-observation-details')) return descendants(this).filter(c =>
         c !== this && c.className.split(/\s+/).includes('quota-observation-details') && (!selector.endsWith('[open]') || c.open));
       return this.children;
@@ -62,6 +64,34 @@ function account(id,state='known',presence='in_use',machine='alpha') {
     five_hour_resets_at:4102444800,seven_day_resets_at:4102444800,updated_at:'2026-01-01T00:00:00Z'};
 }
 // The selected action reading carries its own plan to the final cell.
+for (const [value, label, detail] of [
+  [null, '未知', '尚未取得 reset 额度记录'],
+  [{available_count:0,credits:[]}, '0 次', 'reset 额度：0 次'],
+  [{available_count:3,credits:[{expires_at:1900000000},{expires_at:null},{}]}, '3 次', '到期时间未知'],
+  [{available_count:3,credits:[{expires_at:null}]}, '3 次', '仅返回 1 / 3 笔明细'],
+  [{available_count:2,credits:null}, '2 次', '服务端未返回到期明细'],
+]) {
+  ui.renderQuotaAccounts({codex:{accounts:[{...account('reset-credit'),reset_credits:value}]}});
+  const row=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='reset-credit');
+  const cell=row.cells[7],button=cell.children[0],popup=cell.children[1];
+  assert.equal(button.textContent,label);
+  assert(popup.textContent.includes(detail));
+  assert.equal(popup.hidden,true);
+  button.click();
+  assert.equal(popup.hidden,false,'touch/click fallback opens details');
+  cell.listeners.keydown({key:'Escape'});
+  assert.equal(popup.hidden,true);
+}
+const closedCreditRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='reset-credit');
+const closedCreditButton=closedCreditRow.cells[7].children[0];
+closedCreditButton.focus();
+assert.equal(closedCreditRow.cells[7].children[1].hidden,false);
+closedCreditRow.cells[7].listeners.keydown({key:'Escape'});
+ui.renderQuotaAccounts({codex:{accounts:[account('reset-credit')]}});
+const restoredCreditRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='reset-credit');
+assert.equal(document.activeElement,restoredCreditRow.cells[7].children[0]);
+assert.equal(restoredCreditRow.cells[7].children[1].hidden,true,'dismissed focused detail stays closed after redraw');
+document.activeElement=null;
 const missingPlan={...account('plan'), account_plan:null, reading_plan:null, credential_plan:null, plan_verification:'unverified'};
 ui.updateCodexQuotaReadings([{account_id:'plan',email:'plan@example.test',last_quota:{observed_at:'2026-02-01T00:00:00Z',plan:'promax',seven_day_used_pct:42}}]);
 const displayed=ui.quotaDisplayReading({key:'codex'},missingPlan);
@@ -269,9 +299,9 @@ ui.renderQuotaAccounts({claude:{accounts:[unsubscribed]}});
 const unsubscribedRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='unsubscribed');
 assert(unsubscribedRow.cells[2].textContent.includes('无有效订阅'));
 assert.equal(unsubscribedRow.cells[5].textContent,'不适用');
-assert(unsubscribedRow.cells[8].textContent.includes('历史配额'));
-assert(unsubscribedRow.cells[8].textContent.includes('7%'));
-assert(!unsubscribedRow.cells[8].textContent.includes('分钟前'));
+assert(unsubscribedRow.cells[9].textContent.includes('历史配额'));
+assert(unsubscribedRow.cells[9].textContent.includes('7%'));
+assert(!unsubscribedRow.cells[9].textContent.includes('分钟前'));
 ui.renderQuotaAccounts({claude:{accounts:[{...unsubscribed,account_id:null,account_label:null,account_state:'signed_out',
   last_observation:{five_hour_used_pct:0,seven_day_used_pct:7,five_hour_resets_at:1,seven_day_resets_at:2,observed_at:null}}]}});
 assert(nodes['#quota-machine-records'].textContent.includes('已用 7%'));
@@ -353,13 +383,13 @@ for (const [machines, source, expected] of [
   ui.renderQuotaAccounts({codex:{accounts:[sample]}});
   const row=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='source-context');
   assert(!row.cells[0].textContent.includes('观测'), 'quota time must leave identity');
-  assert.equal(row.cells[7].textContent,expected,JSON.stringify({machines,source}));
-  assert.equal(row.cells[8].dataset.label,'配额更新');
-  if (source) assert(row.cells[8].textContent.includes('来源机器：'+source));
-  assert(descendants(row.cells[8]).some(n=>n.tagName==='SUMMARY'&&n.textContent==='3 分钟前'));
-  assert(!row.cells[8].textContent.includes('配额来源未知'));
-  assert.equal(descendants(row.cells[8]).filter(n=>n.tagName==='DETAILS').some(n=>n.textContent.includes('未取得读数来源机器')),source===null);
-  assert(row.cells[8].textContent.includes(ui.formatDate(sample.updated_at)));
+  assert.equal(row.cells[8].textContent,expected,JSON.stringify({machines,source}));
+  assert.equal(row.cells[9].dataset.label,'配额更新');
+  if (source) assert(row.cells[9].textContent.includes('来源机器：'+source));
+  assert(descendants(row.cells[9]).some(n=>n.tagName==='SUMMARY'&&n.textContent==='3 分钟前'));
+  assert(!row.cells[9].textContent.includes('配额来源未知'));
+  assert.equal(descendants(row.cells[9]).filter(n=>n.tagName==='DETAILS').some(n=>n.textContent.includes('未取得读数来源机器')),source===null);
+  assert(row.cells[9].textContent.includes(ui.formatDate(sample.updated_at)));
 }
 for (const [stamp,expected] of [
   ['2026-10-16T11:59:40Z','刚刚'], ['2026-10-16T10:00:00Z','2 小时前'],
@@ -368,7 +398,7 @@ for (const [stamp,expected] of [
 ]) {
   ui.renderQuotaAccounts({codex:{accounts:[{...account('age'),updated_at:stamp}]}});
   const row=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='age');
-  assert(descendants(row.cells[8]).some(n=>n.tagName==='SUMMARY'&&n.textContent===expected),expected);
+  assert(descendants(row.cells[9]).some(n=>n.tagName==='SUMMARY'&&n.textContent===expected),expected);
 }
 // A signed-out reading source needs a short status, with recovery in details.
 for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
@@ -378,7 +408,7 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
     const signedOut=kind==='healthy-source'?[]:[kind==='other-machine'?'beta':'alpha'];
     ui.renderQuotaAccounts({[provider]:{accounts:[sample],signed_out_machines:signedOut}});
     const row=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='login-context');
-    const cell=row.cells[8], detail=cell.children.find(n=>n.tagName==='DETAILS');
+    const cell=row.cells[9], detail=cell.children.find(n=>n.tagName==='DETAILS');
     const inline=cell.children.filter(n=>n.tagName!=='DETAILS').map(n=>n.textContent).join('');
     const affected=kind==='signed-out-source';
     assert(!nodes['#quota-signed-out'].textContent.includes('登录已失效'));
@@ -402,10 +432,10 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
 const staleAction = {...account('stale-action'), updated_at:'2026-10-14T12:00:00Z', quota_source:'account_action'};
 ui.renderQuotaAccounts({codex:{accounts:[staleAction]}});
 const staleRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='stale-action');
-assert(staleRow.cells[8].textContent.includes('读数来源：账号操作中的配额查询'));
-assert(!staleRow.cells[8].textContent.includes('读数过期'));
-assert(staleRow.cells[8].textContent.includes('读数已超过更新时限'));
-assert(!staleRow.cells[8].textContent.includes('读数可能过期'));
+assert(staleRow.cells[9].textContent.includes('读数来源：账号操作中的配额查询'));
+assert(!staleRow.cells[9].textContent.includes('读数过期'));
+assert(staleRow.cells[9].textContent.includes('读数已超过更新时限'));
+assert(!staleRow.cells[9].textContent.includes('读数可能过期'));
 Date.now=realNow;
 const original=JSON.stringify(data);
 const rows=()=>table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId);
@@ -417,8 +447,8 @@ for (const [source, label] of [['codex_session','会话日志'], ['active_query'
   const before=JSON.stringify(sample);
   ui.renderQuotaAccounts({codex:{accounts:[sample]}});
   assert.equal(rows()[0].cells[0].textContent,'member@example.test');
-  assert(rows()[0].cells[8].textContent.includes('读数来源：'+label));
-  assert(rows()[0].cells[8].textContent.includes('配置名：work-profile'));
+  assert(rows()[0].cells[9].textContent.includes('读数来源：'+label));
+  assert(rows()[0].cells[9].textContent.includes('配置名：work-profile'));
   search('work-profile');
   assert.equal(rows().length,1,'profile remains searchable independently of account label');
   search('absent-profile');
@@ -444,26 +474,26 @@ assert(rows()[0].cells[5].textContent.includes('3%'));
 const originalRow=rows()[0];
 ui.updateCodexQuotaReadings([{...action,busy:true,operation:{...action.operation,stage:'login'}}]);
 assert(rows().includes(originalRow),'unchanged readings must preserve table rows during progress polling');
-assert(rows()[0].cells[8].textContent.includes('来自此次账号操作查询'));
+assert(rows()[0].cells[9].textContent.includes('来自此次账号操作查询'));
 assert(!rows()[0].cells[0].textContent.includes('本页查询'));
 assert(!rows()[0].cells[0].textContent.includes('最后观测值，不代表当前状态'), 'fresh action reading must not be labelled as a machine-history reading');
 assert(!rows()[0].cells[2].textContent.includes('机器记录'));
-const observationDetails=descendants(rows()[0].cells[8]).find(n=>n.tagName==='DETAILS');
+const observationDetails=descendants(rows()[0].cells[9]).find(n=>n.tagName==='DETAILS');
 assert(observationDetails.textContent.includes('来自此次账号操作查询'));
 assert(observationDetails.textContent.includes('读数来源：账号操作中的配额查询'));
 assert(!observationDetails.textContent.includes('读数来源：会话日志'));
 assert(observationDetails.textContent.includes('套餐'));
-assert.equal(rows()[0].cells[7].textContent,'—');
+assert.equal(rows()[0].cells[8].textContent,'—');
 assert(observationDetails.textContent.includes('当前未在已纳入的机器上使用'));
 assert(observationDetails.textContent.includes('独立保存的登录状态见账号操作'));
-assert(!rows()[0].cells[8].children.filter(n=>n.tagName!=='DETAILS').some(n=>n.textContent.includes('查询')),
+assert(!rows()[0].cells[9].children.filter(n=>n.tagName!=='DETAILS').some(n=>n.textContent.includes('查询')),
   'query provenance stays in details, not a repeated row note');
 assert(!rows()[0].cells[1].textContent.includes('历史'),'provider cell describes only provider');
-assert(!rows()[0].cells[8].textContent.includes('读数较旧'));
+assert(!rows()[0].cells[9].textContent.includes('读数较旧'));
 Date.now=()=>Date.parse(observed)+3*86400000;
 ui.renderQuotaAccounts(projection);
-assert(!rows()[0].cells[8].textContent.includes('读数较旧'));
-assert(descendants(rows()[0].cells[8]).some(n=>n.tagName==='SUMMARY'&&n.textContent.includes('天前')), 'observation age remains visible');
+assert(!rows()[0].cells[9].textContent.includes('读数较旧'));
+assert(descendants(rows()[0].cells[9]).some(n=>n.tagName==='SUMMARY'&&n.textContent.includes('天前')), 'observation age remains visible');
 Date.now=realNow;
 ui.renderQuotaAccounts(projection);
 assert.equal(rows()[0].dataset.observedAt,past.updated_at,'deletion CAS stays on machine observation');
@@ -480,17 +510,17 @@ nodes['#quota-explorer']=explorer;
 for (const newer of [observed,'2099-01-01T00:00:00Z']) {
   ui.renderQuotaAccounts({codex:{accounts:[{...past,updated_at:newer,seven_day_used_pct:42}]}});
   assert(rows()[0].cells[5].textContent.includes('42%'));
-  assert(!rows()[0].cells[8].textContent.includes('来自此次账号操作查询'));
-  assert(!rows()[0].cells[8].textContent.includes('历史读数，不代表当前状态'));
-  assert(descendants(rows()[0].cells[8]).some(n=>n.tagName==='DETAILS'&&n.textContent.includes('历史保存未保留来源机器')));
-  assert(rows()[0].cells[8].textContent.includes('当前未在已纳入的机器上使用'));
+  assert(!rows()[0].cells[9].textContent.includes('来自此次账号操作查询'));
+  assert(!rows()[0].cells[9].textContent.includes('历史读数，不代表当前状态'));
+  assert(descendants(rows()[0].cells[9]).some(n=>n.tagName==='DETAILS'&&n.textContent.includes('历史保存未保留来源机器')));
+  assert(rows()[0].cells[9].textContent.includes('当前未在已纳入的机器上使用'));
 }
 ui.renderQuotaAccounts(projection);
 ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:'invalid',seven_day_used_pct:8}},batch_result:action.operation} ]);
 assert(rows()[0].cells[5].textContent.includes('3%'),'retained batch observation survives an unreadable current observation');
 ui.updateCodexQuotaReadings([{...action,last_quota:action.operation.after,operation:{stage:'failed',quota_status:'not_read'}}]);
 assert(rows()[0].cells[5].textContent.includes('3%'),'failed refresh must retain successful post-send reading');
-assert(rows()[0].cells[8].textContent.includes('来自此次账号操作查询'));
+assert(rows()[0].cells[9].textContent.includes('来自此次账号操作查询'));
 assert.equal(ui.latestCodexQuotaReading({last_quota:action.operation.after}),action.operation.after,'cards share retained quota selection');
 const before={observed_at:new Date(Date.parse(observed)+1000).toISOString(),seven_day_used_pct:100,seven_day_resets_at:null};
 for (const source of ['operation','batch_result']) {
@@ -504,7 +534,7 @@ ui.updateCodexQuotaReadings([ {...action,operation:{after:{observed_at:observed,
 assert.equal(rows()[0].cells[5].textContent,'未知');
 assert.equal(rows()[0].cells[5].children[0].attributes['aria-label'],'用量未知');
 assert.equal(descendants(rows()[0]).filter(n=>n.className.includes('quota-account-observation')).length,0);
-assert(rows()[0].cells[8].textContent.includes(ui.formatDate(observed)), 'exact observation time is available in update details');
+assert(rows()[0].cells[9].textContent.includes(ui.formatDate(observed)), 'exact observation time is available in update details');
 assert(!rows()[0].cells[5].textContent.includes('91%'),'unknown new reading never borrows old percentage');
 ui.updateCodexQuotaReadings([]);
 assert(rows()[0].cells[5].textContent.includes('91%'),'page cleanup can clear observations');

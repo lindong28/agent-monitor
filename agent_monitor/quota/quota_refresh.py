@@ -585,7 +585,7 @@ def _codex(account, *, recovery=None):
         value = _reading((reading["five_hour_used_pct"], reading["five_hour_resets_at"]),
                          (reading["seven_day_used_pct"], reading["seven_day_resets_at"]), plan=reading["plan"])
         return dataclasses.replace(value, **{key: reading[key] for key in (
-            "codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type")})
+            "codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type", "reset_credits")})
 
     finally:
         selector.close()

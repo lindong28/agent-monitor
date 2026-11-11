@@ -9,6 +9,7 @@ from agent_monitor.snapshots import generation
 from agent_monitor import hub_config as hub
 from agent_monitor import diagnostics
 from agent_monitor.quota import quota_applicability
+from agent_monitor.quota import reset_credits
 from .account_memory import (NUMERIC_FIELDS, identity_id, account_key, parse_observed_at, quota_number, text)
 
 logger = logging.getLogger("agent-monitor")
@@ -40,6 +41,7 @@ def remembered_rate_limit_entry(record):
         "quota_observation": quota_applicability.observation(record.get("quota_observation")),
         "legacy_observation": record.get("legacy_observation"),
         "this_machine": None,
+        "reset_credits": None,
     }
 
 
@@ -136,6 +138,7 @@ def account_entry(block, machines, self_machine=None, reading_from=None):
         "seven_day_resets_at": quota_number(block.get("seven_day_resets_at")),
         "updated_at": (quota_applicability.observation(block.get("quota_observation")) or {}).get("observed_at") or block.get("updated_at"),
         "quota_observation": quota_applicability.observation(block.get("quota_observation")),
+        "reset_credits": reset_credits.normalize(block.get("reset_credits")),
         "refresh_error": text(block.get("refresh_error")),
         "machines": sorted(machines),
         # Marked so a row can say which account the session in front of the
@@ -512,6 +515,9 @@ class QuotaView:
                 for field in NUMERIC_FIELDS:
                     entry[field] = quota_number(record[field])
                 entry["updated_at"] = record["observed_at"]
+                # Memory v2 has no reset-credit observation. Never attach the
+                # replaced live reading's details to this older window snapshot.
+                entry["reset_credits"] = None
                 entry["quota_observation"] = stored_evidence
                 if record.get("legacy_observation"):
                     entry["legacy_observation"] = record["legacy_observation"]

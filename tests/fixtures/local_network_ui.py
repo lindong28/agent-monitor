@@ -35,6 +35,7 @@ def main():
     parser.add_argument('--vendor', required=True, type=Path)
     parser.add_argument('--host-label', default='Fixture-A')
     parser.add_argument('--processes', type=int, default=1)
+    parser.add_argument('--reset-credits', action='store_true')
     args = parser.parse_args()
     args.artifacts.mkdir(parents=True, exist_ok=True)
     sys.addaudithook(source_guard)
@@ -80,6 +81,30 @@ def main():
             if url.path == '/api/overview':
                 overview['rate_limits']['codex']['accounts'] = [dict(record_account, presence='remembered',
                     updated_at=observed, last_observation={'recorded_at': observed, 'five_hour_used_pct': 20})] if memory.read()[1]['accounts'] else []
+                if args.reset_credits:
+                    from datetime import datetime, timezone
+                    from agent_monitor.contracts.usage import RateLimits
+                    from agent_monitor.quota import codex_quota, quota_service, quota_view
+                    from parsers.accounts import Account
+                    now = int(datetime.now(timezone.utc).timestamp())
+                    scenarios = [('many', {'availableCount': 4, 'credits': [
+                        {'status': 'available', 'expiresAt': now + 86400}, {'status': 'available', 'expiresAt': now + 259200}]}),
+                        ('zero', {'availableCount': 0, 'credits': []}),
+                        ('count-only', {'availableCount': 2, 'credits': None}),
+                        ('unlimited', {'availableCount': 1, 'credits': [{'status': 'available', 'expiresAt': None}]}),
+                        ('unknown', None),
+                        ('expiry-unknown', {'availableCount': 1, 'credits': [{'status': 'available'}]}),
+                        ('expired', {'availableCount': 1, 'credits': [{'status': 'available', 'expiresAt': now - 60}]})]
+                    for name, credits in scenarios:
+                        identity = 'reset-' + name
+                        decoded = codex_quota.decode({'accountId': identity, 'rateLimitResetCredits': credits,
+                            'rateLimits': {'primary': {'usedPercent': 12, 'windowDurationMins': 300}}}, identity)
+                        value = RateLimits(12, now + 3600, 34, now + 86400,
+                            updated_at=decoded['observed_at'], reset_credits=decoded['reset_credits'])
+                        block = quota_service.rate_limit_block(value, Account(identity, identity + '@example.test'))
+                        entry = quota_view.account_entry(block, ['fixture-node'], reading_from='fixture-node')
+                        overview['rate_limits']['codex']['accounts'].append(dict(entry, presence='in_use'))
+                    overview['rate_limits']['claude']['accounts'] = [dict(record_account, account_id='fixture-claude', presence='in_use')]
                 return send(self, overview)
             if url.path == '/api/codex-accounts': return send(self, {'accounts': []})
             if url.path == '/api/timezone': return send(self, {'timezone': 'UTC'})

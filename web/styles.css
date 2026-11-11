@@ -885,6 +885,34 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
 #quota-accounts th[aria-sort="descending"] { color: var(--accent); }
 #quota-accounts .quota-reset-cell { min-width: 130px; }
 
+.quota-reset-credit-count {
+  border: 0;
+  border-bottom: 1px dotted var(--ink-muted);
+  padding: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.quota-reset-credit-count:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.quota-reset-credit-details {
+  max-width: min(340px, calc(100vw - 16px));
+  max-height: min(420px, calc(100dvh - 16px));
+  overflow: auto;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--e-raised);
+  text-align: left;
+  font: 400 12px/20px var(--font-sans);
+}
+.quota-reset-credit-details[popover] { position: fixed; inset: auto; margin: 0; }
+.quota-reset-credit-details p { margin: 0; }
+.quota-reset-credit-details p + p { margin-top: 6px; }
+
 
 .quota-observation-details > summary { cursor: pointer; white-space: nowrap; }
 .quota-observation-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
@@ -1937,7 +1965,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 @media (min-width: 901px) {
   #quota-explorer .quota-mobile-sort { display: none; }
   #quota-accounts .quota-window-cell { min-width: 140px; }
-  #quota-accounts td:nth-child(8) { min-width: 130px; }
+  #quota-accounts td:nth-child(9) { min-width: 130px; }
   .quota-updated-cell .quota-observation-details[open] { min-width: 320px; }
 }
 
@@ -1996,7 +2024,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
 #session-dates label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); font-size: 12px; }
 #session-dates input { width: 140px; }
 
-/* Keep each account's nine fields together when columns no longer fit. */
+/* Keep each account's ten fields together when columns no longer fit. */
 @media (max-width: 900px) {
   #quota-accounts { display: block; min-width: 0; width: 100%; overflow: visible; }
   #quota-accounts thead { display: none; }
@@ -2006,7 +2034,7 @@ details[open] > summary::before, .quota-toggle[aria-expanded="true"]::before { t
   #quota-accounts td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--ink-muted); font-size: 12px; }
   #quota-accounts .quota-identity { position: static; width: auto; min-width: 0; max-width: none; box-shadow: none; }
   #quota-accounts td:first-child, #quota-accounts td:last-child, #quota-accounts td[colspan] { grid-column: 1 / -1; }
-  #quota-accounts td:nth-child(8) { grid-column: 1 / -1; }
+  #quota-accounts td:nth-child(9) { grid-column: 1 / -1; }
   #quota-accounts .quota-account-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   #quota-accounts .quota-window { min-width: 0; }
   #quota-accounts .quota-window-reason { max-width: none; }

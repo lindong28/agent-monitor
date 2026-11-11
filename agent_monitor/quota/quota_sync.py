@@ -339,7 +339,7 @@ class Manager:
                                 incoming["managed_accounts"] = _merge_managed_accounts(before.get("managed_accounts"), incoming.get("managed_accounts", []))
                             identity = lambda b: quota_identity(provider, b.get("account_id"), b.get("account_label"))
                             if identity(incoming) == identity(before) and _time(before.get("updated_at")) > _time(incoming.get("updated_at")):
-                                for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation"):
+                                for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation", "reset_credits"):
                                     incoming[field] = before.get(field)
                                 if provider == "codex":
                                     # A legacy observation without a plan cannot
@@ -504,7 +504,7 @@ class Manager:
                     if (bool(provider == "claude" and incoming_evidence and incoming_evidence["observed_at"]), _time(incoming_evidence["observed_at"] if incoming_evidence and incoming_evidence["observed_at"] else incoming.get("updated_at"))) >= (bool(provider == "claude" and base_evidence and base_evidence["observed_at"]), _time(base_evidence["observed_at"] if base_evidence and base_evidence["observed_at"] else base.get("updated_at"))):
                         # Reading plan belongs to the selected observation; identity
                         # stays with the admitted snapshot.
-                        for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation"):
+                        for field in ("five_hour_pct", "five_hour_resets_at", "seven_day_pct", "seven_day_resets_at", "updated_at", "quota_observation", "reset_credits"):
                             base[field] = incoming.get(field)
                         if provider == "codex" and "reading_plan" in incoming:
                             base["reading_plan"] = incoming["reading_plan"]

@@ -569,7 +569,8 @@ def record_codex_reading(cache_path, account, reading, *, account_profile=None, 
                        codex_quota_available=reading.get("codex_quota_available"),
                        ordinary_usage_allowed=reading.get("ordinary_usage_allowed"),
                        spend_control_reached=reading.get("spend_control_reached"),
-                       rate_limit_reached_type=reading.get("rate_limit_reached_type"))
+                       rate_limit_reached_type=reading.get("rate_limit_reached_type"),
+                       reset_credits=reading.get("reset_credits"))
     fresh = rate_limit_block(value, account)
     fresh.update(refresh_attempted_at=reading["observed_at"], refresh_skip=None, refresh_error=None, refresh_failure=None,
                  signed_out=False, query_state="succeeded")
@@ -732,7 +733,7 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
         reading["plan"] = value.plan
         reading.update(observed_at=value.updated_at,
                        **{key: getattr(value, key, None) for key in (
-                           "codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type")})
+                           "codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type", "reset_credits")})
         try:
             Manager(root / "state/codex-accounts").record_quota_recovery(
                 profile.removeprefix("monitor-"), recovery_operation or source.get("operation_id"), pause_id, reading,

@@ -147,6 +147,7 @@
     const reading = profile && latestCodexQuotaReading(profile);
     if (!reading || (Number.isFinite(Date.parse(account.updated_at)) && Date.parse(reading.observed_at) <= Date.parse(account.updated_at))) return account;
     const display = { ...account, updated_at: reading.observed_at, quota_source: "account_action",
+      reset_credits: reading.reset_credits ?? null,
       quota_observation: {source: "active_query", observed_at: reading.observed_at} };
     for (const spec of QUOTA_COLUMNS) {
       for (const key of [spec.used, spec.reset]) {
@@ -441,6 +442,8 @@
     const history = qs("#quota-past-accounts");
     const rememberedExpanded = options.rememberedExpanded ?? (history ? !history.hidden : initialQuotaHistoryExpanded);
     const focusedObservation = document.activeElement?.closest?.(".quota-observation-details")?.dataset.observationKey;
+    const focusedResetCredit = document.activeElement?.dataset?.resetCreditKey;
+    const openResetCredit = table.querySelector?.('.quota-reset-credit-count[aria-expanded="true"]')?.dataset.resetCreditKey;
     const openObservations = new Set(Array.from(table.querySelectorAll?.(".quota-observation-details[open]") || [])
       .filter((node) => node.tagName === "DETAILS").map((node) => node.dataset.observationKey));
     // Keep recovery cards alive across snapshot redraws, including an in-flight check.
@@ -496,7 +499,7 @@
       const body = document.createElement("tbody");
       body.className = "quota-filter-empty";
       const cell = document.createElement("td");
-      cell.colSpan = 9;
+      cell.colSpan = 10;
       cell.textContent = "没有匹配的账号，可清空筛选。";
       const row = document.createElement("tr");
       row.appendChild(cell);
@@ -519,6 +522,12 @@
       }
     });
     if (focusedRecovery && table.contains?.(focusedRecovery)) focusedRecovery.focus?.({preventScroll:true});
+    if (focusedResetCredit || openResetCredit) {
+      Array.from(table.querySelectorAll?.(".quota-reset-credit-count") || []).forEach((button) => {
+        if (button.dataset.resetCreditKey === focusedResetCredit) button.restoreResetCreditFocus?.();
+        if (button.dataset.resetCreditKey === openResetCredit) button.openResetCredits?.();
+      });
+    }
     renderQuotaSignedOut(rateLimits);
     updateSyncOverviewLink();
     document.dispatchEvent?.(new Event("agent-monitor:quota-rendered"));
@@ -1101,7 +1110,7 @@
     const body = previous || document.createElement("tbody");
     if (!body.quotaDiagnostics) {
       const row = document.createElement("tr"), cell = document.createElement("td");
-      cell.colSpan = 9;
+      cell.colSpan = 10;
       const details = document.createElement("details");
       details.className = "note-disclosure quota-failure-details";
       const summary = document.createElement("summary");
@@ -1324,7 +1333,7 @@
     const summaryRow = document.createElement("tr");
     summaryRow.className = "quota-row quota-summary";
     const summaryCell = document.createElement("td");
-    summaryCell.colSpan = 9;
+    summaryCell.colSpan = 10;
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "quota-toggle quota-past-toggle";
@@ -1393,12 +1402,109 @@
       row.appendChild(quotaWindowCell(provider, spec, display));
       row.appendChild(quotaResetCell(provider, spec, display));
     });
+    row.appendChild(quotaResetCreditsCell(provider, display));
     row.appendChild(quotaMachinesCell(account));
     row.appendChild(quotaUpdatedCell(provider, display, stale, quotaRefreshNotice(provider, account)));
     Array.from(row.children).forEach((cell, index) => {
-      cell.dataset.label = ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间", "机器", "配额更新"][index];
+      cell.dataset.label = ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间", "reset 额度", "机器", "配额更新"][index];
     });
     return row;
+  }
+
+  let resetCreditsDetailId = 0;
+
+  function quotaResetCreditsCell(provider, account) {
+    const cell = document.createElement("td");
+    cell.className = "numeric quota-reset-credits-cell";
+    if (provider.key !== "codex") {
+      cell.textContent = "不适用";
+      return cell;
+    }
+    const value = account.reset_credits;
+    const count = value?.available_count;
+    const known = Number.isInteger(count) && count >= 0;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "quota-reset-credit-count";
+    button.dataset.resetCreditKey = JSON.stringify([provider.key, account.account_id, account.account_label]);
+    button.textContent = known ? `${count} 次` : "未知";
+    button.setAttribute("aria-label", `reset 额度：${button.textContent}，查看到期时间`);
+    const detail = document.createElement("div");
+    detail.className = "quota-reset-credit-details";
+    detail.id = `quota-reset-credit-detail-${++resetCreditsDetailId}`;
+    detail.setAttribute("role", "tooltip");
+    button.setAttribute("aria-describedby", detail.id);
+    button.setAttribute("aria-expanded", "false");
+    const line = (text) => {
+      const node = document.createElement("p");
+      node.textContent = text;
+      detail.appendChild(node);
+    };
+    line(known ? `reset 额度：${count} 次` : "尚未取得 reset 额度记录");
+    if (known) {
+      const rows = Array.isArray(value.credits) ? value.credits : null;
+      if (rows === null || (count > 0 && !rows.length)) {
+        line("服务端未返回到期明细。");
+      } else {
+        rows.forEach((row, index) => {
+          let expiry = "到期时间未知";
+          if (row && Object.hasOwn(row, "expires_at")) {
+            if (row.expires_at === null) expiry = "不过期";
+            else if (typeof row.expires_at === "number" && Number.isFinite(row.expires_at)) {
+              const date = new Date(row.expires_at * 1000);
+              if (Number.isFinite(date.getTime())) expiry = `${formatDate(date.toISOString())} 到期`
+                + (date.getTime() <= Date.now() ? "（时间已过，次数待刷新确认）" : "");
+            }
+          }
+          line(`第 ${index + 1} 次：${expiry}`);
+        });
+        if (rows.length < count) line(`服务端仅返回 ${rows.length} / ${count} 笔明细。`);
+        if (rows.length > count) line("次数与明细不一致，请刷新配额确认。");
+      }
+    } else {
+      line("可通过现有配额查询获取；未取得记录不代表 0 次。");
+    }
+    if (known && account.updated_at) line(`观测时间：${formatDate(account.updated_at)}`);
+    const popover = typeof detail.showPopover === "function";
+    if (popover) detail.setAttribute("popover", "auto");
+    else detail.hidden = true;
+    const isOpen = () => popover ? detail.matches(":popover-open") : !detail.hidden;
+    if (popover) detail.addEventListener("toggle", () => {
+      button.setAttribute("aria-expanded", String(isOpen()));
+    });
+    const hide = () => {
+      if (!isOpen()) return;
+      if (popover) detail.hidePopover();
+      else detail.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+    };
+    const show = () => {
+      if (isOpen()) return;
+      if (popover) {
+        detail.showPopover();
+        const anchor = button.getBoundingClientRect();
+        const box = detail.getBoundingClientRect();
+        detail.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8))}px`;
+        detail.style.top = `${Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - box.height - 8))}px`;
+      } else detail.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+    };
+    cell.addEventListener("mouseenter", show);
+    cell.addEventListener("mouseleave", () => { if (!cell.contains(document.activeElement)) hide(); });
+    let restoringFocus = false;
+    cell.addEventListener("focusin", () => { if (!restoringFocus) show(); });
+    cell.addEventListener("focusout", (event) => { if (!cell.contains(event.relatedTarget)) hide(); });
+    button.addEventListener("click", show);
+    button.openResetCredits = show;
+    button.restoreResetCreditFocus = () => {
+      restoringFocus = true;
+      try { button.focus?.({preventScroll:true}); }
+      finally { restoringFocus = false; }
+    };
+    cell.addEventListener("keydown", (event) => { if (event.key === "Escape") hide(); });
+    cell.appendChild(button);
+    cell.appendChild(detail);
+    return cell;
   }
 
   function quotaProviderCell(provider) {
@@ -2169,7 +2275,7 @@
     row.appendChild(head);
 
     const detail = document.createElement("td");
-    detail.colSpan = 6;
+    detail.colSpan = 7;
     detail.className = "quota-updated-cell";
     detail.textContent = reason || "无已纳入的数据源";
     row.appendChild(detail);
