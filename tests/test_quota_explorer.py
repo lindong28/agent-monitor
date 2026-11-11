@@ -392,7 +392,7 @@ for (const [provider,label] of [['claude','Claude'],['codex','Codex']]) {
     }
     if (affected) {
       assert(inline.endsWith('来源机器未登录'));
-      assert.equal(inline.includes('读数过期'), ui.quotaIsStale(sample.updated_at));
+      assert(!inline.includes('读数过期'));
       for (const text of ['alpha',label,'最后一次','登录此账号','更新统计与配额'])
         assert(detail.textContent.includes(text),text);
       assert.equal(sample.five_hour_used_pct,91,'copy must not alter the reading');
@@ -403,7 +403,8 @@ const staleAction = {...account('stale-action'), updated_at:'2026-10-14T12:00:00
 ui.renderQuotaAccounts({codex:{accounts:[staleAction]}});
 const staleRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='stale-action');
 assert(staleRow.cells[8].textContent.includes('读数来源：账号操作中的配额查询'));
-assert(staleRow.cells[8].textContent.includes('读数过期'));
+assert(!staleRow.cells[8].textContent.includes('读数过期'));
+assert(staleRow.cells[8].textContent.includes('读数已超过更新时限'));
 assert(!staleRow.cells[8].textContent.includes('读数可能过期'));
 Date.now=realNow;
 const original=JSON.stringify(data);

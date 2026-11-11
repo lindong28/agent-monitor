@@ -1946,7 +1946,6 @@
       cell.appendChild(node);
     };
     if (stale && (quotaPresence(account) !== "remembered" || account.quota_source === "account_action")) {
-      note("读数过期");
       const age = document.createElement("span");
       age.className = "quota-history-note";
       age.textContent = "读数已超过更新时限，可能早于一次登录变更；不代表当前剩余额度。";

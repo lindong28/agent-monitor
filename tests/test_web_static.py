@@ -1654,7 +1654,7 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(live["providerText"], "Claude")
         self.assertEqual(live["planText"], "Max 20×来源未记录")
         self.assertEqual(live["warningTexts"], [])
-        self.assertEqual(live["staleWarningCount"], 1)
+        self.assertEqual(live["staleWarningCount"], 0)
         self.assertEqual(live["historyMarkerCount"], 0)
         self.assertEqual(live["historyNoteCount"], 0)
         self.assertEqual(live["observedTexts"], [])
