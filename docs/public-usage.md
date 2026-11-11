@@ -91,6 +91,28 @@ The bundle retains the existing snapshot/manifest schema and saved quota observa
 
 The command does not update the source business records. It creates the destination, may create/use the persistent rollup coordination lock and SQLite coordination sidecars, and uses the normal export staging/cleanup and full-snapshot copy/validation path. Export cost still scales with retained history and may wait for a writer holding the rollup lock. The bundle contains private statistics, project/account identities and saved diagnostic fields: it is not a public-sharing projection and does not authorize moving data across trust boundaries. Keep it in an appropriately protected location and share only within the source's authorized scope.
 
+### Offline catalog projection
+
+After creating a private bundle with `export --cached-state`, project its validated metadata into a Context Lake version 1 import file:
+
+```bash
+./agent-monitor catalog-export /absolute/existing-bundle --out /absolute/new-catalog.json \
+  --instance-id YOUR_PERSONAL_LAKE --organization YOUR_ORGANIZATION \
+  --project-id YOUR_EXISTING_PROJECT_ID \
+  --source-uri ssh://your-host/absolute/monitor \
+  --material-uri ssh://your-host/absolute/existing-bundle
+context-lake catalog-ingest --service YOUR_PERSONAL_SERVICE /absolute/new-catalog.json
+```
+
+The optional Context Lake client is installed separately; Monitor has no dependency on it and never contacts it. Choose the authorized instance and organization explicitly and create the referenced project there first. The projection is always private and creates exactly one source, one statistics family and one observation. It is `metadata_only`: originals, detailed statistics, account/session records and their access controls remain with Monitor. Do not import personal metadata into a company service without authorization.
+
+Both URIs must identify material that the intended reader can retrieve through an authorized path. They are stored, never opened or fetched; credentials, query strings and fragments are rejected. Local validation does not prove remote URI access. The material URI refers to the entire bundle, including `export.json` and `snapshot.db`.
+
+The command validates snapshot contents and manifest digests before creating a new mode-0600 output. Missing/corrupt material and existing output paths are refused; no import is attempted and source records are not changed. Validation reads the full snapshot, so its cost scales with the bundle size. Repeating the same input and scope produces identical bytes. IDs bind the source identity, exporter commit, scope and material digests; a different export/version produces a separate observation, not an update to a previous one. Keep immutable bundle URIs usable for subsequent readers.
+
+`source_version` comes from the manifest exporter commit and `observed_at` from its export timestamp, never the projection time. The short summary counts snapshot rows using the manifest start date and bucket timezone; rows are not sessions or provider attempts. Current quota, provider coverage and actual billing remain unknown. Saved failures/unknown quota and detailed accounting remain available only by reading the original authorized bundle. This inventory does not establish complete run coverage or migrate original-data retention.
+
+
 ## Optional quota and account actions
 
 Local usage does not need a provider login. If your current account is signed in, normal dashboard collection can actively query quota; a supported provider login/client is required for those queries. Use the isolated sample if you do not authorize reading real account state or making quota queries. Quota observations retain account identity and observation time; old or missing values are not current permission to send. `./agent-monitor session-quota SESSION_ID --json` reads a stored Codex session quota observation without querying a provider.

@@ -39,6 +39,7 @@ if [ "${1:-}" = local ]; then
 fi
 
 usage() {
+  echo "Offline catalog projection: agent-monitor catalog-export --help"
   echo "Archive maintenance: agent-monitor archive [stats|compact --backup NEW_PERSISTENT_PATH] [--archive PATH] [--rollup-db PATH] [--budget-seconds N] [--json]"
   echo "Service management: agent-monitor service {status|restart local-web|restart hub|restart collector|restart connector|deploy [--expect SHA]|release {status|abandon}|rebuild-runtime --python /absolute/python}"
   echo "Local dashboard: agent-monitor local {start|stop|restart|status|open}"
@@ -335,6 +336,10 @@ case "${1:-}" in
   process-network)
     shift
     exec "${PYTHON_MODULE[@]}" agent_monitor.network.process_network "$@"
+    ;;
+  catalog-export)
+    shift
+    "${PYTHON_MODULE[@]}" agent_monitor.cli.catalog_export "$@"
     ;;
   export)
     shift
