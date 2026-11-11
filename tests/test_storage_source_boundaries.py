@@ -96,6 +96,9 @@ class StorageSourceBoundaryTests(unittest.TestCase):
 
     def test_production_daily_rollup_and_attach_sites_match_explicit_census(self):
         expected_daily_rollup = [
+            # The comparison projection labels the validated legacy manifest basis;
+            # it opens no connection or SQL path (validation remains in snapshot_stats).
+            ("agent_monitor/cli/catalog_export.py", "_comparison", "validated_manifest_basis_label"),
             ("scripts/benchmark_backend.py", "make_snapshot", "isolated_benchmark_fixture"),
             ("scripts/benchmark_backend.py", "make_snapshot", "isolated_benchmark_fixture"),
             ("agent_monitor/ingestion/project_identity.py", "recover_reviewed", "reviewed_identity_preview_read_only"),
