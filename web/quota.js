@@ -50,6 +50,7 @@
   let quotaStateReadAt = 0;
   let quotaStateTargets = "";
   let initialQuotaHistoryExpanded = false;
+  let accountRefreshes = new Map();
   const quotaFilter = { provider: "all", search: "", window: "five_hour", sort: "default" };
   let boundQuotaExplorer = null;
 
@@ -65,12 +66,21 @@
     codexProfileStateKnown = known;
     codexSharedPause = sharedPause;
     accounts = known ? accounts : codexQuotaReadings;
+    let activityChanged = false;
+    for (const profile of accounts) {
+      const activity = accountRefreshes.get(profile.id), op = profile.operation;
+      if (!activity?.submitted || !op?.refresh_only || op.id === activity.previousOperation) continue;
+      const message = profile.busy ? '正在刷新配额…'
+        : op.stage === 'succeeded' ? '配额已更新。' : op.detail || '配额查询未完成，请在账号管理查看详情。';
+      activityChanged ||= activity.message !== message;
+      activity.message = message;
+    }
     const signature = (profiles) => JSON.stringify(profiles.map((account) => [
       account.id, account.account_id, account.email.toLowerCase(), Boolean(account.disabled), account.quota_query_allowed, typeof account.quota_query_allowed === "boolean" ? Boolean(account.busy) : null, account.restrictions, latestCodexQuotaReading(account),
     ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
     const changed = signature(accounts) !== signature(codexQuotaReadings);
     codexQuotaReadings = accounts;
-    if ((changed || stateChanged) && renderedQuotaRateLimits) renderQuotaAccounts(renderedQuotaRateLimits);
+    if ((changed || stateChanged || activityChanged) && renderedQuotaRateLimits) renderQuotaAccounts(renderedQuotaRateLimits);
   }
 
   function beginQuotaMachineRead(machine) {
@@ -1608,25 +1618,18 @@
       ? codexQuotaReadings.filter(profile => profile.account_id === account.account_id
         && profile.email.toLowerCase() === account.account_label?.toLowerCase()) : [];
     if (profiles.length === 1 && typeof profiles[0].id === "string" && profiles[0].id) {
-      const open = document.createElement("button");
-      open.type = "button";
-      open.className = "btn";
-      open.textContent = "管理账号";
-      open.setAttribute("aria-label", `${quotaAccountName(account)}（${account.account_id}）的账号操作`);
-      open.addEventListener("click", () => window.AgentMonitor?.openCodexAccount?.(profiles[0].id));
-      actions.appendChild(open);
       const refresh = document.createElement('button');
       refresh.type = 'button'; refresh.className = 'btn'; refresh.textContent = '刷新配额';
       const permission = codexQueryPermission(profiles[0]);
-      refresh.disabled = permission !== true;
+      const activity = accountRefreshes.get(profiles[0].id);
+      refresh.disabled = permission !== true || Boolean(activity?.pending);
       refresh.setAttribute('aria-label', `${quotaAccountName(account)}（${account.account_id}）的配额刷新`);
-      refresh.addEventListener('click', () => window.AgentMonitor?.openCodexAccount?.(profiles[0].id, 'refresh'));
+      refresh.addEventListener('click', () => refreshQuotaAccount(profiles[0]));
       if (!quotaAccountDisabled(provider, account)) actions.appendChild(refresh);
       const status = document.createElement("span");
       status.className = "quota-scope";
-      const sendPaused = codexProfileStateKnown && Boolean(profiles[0].restrictions?.quota);
-      status.textContent = permission === null ? "查询权限未核实" : permission ? "" : "查询受限，请查看账号";
-      if (sendPaused && permission !== true) status.textContent = "发送已暂停；" + status.textContent;
+      status.setAttribute('role', 'status');
+      status.textContent = activity?.message || (permission === null ? "查询权限未核实" : "");
       if (status.textContent) wrap.appendChild(status);
     }
 
@@ -1642,6 +1645,26 @@
     if (actions.children.length) wrap.appendChild(actions);
     cell.appendChild(wrap);
     return cell;
+  }
+
+  async function refreshQuotaAccount(profile) {
+    if (codexQueryPermission(profile) !== true || accountRefreshes.get(profile.id)?.pending) return;
+    const signal = quotaStateController.signal;
+    const activity = {pending: true, message: '正在准备配额查询…', previousOperation: profile.operation?.id};
+    accountRefreshes.set(profile.id, activity);
+    const render = () => { if (!signal.aborted && renderedQuotaRateLimits) renderQuotaAccounts(renderedQuotaRateLimits); };
+    render();
+    try {
+      const {submitted, snapshot} = await window.AgentMonitor.refreshCodexAccount(profile, signal);
+      activity.message = submitted ? '已提交配额查询，等待读数更新。' : '';
+      activity.submitted = submitted;
+      if (!signal.aborted) updateCodexQuotaReadings(snapshot.accounts, snapshot.upstream_pause || null);
+    } catch (error) {
+      if (error.name !== 'AbortError') activity.message = error.message;
+    } finally {
+      activity.pending = false;
+      render();
+    }
   }
 
   function quotaRemovalReading(account) {
@@ -2271,6 +2294,7 @@
     codexProfileStateKnown = false;
     codexSharedPause = null;
     codexQuotaReadings = [];
+    accountRefreshes = new Map();
     renderedQuotaRateLimits = null;
     initialQuotaHistoryExpanded = Boolean(options.rememberedExpanded);
   }

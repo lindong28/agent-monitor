@@ -12,9 +12,10 @@ const {values:args} = parseArgs({options:{
   'agent-browser':{type:'string'}, browser:{type:'string'}, python:{type:'string'},
   'quota-settings-only':{type:'boolean'}, 'dashboard-only':{type:'boolean'}, vendor:{type:'string'}, facade:{type:'boolean'}, 'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
   'account-scopes-only':{type:'boolean'}, 'automatic-egress-only':{type:'boolean'},
+  'quota-actions-only':{type:'boolean'},
 }});
 if (args.help) {
-  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--automatic-egress-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks automatic system diagnostics, cache reuse, restart restoration and failure recovery using synthetic probes. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --automatic-egress-only checks automatic-region skips and retained readings without provider requests. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
+  console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--automatic-egress-only] [--quota-actions-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks automatic system diagnostics, cache reuse, restart restoration and failure recovery using synthetic probes. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --automatic-egress-only checks automatic-region skips and retained readings without provider requests. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
   process.exit(0);
 }
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -129,6 +130,7 @@ async function stats() { return (await fetch(url+'/fixture/stats',{signal:AbortS
 async function configure(value) { const r=await fetch(url+'/fixture/config',{method:'POST',body:JSON.stringify(value),signal:AbortSignal.timeout(3000)}); assert.equal(r.status,200); }
 async function startFixture() {
   const command=args['network-only'] ? [path.join(repo,'tests/fixtures/network_cache_ui.py'),'--artifacts',root] : (args['quota-settings-only'] || args['automatic-egress-only']) ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor'), ...(args['automatic-egress-only'] ? ['--automatic-egress'] : [])] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
+  if (args['quota-actions-only']) command.push('--overview','--vendor',args.vendor || path.join(repo,'web/vendor'));
   fixture=spawn(python,command,{env,cwd:repo,stdio:['ignore','pipe','pipe']});
   children.push(fixture);
   let line='',error='';
@@ -175,7 +177,40 @@ try {
   await browserCommand(['get','url'],false,false);
   assert.equal((await bt('get','url')).data.url,new URL(url).href,'pinned fixture origin');
   console.log('Isolated browser opened the local fixture.');
-  if (args['account-scopes-only']) {
+  if (args['quota-actions-only']) {
+    const row='tr[data-account-id="workspace-0"]', refresh=row+' .quota-account-links button';
+    await until('overview quota actions',()=>read(`!!document.querySelector('${refresh}') && !document.querySelector('${refresh}').disabled`));
+    assert(!await read("document.querySelector('#quota-accounts').innerText.includes('管理账号')"));
+    assert(!await read("document.querySelector('#quota-accounts').innerText.includes('查询受限，请查看账号')"));
+    assert(await read("document.querySelector('tr[data-account-id=\"workspace-5\"] .quota-account-links button').disabled"));
+    await click(refresh,"!!document.querySelector('dialog[open] .btn-primary:not(:disabled)')");
+    assert.equal(new URL((await bt('get','url')).data.url).pathname,'/');
+    await click('dialog[open] button:not(.btn-primary)',"!document.querySelector('dialog[open]')");
+    assert.deepEqual((await stats()).refreshes,[],'cancel never submits');
+    await click(refresh,"!!document.querySelector('dialog[open] .btn-primary:not(:disabled)')");
+    await click('dialog[open] .btn-primary',`document.querySelector('${row}').innerText.includes('配额已更新')`);
+    assert.deepEqual((await stats()).refreshes,['0']);
+    assert(await read(`document.querySelector('${row}').innerText.includes('7%')`));
+    assert.equal(new URL((await bt('get','url')).data.url).pathname,'/');
+    await bt('screenshot',path.join(root,'quota-refresh-overview.png'));
+    await bt('open',url+'/accounts');
+    await until('account page',()=>read("!!document.querySelector('[data-reader-state=\"codex-account:1:refresh\"]')"));
+    assert.equal(await read("document.querySelector('[data-reader-state=\"codex-account:1:refresh\"]').textContent"),'刷新配额');
+    await click('[data-reader-state="codex-account:1:refresh"]',"!!document.querySelector('dialog[open] .btn-primary:not(:disabled)')");
+    await click('dialog[open] .btn-primary',"!document.querySelector('dialog[open]')");
+    await until('account refresh receipt',async()=> (await stats()).refreshes.length===2);
+    assert.deepEqual((await stats()).refreshes,['0','1']);
+    const payloads=(await stats()).preview_payloads;
+    assert(payloads.every(p=>p.approval_action==='refresh' && p.approval_expected==='fixture-old'));
+    assert.deepEqual(payloads.map(p=>p.profile_ids),[['0'],['0'],['1']]);
+    await click('#codex-batch-mode',"!document.querySelector('#codex-batch-panel').hidden");
+    await click('#codex-select-all',"document.querySelector('#codex-selection-count').textContent.includes('已选 6 / 6')");
+    await click('#codex-batch-panel details:has(#codex-batch-next) > summary',"document.querySelector('#codex-batch-next').checkVisibility()");
+    assert(await read("document.querySelector('#codex-batch-next').textContent.includes('6')"));
+    await bt('screenshot',path.join(root,'account-message-entry.png'));
+    assert.deepEqual((await stats()).starts,[],'message entry inspected without sending');
+    console.log('Quota actions: overview cancel/confirm, exact identity, account-page parity and message entry passed.');
+  } else if (args['account-scopes-only']) {
     await configure({account_scopes:true});
     await bt('open',url);
     const panel='#codex-recovery-body .quota-recovery-panel';

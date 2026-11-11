@@ -215,27 +215,27 @@ ui.updateQuotaMachineState('alpha', {machine:'alpha',observed_at:new Date().toIS
 ui.updateQuotaMachineState('beta', {machine:'beta',observed_at:new Date().toISOString(),pause:null,active:null});
 let currentRow = () => table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.accountId==='current');
 assert(!currentRow().textContent.includes('发送已暂停'));
-assert.equal(descendants(currentRow()).find(n=>n.textContent==='刷新配额').disabled,false);
+assert.equal(descendants(currentRow()).find(n=>n.tagName==='BUTTON' && n.textContent==='刷新配额').disabled,false);
 assert(!currentRow().textContent.includes('额度已用尽'));
 // A quota observation alone must not become a sending restriction.
 ui.updateCodexQuotaReadings([{id:'profile-current',account_id:'current',email:'current@example.test',quota_query_allowed:true,restrictions:{}}]);
 assert(currentRow().textContent.includes('100%'));
 assert(!currentRow().textContent.includes('发送已暂停'));
 assert(!descendants(currentRow()).some(n=>n.className==='quota-scope' && n.textContent==='可查询配额'));
-assert.equal(descendants(currentRow()).find(n=>n.textContent==='刷新配额').disabled,false);
+assert.equal(descendants(currentRow()).find(n=>n.tagName==='BUTTON' && n.textContent==='刷新配额').disabled,false);
 ui.updateCodexQuotaReadings([{id:'profile-current',account_id:'current',email:'current@example.test',quota_query_allowed:true,restrictions:{quota:{}}}]);
 assert(currentRow().textContent.includes('alpha 自动查询已暂停'));
 assert(!currentRow().textContent.includes('beta 自动查询已暂停'));
 assert(currentRow().textContent.includes('历史采集'));
 assert(currentRow().textContent.includes('100%'));
-assert.equal(descendants(currentRow()).find(n=>n.textContent==='刷新配额').disabled,false);
+assert.equal(descendants(currentRow()).find(n=>n.tagName==='BUTTON' && n.textContent==='刷新配额').disabled,false);
 ui.updateQuotaMachineState('alpha', {machine:'alpha',observed_at:new Date().toISOString(),pause:null,active:null});
 assert(!currentRow().textContent.includes('自动查询已暂停'));
 ui.updateQuotaMachineState('beta', null);
 assert(currentRow().textContent.includes('beta 暂停状态未核实'));
 ui.updateCodexQuotaReadings([{id:'profile-current',account_id:'current',email:'current@example.test',quota_query_allowed:false,restrictions:{authentication:{}}}]);
-assert.equal(descendants(currentRow()).find(n=>n.textContent==='刷新配额').disabled,true);
-assert(currentRow().textContent.includes('查询受限'));
+assert.equal(descendants(currentRow()).find(n=>n.tagName==='BUTTON' && n.textContent==='刷新配额').disabled,true);
+assert(!currentRow().textContent.includes('查询受限'));
 ui.updateCodexQuotaReadings(null);
 assert(currentRow().textContent.includes('查询权限未核实'));
 ui.resetQuotaReadings();
@@ -586,19 +586,34 @@ replacementButtons[2].click();
 assert(table.textContent.includes('fixture unavailable'));
 console.log('quota explorer: filters, counters, notices, polling, full snapshot removal, unavailable passed');
 
-// Navigation must bind the workspace and email together, independent of table filters.
-let opened = [];
-window.AgentMonitor = {openCodexAccount: id => opened.push(id)};
+// Refresh binds workspace and email, independent of table filters; no management link.
 ui.quotaFilter.search=''; ui.quotaFilter.provider='all';
 ui.updateCodexQuotaReadings([
- {id:'profile-one',account_id:'one',email:'same@example.test'},
- {id:'profile-two',account_id:'two',email:'same@example.test'},
- {id:'profile-wrong-email',account_id:'three',email:'different@example.test'},
+ {id:'profile-one',account_id:'one',email:'same@example.test',quota_query_allowed:true},
+ {id:'profile-two',account_id:'two',email:'same@example.test',quota_query_allowed:true},
+ {id:'profile-wrong-email',account_id:'three',email:'different@example.test',quota_query_allowed:true},
 ]);
 ui.renderQuotaAccounts({codex:{accounts:['one','two','three'].map(id=>({...account(id),account_label:'same@example.test'}))}});
-const actionButtons=descendants(table).filter(n=>n.tagName==='BUTTON' && n.textContent==='管理账号');
-assert.equal(actionButtons.length,2,'no link for email mismatch');
-actionButtons.forEach(n=>n.click());assert.deepEqual(opened,['profile-one','profile-two']);
+const actionButtons=descendants(table).filter(n=>n.tagName==='BUTTON' && n.textContent==='刷新配额');
+assert.equal(actionButtons.length,2,'no action for email mismatch');
+assert(!table.textContent.includes('管理账号'));
+assert(!table.textContent.includes('查询受限，请查看账号'));
+// Pending clicks survive a table rerender and page teardown aborts the operation.
+let finishRefresh, refreshCalls=[];
+window.AgentMonitor.refreshCodexAccount=(profile,signal)=>{
+ refreshCalls.push({profile,signal});
+ return new Promise(resolve=>{finishRefresh=resolve;});
+};
+actionButtons[0].click(); actionButtons[0].click();
+assert.equal(refreshCalls.length,1,'a stale button cannot submit twice');
+assert.equal(refreshCalls[0].profile.id,'profile-one');
+assert(descendants(table).filter(n=>n.tagName==='BUTTON' && n.textContent==='刷新配额')[0].disabled);
+const pendingSignal=refreshCalls[0].signal;
+const preservedSnapshot=ui.quotaSnapshot();
+ui.resetQuotaReadings();
+assert(pendingSignal.aborted,'leaving the page cancels the action');
+finishRefresh({submitted:false,snapshot:{accounts:[]}});
+ui.renderQuotaAccounts(preservedSnapshot);
 for (const [sort,hidden] of [['default',true],['remaining',false],['reset',false],['remaining_desc',false],['observed',true]]) {
  ui.quotaFilter.sort=sort;ui.renderQuotaAccounts(ui.quotaSnapshot());
  assert.equal(nodes['#quota-window-control'].hidden,hidden,sort);

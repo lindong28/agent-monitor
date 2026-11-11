@@ -5,6 +5,19 @@ async function previewEgress(...args) {
   return preview.previewEgress(...args);
 }
 
+// Both the overview and account page use the same single-account operation.
+export async function refreshAccountQuota({account, request, requireDevice, signal, expected = null, onApproved = () => {}}) {
+  const connection = await requireDevice();
+  if (signal.aborted) return false;
+  const approval = await previewEgress(request, [account], signal, {
+    connection, profile_ids: [account.id], approval_action: "refresh", approval_expected: expected,
+  });
+  if (!approval || signal.aborted) return false;
+  onApproved();
+  await request("refresh", {id: account.id, connection, confirmation: approval, approval_expected: expected});
+  return true;
+}
+
 const STAGES = {
   queued: "排队中",
   checking: "检查登录", login_queued: "等待授权排队", login: "等待官方授权", sending: "正在发送", reading: "读取配额", saving: "保存配额结果",
@@ -373,6 +386,15 @@ export function init({ autoLoad = true } = {}) {
     let approval = null;
     if (upstream) {
       try {
+        if (action === "refresh") {
+          const submitted = await refreshAccountQuota({account, request, requireDevice: actions.requireDevice,
+            signal: controller.signal, expected: batch?.id ?? null, onApproved: () => {
+              button.disabled = true;
+              notice.textContent = "正在提交配额查询…";
+            }});
+          if (submitted && current()) await load();
+          return;
+        }
         const connection = await actions.requireDevice();
         const expected = batch?.id ?? null;
         approval = await previewEgress(request, account ? [account] : [], controller.signal, {
@@ -707,7 +729,7 @@ export function init({ autoLoad = true } = {}) {
         send.addEventListener("click", () => actions.performBatch("batch-start", [account.id]));
         currentDetail.append(send);
       }
-      const refresh = button("仅刷新配额", "refresh", account);
+      const refresh = button("刷新配额", "refresh", account);
       const restrictions = account.restrictions || {};
       refresh.disabled ||= accountRefreshBlocked(account) || Boolean(upstreamPause) || Boolean(account.account_quota_pause);
       controls.append(refresh);
@@ -981,8 +1003,8 @@ export function renderAccountBatch(state, controls) {
     if (blockedReason && quotaUnsent.length && !submittingBatch && !busy && !upstreamPause) {
       const prerequisites = quotaUnsent.filter(account => accountRefreshBlocked(account)).length;
       const nextStep = prerequisites
-        ? `其中 ${prerequisites} 个需先完成登录或处理其他限制，再「仅刷新配额」。${prerequisites < quotaUnsent.length ? "其余可在对应账号「仅刷新配额」。" : ""}`
-        : "请先在对应账号「仅刷新配额」。";
+        ? `其中 ${prerequisites} 个需先完成登录或处理其他限制，再「刷新配额」。${prerequisites < quotaUnsent.length ? "其余可在对应账号「刷新配额」。" : ""}`
+        : "请先在对应账号「刷新配额」。";
       blockedReason.textContent += `未发送账号中有 ${quotaUnsent.length} 个受额度限制。${nextStep}解除后再继续发送。`;
       blockedReason.hidden = false;
     }

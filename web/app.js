@@ -771,6 +771,31 @@
     url.searchParams.set('return', currentPageUrl());
     return renderRoute(url, {push:true}).then(handled => { if (!handled) window.location.assign(url.href); });
   }
+  async function refreshCodexAccount(profile, signal) {
+    // Pair synchronously from the click, before awaits consume the user gesture.
+    const connection = await requireRecoveryDevice(signal);
+    const request = async (action, payload) => {
+      const response = await fetch('/api/codex-accounts' + (action ? '/' + action : ''), {
+        method: action ? 'POST' : 'GET', signal,
+        headers: {'X-Agent-Monitor': 'codex-accounts', ...(action ? {'Content-Type': 'application/json'} : {})},
+        body: action ? JSON.stringify(payload) : undefined,
+      });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error || '账号操作请求失败。');
+      return value;
+    };
+    const snapshot = await request('');
+    const account = snapshot.accounts?.find(item => item.id === profile.id
+      && item.account_id === profile.account_id && item.email.toLowerCase() === profile.email.toLowerCase());
+    if (!account || account.quota_query_allowed !== true || account.busy || snapshot.upstream_pause) {
+      throw new Error('此账号当前无法刷新配额，请在账号管理查看限制。');
+    }
+    const module = await import('/web/codex-accounts.js' + (assetVersion ? `?v=${assetVersion}` : ''));
+    if (signal.aborted) return false;
+    const submitted = await module.refreshAccountQuota({account, request, signal, expected: snapshot.batch?.id ?? null,
+      requireDevice: () => Promise.resolve(connection)});
+    return {submitted, snapshot: submitted ? await request('') : snapshot};
+  }
   const CLIENT_ROUTES = new Map([
     ["/", () => initOverview()],
     ["/explore", () => window.AgentMonitorPivot.init()],
@@ -1002,6 +1027,7 @@
     api,
     previewUpstream,
     requireRecoveryDevice,
+    refreshCodexAccount,
     autoTimeDim,
     bindShell,
     chart,

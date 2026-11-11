@@ -38,15 +38,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--facade', action='store_true', help='Exercise real same-origin forwarding to the synthetic owner.')
     parser.add_argument('--loopback', action='store_true', help='Use a loopback page origin for automated acceptance.')
+    parser.add_argument('--overview', action='store_true', help='Serve the real overview and account pages for quota action acceptance.')
+    parser.add_argument('--vendor', type=Path)
     parser.add_argument('--state-root', type=Path, help='Explicit facade installation root for isolated acceptance.')
     args = parser.parse_args()
     accounts = [dict(id=str(i), email=f'fixture{i}@example.test', account_id=f'workspace-{i}',
                      eligible=True, busy=False, has_credentials=True) for i in range(6)]
+    if args.overview:
+        for account in accounts:
+            account['quota_query_allowed'] = account['id'] != '5'
     state = dict(disclosure=False, quota_failure=False, mode='mixed', delay=0, starts=[], previews=0, paused=False,
                  pair_mode='ready', status_mode='ready', pair_requests=0, status_requests=0,
                  pause_record='matched', probe_used=False, recovery_mode='success', recoveries=[], resumes=[], restricted=False, recovery_reads=0, last_recovery=None, pause_id='fixture-pause', recovery_state='ready')
     state.update(process_reads=0, server_reads=0, process_probes=0, process_probe_kinds=[], process_mode="ready",
                  account_scopes=False, cleared_scopes=[], scoped_receipts={}, scoped_reads=[])
+    state.update(refreshes=[], preview_payloads=[])
     recovery_approvals = client_network.ApprovalStore()
     from agent_monitor.network import process_network
     def process_report():
@@ -140,6 +146,28 @@ def main():
             self.wfile.write(body)
 
         def do_GET(self):
+            if args.overview:
+                path = urlsplit(self.path).path
+                if path in ('/', '/accounts'):
+                    return self.send((ROOT / 'web' / ('index.html' if path == '/' else 'accounts.html')).read_bytes(), 'text/html; charset=utf-8')
+                if path.startswith('/web/') and '..' not in path.split('/'):
+                    file = args.vendor / Path(path).name if path.startswith('/web/vendor/') else ROOT / path.lstrip('/')
+                    body = file.read_bytes()
+                    if path.endswith('/device-connection.js'):
+                        body = body.replace(b'127.0.0.1:39002', f'127.0.0.1:{pair.server_port}'.encode())
+                    return self.send(body, 'text/css' if path.endswith('.css') else 'text/javascript')
+                sync = dict(machines=[], coverage={'admitted': 0, 'declared': 0}, syncing=False, terminal=True)
+                if path == '/api/overview':
+                    rows = [dict(account_state='known', account_id=a['account_id'], account_label=a['email'],
+                        updated_at='2026-11-01T00:00:00Z', five_hour_used_pct=12, seven_day_used_pct=23,
+                        machines=[], presence='in_use') for a in accounts]
+                    return self.send(dict(today={'cost_usd': 12}, week={'cost_usd': 34}, range={'cost_usd': 56, 'total_tokens': 100},
+                        rate_limits={'claude': {'accounts': []}, 'codex': {'accounts': rows}},
+                        daily_cost_30d=[], top_projects_week=[], model_mix_month=[], sync=sync))
+                if path == '/api/runtime-context': return self.send({'local_network': False})
+                if path == '/api/timezone': return self.send({'timezone': 'UTC'})
+                if path == '/api/sync-status': return self.send(sync)
+                if path == '/api/health': return self.send({'stale': False, 'instance_id': 'quota-action-fixture'})
             if self.path == '/':
                 self.send(html.encode(), 'text/html; charset=utf-8')
             elif self.path == '/network':
@@ -231,13 +259,14 @@ def main():
                 state['server_reads'] += 1
                 self.send(dict(checked_host='fixture-server-device', error='Synthetic server unavailable', verdict='unknown'))
             elif self.path == '/api/codex-accounts/egress-preview':
+                state['preview_payloads'].append(payload)
                 try:
                     recovery = payload.get('approval_action') in ('quota-recovery', 'quota-auth-recovery')
                     if recovery:
                         confirmation = recovery_approvals.issue(payload['approval_action'], payload['approval_scope'], payload['approval_expected'])
                     else:
                         route = client_network.hub.browser_route(payload.get('connection'))
-                        confirmation = route.issue(payload.get('profile_ids', []), payload.get('expected_batch_id'))
+                        confirmation = route.issue(payload.get('profile_ids', []), payload.get('approval_expected') if args.overview else payload.get('expected_batch_id'))
                 except client_network.NetworkError as exc:
                     self.send(dict(error=str(exc)), status=exc.status)
                     return
@@ -267,6 +296,16 @@ def main():
                 route = client_network.hub.browser_route(payload.get('connection'))
                 route.consume(payload.get('confirmation'), payload.get('profile_ids'), payload.get('expected_batch_id'))
                 state['starts'].append(payload)
+                self.send({})
+            elif args.overview and self.path == '/api/codex-accounts/refresh':
+                route = client_network.hub.browser_route(payload.get('connection'))
+                route.consume(payload.get('confirmation'), [payload['id']], payload.get('approval_expected'))
+                assert state['preview_payloads'][-1]['approval_action'] == 'refresh'
+                assert state['preview_payloads'][-1]['profile_ids'] == [payload['id']]
+                state['refreshes'].append(payload['id'])
+                account = next(a for a in accounts if a['id'] == payload['id'])
+                account['operation'] = dict(id='refresh-' + str(len(state['refreshes'])), refresh_only=True, stage='succeeded',
+                    detail='配额已更新', after=dict(observed_at='2026-11-11T08:00:00Z', five_hour_used_pct=7, seven_day_used_pct=17))
                 self.send({})
             elif self.path == '/api/codex-accounts/set-disabled':
                 account = next(a for a in accounts if a['id'] == payload['id'])

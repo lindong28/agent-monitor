@@ -68,7 +68,7 @@ state.batch.items[0].operation.message_status = "not_sent";
 state.accounts[0].restrictions = {quota: {reason: "quota"}};
 state.accounts[0].has_credentials = true;
 render();
-assert.match(controls.blockedReason.textContent, /1.*额度.*仅刷新配额/);
+assert.match(controls.blockedReason.textContent, /1.*额度.*刷新配额/);
 assert.equal(controls.batchRetry.disabled, false);
 state.selectedIds.clear(); render();
 assert.match(controls.blockedReason.textContent, /选择/);
