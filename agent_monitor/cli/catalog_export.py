@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 from agent_monitor.snapshots import exporter
 
+COMPARISON_CONTRACT = "agent-monitor.rollup.v1"
+
 
 class CatalogExportError(ValueError):
     pass
@@ -34,6 +36,23 @@ def _uri(value):
 def _id(kind, values):
     digest = hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return "monitor:" + kind + ":" + digest
+
+
+def _comparison(manifest, instance_id, organization, project_id):
+    """Full validated retained rollup, not provider coverage or current quota."""
+    scope = {"instance_id": instance_id, "organization": organization, "project_id": project_id,
+             "source_host_identity": manifest["source_host_identity"]}
+    accounting = {"bucket_timezone": manifest["bucket_timezone"],
+                  "metric_totals_basis": "legacy_daily_rollup"}
+    if manifest["schema_version"] == 2:
+        accounting.update({key: manifest[key] for key in (
+            "metric_totals_basis", "legacy_fallback_bucket_dimensions", "legacy_fallback_bucket_count")})
+    projection = {"contract": COMPARISON_CONTRACT, "snapshot_schema_version": manifest["schema_version"],
+                  "logical_digest": manifest["logical_digest"], "accounting": accounting}
+    def digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                         ensure_ascii=True, allow_nan=False).encode()).hexdigest()
+    return {"contract": COMPARISON_CONTRACT, "scope": digest(scope), "digest": digest(projection)}
 
 
 def project_bundle(bundle, *, instance_id, organization, project_id, source_uri, material_uri):
@@ -79,7 +98,8 @@ def project_bundle(bundle, *, instance_id, organization, project_id, source_uri,
             "project_id": project_id, "family_id": family_id, "category": "observation",
             "source_version": version, "observed_at": observed, "summary": summary,
             "availability": {"state": "available", "reason": "Local bundle validated; remote URI access is not verified."},
-            "locator": material_uri, "input_ids": []}, material_uri)]}
+            "locator": material_uri, "input_ids": [],
+            "comparison": _comparison(manifest, instance_id, organization, project_id)}, material_uri)]}
 
 
 def write_projection(output, payload):

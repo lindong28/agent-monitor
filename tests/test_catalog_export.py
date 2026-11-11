@@ -1,6 +1,8 @@
 """Public offline projection with explicit fixtures and denied provider/network access."""
 import json
+import hashlib
 from pathlib import Path
+import sqlite3
 import subprocess
 
 from tests.artifacts import ArtifactTestCase
@@ -132,3 +134,76 @@ class CatalogExportTests(ArtifactTestCase):
         snapshot.symlink_to(real)
         self.assertEqual(self.invoke(bundle, self.root / "new-output").returncode, 2)
         self.assertFalse((self.root / "new-output").exists())
+
+    def refresh_manifest(self, bundle, **changes):
+        from agent_monitor.snapshots import exporter, generation
+        path, snapshot = bundle / "export.json", bundle / "snapshot.db"
+        manifest = json.loads(path.read_text())
+        stats = generation.snapshot_stats(snapshot)
+        for key in exporter._MANIFEST_V2_FIELDS:
+            manifest.pop(key, None)
+        manifest.update(stats, transfer_digest=hashlib.sha256(snapshot.read_bytes()).hexdigest(), **changes)
+        manifest["manifest_digest"] = exporter.manifest_digest(manifest)
+        path.write_text(json.dumps(manifest))
+        return manifest
+
+    def projected_record(self, bundle, name, *extra):
+        output = self.root / (name + ".json")
+        result = self.invoke(bundle, output, *extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(output.read_text())["entities"][2]
+
+    def test_comparison_ignores_capture_quota_uri_and_physical_snapshot_bytes(self):
+        bundle = self.export_bundle()
+        first = self.projected_record(bundle, "original")
+        snapshot = bundle / "snapshot.db"
+        physical_before = snapshot.read_bytes()
+        with sqlite3.connect(snapshot) as connection:
+            connection.execute("PRAGMA user_version=7")
+        self.assertNotEqual(snapshot.read_bytes(), physical_before)
+        self.refresh_manifest(bundle, generated_at="2026-11-12T00:00:00Z", exporter_commit="b" * 40,
+                              rate_limits={"codex": {"updated_at": "2026-11-12T00:00:00Z", "primary_used_percent": 42}})
+        second = self.projected_record(bundle, "recaptured", "--material-uri", "urn:fixture:second-material",
+                                       "--source-uri", "urn:fixture:other-source-entry")
+        self.assertEqual(first["payload"]["comparison"], second["payload"]["comparison"])
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertNotEqual(first["payload"]["source_version"], second["payload"]["source_version"])
+        self.assertEqual(set(first["payload"]["comparison"]), {"contract", "scope", "digest"})
+        self.assertEqual(first["payload"]["comparison"]["contract"], "agent-monitor.rollup.v1")
+
+    def test_comparison_detects_two_business_changes_and_returns_to_prior_value(self):
+        bundle = self.export_bundle()
+        original = self.projected_record(bundle, "baseline")["payload"]["comparison"]
+        for field in ("input_tokens", "output_tokens"):
+            with self.subTest(field=field):
+                with sqlite3.connect(bundle / "snapshot.db") as connection:
+                    connection.execute("UPDATE daily_usage_rollup SET " + field + "=" + field + "+10")
+                self.refresh_manifest(bundle)
+                changed = self.projected_record(bundle, field)["payload"]["comparison"]
+                self.assertEqual(changed["scope"], original["scope"])
+                self.assertNotEqual(changed["digest"], original["digest"])
+                with sqlite3.connect(bundle / "snapshot.db") as connection:
+                    connection.execute("UPDATE daily_usage_rollup SET " + field + "=" + field + "-10")
+                self.refresh_manifest(bundle)
+                self.assertEqual(self.projected_record(bundle, field + "-restored")["payload"]["comparison"], original)
+
+    def test_comparison_scope_uses_target_and_real_host_and_keeps_schema_basis(self):
+        bundle = self.export_bundle()
+        first = self.projected_record(bundle, "scope-original")["payload"]["comparison"]
+        for flag in ("--instance-id", "--organization", "--project-id"):
+            changed = self.projected_record(bundle, flag[2:], flag, "other")["payload"]["comparison"]
+            self.assertNotEqual(changed["scope"], first["scope"])
+            self.assertEqual(changed["digest"], first["digest"])
+        manifest = json.loads((bundle / "export.json").read_text())
+        self.refresh_manifest(bundle, source_host_identity="host-v1:" + "9" * 64)
+        other_host = self.projected_record(bundle, "other-host")["payload"]["comparison"]
+        self.assertNotEqual(other_host["scope"], first["scope"])
+        self.assertEqual(other_host["digest"], first["digest"])
+        with sqlite3.connect(bundle / "snapshot.db") as connection:
+            connection.execute("DROP TABLE daily_usage_rollup")
+            connection.execute("DELETE FROM rollup_meta WHERE key='usage_rollup_schema'")
+        self.refresh_manifest(bundle, source_host_identity=manifest["source_host_identity"])
+        legacy = self.projected_record(bundle, "legacy")["payload"]["comparison"]
+        self.assertEqual(legacy["scope"], first["scope"])
+        self.assertEqual(legacy["contract"], first["contract"])
+        self.assertNotEqual(legacy["digest"], first["digest"])
