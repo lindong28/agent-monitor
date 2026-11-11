@@ -96,6 +96,9 @@ class StorageSourceBoundaryTests(unittest.TestCase):
 
     def test_production_daily_rollup_and_attach_sites_match_explicit_census(self):
         expected_daily_rollup = [
+            # Saved-content view labels its admitted project table; the native
+            # accounting reader opens only the bounded private immutable copy.
+            ("agent_monitor/cli/bundle_read.py", "read_bundle", "validated_project_rollup_label"),
             # The comparison projection labels the validated legacy manifest basis;
             # it opens no connection or SQL path (validation remains in snapshot_stats).
             ("agent_monitor/cli/catalog_export.py", "_comparison", "validated_manifest_basis_label"),

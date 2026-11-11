@@ -39,6 +39,7 @@ if [ "${1:-}" = local ]; then
 fi
 
 usage() {
+  echo "Saved bundle content: agent-monitor bundle-read --help"
   echo "Offline catalog projection: agent-monitor catalog-export --help"
   echo "Archive maintenance: agent-monitor archive [stats|compact --backup NEW_PERSISTENT_PATH] [--archive PATH] [--rollup-db PATH] [--budget-seconds N] [--json]"
   echo "Service management: agent-monitor service {status|restart local-web|restart hub|restart collector|restart connector|deploy [--new] [--expect SHA]|release {status|resume|abandon}|rebuild-runtime --python /absolute/python}"
@@ -336,6 +337,11 @@ case "${1:-}" in
   process-network)
     shift
     exec "${PYTHON_MODULE[@]}" agent_monitor.network.process_network "$@"
+    ;;
+  bundle-read)
+    shift
+    # Saved-material reads must not attach service-log maintenance or load state.
+    "$AGENT_MONITOR_PYTHON" -c 'import sys, runpy; sys.path[0]=sys.argv.pop(1); runpy.run_module("agent_monitor.cli.bundle_read",run_name="__main__",alter_sys=True)' "$ROOT_DIR" "$@"
     ;;
   catalog-export)
     shift

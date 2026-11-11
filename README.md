@@ -8,6 +8,8 @@ agent-monitor 读取本地 agent 日志，也可以通过 SSH 汇总你明确配
 
 需要把已保存统计登记到自己的目录服务时，可用[离线目录投影](docs/public-usage.md#offline-catalog-projection)：`./agent-monitor catalog-export --help`。它只生成 private 元数据文件，不发送数据或刷新账号。
 
+需要读取某份已保存 bundle 的项目日汇总、实际用量或会话内容时，使用[保存材料读取](docs/public-usage.md#read-saved-bundle-content)：`./agent-monitor bundle-read /absolute/existing-bundle --kind rollup --json`。该命令校验材料身份并有界分页，不访问 provider、不刷新统计。
+
 它帮助你回答：**这些 token 用在了哪个项目或会话上？保留的记录能说明多少费用？** 从**总览**进入**会话**，再查看某个会话的**用量记录**。费用根据记录中的用量估算，并非服务商账单；额度是带时间戳的观测结果，不能保证请求一定成功。
 
 **请在自己的电脑或可信网络中运行。** 仪表盘没有客户端鉴权。下面的快速上手命令绑定到 `127.0.0.1`；直接运行 `./agent-monitor start` 则默认监听所有网络接口。不要将它直接暴露到公网。若想先体验而不访问自己的账号，请使用[内置示例](#try-the-included-sample-without-your-accounts)。
