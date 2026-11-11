@@ -18,7 +18,11 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         home = self.root / "home"
         home.mkdir()
-        self.env = {**os.environ, "HOME": str(home), "GIT_CONFIG_GLOBAL": os.devnull,
+        # Git's automatic maintenance must finish before fixture cleanup, including
+        # maintenance started by receive-pack in the local bare remote.
+        git_config = home / ".gitconfig"
+        git_config.write_text("[maintenance]\n\tautoDetach = false\n[gc]\n\tautoDetach = false\n")
+        self.env = {**os.environ, "HOME": str(home), "GIT_CONFIG_GLOBAL": str(git_config),
                     "CLAUDE_CONFIG_DIR": str(home / '.claude'), "CODEX_HOME": str(home / '.codex'),
                     "AGENT_MONITOR_PYTHON": sys.executable, "PYTHONDONTWRITEBYTECODE": '1', "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
         for key in list(self.env):
