@@ -191,6 +191,7 @@ def local_status(*, profile=None, pause_scope=None):
                         "blocked_reason": blocked_reason,
                         "resolution_reason": resolution_reason,
                         "credential_path": str(auth), "quota_profile": profile or ""},
+            "last_quota_retry": state.get("last_quota_retry"),
             "last_recovery": state.get("last_recovery")}
 
 

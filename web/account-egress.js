@@ -37,6 +37,9 @@ export async function previewEgress(request, targets, signal, payload = {}) {
   if (needsApproval) controls.append(confirm);
   dialog.append(title, status, results,
     node("p", "分别探测 ChatGPT 业务与认证域名，不携带账号凭据。以下是探测时的出口；后续连接、其他目标或代理切换仍可能改变出口。", "quota-scope"));
+  if (["refresh", "refresh-all", "refresh-selected", "refresh-retry", "quota-settings"].includes(payload.approval_action)) {
+    dialog.append(node("p", "普通配额读取仅在身份、认证有效期和原出口条件已核实时，允许同次操作内最多一次诊断复读；总时限不延长，已有暂停不会自动解除。", "quota-scope"));
+  }
   if (sending) {
     dialog.append(node("p", `将为以下 ${targets.length} 个账号各随机抽取并发送一条日常短消息（可能重复）：`));
     const identities = node("ul", undefined, "account-egress-identities");

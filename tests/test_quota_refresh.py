@@ -469,7 +469,7 @@ class ProviderTests(unittest.TestCase):
             env = spawn.call_args.kwargs["env"]
             self.assertEqual(env["CODEX_HOME"], str(home))
             self.assertIn("127.0.0.1:9", env["HTTPS_PROXY"])
-            self.assertEqual(spawn.call_args.args[0][1:], ["app-server", "--listen", "stdio://", "-c", 'features.respect_system_proxy=false'])
+            self.assertEqual(spawn.call_args.args[0][1:], ["app-server", "--listen", "stdio://", "-c", 'features.respect_system_proxy=false', "-c", 'cli_auth_credentials_store="file"'])
             spawn.reset_mock()
             with self.assertRaises(quota_refresh.LocalUnavailable):
                 quota_refresh._codex({"account_id": "account-a", "label": "other@example.test", "codex_home": str(home)})

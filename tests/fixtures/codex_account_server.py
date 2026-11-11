@@ -38,7 +38,9 @@ for line in sys.stdin:
     if "id" not in message:
         continue
     result = {}
-    if method == "account/read":
+    if method == "initialize" and scenario.startswith("bounded_"):
+        result = {"userAgent": "agent_monitor_accounts/0.167.0 (fixture)"}
+    elif method == "account/read":
         read_errors = {
             "account_read_auth": "workspace routing discovery unauthorized (401)",
             "account_read_workspace": "selected workspace missing from routing discovery",
@@ -94,6 +96,16 @@ for line in sys.stdin:
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
     elif method == "account/rateLimits/read":
         quota_reads += 1
+        if scenario.startswith("bounded_") and (quota_reads == 1 or scenario == "bounded_persistent"):
+            if scenario == "bounded_changed":
+                auth = json.loads((home / "auth.json").read_text())
+                auth["tokens"]["access_token"] = "changed-fixture"
+                (home / "auth.json").write_text(json.dumps(auth))
+            error = {"code": -32603, "message": "failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage)"}
+            if scenario == "bounded_unknown":
+                error["data"] = {"request_id": "fixture-data", "unrecognized": True}
+            emit({"id": message["id"], "error": error})
+            continue
         if scenario.startswith("scoped_"):
             status = 500 if scenario == "scoped_500" else 403 if scenario == "scoped_403" else 401
             phrase = {500: "Internal Server Error", 403: "Forbidden", 401: "Unauthorized"}[status]

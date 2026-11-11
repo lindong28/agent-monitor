@@ -34,6 +34,11 @@ def observation(value):
         return None
     observed = value.get("observed_at")
     result = {"source": value["source"], "observed_at": observed if timestamp(observed) is not None else None}
+    if value["source"] == "active_query" and value.get("quota_retry"):
+        from agent_monitor import diagnostics
+        retry = diagnostics.safe_failure({"quota_retry": value["quota_retry"]}).get("quota_retry")
+        if retry:
+            result["quota_retry"] = retry
     if value["source"] == "codex_session" and isinstance(value.get("session_id"), str) and value["session_id"]:
         result["session_id"] = value["session_id"]
     return result

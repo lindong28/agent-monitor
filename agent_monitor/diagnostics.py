@@ -68,7 +68,7 @@ def _redact_url_credentials(match):
     return re.sub(r"([?&#;])([^=?&#;]+)=([^&#;]*)", parameter, value) + punctuation
 
 
-def safe_upstream_detail(value):
+def safe_upstream_detail(value, *, limit=512):
     """Retain bounded context for trusted readers, removing credential syntax.
 
     This is not a public-sharing projection or a guarantee for arbitrary text.
@@ -81,7 +81,40 @@ def safe_upstream_detail(value):
     value = re.sub(r"https?://[^\s\"'<>]+", _redact_url_credentials, value, flags=re.I)
     value = re.sub(r"(?i)\bBearer\s+[^\s,;\"}]+", "Bearer [redacted]", value)
     value = re.sub(r'''(?ix)(?<![\w-])(["']?(?:password|passwd|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|token|secret|credential|jwt|authorization|signature|private[_-]?key)["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}&\#)]+)''', r"\1[redacted]", value)
-    return " ".join(value.split())[:512]
+    return " ".join(value.split())[:limit]
+
+
+
+def rpc_error_context(error, *, secrets=()):
+    """Bounded diagnostic text, never an error classifier or request authority."""
+    result = {}
+    def text(value, key, clipped=False):
+        for secret in sorted({v for v in secrets if isinstance(v, str) and v}, key=len, reverse=True):
+            value = value.replace(secret, "[redacted]")
+        value = safe_upstream_detail(value, limit=2049)
+        result[key] = value[:2048]
+        result[key + "_truncated"] = clipped or len(value) > 2048
+    message = error.get("message")
+    if isinstance(message, str):
+        text(message, "rpc_message")
+    if "data" in error:
+        budget = [128]
+        clipped = [False]
+        def bounded(value, depth=0):
+            budget[0] -= 1
+            if budget[0] < 0 or depth > 4:
+                clipped[0] = True
+                return "[diagnostic structure truncated]"
+            if isinstance(value, dict):
+                clipped[0] |= len(value) > 32
+                return {key: bounded(item, depth + 1) for key, item in list(value.items())[:32]}
+            if isinstance(value, list):
+                clipped[0] |= len(value) > 32
+                return [bounded(item, depth + 1) for item in value[:32]]
+            return value
+        # Separate lines keep header redaction from consuming unrelated fields.
+        text(json.dumps(bounded(error["data"]), ensure_ascii=False, indent=2), "rpc_data", clipped[0])
+    return result
 
 
 def safe_failure(value):
@@ -92,6 +125,11 @@ def safe_failure(value):
         item = safe_upstream_detail(value.get(key))
         if item:
             result[key] = item
+    for key in ("rpc_message", "rpc_data"):
+        item = safe_upstream_detail(value.get(key), limit=2049)
+        if item is not None:
+            result[key] = item[:2048]
+            result[key + "_truncated"] = bool(value.get(key + "_truncated")) or len(item) > 2048
     for key, allowed in (("stage", _STAGES), ("kind", _KINDS), ("error_type", _ERROR_TYPES)):
         item = value.get(key)
         if isinstance(item, str) and item in allowed:
@@ -100,6 +138,12 @@ def safe_failure(value):
         item = value.get(key)
         if type(item) is int and abs(item) <= 2**31:
             result[key] = item
+    retry = value.get("quota_retry")
+    if isinstance(retry, dict) and retry.get("quota_rpc_budget_used") == 2:
+        first = retry.get("first_failure")
+        if isinstance(first, dict) and retry.get("outcome") in {"quota_confirmed", "quota_failed"}:
+            result["quota_retry"] = {"quota_rpc_budget_used": 2, "outcome": retry["outcome"],
+                "first_failure": safe_failure({key: item for key, item in first.items() if key != "quota_retry"})}
     item = value.get("timeout_seconds")
     if type(item) in (int, float) and math.isfinite(item) and 0 <= item <= 86400:
         result["timeout_seconds"] = round(item, 3)

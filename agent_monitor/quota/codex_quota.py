@@ -3,12 +3,20 @@ import math
 import json
 import hashlib
 import re
+import base64
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from parsers.accounts import codex_account, quota_identity
 from parsers.codex import select_codex_rate_limit
 from agent_monitor import diagnostics
 from agent_monitor.quota import reset_credits
+
+# Network/CA settings survive; alternate authentication inputs do not.
+FILE_AUTH_ENV_KEYS = ("PATH", "LANG", "LC_ALL", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "CODEX_CA_CERTIFICATE", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "AGENT_PROXY_ADDR")
+
 
 REACHED_LIMITS = {"rate_limit_reached", "workspace_owner_credits_depleted",
                   "workspace_member_credits_depleted", "workspace_owner_usage_limit_reached",
@@ -33,6 +41,7 @@ def rpc_failure(error, *, stage="quota_read", secrets=()):
     """Bounded diagnostic facts, never an admission or account-scope classifier."""
     facts = {"stage": stage, "kind": "rpc_error"}
     if isinstance(error, dict):
+        facts.update(diagnostics.rpc_error_context(error, secrets=secrets))
         facts["rpc_code"] = error.get("code")
         message = error.get("message")
         if isinstance(message, str):
@@ -58,6 +67,55 @@ def rpc_failure(error, *, stage="quota_read", secrets=()):
                 value = value.replace(secret, "[redacted]")
             facts[key] = value
     return diagnostics.safe_failure(facts)
+
+
+
+def quota_transport_failure(error, method):
+    """Fixed audited client transport envelope; not evidence of transience."""
+    return (method == "account/rateLimits/read" and isinstance(error, dict)
+            and type(error.get("code")) is int and error["code"] == -32603 and error.get("data") is None
+            and error.get("message") == "failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage)")
+
+
+def _reread_allowed(auth_path, retry):
+    if not retry or retry.get("used"):
+        return False
+    try:
+        version = retry["client_info"]["userAgent"].partition("/")[2].partition(" ")[0]
+        if version not in {"0.166.0", "0.167.0"}:
+            return False
+        remaining = retry["deadline"] - time.monotonic()
+        if remaining <= 0 or not retry.get("original_digest") or retry["original_digest"] != credential_digest(auth_path):
+            return False
+        file_auth_recovery_preflight(auth_path)
+        token = json.loads(Path(auth_path).read_text())["tokens"]["access_token"]
+        parts = token.split(".")
+        if len(parts) != 3 or not all(parts) or not re.fullmatch(r"[A-Za-z0-9_-]+", parts[1]):
+            return False
+        part = parts[1]
+        payload = base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
+        if base64.urlsafe_b64encode(payload).decode().rstrip("=") != part:
+            return False
+        def unique(pairs):
+            result = {}
+            for key, item in pairs:
+                if key in result:
+                    raise ValueError("duplicate JWT claim")
+                result[key] = item
+            return result
+        def invalid_constant(_value):
+            raise ValueError("non-JSON JWT claim")
+        claims = json.loads(payload, object_pairs_hook=unique, parse_constant=invalid_constant)
+        json.dumps(claims, ensure_ascii=False).encode("utf-8")
+        expires = claims["exp"]
+        if type(expires) is not int:
+            return False
+        datetime.fromtimestamp(expires, timezone.utc)
+        # Codex 0.166/0.167 auth::AuthManager proactively refreshes in the
+        # five-minute expiry window. Reserve the remaining operation deadline.
+        return expires > time.time() + 300 + remaining
+    except (OSError, ValueError, OverflowError, RecursionError, KeyError, IndexError, TypeError, AttributeError):
+        return False
 
 
 class ReadingError(ValueError):
@@ -213,13 +271,17 @@ def file_auth_recovery_preflight(auth_path):
         raise ReadingError("此来源未确认使用标准文件 OAuth 凭据，未开始认证修复。", "invalid_result", "credentials")
 
 
-def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recovery=None):
-    """One quota RPC, bound to the same local identity before and after it.
+def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recovery=None, retry=None):
+    """Quota reading bound to the same identity, with an optional finite reread.
 
     Callers retain transport, cancellation, admission and pause ownership.
     account/read is not a prerequisite of the upstream quota method.
     """
     check_identity(auth_path, account_id, label)
+    if retry and retry.get("used"):
+        raise ReadingError("本次有限复查机会已使用，未发出新的请求。", "invalid_result", "admission")
+    if renew_auth:
+        retry = None
     if renew_auth:
         if recovery is None:
             raise ReadingError("认证修复缺少结果记录，未发出请求。", "invalid_result", "credentials")
@@ -250,7 +312,29 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
         recovery["outcome"] = "new_credentials"
     before_digest = credential_digest(auth_path)
     try:
-        result = request("account/rateLimits/read", {"excludeResetCreditDetails": True} if renew_auth else {})
+        params = {"excludeResetCreditDetails": True} if renew_auth else {}
+        try:
+            result = request("account/rateLimits/read", params)
+        except Exception as first:
+            if not getattr(first, "quota_transport_failure", False):
+                raise
+            try:
+                check_identity(auth_path, account_id, label)
+            except ReadingError as identity_error:
+                identity_error.failure = {**diagnostics.safe_failure(getattr(first, "failure", None)),
+                                          **identity_error.failure}
+                raise
+            if not _reread_allowed(auth_path, retry):
+                raise
+            retry["used"] = True  # Consume before dispatch; cancellation cannot renew it.
+            retry["receipt"] = {"quota_rpc_budget_used": 2, "outcome": "quota_failed",
+                                "first_failure": diagnostics.safe_failure(getattr(first, "failure", None))}
+            try:
+                result = request("account/rateLimits/read", params)
+            except Exception as second:
+                second.failure = {**diagnostics.safe_failure(getattr(second, "failure", None)),
+                                  "quota_retry": retry["receipt"]}
+                raise
     except Exception as exc:
         # An error return still needs identity and credential-generation checks.
         try:
@@ -263,12 +347,20 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
         if renew_auth:
             recovery["outcome"] = "quota_failed"
         raise
-    check_identity(auth_path, account_id, label)
-    reading = decode(result, account_id)
-    if reading["five_hour_used_pct"] is None and reading["seven_day_used_pct"] is None:
-        raise ReadingError("服务端未返回可用配额窗口，本次保留上次读数。", "missing_windows", "quota_parse")
+    try:
+        check_identity(auth_path, account_id, label)
+        reading = decode(result, account_id)
+        if reading["five_hour_used_pct"] is None and reading["seven_day_used_pct"] is None:
+            raise ReadingError("服务端未返回可用配额窗口，本次保留上次读数。", "missing_windows", "quota_parse")
+    except Exception as exc:
+        if retry and retry.get("receipt"):
+            exc.failure = {**diagnostics.safe_failure(getattr(exc, "failure", None)), "quota_retry": retry["receipt"]}
+        raise
     if renew_auth:
         recovery["outcome"] = "quota_confirmed"
+    if retry and retry.get("receipt"):
+        retry["receipt"]["outcome"] = "quota_confirmed"
+        reading["quota_retry"] = retry["receipt"]
     return reading
 
 

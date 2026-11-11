@@ -274,9 +274,7 @@ def lock_file(path):
 def child_environment(home, scope=None):
     # Inherit network transport settings, not API keys, alternate auth or a
     # parent's Codex session/configuration. Resolve executables before HOME changes.
-    names = ("PATH", "LANG", "LC_ALL", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
-             "CODEX_CA_CERTIFICATE", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
-             "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "AGENT_PROXY_ADDR")
+    names = codex_quota.FILE_AUTH_ENV_KEYS
     env = {key: os.environ[key] for key in names if key in os.environ}
     env["PATH"] = os.pathsep.join([str(Path.home() / ".local/bin"), "/opt/homebrew/bin",
                                   "/usr/local/bin", env.get("PATH", "/usr/bin:/bin")])
@@ -378,6 +376,8 @@ class Rpc:
             self.buffer += chunk
 
     def request(self, method, params, deadline):
+        if time.monotonic() >= deadline:
+            raise ActionError("本次检查已达到总时限，未发出下一阶段请求。", 504, "timeout")
         redactions = self.redaction_values + codex_quota.credential_secrets(self.auth_path)
         if method != "turn/interrupt":
             self.diagnostics.update(last_request=method, last_request_at=now())
@@ -411,6 +411,8 @@ class Rpc:
                         detail = ("当前 Codex 不支持配额查询接口，请核对 CLI 版本。" if code == -32601 else
                                   "Codex 配额查询失败，本次未取得新读数；请查看技术详情中的错误摘要。")
                         failure = ActionError(detail, 502)
+                        failure.failure = self.diagnostics["rpc_failure"]
+                        failure.quota_transport_failure = codex_quota.quota_transport_failure(error, method)
                         failure.authentication_quota_transport = codex_quota.authentication_quota_transport(error, method)
                         if failure.authentication_quota_transport:
                             self.diagnostics["rpc_failure"].update(http_status=401)
@@ -441,7 +443,7 @@ class Rpc:
                 raise ActionError("Codex 返回过多事件，操作已停止。", 502)
 
     def initialize(self):
-        self.request("initialize", {"clientInfo": {"name": "agent_monitor_accounts", "version": "1"},
+        self.client_info = self.request("initialize", {"clientInfo": {"name": "agent_monitor_accounts", "version": "1"},
                                    "capabilities": {"experimentalApi": True}}, time.monotonic() + 20)
         self.send({"method": "initialized"})
 
@@ -1486,17 +1488,30 @@ class Manager:
                 raise ActionError(str(exc), 409, "locallyPaused") from None
             check_account_hold()
             self.update(directory, record, stage="checking", detail="正在检查登录状态。")
+            original_digest = codex_quota.credential_digest(directory / "codex/auth.json")
             rpc = self.open_rpc(directory, job)
             rpc.initialize()
             if record["operation"]["refresh_only"]:
                 self.update(directory, record, stage="reading", detail="正在查询配额，本次不发送消息。")
+                quota_deadline = time.monotonic() + 20
+                retry = {"original_digest": original_digest, "deadline": quota_deadline,
+                         "client_info": getattr(rpc, "client_info", {})}
                 try:
                     after = codex_quota.read_bound(
-                        lambda method, params: rpc.request(method, params, time.monotonic() + 20),
-                        directory / "codex/auth.json", record["account_id"], record["email"])
+                        lambda method, params: rpc.request(method, params, quota_deadline),
+                        directory / "codex/auth.json", record["account_id"], record["email"],
+                        retry=retry if not (job.get("login_recovery") or recovery) else None)
                 except ValueError as exc:
                     rpc.diagnostics["rpc_failure"] = getattr(exc, "failure", {})
                     raise ActionError(str(exc), 502) from None
+                finally:
+                    if retry.get("receipt"):
+                        receipt = diagnostic_evidence.safe_failure({"quota_retry": retry["receipt"]})["quota_retry"]
+                        rpc.diagnostics["quota_retry"] = receipt
+                        lease.state["last_quota_retry"] = {"account_id": record["account_id"], "account_label": record["email"],
+                            "operation_id": record["operation"]["id"], "at": now(), **receipt}
+                        if rpc.diagnostics.get("rpc_failure"):
+                            rpc.diagnostics["rpc_failure"]["quota_retry"] = receipt
                 self.observe_permission(directory, record, after, explicit=True)
                 self.update(directory, record, stage="succeeded", quota_status="observed", after=after,
                             detail="已读取服务端配额，本次未发送消息。")

@@ -2,6 +2,7 @@
 import http.client
 import json
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -148,7 +149,7 @@ class AccountReadDiagnosticsTests(unittest.TestCase):
                 rpc.send = mock.Mock()
                 rpc.receive = mock.Mock(return_value={"id": 1, "error": error})
                 with self.assertRaises(ca.ActionError) as raised:
-                    rpc.request("account/read", {"refreshToken": False}, 0)
+                    rpc.request("account/read", {"refreshToken": False}, time.monotonic() + 5)
                 self.assertEqual(rpc.diagnostics["rpc_error_reason"], "unrecognized")
                 self.assertNotIn("SECRET_FIXTURE_TOKEN", str(raised.exception) + json.dumps(rpc.diagnostics))
 
@@ -171,7 +172,7 @@ class AccountReadDiagnosticsTests(unittest.TestCase):
                         "code": -32603, "message": "request failed body=" + body}})
                     with mock.patch.object(ca.codex_quota, "credential_secrets", return_value=(new,)):
                         with self.assertRaises(ca.ActionError):
-                            rpc.request(method, {}, 0)
+                            rpc.request(method, {}, time.monotonic() + 5)
                     rpc.send.assert_called_once()
                     facts = rpc.diagnostics["rpc_failure"]
                     self.assertIn("rotation failed", facts["detail"])

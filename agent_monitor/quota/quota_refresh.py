@@ -200,6 +200,8 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
         try:
             # The lease remains held through the bounded child's cleanup.
             target = dataclasses.asdict(account)
+            if probe_pause_id is not None:
+                target["recovery_probe"] = True
             if renew_auth:
                 target["renew_auth"] = True
                 target["auth_failure"] = auth_failure
@@ -244,7 +246,12 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 raise kind(payload.get("error") or "配额读取失败，请核对后解除本地暂停。",
                            failure=detail)
             reading = RateLimits(**payload["reading"])
+            retry_receipt = diagnostics.safe_failure({"quota_retry": (reading.quota_observation or {}).get("quota_retry")}).get("quota_retry")
+            if retry_receipt:
+                lease.state["last_quota_retry"] = {"account_id": account.account_id, "account_label": account.label,
+                    "at": reading.updated_at, **retry_receipt}
             return dataclasses.replace(reading, quota_observation={
+                **({"quota_retry": retry_receipt} if retry_receipt else {}),
                 "source": "active_query", "observed_at": reading.updated_at})
         except (ValueError, KeyError, TypeError):
             raise RefreshError("配额读取返回了无效结果，请核对后解除本地暂停。",
@@ -483,6 +490,9 @@ def _codex(account, *, recovery=None):
             # Reuse the transport allowlist, but not Monitor's isolated HOME.
             env["HOME"] = str(Path.home())
     env["CODEX_HOME"] = str(home)
+    original_digest = codex_quota.credential_digest(auth_path)
+    env = {key: value for key, value in env.items()
+           if key in codex_quota.FILE_AUTH_ENV_KEYS or key in {"HOME", "CODEX_HOME", network_policy.INTERNAL}}
     redactions = codex_quota.credential_secrets(auth_path)
     # SSH/launchd do not load shell rc files. Supply installed user binary paths
     # to the existing shim as well as to its backend lookup.
@@ -493,9 +503,9 @@ def _codex(account, *, recovery=None):
     if not command:
         raise LocalUnavailable("Codex CLI 不可用，请在这台机器上安装后刷新。")
     try:
-        arguments = [command, "app-server", "--listen", "stdio://", "-c", "features.respect_system_proxy=false"]
+        arguments = [command, "app-server", "--listen", "stdio://", "-c", "features.respect_system_proxy=false",
+                     "-c", 'cli_auth_credentials_store="file"']
         if account.get("renew_auth"):
-            arguments += ["-c", 'cli_auth_credentials_store="file"']
             if account.get("managed_auth"):
                 arguments += ["-c", 'forced_login_method="chatgpt"']
         process = subprocess.Popen(arguments,
@@ -536,6 +546,7 @@ def _codex(account, *, recovery=None):
                         if method == "account/read":
                             facts["stage"] = "account_check"
                         error = RefreshError(_codex_rpc_error(message["error"], request_id), failure=facts)
+                        error.quota_transport_failure = codex_quota.quota_transport_failure(message["error"], method)
                         error.authentication_quota_transport = codex_quota.authentication_quota_transport(message["error"], method)
                         if error.authentication_quota_transport:
                             error.failure["http_status"] = 401
@@ -563,7 +574,7 @@ def _codex(account, *, recovery=None):
         with _failure_stage("initialize"):
             send({"id": 1, "method": "initialize", "params": {
                 "clientInfo": {"name": "agent_monitor", "version": "1"}}})
-            receive(1)
+            client_info = receive(1)
         with _failure_stage("quota_read"):
             send({"method": "initialized"})
             sequence = 1
@@ -576,14 +587,16 @@ def _codex(account, *, recovery=None):
                 send({"id": sequence, "method": method, "params": params})
                 return receive(sequence, method)
             try:
-                options = {}
-                if account.get("renew_auth"):
-                    options = {"renew_auth": True, "recovery": recovery}
+                retry = {"original_digest": original_digest, "deadline": deadline, "client_info": client_info}
+                options = ({"renew_auth": True, "recovery": recovery} if account.get("renew_auth") else
+                           {"retry": retry} if not account.get("recovery_probe") else {})
                 reading = codex_quota.read_bound(request, auth_path, account["account_id"], account.get("label"), **options)
             except codex_quota.ReadingError as exc:
                 raise RefreshError(str(exc), failure=exc.failure) from None
         value = _reading((reading["five_hour_used_pct"], reading["five_hour_resets_at"]),
                          (reading["seven_day_used_pct"], reading["seven_day_resets_at"]), plan=reading["plan"])
+        if retry.get("receipt"):
+            value = dataclasses.replace(value, quota_observation={"quota_retry": retry["receipt"]})
         return dataclasses.replace(value, **{key: reading[key] for key in (
             "codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type", "reset_credits")})
 

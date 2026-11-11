@@ -158,7 +158,8 @@
     if (!reading || (Number.isFinite(Date.parse(account.updated_at)) && Date.parse(reading.observed_at) <= Date.parse(account.updated_at))) return account;
     const display = { ...account, updated_at: reading.observed_at, quota_source: "account_action",
       reset_credits: reading.reset_credits ?? null,
-      quota_observation: {source: "active_query", observed_at: reading.observed_at} };
+      quota_observation: {source: "active_query", observed_at: reading.observed_at,
+        ...(reading.quota_retry ? {quota_retry: reading.quota_retry} : {})} };
     for (const spec of QUOTA_COLUMNS) {
       for (const key of [spec.used, spec.reset]) {
         display[key] = typeof reading[key] === "number" && Number.isFinite(reading[key]) ? reading[key] : null;
@@ -678,6 +679,8 @@
     add(`停止阶段：${f.stage === "quota_read" ? "读取配额" : f.stage === "recovery_commit" ? "本地保存与发布" : f.stage || "未记录"}；Codex RPC：${f.rpc_code ?? "未取得"}；上游 HTTP：${f.http_status ?? "未取得"}`);
     if (f.error_type) add(`错误类别：${f.error_type}${f.errno != null ? ` · errno ${f.errno}` : ""}`);
     if (f.detail) add(`已记录的错误摘要：${f.detail}`);
+    if (f.rpc_message && f.rpc_message !== f.detail) add(`RPC message（已脱敏${f.rpc_message_truncated ? "并截断" : ""}）：${f.rpc_message}`);
+    if (f.rpc_data !== undefined) add(`RPC error.data（脱敏文本投影${f.rpc_data_truncated ? "，已截断" : ""}）：${f.rpc_data}`);
     const auth = receipt.authentication_recovery;
     if (auth) {
       const outcomes = {quota_confirmed: "已取得新配额", quota_failed: "新凭据后的配额查询仍失败", no_new_credentials: "未确认取得新凭据，未查询配额", new_credentials: "已保存新候选凭据，配额未确认", identity_changed: "身份发生变化，已停止", refresh_failed: "认证修复未完成"};
@@ -952,6 +955,13 @@
       if (!value) return;
       context.replaceChildren();
       const add = text => context.appendChild(make("p", text));
+      if (state?.last_quota_retry) {
+        const retry = state.last_quota_retry;
+        const first = retry.first_failure || {};
+        add(`最近有限复读：${retry.account_label || "账号未记录"} · ${when(retry.at)}；${retry.outcome === "quota_confirmed" ? "当次已取得配额" : "当次未完成配额读取"}。这是历史处置记录，当前保护状态另行显示。`);
+        if (first.rpc_message || first.detail) add(`首次错误（已脱敏${first.rpc_message_truncated ? "并截断" : ""}）：${first.rpc_message || first.detail}`);
+        if (first.rpc_data !== undefined) add(`首次 RPC error.data（脱敏投影${first.rpc_data_truncated ? "，已截断" : ""}）：${first.rpc_data}`);
+      }
       add(`执行机器：${value.machine}；状态读取于 ${when(value.observed_at)}。`);
       add(`查询账号：${a.account_label || "未取得"}；工作区：${a.account_id || "未取得"}。`);
       add(`账号来源：${({default:"默认 Codex 目录",managed:"托管账号 " + (a.profile || ""),configured:"服务配置指定目录"})[a.source] || "未知"}；凭据位置：${a.credential_path || "未取得"}。`);
@@ -2006,6 +2016,15 @@
     exact.textContent += `；读数来源：${sourceLabel || "旧记录未注明"}`;
     if (account.reading_from && account.quota_source !== "account_action") exact.textContent += `；来源机器：${account.reading_from}`;
     details.appendChild(exact);
+    const retry = account.quota_observation?.quota_retry;
+    if (retry) {
+      const note = document.createElement("span");
+      note.className = "quota-history-note";
+      const first = retry.first_failure || {};
+      note.textContent = `本次读数通过一次有限复读取得；首次错误（已脱敏${first.rpc_message_truncated ? "并截断" : ""}）：${first.rpc_message || first.detail || "未保留详细原因"}`
+        + (first.rpc_data !== undefined ? `；RPC error.data（脱敏投影${first.rpc_data_truncated ? "，已截断" : ""}）：${first.rpc_data}` : "");
+      details.appendChild(note);
+    }
     appendQuotaPlanSources(details, account, provider);
     if (account.account_profile) {
       const profile = document.createElement("span");
