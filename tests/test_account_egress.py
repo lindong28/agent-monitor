@@ -6,6 +6,7 @@ from unittest import mock
 
 import requests
 from agent_monitor.network import account_egress as egress
+from agent_monitor.network import client_network
 
 
 class EgressTests(unittest.TestCase):
@@ -87,3 +88,37 @@ class EgressTests(unittest.TestCase):
             self.assertEqual(calls.count('auth.openai.com'), 1)
             self.assertTrue(report['targets'][1]['cached'])
             self.assertGreater(report['targets'][1]['retry_after_seconds'], 60)
+
+    def test_device_preview_rejects_cache_after_generation_or_visible_route_change(self):
+        route = client_network.Route('fixture')
+        self.addCleanup(route.close)
+        routes = {'https://' + host: 'DIRECT' for host in egress.TARGETS}
+        observation = {'generation': 1, 'routes': routes, 'events': [
+            {'target': origin, 'route': 'DIRECT', 'result': 'connected', 'generation': 1}
+            for origin in routes]}
+        route.observe = mock.Mock(side_effect=lambda **_: observation)
+        with mock.patch.object(egress, '_run_probe', side_effect=lambda host, env: egress.unknown(host, 'unknown region')) as probe:
+            report = egress.preview(route)
+            self.assertEqual(report['routes'], routes)
+            self.assertEqual(report['generation'], 1)
+            self.assertTrue(all(item['ip'] is None for item in report['targets']))
+            for update in ({'generation': 2}, {'routes': {key: 'PROXY 127.0.0.1:1234' for key in routes}}):
+                with self.subTest(update=update):
+                    route.observe.return_value = dict(observation, **update)
+                    route.observe.side_effect = None
+                    with self.assertRaises(client_network.NetworkError):
+                        egress.preview(route)
+            self.assertEqual(probe.call_count, 2, 'route changes must not bypass the 60-second probe cooldown')
+
+    def test_device_preview_rejects_missing_actual_connection_or_mid_probe_generation_change(self):
+        for after in ({'generation': 2}, {'events': []}):
+            route = client_network.Route('fixture')
+            self.addCleanup(route.close)
+            routes = {'https://' + host: 'DIRECT' for host in egress.TARGETS}
+            observation = {'generation': 1, 'routes': routes, 'events': [
+                {'target': origin, 'route': 'DIRECT', 'result': 'connected', 'generation': 1}
+                for origin in routes]}
+            route.observe = mock.Mock(side_effect=[observation, dict(observation, **after)])
+            with mock.patch.object(egress, '_run_probe', side_effect=lambda host, env: egress.unknown(host, 'unknown')):
+                with self.assertRaises(client_network.NetworkError):
+                    egress.preview(route)

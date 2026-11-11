@@ -80,7 +80,7 @@ def main():
             def do_GET(self):
                 if self.path == "/":
                     body, content_type = html.encode(), "text/html; charset=utf-8"
-                elif self.path in ("/web/styles.css", "/web/codex-accounts.js"):
+                elif self.path in ("/web/styles.css", "/web/codex-accounts.js", "/web/device-connection.js", "/web/account-egress.js"):
                     body = (ROOT / self.path.lstrip("/")).read_bytes()
                     content_type = "text/css" if self.path.endswith("css") else "text/javascript"
                 elif self.path == "/fixture/stats":

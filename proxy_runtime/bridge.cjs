@@ -195,10 +195,12 @@ class Router {
     this.resolve = resolve; this.timeout = timeout; this.now = now;
     this.bad = new Map(); this.generation = 0; this.sockets = new Set(); this.events = [];
     this.automatic = new Map();
+    this.confirmedSockets = new Set();
   }
   invalidate() {
     this.bad.clear(); this.generation++;
     for (const scope of this.automatic.keys()) this.deny(scope, 'automatic_route_changed');
+    for (const socket of this.confirmedSockets) socket.destroy();
   }
   admit(scope, generation, routes, seconds) {
     // Automatic scope names remain fail-closed even after their record expires.
@@ -243,12 +245,22 @@ class Router {
     const bad = route => (this.bad.get(route.key) || 0) > this.now();
     return [...list.filter(route => !bad(route)), ...list.filter(bad)];
   }
-  async connect(target, tunnel, signal, scope = 'shared') {
+  requireConfirmation(confirmation, target, route) {
+    if (!confirmation) return;
+    if (confirmation.generation !== this.generation) throw new RouteError('confirmed_generation_changed');
+    const key = confirmation.routes[target.url.origin];
+    if (route && key && route.key !== key) throw new RouteError('confirmed_route_changed');
+  }
+  async connect(target, tunnel, signal, scope = 'shared', confirmation = null) {
     let list;
-    try { list = await this.routes(target.url.href); }
+    try {
+      this.requireConfirmation(confirmation, target);
+      list = await this.routes(target.url.href);
+      this.requireConfirmation(confirmation, target, list[0]);
+    }
     catch (error) {
       this.deny(scope, 'automatic_route_unobserved');
-      this.record(target, {key:null}, 'proxy_resolution_failed', scope); throw error;
+      this.record(target, {key:null}, error instanceof RouteError ? error.kind : 'proxy_resolution_failed', scope); throw error;
     }
     const generation = this.generation;
     let last = new RouteError('proxy_connect_failed');
@@ -257,11 +269,17 @@ class Router {
       let socket;
       try {
         this.require(scope, route);
+        this.requireConfirmation(confirmation, target, route);
         socket = await connected(route, target, signal, this.timeout);
         this.require(scope, route);
+        this.requireConfirmation(confirmation, target, route);
         this.sockets.add(socket); socket.once('close', () => this.sockets.delete(socket));
         await handshake(socket, route, target, tunnel, signal, this.timeout);
         this.require(scope, route);
+        this.requireConfirmation(confirmation, target, route);
+        if (confirmation) {
+          this.confirmedSockets.add(socket); socket.once('close', () => this.confirmedSockets.delete(socket));
+        }
         const admission = this.automatic.get(scope);
         if (admission) {
           admission.sockets.add(socket); socket.once('close', () => admission.sockets.delete(socket));
@@ -306,7 +324,21 @@ function cleanHeaders(input) {
   const headers = {...input};
   for (const name of (headers.connection || '').split(',')) delete headers[name.trim().toLowerCase()];
   for (const name of ['proxy-authorization', 'proxy-authenticate', 'proxy-connection', 'connection', 'keep-alive', 'upgrade']) delete headers[name];
+  for (const name of Object.keys(headers)) if (name.startsWith('x-agent-monitor-')) delete headers[name];
   return headers;
+}
+
+function confirmedRoute(req) {
+  const encoded = req.headers['x-agent-monitor-confirmation'];
+  if (encoded === undefined) return null;
+  try {
+    if (typeof encoded !== 'string' || encoded.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(encoded)) throw new Error();
+    const value = JSON.parse(Buffer.from(encoded, 'base64url').toString());
+    if (!Number.isSafeInteger(value.generation) || value.generation < 0 || !value.routes
+        || Object.keys(value.routes).sort().join(',') !== 'https://auth.openai.com,https://chatgpt.com'
+        || Object.values(value.routes).some(key => typeof key !== 'string' || !key || key.length > 512)) throw new Error();
+    return value;
+  } catch { throw new RouteError('confirmed_route_invalid'); }
 }
 
 function createBridge(resolve, token, options) {
@@ -337,13 +369,37 @@ function createBridge(resolve, token, options) {
       }
       return;
     }
+    if (req.url === '/resolve' && req.method === 'POST' && scope === 'shared') {
+      try {
+        let body = '';
+        for await (const chunk of req) {
+          body += chunk;
+          if (body.length > 4096) throw new RouteError('invalid_target');
+        }
+        const {targets} = JSON.parse(body);
+        if (!Array.isArray(targets) || targets.length !== 2
+            || [...targets].sort().join(',') !== 'https://auth.openai.com,https://chatgpt.com') throw new RouteError('invalid_target');
+        const generation = router.generation;
+        const routes = {};
+        let timer;
+        try {
+          await Promise.race([
+            Promise.all(targets.map(async origin => { routes[origin] = (await router.routes(origin + '/'))[0].key; })),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new RouteError('proxy_resolution_timeout')), router.timeout); }),
+          ]);
+        } finally { clearTimeout(timer); }
+        if (generation !== router.generation) throw new RouteError('confirmed_generation_changed');
+        res.writeHead(200, {'content-type': 'application/json'}); res.end(JSON.stringify({generation, routes}));
+      } catch { res.writeHead(409); res.end(); }
+      return;
+    }
     const controller = new AbortController();
     res.on('close', () => controller.abort());
     let upstream;
     try {
       const target = destination(req.url, false);
       if (target.url.protocol !== 'http:') throw new RouteError('use_connect_for_https');
-      const {socket, route} = await router.connect(target, false, controller.signal, scope);
+      const {socket, route} = await router.connect(target, false, controller.signal, scope, confirmedRoute(req));
       controller.signal.addEventListener('abort', () => socket.destroy(), {once: true});
       if (controller.signal.aborted) { socket.destroy(); return; }
       const headers = cleanHeaders(req.headers); headers.host = target.url.host; headers.connection = 'close';
@@ -375,7 +431,7 @@ function createBridge(resolve, token, options) {
       const scheme = req.headers['x-agent-monitor-target-scheme'];
       if (scheme && !['http', 'https'].includes(scheme)) throw new RouteError('invalid_target');
       if (scheme) target.url = new URL(`${scheme}://${req.url}/`);
-      const {socket} = await router.connect(target, true, controller.signal, scope);
+      const {socket} = await router.connect(target, true, controller.signal, scope, confirmedRoute(req));
       controller.signal.addEventListener('abort', () => socket.destroy(), {once: true});
       if (controller.signal.aborted) { socket.destroy(); return; }
       socket.on('error', () => client.destroy()); socket.on('close', () => client.destroy());

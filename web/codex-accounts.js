@@ -1,3 +1,4 @@
+import {createDeviceConnection} from "./device-connection.js";
 async function previewEgress(...args) {
   const version = document.querySelector('meta[name="asset-version"]')?.content;
   const preview = await import("./account-egress.js" + (version ? `?v=${version}` : ""));
@@ -54,7 +55,7 @@ export function quotaFailureExplanation(account, sharedPause, accounts = []) {
     const source = accounts.find(a => a.id === sharedPause?.source?.profile_id);
     const history = "本账号上次未发出请求：当时被本地保护暂停。";
     if (sharedPause) return history + (source ? `当前 ${source.email} 的查询触发的共享暂停仍在生效。` : "当前共享暂停仍在生效。") + "请先处理共享暂停。";
-    return history + "当前无共享暂停；" + (account.account_quota_pause ? "本账号仍有配额暂停，请打开登录修复。"
+    return history + "当前无共享暂停；" + (account.account_quota_pause ? "本账号仍有配额暂停，请恢复此账号的额度查询。"
       : accountRefreshBlocked(account) ? "请先处理此账号的其他限制。" : "可继续查询此未完成项。");
   }
   const failure = op.diagnostics?.rpc_failure;
@@ -70,13 +71,13 @@ export function quotaFailureExplanation(account, sharedPause, accounts = []) {
 export function accountQuotaPauseGuidance(account) {
   return account.disabled
     ? "恢复此账号前，请先重新启用；启用后仍需处理配额暂停。"
-    : "本机账号已启用，配额暂停仍保留。打开登录修复后，按面板当前提示完成恢复；仅打开面板不会发起上游请求。";
+    : "本机账号已启用，配额暂停仍保留。恢复此账号的额度查询后，按面板当前提示完成恢复；仅打开面板不会发起上游请求。";
 }
 
 export function accountToggleNotice(account) {
   if (account.disabled) return "已停用此账号；未发出上游请求，历史记录和其他限制保留。";
   return account.account_quota_pause
-    ? "已重新启用此账号；配额暂停仍保留，请打开登录修复继续处理。"
+    ? "已重新启用此账号；配额暂停仍保留，请恢复此账号的额度查询继续处理。"
     : "已重新启用此账号；未自动查询、登录或发送，其他限制保留。";
 }
 
@@ -196,14 +197,12 @@ export function init({ autoLoad = true } = {}) {
   let locatePending = new URLSearchParams(window.location?.search || "").get("profile");
   let refreshingAll = false;
   const controller = new AbortController();
-  let deviceConnection = null;
   const deviceStatus = root.querySelector("#codex-device-status");
   const deviceConnect = root.querySelector("#codex-device-connect");
   const deviceCancel = root.querySelector("#codex-device-cancel");
   const deviceHelp = root.querySelector("#codex-device-help");
   const deviceCommand = root.querySelector("#codex-device-command");
   if (deviceCommand) deviceCommand.textContent = `agent-monitor connect install --server '${window.AgentMonitor.hubUrl?.() || location.origin}'`;
-  let pairing = null;
   function deviceFeedback(message, failed = false) {
     if (!current()) return;
     if (deviceStatus) {
@@ -212,85 +211,10 @@ export function init({ autoLoad = true } = {}) {
     }
     if (failed && deviceHelp) deviceHelp.open = true;
   }
-  controller.signal.addEventListener("abort", () => pairing?.finish(new DOMException("页面已离开", "AbortError")), { once: true });
-  deviceCancel?.addEventListener("click", () => pairing?.finish(new Error("已取消本机连接；本次操作未继续。需要时重新点击原操作即可。")));
   deviceConnect?.addEventListener("click", () => actions.connect());
 
-  function requireDevice() {
-    if (pairing) return pairing.promise;
-    if (controller.signal.aborted) return Promise.reject(new DOMException("页面已离开", "AbortError"));
-    // Keep window.open inside this user gesture, before any await/import/fetch.
-    // Re-pair on each action so a refresh or a restarted local service needs no
-    // separate connect click, and no capability is persisted in browser storage.
-    deviceConnection = null;
-    const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(n => n.toString(16).padStart(2, "0")).join("");
-    const popup = window.open(`http://127.0.0.1:39002/pair?origin=${encodeURIComponent(location.origin)}&nonce=${nonce}`, "agent-monitor-device", "width=520,height=240");
-    if (!popup) {
-      const message = "浏览器阻止了本机连接窗口。请允许此页面打开弹窗，再重试原操作；本次操作未继续。";
-      deviceFeedback(message, true);
-      return Promise.reject(new Error(message));
-    }
-    let resolve, reject;
-    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-    const attempt = { promise, validating: false, finished: false, timer: null, poll: null, receive: null };
-    pairing = attempt;
-    attempt.finish = (error, connection, result) => {
-      if (attempt.finished) return;
-      attempt.finished = true;
-      clearTimeout(attempt.timer);
-      clearInterval(attempt.poll);
-      window.removeEventListener("message", attempt.receive);
-      window.removeEventListener("pagehide", attempt.leave);
-      popup.close();
-      if (pairing === attempt) pairing = null;
-      if (deviceCancel) deviceCancel.hidden = true;
-      if (deviceConnect) deviceConnect.disabled = false;
-      if (error) {
-        deviceFeedback(error.message, error.name !== "AbortError");
-        reject(error);
-      } else {
-        deviceConnection = connection;
-        deviceFeedback(`已连接当前设备：${result.label}。断开时停止操作，不会切回服务器出口。`);
-        if (current()) notice.textContent = "";
-        resolve(connection);
-      }
-    };
-    attempt.receive = async event => {
-      if (attempt.finished || attempt.validating || event.origin !== "http://127.0.0.1:39002" || event.source !== popup
-          || event.data?.type !== "agent-monitor-network" || event.data?.nonce !== nonce) return;
-      attempt.validating = true;
-      clearInterval(attempt.poll);
-      popup.close();
-      if (event.data.error) {
-        attempt.finish(new Error(`本机连接端未能完成配对：${event.data.error} 请按下方连接帮助恢复后重试。`));
-        return;
-      }
-      deviceFeedback("已收到本机响应，正在确认它与服务器的连接…");
-      try {
-        const connection = event.data.connection;
-        if (!connection || typeof connection.id !== "string" || typeof connection.capability !== "string") throw new Error("本机返回的配对信息不完整。");
-        const result = await request("network-status", { connection });
-        if (!result.connected) throw new Error("服务器尚未确认本机连接可用。");
-        if (!current()) { attempt.finish(new DOMException("页面已离开", "AbortError")); return; }
-        attempt.finish(null, connection, result);
-      } catch (error) {
-        attempt.finish(error.name === "AbortError" ? error : new Error(`本机与服务器的连接校验未通过：${error.message} 请在本机执行 agent-monitor connect status，恢复连接后重试原操作。`));
-      }
-    };
-    attempt.leave = () => attempt.finish(new DOMException("页面已离开", "AbortError"));
-    window.addEventListener("pagehide", attempt.leave);
-    window.addEventListener("message", attempt.receive);
-    attempt.timer = setTimeout(() => attempt.finish(new Error(attempt.validating
-      ? "本机与服务器的连接校验超时，本次操作未继续。请执行 agent-monitor connect status，恢复后重试原操作。"
-      : "未收到本机连接端的配对响应，本次操作未继续。请在当前设备按下方帮助启用或检查连接服务，再重试原操作。")), 20000);
-    attempt.poll = setInterval(() => {
-      if (popup.closed && !attempt.validating) attempt.finish(new Error("本机连接窗口已关闭，配对未完成；本次操作未继续。可重试原操作，或展开连接帮助检查服务。"));
-    }, 250);
-    if (deviceConnect) deviceConnect.disabled = true;
-    if (deviceCancel) deviceCancel.hidden = false;
-    deviceFeedback("正在连接当前设备的网络…首次使用需启用本机连接服务；完成连接后将继续当前操作。");
-    return promise;
-  }
+  const requireDevice = createDeviceConnection({request, controller, current, deviceFeedback, deviceConnect, deviceCancel,
+    onConnected: () => { if (current()) notice.textContent = ""; }});
 
   const actions = createAccountActions({
     getAccounts: () => accounts, getBatch: () => batch, getSelectedIds: () => selectedIds,
@@ -534,6 +458,7 @@ export function init({ autoLoad = true } = {}) {
     if (!panel) {
       panel = window.AgentMonitor.createRecoveryPanel?.("self", {
         ...(selectedId ? {profile: `monitor-${selectedId}`, pauseScope: "account"} : {}),
+        getConnection: () => actions.requireDevice(),
         onSaved: () => load(), onContinue: async () => {
         await load();
         setBatchMode(true);
@@ -752,7 +677,7 @@ export function init({ autoLoad = true } = {}) {
           card.append(box, element("p", op.recovery
             ? `请确认官方页面登录的是 ${account.email} 及原工作区。官方授权成功且新凭据身份核验通过后，将复验一次配额；有效读数保存并发布后才结清原任务和暂停。不发送消息。设备确认最多等待 10 分钟，另有有界的身份、配额与保存阶段；期间占用本机 Codex 通道。`
             : `请确认官方页面登录的是 ${account.email}。授权成功后仅保存登录态，不自动发送或查询；最多等待 10 分钟。`, "quota-scope"));
-          if (op.recovery) card.append(element("p", "后台认证与配额检查使用执行机器的 Monitor 路由桥；官方授权网页使用浏览器自己的网络。需要网页同出口时，请先核实浏览器路由。", "quota-scope"));
+          if (op.recovery) card.append(element("p", "后台认证与配额检查使用本次确认的出站设备；官方授权网页使用浏览器自己的网络。需要网页同出口时，请先核实浏览器路由。", "quota-scope"));
         }
         if (latestReading) {
           const reading = element("dl", undefined, "codex-account-reading");
@@ -771,7 +696,7 @@ export function init({ autoLoad = true } = {}) {
       if (account.account_quota_pause) {
         heading.append(element("span", "此账号配额查询已暂停", "codex-batch-result"));
         card.append(element("p", accountQuotaPauseGuidance(account), "quota-scope account-quota-pause-guidance"));
-        const repair = button("打开登录修复", "repair-login", account);
+        const repair = button("恢复此账号的额度查询", "repair-login", account);
         repair.disabled = false;
         controls.append(repair);
       }
@@ -803,7 +728,7 @@ export function init({ autoLoad = true } = {}) {
         const forget = button("清除本页登录态", "forget-login", account);
         if (account.account_quota_pause) {
           forget.disabled = true;
-          maintenance.append(element("p", "此账号的配额暂停尚未结清；先打开登录修复并完成复验，再清除登录态。", "quota-scope"));
+          maintenance.append(element("p", "此账号的配额暂停尚未结清；先恢复此账号的额度查询并完成复验，再清除登录态。", "quota-scope"));
         }
         maintenance.append(forget);
         managementDetail.append(maintenance);

@@ -146,9 +146,9 @@ def main():
                 self.send(network_html.encode(), 'text/html; charset=utf-8')
             elif self.path == '/api/network/cache':
                 self.send(dict(available=False))
-            elif self.path in ('/web/styles.css', '/web/codex-accounts.js', '/web/account-egress.js', '/web/quota.js', '/web/network.js'):
+            elif self.path in ('/web/styles.css', '/web/codex-accounts.js', '/web/device-connection.js', '/web/account-egress.js', '/web/quota.js', '/web/network.js'):
                 body = (ROOT / self.path.lstrip('/')).read_bytes()
-                if self.path.endswith(('/codex-accounts.js', '/network.js')):
+                if self.path.endswith(('/device-connection.js', '/network.js')):
                     body = body.replace(b'127.0.0.1:39002', f'127.0.0.1:{pair.server_port}'.encode())
                 self.send(body, 'text/css' if self.path.endswith('.css') else 'text/javascript')
             elif self.path == '/api/codex-accounts':

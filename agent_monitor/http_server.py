@@ -570,8 +570,35 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/codex-accounts/egress-preview":
                 approval_action = payload.get("approval_action") or ""
                 local_actions = {"quota-recovery", "quota-auth-recovery", "quota-login-recovery", "quota-settings", "refresh"}
-                if approval_action in local_actions and not payload.get("connection"):
+                recovery_actions = {"quota-recovery", "quota-auth-recovery", "quota-login-recovery"}
+                recovery_request = payload.get("recovery_request")
+                if approval_action in recovery_actions and (payload.get("connection") or recovery_request):
+                    from agent_monitor.quota import quota_recovery
+                    if not isinstance(recovery_request, dict):
+                        raise codex_accounts.ActionError("请更新恢复状态，并确认原任务的设备网络。", 409)
+                    value = quota_recovery.validate_request({k: recovery_request[k] for k in
+                        ("machine", "account_id", "account_label", "pause_id", "profile", "mode", "operation_id", "pause_scope", "source_digest")
+                        if k in recovery_request})
+                    machine = sync.load_machine_config().by_name.get(value["machine"])
+                    if not machine or not machine.is_self or not hub.is_hub():
+                        raise codex_accounts.ActionError("配对设备恢复只支持账号所在 Hub 本机。", 409)
+                    scope = quota_recovery.approval_scope(value)
+                    if (approval_action != quota_recovery.approval_action(value) or payload.get("approval_scope") != scope
+                            or payload.get("approval_expected") != value["pause_id"]):
+                        raise codex_accounts.ActionError("恢复预览与原任务不一致，请更新状态。", 409)
+                    context = quota_recovery.managed_network_context(value, recovery_request.get("network_context"))
+                    route = client_network.hub.browser_route(payload.get("connection"))
+                    result = account_egress.preview(route)
+                    result["confirmation"] = route.issue(scope, {"pause_id": value["pause_id"], "network_context": context},
+                        approval_action, preview=result)
+                    result.update(approval_action=approval_action, approval_scope=scope, network_context=context,
+                        network_device={"id": route.id, "label": route.label},
+                        route_change=(context.get("device") or {}).get("id") != route.id)
+                elif approval_action in local_actions and not payload.get("connection"):
                     scope = payload.get("approval_scope")
+                    if approval_action in recovery_actions and isinstance(scope, list) and any(
+                            isinstance(part, str) and part.startswith("monitor-") for part in scope):
+                        raise codex_accounts.ActionError("Monitor 账号恢复需要确认原任务的设备网络，请更新页面。", 409)
                     expected = payload.get("approval_expected")
                     if (not isinstance(scope, list) or not scope or
                             any(not isinstance(item, str) or not item for item in scope)):
@@ -604,10 +631,10 @@ class Handler(BaseHTTPRequestHandler):
                     if approval_action:
                         if approval_action not in {"batch-start", "batch-retry", "refresh", "refresh-all", "refresh-selected", "refresh-retry", "login"}:
                             raise codex_accounts.ActionError("预览操作类型无效。")
-                        result["confirmation"] = route.issue(selected, payload.get("approval_expected"), approval_action)
+                        result["confirmation"] = route.issue(selected, payload.get("approval_expected"), approval_action, preview=result)
                         result["approval_action"] = approval_action
                     elif selected:
-                        result["confirmation"] = route.issue(selected, payload.get("expected_batch_id"))
+                        result["confirmation"] = route.issue(selected, payload.get("expected_batch_id"), preview=result)
             elif path == "/api/codex-accounts/network-status":
                 route = client_network.hub.browser_route(payload.get("connection"))
                 result = {"label": route.label, "connected": True}
@@ -630,7 +657,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not selected:
                     raise codex_accounts.ActionError("尚未发现可发送的 Codex 登录账号。")
                 route = client_network.hub.browser_route(payload.get("connection"))
-                route.consume(payload.get("confirmation"), selected, payload["expected_batch_id"], "batch-start")
+                route = route.consume(payload.get("confirmation"), selected, payload["expected_batch_id"], "batch-start")
                 manager.start_batch(payload["expected_batch_id"], selected, network_route=route)
                 result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/batch-retry":
@@ -642,7 +669,7 @@ class Handler(BaseHTTPRequestHandler):
                 current = manager.list(ids)
                 pending = {item["profile_id"] for item in (current.get("batch") or {}).get("items", [])
                            if not item.get("operation") or item["operation"].get("message_status") == "not_sent"}
-                route.consume(payload.get("confirmation"), pending, payload.get("batch_id"), "batch-retry")
+                route = route.consume(payload.get("confirmation"), pending, payload.get("batch_id"), "batch-retry")
                 manager.retry_batch(payload.get("batch_id"), ids, network_route=route)
                 result = {**manager.list(ids), "unavailable_accounts": unavailable}
             elif path == "/api/codex-accounts/start":
@@ -654,7 +681,7 @@ class Handler(BaseHTTPRequestHandler):
                 batch_id = (manager.read_batch() or {}).get("id")
                 if payload.get("approval_expected") != batch_id:
                     raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
-                route.consume(payload.get("confirmation"), [account_id], batch_id, "refresh")
+                route = route.consume(payload.get("confirmation"), [account_id], batch_id, "refresh")
                 result = manager.start(account_id, refresh_only=True, network_route=route)
             elif path in {"/api/codex-accounts/refresh-all", "/api/codex-accounts/refresh-selected", "/api/codex-accounts/refresh-retry"}:
                 action = path.rsplit("/", 1)[1]
@@ -677,7 +704,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
                 ids = set(requested)
                 route = client_network.hub.browser_route(payload.get("connection"))
-                route.consume(payload.get("confirmation"), ids, revision, action)
+                route = route.consume(payload.get("confirmation"), ids, revision, action)
                 result = manager.start_refresh_batch(sorted(ids), network_route=route,
                     retry_revision=revision if action == "refresh-retry" else None, expected_revision=revision)
                 result["unavailable_accounts"] = unavailable
@@ -687,7 +714,7 @@ class Handler(BaseHTTPRequestHandler):
                 batch_id = (manager.read_batch() or {}).get("id")
                 if payload.get("approval_expected") != batch_id:
                     raise codex_accounts.ActionError("账号列表已变化，请重新查看出口并确认。", 409)
-                route.consume(payload.get("confirmation"), [account_id], batch_id, "login")
+                route = route.consume(payload.get("confirmation"), [account_id], batch_id, "login")
                 result = manager.start(account_id, login_only=True, network_route=route)
             elif path == "/api/codex-accounts/commit-recovery":
                 from agent_monitor.quota import quota_recovery
@@ -791,7 +818,22 @@ class Handler(BaseHTTPRequestHandler):
             if machine is None:
                 raise ValueError()
             scope = quota_recovery.approval_scope(value)
-            UPSTREAM_APPROVALS.consume(raw.get("confirmation"), quota_recovery.approval_action(value), scope, value["pause_id"])
+            route = None
+            context = None
+            if value.get("profile", "").startswith("monitor-"):
+                if not machine.is_self or not hub.is_hub():
+                    raise ValueError("配对设备恢复只支持账号所在 Hub。")
+                context = quota_recovery.managed_network_context(value, raw.get("network_context"))
+                route = client_network.hub.browser_route(raw.get("connection"))
+                route = route.consume(raw.get("confirmation"), scope,
+                    {"pause_id": value["pause_id"], "network_context": context}, quota_recovery.approval_action(value))
+            else:
+                if raw.get("connection"):
+                    raise ValueError("此来源的恢复须使用账号所在机器的网络。")
+                UPSTREAM_APPROVALS.consume(raw.get("confirmation"), quota_recovery.approval_action(value), scope, value["pause_id"])
+        except codex_accounts.ActionError as exc:
+            self._send_json({"error": str(exc)}, status=exc.status)
+            return
         except (ValueError, UnicodeDecodeError):
             self._send_json({"error": "恢复目标或请求格式无效。"}, status=400)
             return
@@ -803,11 +845,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "已有配额操作，请等待结束后再核对暂停状态。"}, status=409)
                 return
             try:
+                if route:
+                    codex_accounts.manager.bind_recovery_network(value["profile"][8:], value["operation_id"], value["pause_id"],
+                        context, route, pause_scope=value.get("pause_scope"))
                 if value.get("mode") == "reauthorize":
                     if not machine.is_self or not hub.is_hub():
                         self._send_json({"error": "此异步重新授权入口只支持账号所在 Hub 本机。"}, status=409)
                         return
-                    from agent_monitor.accounts import codex_accounts
                     try:
                         current = QUOTA_REFRESH.recovery_status(machine, **({"profile": value["profile"], "pause_scope": "account"}
                             if value.get("pause_scope") == "account" else {}))
@@ -822,14 +866,16 @@ class Handler(BaseHTTPRequestHandler):
                             return QUOTA_REFRESH.managed_recovery_publication(machine, value["profile"], block,
                                 expected_source=current["source_host_identity"])
                         account = codex_accounts.manager.start_reauthorization(value["profile"][len("monitor-"):],
-                            binding, publication=publication)
+                            binding, publication=publication, **({"network_route": route} if route else {}))
                     except (codex_accounts.ActionError, ValueError) as exc:
                         self._send_json({"error": str(exc)}, status=getattr(exc, "status", 409))
                         return
                     self._send_json({"ok": True, "login_pending": True, "account": account}, status=202)
                     return
-                receipt, status = QUOTA_REFRESH.recover(machine, value)
+                receipt, status = QUOTA_REFRESH.recover(machine, value, **({"network_route": route} if route else {}))
                 self._send_json(receipt, status=status)
+            except codex_accounts.ActionError as exc:
+                self._send_json({"error": str(exc)}, status=getattr(exc, "status", 409))
             except Exception:
                 self._send_json({"error": "恢复回执未能确认或保存，请核对目标机器状态；不要重复探测。"}, status=500)
 

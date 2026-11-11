@@ -374,12 +374,15 @@ try {
   const ready=`!document.hidden && !!document.querySelector('${primary}') && !document.querySelector('${primary}').disabled && document.querySelector('${primary}').textContent.includes('6')`;
   const preview=`!!document.querySelector('${dialog} .account-egress-address')`;
   const closed=`!document.querySelector('${dialog}')`;
-  await until('account list',()=>read(ready));
+  await until('account list',()=>read("!document.hidden && document.querySelectorAll('.codex-account-card').length===6"));
+  await click('#codex-batch-mode',"!document.querySelector('#codex-batch-panel').hidden");
+  await click('#codex-select-all',ready);
+  await until('selected accounts ready',()=>read(ready));
   assert.match(await read(`document.querySelector('${primary}').textContent`),/6/);
   // Exercise the complete disclosure unit before any synthetic send action.
   await configure({disclosure:true});
   await bt('open',url);
-  await until('disclosure scenario',()=>read("document.querySelector('#codex-batch-status').textContent.includes('未发送 2')"));
+  await until('disclosure scenario',()=>read("document.querySelector('#codex-send-receipt').textContent.includes('未发送 2')"));
   await bt('set','viewport','1440','1000');
   const card='#codex-account-list > :first-child', detail=card+' details';
   const firstSummary=await read(`document.querySelector('${detail} > summary').getBoundingClientRect().toJSON()`);
@@ -516,7 +519,7 @@ try {
   await bt('open',url);
   await until('pause',()=>read(paused));
   await until('visible recovery card',()=>read(focused));
-  assert.match(await read(`document.querySelector('${panel}').innerText`),/配额读取失败，需要一次受控检查[\s\S]*通过目标机器路由桥检查配额/);
+  assert.match(await read(`document.querySelector('${panel}').innerText`),/配额读取失败，需要一次受控检查[\s\S]*确认出口并检查配额/);
   assert.equal(await read(`document.querySelector('${panel} .recovery-technical').open`),false);
   assert.doesNotMatch(await read(`document.querySelector('${panel}').innerText`),/workspace-0|凭据位置|RPC/);
   await bt('screenshot',path.join(root,'recovery-paused.png'));
@@ -624,7 +627,7 @@ try {
     const card=${expression};
     return !!card && [...card.querySelectorAll('[hidden]')].every(e => getComputedStyle(e).display==='none' && e.getClientRects().length===0);
   })()`);
-  await click('#quota-accounts [data-codex-pause-id]:nth-child(3) > button',`document.querySelector('${quotaPanel}')?.innerText.includes('通过目标机器路由桥检查配额')`);
+  await click('#quota-accounts [data-codex-pause-id]:nth-child(3) > button',`document.querySelector('${quotaPanel}')?.innerText.includes('确认出口并检查配额')`);
   assert.match(await read(`document.querySelector('${quotaPanel}').innerText`),/配额读取失败，需要一次受控检查[\s\S]*不会发送消息/);
   assert.equal((await stats()).recoveries.length,beforeQuota,'quota consumer reads without probing');
   assert.equal(await hiddenRecoveryControlsHaveNoLayout(`document.querySelector('${quotaPanel}')`),true,'paused quota card hides unavailable actions in actual layout');
@@ -659,7 +662,7 @@ try {
   failure=error;
   if (browserAttempted && fs.existsSync(pidFile)) {
     try {
-      const observed=await read(`({url:location.href,hidden:document.hidden,pause:document.querySelector('[data-codex-pause-id="fixture-pause"]')?.textContent,dialog:document.querySelector('dialog[open]')?.textContent,buttons:[...document.querySelectorAll('dialog button')].map(e=>({text:e.textContent,disabled:e.disabled,rect:e.getBoundingClientRect().toJSON()}))})`);
+      const observed=await read(`({url:location.href,hidden:document.hidden,cards:document.querySelectorAll('.codex-account-card').length,selection:document.querySelector('#codex-selection-count')?.textContent,batchPanelHidden:document.querySelector('#codex-batch-panel')?.hidden,batchNext:{text:document.querySelector('#codex-batch-next')?.textContent,disabled:document.querySelector('#codex-batch-next')?.disabled},pause:document.querySelector('[data-codex-pause-id="fixture-pause"]')?.textContent,dialog:document.querySelector('dialog[open]')?.textContent,buttons:[...document.querySelectorAll('dialog button')].map(e=>({text:e.textContent,disabled:e.disabled,rect:e.getBoundingClientRect().toJSON()}))})`);
       console.error('Fixture failure evidence: '+JSON.stringify({counts:((s)=>({pairs:s.pair_requests,status:s.status_requests,previews:s.previews,starts:s.starts?.length,recoveries:s.recoveries?.length,resumes:s.resumes?.length,writes:s.writes}))(await stats()),page:observed}));
     } catch { console.error('Fixture page failure evidence unavailable; original error retained.'); }
   }

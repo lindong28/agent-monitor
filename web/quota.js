@@ -598,7 +598,7 @@
         key: "upstream_auth",
         label: "上游认证响应",
         summary: `上游返回 ${signal}，原因未核实`,
-        action: "先打开“查看当前状态与恢复”，通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，需由 Agent Monitor 管理员核对该机器的账号、部署与上游认证。",
+        action: "先打开“查看当前状态与恢复”，通过本次确认的出站路径只检查一次；若仍失败，需由 Agent Monitor 管理员核对该机器的账号、部署与上游认证。",
       };
     }
     if (detail.kind === "rpc_error" || detail.stage === "quota_read"
@@ -607,7 +607,7 @@
         key: "read_error",
         label: "读取失败",
         summary: "配额读取失败，原因未核实",
-        action: "先打开“查看当前状态与恢复”；检查会沿目标机器的 Agent Monitor 路由桥进行，仍失败时复制诊断交由管理员排查。",
+        action: "先打开“查看当前状态与恢复”；检查会沿本次确认的出站路径进行，仍失败时复制诊断交由管理员排查。",
       };
     }
     if (quotaFailureKind(failure.reason, failure.query_state) === "paused") {
@@ -680,14 +680,17 @@
     if (f.returncode != null) add(`CLI 退出码：${f.returncode}`);
     if (receipt.record_error) add(receipt.record_error);
     const network = receipt.network;
-    add(`出站策略：${network?.policy === "chromium-system" ? "执行主机的系统代理" : "未记录"}；公网出口 IP／地区：未核实。`);
+    const selected = receipt.network_context;
+    if (selected?.device) add(`本次选择的出站设备：${selected.device.label}（临时连接 ${String(selected.device.id).slice(0, 8)}）；执行与凭据主机：${receipt.request?.machine || "见本次对象"}。`);
+    add(`出站策略：${network?.policy === "chromium-system" ? "所选出站设备的系统代理" : "未记录"}；实际配额请求的公网出口 IP／地区：未核实。`);
+    for (const target of selected?.preview?.targets || []) add(`确认时的匿名预览：${target.host} · ${target.ip || "IP 未知"} · ${target.country_code || "地区未知"} · ${target.observed_at ? new Date(target.observed_at * 1000).toLocaleString("zh-CN") : "时间未记录"}${target.cached ? " · 缓存结果" : ""}。`);
     add("以下仅为本次连接观测；connected 表示代理桥建立了连接，不证明配额请求成功，也不能证明最终公网出口。其他设备的出口预览不能代替此读数。");
     if (!network?.events?.length) add("未保存可用的连接观测；不能据此断定没有发出请求。");
     for (const e of network?.events || []) add(`${e.at || "时间未记录"} · ${e.target} → ${e.route} · ${e.result}`);
     return box;
   }
 
-  function createRecoveryPanel(machine = "self", {onContinue, onSaved, sourceFailure = null, profile = "", pauseScope = ""} = {}) {
+  function createRecoveryPanel(machine = "self", {onContinue, onSaved, getConnection, sourceFailure = null, profile = "", pauseScope = ""} = {}) {
     function canRenewAuth(value) {
       // Recovery eligibility belongs to the server; do not duplicate its code list.
       return value?.account?.auth_recovery_available === true;
@@ -720,7 +723,7 @@
     const commit = make("button", "保存已有配额结果");
     commit.hidden = true;
     const help = make("button", "查看排查步骤");
-    const resume = make("button", "返回账号操作");
+    const resume = make("button", profile.startsWith("monitor-") ? "返回配额查询" : "返回账号操作");
     const copy = make("button", "复制诊断信息", "btn");
     for (const [button, action] of [[read,"read"],[probe,"probe"],[relogin,"reauthorize"],[commit,"commit"],[help,"help"],[resume,"continue"],[copy,"copy"]]) {
       button.type = "button";
@@ -807,9 +810,9 @@
         unreadable: ["暂停记录无法读取", "发送仍暂停。先按排查步骤修复状态记录，再更新状态；不能直接清除暂停。"],
         used: ["本次暂停的检查机会已使用", "先更新状态查看已有结果。若仍未结束，按下方排查步骤处理；此处不能重复检查或重置机会。"],
         identity: ["查询账号身份需要确认", "暂停保留。先核对目标机器上的原账号凭据来源；可恢复原账号的独立配置，无需切换默认登录。确认后更新状态。"],
-        "source-mismatch": ["恢复状态来源不一致，需要核对", `${mismatchEvidence}；两份记录不一致，页面不能据此判断根因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
-        "upstream-auth": ["上游认证响应需要核对", `已记录${authEvidence}；这条读数不能区分凭据、权限或服务端原因。先通过目标机器的 Agent Monitor 路由桥只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
-        "read-error": ["配额读取失败，需要一次受控检查", "已记录读取阶段失败，但原因未核实。先通过目标机器的 Agent Monitor 路由桥只检查一次；仍失败时复制诊断交由管理员排查。"],
+        "source-mismatch": ["恢复状态来源不一致，需要核对", `${mismatchEvidence}；两份记录不一致，页面不能据此判断根因。先通过本次确认的出站路径只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
+        "upstream-auth": ["上游认证响应需要核对", `已记录${authEvidence}；这条读数不能区分凭据、权限或服务端原因。先通过本次确认的出站路径只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
+        "read-error": ["配额读取失败，需要一次受控检查", "已记录读取阶段失败，但原因未核实。先通过本次确认的出站路径只检查一次；仍失败时复制诊断交由管理员排查。"],
         failed: ["配额检查未成功，发送仍暂停", "具体原因尚未确认。先查看排查步骤，处理后可再次检查；已有发送结果和账号选择保留。"],
         "auth-unresolved": ["认证刷新未取得新凭据", "本次没有继续查询配额，暂停保留。官方接口未提供明确失败原因；先查看诊断，不要重复查询同一份凭据。"],
         "local-commit": ["配额已有候选结果，本地结清未完成", "暂停保留。先查看本地保存或发布错误及已有结果；不要重新授权或再次查询配额。"],
@@ -867,8 +870,8 @@
       if (value && unrecordedOutcome) result.textContent = "最近检查：未取得该次结果记录。当前是否暂停以上方状态为准。";
       probe.hidden = !["paused", "failed", "source-mismatch", "upstream-auth", "read-error"].includes(mode);
       probe.disabled = busy || probe.hidden;
-      probe.textContent = mode === "failed" ? "处理后再次检查配额" : "通过目标机器路由桥检查配额";
-      effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，沿用该机器原有系统代理；不会发送消息。";
+      probe.textContent = mode === "failed" ? "处理后再次检查配额" : "确认出口并检查配额";
+      effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，使用本次确认的出站路径；不会发送消息。";
       const renewAuth = canRenewAuth(value) && !probe.hidden;
       relogin.hidden = mode !== "auth-unresolved" || !a.login_recovery
         || a.login_recovery.pause_id !== pause?.id;
@@ -880,7 +883,7 @@
       if (renewAuth) {
         probe.textContent = "刷新认证并检查配额";
         guidance.textContent = "配额接口拒绝了当前认证。可通过官方接口尝试刷新本账号登录态；只有取得同身份的新凭据才检查配额，未恢复时保留暂停与诊断。";
-        effect.textContent = "最多一次认证刷新 RPC 和一次配额 RPC，共用原总时限与目标机器路由；官方内部可能产生多次请求，不发送消息。";
+        effect.textContent = "最多一次认证刷新 RPC 和一次配额 RPC，共用原总时限与本次确认的出站路径；官方内部可能产生多次请求，不发送消息。";
       }
       help.hidden = !(mode === "account-blocked" && layeredPause) && !["local-commit", "auth-unresolved", "failed", "unreadable", "identity", "source-mismatch", "upstream-auth", "read-error", "used"].includes(mode);
       resume.hidden = mode !== "ready" || !onContinue;
@@ -915,15 +918,15 @@
         "恢复明确的原账号来源后点击“更新状态”。原来源无法恢复时，将本次暂停诊断交给维护者核对处置；本地留存用量仍可查看，共享暂停不因此自动清除。"
       ] : mode === "source-mismatch" ? [
         "保留两份记录，不要删除暂停或自行切换出口。",
-        `下一次检查将在 ${host} 执行，并使用该机器的 Agent Monitor 路由桥；预览失败时不会发送配额检查请求。`,
+        `下一次检查将在 ${host} 执行，并使用本次确认的出站路径；预览失败时不会发送配额检查请求。`,
         `若一次检查仍失败，页面不能替 ${host} 修复账号或部署；复制技术详情，交由 Agent Monitor 管理员核对汇总与机器记录。`
       ] : mode === "upstream-auth" ? [
-        `核对上方检查对象。下一次检查将在 ${host} 执行，并先展示该机器的 Agent Monitor 路由桥出口。`,
+        `核对上方检查对象。下一次检查将在 ${host} 执行，并先展示所选出站设备的出口预览。`,
         `已记录${authEvidence}；这条记录不能单独证明是凭据、权限还是服务端原因。不要直接换出口、重复登录或连续重试。`,
         `若一次检查仍失败，页面不能替 ${host} 修复账号或部署；复制技术详情，交由 Agent Monitor 管理员继续核对。`
       ] : mode === "read-error" ? [
-        `核对上方检查对象。检查将在 ${host} 执行，并使用该机器的 Agent Monitor 路由桥，不使用打开网页设备的直连。`,
-        "点击“通过目标机器路由桥检查配额”前先确认出口预览完整；预览失败时不会发送配额检查请求。",
+        `核对上方检查对象。检查将在 ${host} 执行，并使用本次确认的出站路径，不会自动改走其他设备。`,
+        "点击“确认出口并检查配额”前先核对所选网络路径；IP 或地区未知时会明确显示；预览失败时不会发送配额检查请求。",
         "若仍失败，保留暂停状态并复制技术详情交由管理员排查，不要重复盲试。"
       ] : mode === "failed" ? [
         "本次检查已经失败。保留暂停和诊断，先展开技术详情并复制诊断信息，不要直接重复检查。",
@@ -932,7 +935,7 @@
       ] : [
         `核对上方检查对象。检查发生在 ${host}，不是自动使用打开网页这台设备的网络。`,
         `检查会通过 ${host} 的 Agent Monitor 路由桥执行；保持该机器原有出口，不切换节点。错误码本身不能确认是代理或登录故障。`,
-        mode === "used" ? "点击“更新状态”查看是否已有检查结果。若检查机会一直占用，复制诊断排查服务日志；不要删除暂停或重复提交。" : "确认出口后点击“通过目标机器路由桥检查配额”，只检查一次。若仍失败，保留结果并复制诊断继续定位，不反复盲试。"
+        mode === "used" ? "点击“更新状态”查看是否已有检查结果。若检查机会一直占用，复制诊断排查服务日志；不要删除暂停或重复提交。" : "确认出口后点击“确认出口并检查配额”，只检查一次。若仍失败，保留结果并复制诊断继续定位，不反复盲试。"
       ];
       for (const text of instructions) list.appendChild(make("li", text));
       steps.append(make("strong", "排查步骤"), list);
@@ -942,7 +945,7 @@
       add(`执行机器：${value.machine}；状态读取于 ${when(value.observed_at)}。`);
       add(`查询账号：${a.account_label || "未取得"}；工作区：${a.account_id || "未取得"}。`);
       add(`账号来源：${({default:"默认 Codex 目录",managed:"托管账号 " + (a.profile || ""),configured:"服务配置指定目录"})[a.source] || "未知"}；凭据位置：${a.credential_path || "未取得"}。`);
-      add("本地身份记录不证明上游登录有效。状态更新只读本地记录，不查询上游。检查配额使用执行机器的原有系统代理，不会发送或重发消息。");
+      add("本地身份记录不证明上游登录有效。状态更新只读本地记录，不查询上游。检查配额使用本次确认的出站路径，不会发送或重发消息。");
       if (pause) {
         add(`当前暂停：${pause.id}；已记录的错误摘要：${pause.failure?.detail || "未记录，原因未核实"}`);
         describeDiagnosticSummary(add, pause.failure?.detail);
@@ -1026,9 +1029,15 @@
       notice.textContent = "";
       let receipt, code, attempted = false;
       try {
+        if (request.profile.startsWith("monitor-")) {
+          request.network_context = state.network_context;
+          request.operation_id = state.network_context?.operation_id || request.operation_id;
+          request.connection = await (getConnection ? getConnection() : window.AgentMonitor.requireRecoveryDevice?.(controller.signal));
+          if (!request.connection) throw new Error("请先连接本次恢复要使用的网络设备；未发出上游请求。");
+        }
         const approval = await window.AgentMonitor.previewUpstream?.(
           [{email: request.account_label, account_id: request.account_id}],
-          {approval_action: request.mode === "reauthorize" ? "quota-login-recovery" : request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : []), ...(request.operation_id ? [request.operation_id] : []), ...(request.pause_scope ? [request.pause_scope] : []), ...(request.source_digest ? [request.source_digest] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
+          {...(request.connection ? {connection: request.connection, recovery_request: request} : {}), approval_action: request.mode === "reauthorize" ? "quota-login-recovery" : request.mode ? "quota-auth-recovery" : "quota-recovery", approval_scope: [request.machine, request.account_id, request.account_label, request.profile || "native", ...(request.mode ? [request.mode] : []), ...(request.operation_id ? [request.operation_id] : []), ...(request.pause_scope ? [request.pause_scope] : []), ...(request.source_digest ? [request.source_digest] : [])], approval_expected: request.pause_id, approval_machine: request.machine},
           controller.signal);
         if (!approval) throw new Error("已取消检查；未发出上游请求。");
         attempted = true;
@@ -1038,6 +1047,7 @@
       pendingPauseId = attempted && (!receipt || (typeof receipt.ok !== "boolean" && !receipt.failure)) ? request.pause_id : null;
       busy = false;
       await refresh();
+      if (receipt?.ok && !receipt.login_pending) await onSaved?.();
       if (!receipt?.login_pending && (receipt?.ok || receipt?.failure)) {
         const diagnostic = recoveryDiagnostics({...receipt,request}, code);
         diagnostic.open = true; details.replaceChildren(diagnostic);

@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import threading
 import time
 
 from agent_monitor.network import network_policy
+from agent_monitor.network.client_network import NetworkError, confirmation
 from agent_monitor.runtime.python_entrypoint import module_command
 
 # ChatGPT-authenticated Codex defaults, verified against rust-v0.162.1.
@@ -87,19 +89,69 @@ def _run_probe(host, env):
         return unknown(host, "无法完成出口探测，未重试")
 
 
+def _device_preview(route):
+    with route.egress_lock:
+        route.preview_context = None
+        before = confirmation(route.observe())
+        cache = route.egress_cache
+        now = time.monotonic()
+        due = [host for host in TARGETS if host not in cache or cache[host][0] <= now]
+        for host in TARGETS:
+            if host not in due and (len(cache[host]) != 4 or cache[host][2:] != (
+                    before["generation"], before["routes"]["https://" + host])):
+                raise NetworkError("设备网络已变化或上次路由未能确认；请等待当前探测冷却结束后重新查看出口。")
+        scope = secrets.token_hex(16)
+        if due:
+            with network_policy.using_route(route.endpoint):
+                env = network_policy.child_environment(os.environ, scope=scope)
+            with ThreadPoolExecutor(max_workers=len(due)) as pool:
+                results = list(pool.map(lambda host: _run_probe(host, env), due))
+            # Reserve the existing cooldown even when observation fails below.
+            # Invalid evidence cannot authorize traffic or trigger another probe.
+            for host, result in zip(due, results):
+                delay = result.get("retry_after_seconds", 0)
+                if not isinstance(delay, (int, float)) or isinstance(delay, bool) or not math.isfinite(delay):
+                    delay = 0
+                cache[host] = (time.monotonic() + max(60, delay), result, None, None)
+        observed = route.observe(scope=scope)
+        after = confirmation(observed)
+        if before["generation"] != after["generation"]:
+            raise NetworkError("探测期间设备网络配置已变化，请等待探测冷却结束后重新查看出口。")
+        updates = {}
+        for host in TARGETS:
+            origin = "https://" + host
+            if host in due:
+                events = [event for event in observed.get("events", []) if isinstance(event, dict)
+                          and event.get("target") == origin and event.get("result") == "connected"
+                          and event.get("generation") == after["generation"]]
+                if not events or events[-1].get("route") != after["routes"][origin]:
+                    raise NetworkError("未能确认探测实际使用的设备路由；请等待探测冷却结束后重新查看出口。")
+                updates[host] = (*cache[host][:2], after["generation"], events[-1]["route"])
+            elif cache[host][2:] != (after["generation"], after["routes"][origin]):
+                raise NetworkError("设备网络已变化，缓存出口不再适用；请等待探测冷却结束后重新查看出口。")
+        cache.update(updates)
+        route.require()
+        result = {"checked_host": route.label, **after, "observed_at": time.time(), "targets": [
+            dict(cache[host][1], cached=host not in due,
+                 retry_after_seconds=max(0, math.ceil(cache[host][0] - time.monotonic())))
+            for host in TARGETS]}
+        route.preview_context = result
+        return result
+
+
 def preview(route=None):
     # Share successful and failed observations across tabs/users. A preview
     # never clears provider pauses and has no path to the account manager.
-    cache = route.egress_cache if route else _cache
-    lock = route.egress_lock if route else _lock
     if route:
         route.require()
-    with lock:
+        return _device_preview(route)
+    cache = _cache
+    with _lock:
         now = time.monotonic()
         due = [host for host in TARGETS if host not in cache or cache[host][0] <= now]
         if due:
             try:
-                with network_policy.using_route(route.endpoint if route else None):
+                with network_policy.using_route(None):
                     env = network_policy.child_environment(os.environ)
                 with ThreadPoolExecutor(max_workers=len(due)) as pool:
                     results = list(pool.map(lambda host: _run_probe(host, env), due))
@@ -110,9 +162,7 @@ def preview(route=None):
                 if not isinstance(delay, (int, float)) or isinstance(delay, bool) or not math.isfinite(delay):
                     delay = 0
                 cache[host] = (time.monotonic() + max(60, delay), result)
-        if route:
-            route.require()
-        return {"checked_host": route.label if route else socket.gethostname(), "targets": [
+        return {"checked_host": socket.gethostname(), "targets": [
             dict(cache[host][1], cached=host not in due,
                  retry_after_seconds=max(0, math.ceil(cache[host][0] - time.monotonic())))
             for host in TARGETS]}

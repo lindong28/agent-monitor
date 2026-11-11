@@ -158,7 +158,7 @@ class Manager:
             raise ValueError("目标机器身份变化，未采纳状态；请先重新采集确认来源。")
         return {**status, "machine": machine.name}
 
-    def recover(self, machine, value):
+    def recover(self, machine, value, *, network_route=None):
         """Admit and persist one recovery receipt while recovery_scope is held."""
         from agent_monitor.snapshots import generation
         from agent_monitor.quota import quota_recovery
@@ -177,7 +177,7 @@ class Manager:
         if (before.get("blocked_reason") or status.get("active") or (status.get("pause") or {}).get("probe_attempt")
                 or (status.get("pause") or {}).get("id") != value["pause_id"]):
             return {"error": "暂停状态已变化或仍有操作，请重新读取状态。"}, 409
-        receipt = quota_recovery.run(machine, value)
+        receipt = quota_recovery.run(machine, value, **({"network_route": network_route} if network_route else {}))
         if receipt.get("ok"):
             block = receipt.get("block") or {}
             if (receipt.get("source_host_identity") != meta["source_host_identity"]
@@ -211,7 +211,8 @@ class Manager:
             auth_result = safe_auth_recovery(receipt.get("authentication_recovery"))
             receipt = {"ok": True, "message": "有效读数已保存，目标机器的 Codex 自动查询已恢复。",
                        **({"record_error": receipt["record_error"]} if receipt.get("record_error") else {}),
-                       "network": receipt.get("network", {"coverage": "unavailable", "events": []})}
+                       "network": receipt.get("network", {"coverage": "unavailable", "events": []}),
+                       **({"network_context": receipt["network_context"]} if receipt.get("network_context") else {})}
             if auth_result:
                 receipt["authentication_recovery"] = auth_result
         return receipt, 200 if receipt.get("ok") else 409

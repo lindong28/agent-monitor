@@ -17,6 +17,7 @@ from pathlib import Path
 import time
 import uuid
 from urllib.parse import parse_qs, urlsplit
+import urllib.request
 
 from agent_monitor.network import client_network
 from agent_monitor.network import network_policy
@@ -37,16 +38,21 @@ def response_header(sock):
         raise client_network.NetworkError("连接握手被拒绝；请检查设备代理和服务地址。")
 
 
-def connect_via(route, target, *, scheme="https", scope=None):
+def connect_via(route, target, *, scheme="https", scope=None, confirmation=None):
     client_network.authority(target)
     parsed = urlsplit(route)
     name = "agent-monitor" + ("." + scope if scope else "")
     auth = base64.b64encode((name + ":" + parsed.password).encode()).decode()
+    constraint = ""
+    if confirmation is not None:
+        value = client_network.confirmation(confirmation)
+        encoded = base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
+        constraint = f"X-Agent-Monitor-Confirmation: {encoded}\r\n"
     sock = socket.create_connection((parsed.hostname, parsed.port), timeout=8)
     try:
         sock.settimeout(client_network.CONNECT_SECONDS)
         sock.sendall((f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n"
-                      f"Proxy-Authorization: Basic {auth}\r\nX-Agent-Monitor-Target-Scheme: {scheme}\r\n\r\n").encode())
+                      f"Proxy-Authorization: Basic {auth}\r\nX-Agent-Monitor-Target-Scheme: {scheme}\r\n{constraint}\r\n").encode())
         response_header(sock)
         return sock
     except Exception:
@@ -83,7 +89,8 @@ class Connector:
             exc.failure = {"stage": "pair_listen", "error_type": type(exc).__name__, "errno": exc.errno}
             raise
         try:
-            self.registration = self.request("register", {"label": label})
+            self.registration = self.request("register", {"label": label,
+                "capabilities": [client_network.OBSERVATION_CAPABILITY]})
         except BaseException:
             self.pair_server.server_close()
             raise
@@ -285,9 +292,39 @@ window.opener?.postMessage({type:'agent-monitor-probe-ready',nonce:c.nonce},c.or
         except (OSError, ValueError, http.client.HTTPException, process_identity.IdentityUnknown):
             return False
 
+    def observe(self, scope=None):
+        """Read generation, resolve fixed origins locally, then read fresh scoped facts."""
+        before = network_policy.observations(self.local_route)
+        parsed = urlsplit(self.local_route)
+        auth = base64.b64encode((parsed.username + ":" + parsed.password).encode()).decode()
+        request = urllib.request.Request(f"http://127.0.0.1:{parsed.port}/resolve",
+            data=json.dumps({"targets": client_network.PREVIEW_ORIGINS}).encode(),
+            headers={"Proxy-Authorization": "Basic " + auth, "Content-Type": "application/json"})
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=client_network.CONNECT_SECONDS) as response:
+                resolution = json.loads(response.read(8192))
+        except (OSError, ValueError):
+            raise client_network.NetworkError("设备代理无法提供当前路由，请更新连接端并重试。") from None
+        scoped = self.local_route if not scope else f"http://agent-monitor.{scope}:{parsed.password}@127.0.0.1:{parsed.port}"
+        after = network_policy.observations(scoped)
+        result = client_network.confirmation(resolution)
+        if before.get("generation") != result["generation"] or after.get("generation") != result["generation"]:
+            raise client_network.NetworkError("观察期间设备网络已变化，请重新查看出口。")
+        return dict(result, events=after.get("events", []))
+
     def forward(self, task):
         upstream = tunnel = None
         try:
+            if task.get("type") == "observe":
+                scope = task.get("scope")
+                if scope is not None and not re.fullmatch(r"[a-f0-9]{32}", scope):
+                    raise ValueError()
+                try:
+                    observation = self.observe(scope)
+                except client_network.NetworkError:
+                    observation = None
+                self.request("observed", {"channel": task["channel"], "observation": observation})
+                return
             target, scope = task["target"], task.get("scope")
             client_network.authority(target)
             if not isinstance(task.get("channel"), str) or not re.fullmatch(r"[a-f0-9]{32}", task["channel"]):
@@ -295,7 +332,7 @@ window.opener?.postMessage({type:'agent-monitor-probe-ready',nonce:c.nonce},c.or
             if scope is not None and not re.fullmatch(r"[a-f0-9]{32}", scope):
                 raise ValueError()
             try:
-                upstream = connect_via(self.local_route, target, scope=scope)
+                upstream = connect_via(self.local_route, target, scope=scope, confirmation=task.get("confirmation"))
             finally:
                 parsed = urlsplit(self.local_route)
                 scoped = self.local_route if not scope else f"http://agent-monitor.{scope}:{parsed.password}@127.0.0.1:{parsed.port}"
@@ -323,7 +360,8 @@ window.opener?.postMessage({type:'agent-monitor-probe-ready',nonce:c.nonce},c.or
             client_network.relay(upstream, tunnel, self.stopped)
         except (OSError, ValueError, KeyError, client_network.NetworkError):
             # No business replay; the originating client sees a closed tunnel.
-            pass
+            with contextlib.suppress(client_network.NetworkError):
+                self.request("failed", {"channel": task.get("channel")})
         finally:
             with self.guard:
                 for sock in (upstream, tunnel):

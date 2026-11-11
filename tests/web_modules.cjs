@@ -116,7 +116,7 @@ assert.match(resetUi.resetText(3, 2000), /预计/);
       return {ok: true, status: 200, json: async () => options.method === 'POST' ? {ok: true} : value};
     },
   }, formatDate: String});
-  const panel = ui.createRecoveryPanel('self', {profile, pauseScope: 'account', onSaved: () => {saved++;}});
+  const panel = ui.createRecoveryPanel('self', {profile, pauseScope: 'account', getConnection: async () => ({id:'fixture',capability:'fixture'}), onSaved: () => {saved++;}});
   await tick();
   const query = new URL(calls[0].url, 'http://fixture').searchParams;
   assert.equal(query.get('profile'), profile);
@@ -137,7 +137,7 @@ assert.match(resetUi.resetText(3, 2000), /预计/);
   const commit = calls.find(call => call.url === '/api/codex-accounts/commit-recovery');
   assert.equal(JSON.parse(commit.options.body).pause_scope, 'account');
   assert.equal(approvals.length, 1, 'local save needs no upstream preview');
-  assert.equal(saved, 1);
+  assert.equal(saved, 2, "successful recovery and local commit both refresh saved quota consumers");
   const managedState = value;
   const managedCalls = [...calls];
   for (const source of ['default', 'configured']) {

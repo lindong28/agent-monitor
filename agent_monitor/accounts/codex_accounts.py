@@ -731,6 +731,51 @@ class Manager:
         batch["items"] = items
         return batch
 
+    def recovery_network_context(self, profile_id):
+        """Safe selected-network snapshot, anchored to the original quota task."""
+        record = self.read(self.directory(profile_id))
+        operation = record.get("operation") or {}
+        operation = (operation.get("recovery") or {}).get("original_operation") or operation
+        context = copy.deepcopy(operation.get("network_context") or {})
+        device = context.get("device")
+        if not device and operation.get("quota_batch_id"):
+            batch = self.read_quota_batch() or {}
+            if batch.get("id") == operation["quota_batch_id"] and profile_id in batch.get("profile_ids", []):
+                device = copy.deepcopy(batch.get("network_device"))
+        return {"operation_id": operation.get("id"), "quota_batch_id": operation.get("quota_batch_id"),
+                "device": device, "preview": context.get("preview")}
+
+    @staticmethod
+    def selected_network(route, operation):
+        preview = getattr(route, "approval_context", None)
+        return {"operation_id": operation.get("id"), "quota_batch_id": operation.get("quota_batch_id"),
+                "device": {"id": route.id, "label": route.label},
+                "preview": copy.deepcopy(preview) if isinstance(preview, dict) else None}
+
+    def bind_recovery_network(self, profile_id, operation_id, pause_id, expected, route, *, pause_scope=None):
+        """CAS the previewed task context; no credentials or capability is stored."""
+        with self.guard:
+            directory = self.directory(profile_id)
+            with lock_file(directory / ".lock"):
+                record = self.read(directory)
+                operation = record.get("operation") or {}
+                current = self.recovery_network_context(profile_id)
+                controls = (account_holds.controls(self.root.parent, record.get("account_id"), record["email"])
+                            if pause_scope == "account" else self.controls)
+                state = controls.read("codex")
+                if (operation.get("id") != operation_id or current != expected
+                        or not operation.get("refresh_only") or operation.get("login_only")
+                        or operation.get("stage") not in {"failed", "interrupted"}
+                        or operation.get("message_status") != "not_sent"
+                        or state.get("active") or (state.get("pause") or {}).get("id") != pause_id
+                        or (state.get("pause") or {}).get("probe_attempt")):
+                    raise ActionError("原配额任务、暂停或网络选择已变化，请更新状态后重新确认。", 409)
+                route.require()
+                operation["previous_network_context"] = current
+                operation["network_context"] = self.selected_network(route, operation)
+                self.save(directory, record)
+                return copy.deepcopy(operation["network_context"])
+
     def quota_pending(self, eligible_ids):
         batch = self.quota_batch_view()
         return [item["profile_id"] for item in (batch or {}).get("items", [])
@@ -857,17 +902,24 @@ class Manager:
                                         published_id=batch["id"] if batch else None)
                 if network_route:
                     prepared[2]["network_route"] = network_route
+                    prepared[1]["operation"]["network_context"] = self.selected_network(network_route, prepared[1]["operation"])
+                    self.save(directory, prepared[1])
                 self.launch(prepared)
                 return self.view(directory)
 
-    def start_reauthorization(self, profile_id, binding, *, publication):
-        """Explicit owner-route recovery; never borrow a browser-device route."""
+    def start_reauthorization(self, profile_id, binding, *, publication, network_route=None):
+        """Explicit same-task recovery using the confirmed device when selected."""
         if not callable(publication):
             raise ActionError("缺少正常配额页面的发布通道，未开始重新授权。", 409)
         with self.guard:
             with lock_file(self.root / ".catalog.lock"):
                 prepared = self.prepare(profile_id, login_only=True, login_recovery=binding)
                 prepared[2]["quota_publication"] = publication
+                if network_route:
+                    network_route.require()
+                    prepared[2]["network_route"] = network_route
+                    prepared[1]["operation"]["network_context"] = self.selected_network(network_route, prepared[1]["operation"])
+                    self.save(prepared[0], prepared[1])
                 self.launch(prepared)
                 return self.view(prepared[0])
 
@@ -920,6 +972,8 @@ class Manager:
             "network": copy.deepcopy((record["operation"].get("diagnostics") or {}).get("network")
                                      or {"coverage": "unavailable", "events": []}),
             "previous_recovery": previous,
+            **({"network_context": copy.deepcopy(candidate["operation"]["network_context"])}
+               if candidate["operation"].get("network_context") else {}),
             "authentication_recovery": {"outcome": "quota_confirmed",
                 "initial_failure": previous["authentication_recovery"]["initial_failure"]}}
         committed["last_pause"] = committed.pop("pause")
@@ -1042,6 +1096,8 @@ class Manager:
                                             published_id=sending["id"] if sending else None)
                         prepared.append(item)
                         item[1]["operation"]["quota_batch_id"] = quota_batch["id"]
+                        if network_route:
+                            item[1]["operation"]["network_context"] = self.selected_network(network_route, item[1]["operation"])
                         self.save(directory, item[1])
                         if network_route:
                             item[2]["network_route"] = network_route

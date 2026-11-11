@@ -128,7 +128,7 @@ assert.match(accountQuotaPauseGuidance({...tokenRevoked, disabled: false}), /本
 assert.match(accountQuotaPauseGuidance({...tokenRevoked, disabled: false}), /按面板当前提示/);
 assert.match(accountQuotaPauseGuidance({...tokenRevoked, disabled: true}), /先重新启用/);
 assert.match(accountQuotaPauseGuidance({account_quota_pause: {failure: {stage: "quota_read", kind: "rpc_error", http_status: 500}}}), /按面板当前提示/);
-assert.match(accountToggleNotice({...tokenRevoked,disabled:false}), /打开登录修复/);
+assert.match(accountToggleNotice({...tokenRevoked,disabled:false}), /恢复此账号的额度查询/);
 assert.doesNotMatch(accountToggleNotice({disabled:false}), /配额暂停|登录修复/);
 assert.match(accountToggleNotice({disabled:true}), /已停用/);
 ''')

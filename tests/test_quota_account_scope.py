@@ -485,18 +485,28 @@ class ScopedHttpTests(unittest.TestCase):
         from types import SimpleNamespace
         from agent_monitor import http_server as server
         from agent_monitor.quota import quota_recovery
-        from agent_monitor.network.client_network import ApprovalStore
+        from agent_monitor.network.client_network import ApprovalStore, Route
         profile = "monitor-11111111-1111-4111-8111-111111111111"
         machine = SimpleNamespace(name="fixture", is_self=True)
         request = {"machine": "fixture", "account_id": "workspace", "account_label": "one@example.test",
-            "profile": profile, "pause_id": "a" * 32, "mode": "renew_auth", "pause_scope": "account"}
+            "profile": profile, "pause_id": "a" * 32, "mode": "renew_auth", "pause_scope": "account",
+            "operation_id": "22222222-2222-4222-8222-222222222222"}
         manager = mock.MagicMock()
         manager.recovery_scope.return_value.__enter__.return_value = True
         manager.recovery_status.return_value = {"pause_scope": "account", "account": {"quota_profile": profile}}
         manager.recover.return_value = ({"ok": True}, 200)
         approvals = ApprovalStore()
+        route = Route("fixture device")
+        self.addCleanup(route.close)
+        context = {"operation_id": request["operation_id"], "device": None, "preview": None, "quota_batch_id": None}
+        connection = {"id": route.id, "capability": route.browser}
+        expected = {"pause_id": request["pause_id"], "network_context": context}
         with mock.patch.object(server, "UPSTREAM_APPROVALS", approvals), mock.patch.object(server, "QUOTA_REFRESH", manager), \
              mock.patch.object(server.hub, "enabled", return_value=False), \
+             mock.patch.object(server.hub, "is_hub", return_value=True), \
+             mock.patch.object(quota_recovery, "managed_network_context", return_value=context), \
+             mock.patch.object(server.codex_accounts.manager, "bind_recovery_network"), \
+             mock.patch.object(server.client_network.hub, "browser_route", return_value=route), \
              mock.patch.object(server.sync, "load_machine_config", return_value=SimpleNamespace(by_name={"fixture": machine})):
             httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
             thread = threading.Thread(target=httpd.serve_forever)
@@ -515,12 +525,12 @@ class ScopedHttpTests(unittest.TestCase):
                 manager.recovery_status.assert_called_once_with(machine, profile=profile, pause_scope="account")
                 scope = quota_recovery.approval_scope(request)
                 old = approvals.issue("quota-auth-recovery", scope[:-1], request["pause_id"])
-                self.assertEqual(call("POST", "/api/quota-recovery", {**request, "confirmation": old})[0], 409)
+                self.assertEqual(call("POST", "/api/quota-recovery", {**request, "confirmation": old, "connection": connection, "network_context": context})[0], 409)
                 manager.recover.assert_not_called()
-                token = approvals.issue("quota-auth-recovery", scope, request["pause_id"])
-                self.assertEqual(call("POST", "/api/quota-recovery", {**request, "confirmation": token})[0], 200)
-                manager.recover.assert_called_once_with(machine, request)
-                self.assertEqual(call("POST", "/api/quota-recovery", {**request, "confirmation": token})[0], 409)
+                token = route.issue(scope, expected, "quota-auth-recovery")
+                self.assertEqual(call("POST", "/api/quota-recovery", {**request, "confirmation": token, "connection": connection, "network_context": context})[0], 200)
+                manager.recover.assert_called_once_with(machine, request, network_route=mock.ANY)
+                self.assertEqual(call("POST", "/api/quota-recovery", {**request, "confirmation": token, "connection": connection, "network_context": context})[0], 409)
             finally:
                 httpd.shutdown()
                 httpd.server_close()

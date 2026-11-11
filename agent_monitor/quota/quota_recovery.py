@@ -40,14 +40,14 @@ def validate_request(value):
         raise ValueError("认证来源标识无效。")
     if value.get("mode") == "renew_auth" and not value.get("profile", "").startswith("monitor-") and not value.get("source_digest"):
         raise ValueError("认证修复必须绑定原凭据来源，请更新状态。")
-    if value.get("mode") == "reauthorize":
+    if value.get("mode") == "reauthorize" or "operation_id" in value and value.get("profile", "").startswith("monitor-"):
         try:
             if str(uuid.UUID(value["operation_id"])) != value["operation_id"]:
                 raise ValueError()
         except (KeyError, ValueError, TypeError):
             raise ValueError("重新授权必须绑定原配额任务。") from None
     elif "operation_id" in value:
-        raise ValueError("原配额任务只适用于重新授权。")
+        raise ValueError("原配额任务只适用于 Monitor 账号恢复。")
     if "pause_scope" in value:
         validate_selection(value.get("profile"), value["pause_scope"])
     return value
@@ -70,6 +70,30 @@ def approval_scope(value):
     scope = scope + [value["operation_id"]] if "operation_id" in value else scope
     scope = scope + ["account"] if value.get("pause_scope") == "account" else scope
     return scope + [value["source_digest"]] if "source_digest" in value else scope
+
+
+def managed_network_context(value, supplied):
+    """Validate the failed task and safe prior context before selecting a route."""
+    from agent_monitor.accounts import codex_accounts, account_holds
+    manager = codex_accounts.manager
+    profile = value.get("profile", "")
+    if not profile.startswith("monitor-"):
+        raise ValueError("此网络选择只适用于 Monitor 账号。")
+    profile_id = profile[8:]
+    record = manager.read(manager.directory(profile_id))
+    operation = record.get("operation") or {}
+    context = manager.recovery_network_context(profile_id)
+    controls = (account_holds.controls(manager.root.parent, record.get("account_id"), record["email"])
+                if value.get("pause_scope") == "account" else manager.controls)
+    state = controls.read("codex")
+    if (record.get("account_id") != value["account_id"] or record.get("email", "").casefold() != value["account_label"].casefold()
+            or operation.get("id") != value.get("operation_id") or supplied != context
+            or not operation.get("refresh_only") or operation.get("login_only")
+            or operation.get("stage") not in {"failed", "interrupted"} or operation.get("message_status") != "not_sent"
+            or state.get("active") or (state.get("pause") or {}).get("id") != value["pause_id"]
+            or (state.get("pause") or {}).get("probe_attempt")):
+        raise codex_accounts.ActionError("原配额任务、暂停或网络上下文已变化，请更新状态后重新确认。", 409)
+    return context
 
 
 def approval_action(value):
@@ -144,7 +168,14 @@ def local_status(*, profile=None, pause_scope=None):
             auth_recovery_available = True
         except codex_quota.ReadingError:
             pass
-    return {**({"pause_scope": "account", "shared_pause": shared.get("pause")} if pause_scope == "account" else {}),
+    context = {}
+    if source == "managed" and profile and profile.startswith("monitor-"):
+        from agent_monitor.accounts import codex_accounts
+        try:
+            context["network_context"] = codex_accounts.manager.recovery_network_context(profile[8:])
+        except (codex_accounts.ActionError, OSError, ValueError):
+            context["network_context"] = None
+    return {**context, **({"pause_scope": "account", "shared_pause": shared.get("pause")} if pause_scope == "account" else {}),
             "source_host_identity": generation.self_certified_host_identity(),
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "pause": state.get("pause"), "active": state.get("active"),
@@ -240,7 +271,7 @@ def safe_network(value):
     return result
 
 
-def local_recovery(value):
+def local_recovery(value, *, network_route=None):
     from agent_monitor.snapshots import exporter
     from agent_monitor.quota import quota_service
     from agent_monitor.snapshots import generation
@@ -262,7 +293,12 @@ def local_recovery(value):
         selected_controls = account_holds.controls(exporter.ROOT / "state", value["account_id"], value["account_label"])
     try:
         # Scope observations without choosing a different endpoint or proxy policy.
-        route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
+        if network_route:
+            network_route.require()
+            with network_policy.using_route(network_route.endpoint):
+                route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
+        else:
+            route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
         with network_policy.using_route(route):
             options = {"renew_auth": True} if value.get("mode") == "renew_auth" else {}
             if "source_digest" in value:
@@ -288,6 +324,11 @@ def local_recovery(value):
                   "observed_at": datetime.now(timezone.utc).isoformat(),
                   "pause_id": receipt.get("pause_id"),
                   "failure": diagnostics.safe_failure(receipt.get("failure")), "network": receipt["network"]}
+    if network_route:
+        context = {"device": {"id": network_route.id, "label": network_route.label},
+                   "preview": network_route.approval_context}
+        receipt["network_context"] = context
+        historical["network_context"] = context
     if auth_recovery:
         historical["authentication_recovery"] = auth_recovery
     if admitted_probe.get("id"):
@@ -298,14 +339,16 @@ def local_recovery(value):
     return receipt
 
 
-def run(machine, value):
+def run(machine, value, *, network_route=None):
     """Configured machine only; uncertain remote outcomes are never retried."""
     from agent_monitor.snapshots import sync
     validate_request(value)
     if machine.name != value["machine"]:
         raise ValueError("目标机器不一致")
     if machine.is_self:
-        return local_recovery(value)
+        return local_recovery(value, **({"network_route": network_route} if network_route else {}))
+    if network_route:
+        raise ValueError("配对设备恢复只支持账号所在 Hub 本机。")
     if value.get("pause_scope") == "account":
         raise ValueError("账号恢复只支持账号所在 Hub 本机。")
     command = "~/.local/bin/agent-monitor quota-recover --request " + shlex.quote(json.dumps(value))

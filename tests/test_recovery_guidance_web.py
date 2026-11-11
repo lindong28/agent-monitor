@@ -161,12 +161,12 @@ async function render(changes={}, error=false) {
   assert.match(classified.quotaDiagnostics.summary.textContent,/3 台暂停；账号身份未确认/);
   assert.doesNotMatch(classified.quotaDiagnostics.summary.textContent,/读取失败 \d/);
   assert.match(classified.quotaDiagnostics.entries[0].note.textContent,/账号身份变化.*核对暂停原账号.*独立配置.*无需切换默认登录/);
-  assert.match(classified.quotaDiagnostics.entries[1].note.textContent,/配额读取失败，原因未核实.*目标机器的 Agent Monitor 路由桥/);
-  assert.match(classified.quotaDiagnostics.entries[2].note.textContent,/上游返回 401\/token_revoked，原因未核实.*目标机器的 Agent Monitor 路由桥/);
+  assert.match(classified.quotaDiagnostics.entries[1].note.textContent,/配额读取失败，原因未核实.*本次确认的出站路径/);
+  assert.match(classified.quotaDiagnostics.entries[2].note.textContent,/上游返回 401\/token_revoked，原因未核实.*本次确认的出站路径/);
   p=await render({pause:{...base.pause,failure:{stage:'quota_read',upstream_code:'token_revoked',http_status:401,detail:'invalidated oauth token'}}});
   assert.match(visibleText(p),/上游认证响应需要核对/);
   assert.match(visibleText(p),/不能区分凭据、权限或服务端原因/);
-  assert.match(visibleText(p),/通过目标机器的 Agent Monitor 路由桥只检查一次/);
+  assert.match(visibleText(p),/通过本次确认的出站路径只检查一次/);
   assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='probe').hidden,false);
   assert.match(p.textContent,/页面不能替你修复该机器的账号或部署/);
   p=await render({pause_scope:'account', account:{...base.account,source:'managed',quota_profile:'monitor-managed-fixture',auth_recovery_available:true}, pause:{...base.pause,failure:{stage:'quota_read',kind:'rpc_error',upstream_code:'token_revoked',http_status:401,detail:'invalidated oauth token'}}});
@@ -220,7 +220,7 @@ async function render(changes={}, error=false) {
   await new Promise(r=>setImmediate(r));
   assert.match(visibleText(p),/恢复状态来源不一致，需要核对/);
   assert.match(visibleText(p),/页面汇总显示“账号身份变化”，目标机器状态显示“配额读取失败，原因未核实”/);
-  assert.match(visibleText(p),/目标机器的 Agent Monitor 路由桥只检查一次/);
+  assert.match(visibleText(p),/本次确认的出站路径只检查一次/);
   assert.equal(all(p).find(n=>n.attrs?.['data-recovery-action']==='probe').hidden,false);
   body.quotaDiagnostics.details.open=true;
   await all(body).find(n=>n.tag==='button' && n.textContent==='查看当前状态与恢复').click();
@@ -244,7 +244,7 @@ async function render(changes={}, error=false) {
   const action=(p,key)=>all(p).find(n=>n.attrs?.['data-recovery-action']===key);
   const settle=()=>new Promise(r=>setImmediate(r));
   {
-    let current={...base,account:{...base.account,source:'managed',auth_recovery_available:true,quota_profile:'monitor-fixture'},
+    let current={...base,network_context:{operation_id:'fixture-operation',device:{id:'old-connection',label:'US'}},account:{...base.account,source:'managed',auth_recovery_available:true,quota_profile:'monitor-fixture'},
       pause:{id:'b'.repeat(32),failure:{stage:'quota_read',kind:'rpc_error',http_status:401,upstream_code:'token_revoked'}}};
     let preview, submitted;
     const repair=require('./web/quota.js')({platform:{document:{createElement:node,dispatchEvent(){}},
@@ -262,41 +262,46 @@ async function render(changes={}, error=false) {
         }
         return {ok:true,status:200,json:async()=>current};
       }},formatDate:String});
-    p=repair.createRecoveryPanel('fixture-host'); await settle();
+    p=repair.createRecoveryPanel('fixture-host',{getConnection:async()=> 'fixture-connection'}); await settle();
     assert.equal(action(p,'probe').textContent,'刷新认证并检查配额');
     assert(action(p,'probe').className.includes('btn-primary'));
     assert.match(visibleText(p),/同身份的新凭据/);
     await action(p,'probe').click();
     assert.equal(preview.approval_action,'quota-auth-recovery');
     assert.equal(preview.approval_machine,'fixture-host');
-    assert.deepEqual(preview.approval_scope,['fixture-host','fixture-id','fixture@example.test','monitor-fixture','renew_auth']);
+    assert.deepEqual(preview.approval_scope,['fixture-host','fixture-id','fixture@example.test','monitor-fixture','renew_auth','fixture-operation']);
     assert.equal(submitted.mode,'renew_auth');
+    assert.equal(submitted.connection,'fixture-connection');
+    assert.equal(submitted.operation_id,'fixture-operation');
+    assert.deepEqual(submitted.network_context,current.network_context);
+    assert.equal(preview.connection,submitted.connection);
+    assert.equal(preview.recovery_request.account_id,submitted.account_id);
     assert.equal(submitted.confirmation,'auth-confirmation');
     assert.match(p.textContent,/已取得新配额/);
-    const reloaded=repair.createRecoveryPanel('fixture-host'); await settle();
+    const reloaded=repair.createRecoveryPanel('fixture-host',{getConnection:async()=> 'fixture-connection'}); await settle();
     assert.match(reloaded.textContent,/已取得新配额/,'saved authentication result survives a new panel');
     assert.equal(action(reloaded,'probe').hidden,true,'success does not automatically repeat the provider operation');
     current={...current,pause:{id:'c'.repeat(32),failure:{stage:'credentials',kind:'invalid_result'}},
       last_recovery:{ok:false,pause_id:'c'.repeat(32),request:submitted,authentication_recovery:{outcome:'no_new_credentials',client_diagnostics:'fixture refresh detail'}}};
-    const unresolved=repair.createRecoveryPanel('fixture-host'); await settle();
+    const unresolved=repair.createRecoveryPanel('fixture-host',{getConnection:async()=> 'fixture-connection'}); await settle();
     assert.match(visibleText(unresolved),/认证刷新未取得新凭据/);
     assert.match(visibleText(unresolved),/本次没有继续查询配额/);
     assert.equal(action(unresolved,'probe').hidden,true,'unchanged rejected credentials must not offer ordinary quota retry');
     assert.match(unresolved.textContent,/客户端诊断摘录：fixture refresh detail/);
     assert.match(unresolved.textContent,/不作为上游错误分类/);
     current.account.login_recovery={pause_id:current.pause.id,operation_id:'original-operation',account_id:'fixture-id',account_label:'fixture@example.test'};
-    const canLogin=repair.createRecoveryPanel('fixture-host'); await settle();
+    const canLogin=repair.createRecoveryPanel('fixture-host',{getConnection:async()=> 'fixture-connection'}); await settle();
     assert.equal(action(canLogin,'reauthorize').hidden,false);
     assert(action(canLogin,'reauthorize').className.includes('btn-primary'));
     assert.match(visibleText(canLogin),/占用本机 Codex 通道/);
     await action(canLogin,'reauthorize').click();
     assert.equal(preview.approval_action,'quota-login-recovery');
     assert.equal(submitted.mode,'reauthorize');
-    assert.equal(submitted.operation_id,'original-operation');
-    assert.deepEqual(preview.approval_scope.slice(-2),['reauthorize','original-operation']);
+    assert.equal(submitted.operation_id,'fixture-operation');
+    assert.deepEqual(preview.approval_scope.slice(-2),['reauthorize','fixture-operation']);
     assert.doesNotMatch(canLogin.textContent,/本次配额读取成功/,'queued login is not a successful quota observation');
     current={...current,active:null,pause:{id:'local-commit-pause',failure:{stage:'recovery_commit',kind:'exception',error_type:'OSError'}}};
-    const localCommit=repair.createRecoveryPanel('fixture-host');await settle();
+    const localCommit=repair.createRecoveryPanel('fixture-host',{getConnection:async()=> 'fixture-connection'});await settle();
     assert.match(visibleText(localCommit),/本地结清未完成/);
     assert.equal(action(localCommit,'probe').hidden,true);
     assert.equal(action(localCommit,'reauthorize').hidden,true);

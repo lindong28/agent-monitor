@@ -256,6 +256,25 @@
     if (code) await copyText(button, code.textContent);
   }
 
+  let recoveryDeviceFactory = null;
+  if (typeof module !== "object" || !module.exports) {
+    import("/web/device-connection.js" + (assetVersion ? `?v=${assetVersion}` : ""))
+      .then(module => { recoveryDeviceFactory = module.createDeviceConnection; }).catch(() => {});
+  }
+  function requireRecoveryDevice(signal) {
+    if (!recoveryDeviceFactory) throw new Error("网络连接组件尚未就绪，请稍后重试。");
+    const controller = {signal};
+    return recoveryDeviceFactory({controller, request: async (action, body) => {
+      const response = await fetch("/api/codex-accounts/" + action, {
+        method:"POST", headers:{"Content-Type":"application/json", "X-Agent-Monitor":"codex-accounts"},
+        body:JSON.stringify(body), signal,
+      });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error || "网络连接校验失败");
+      return value;
+    }})();
+  }
+
   async function previewUpstream(targets, payload = {}, signal = new AbortController().signal) {
     const version = document.querySelector?.('meta[name="asset-version"]')?.content;
     const module = await import("/web/account-egress.js" + (version ? `?v=${version}` : ""));
@@ -982,6 +1001,7 @@
     replaceCurrentUrl,
     api,
     previewUpstream,
+    requireRecoveryDevice,
     autoTimeDim,
     bindShell,
     chart,

@@ -31,10 +31,10 @@ function get(port, url, auth = authorization) {
     request.on('error', reject); request.setTimeout(3000, () => request.destroy(new Error('test timeout')));
   });
 }
-async function tunnel(port, target, scheme) {
+async function tunnel(port, target, scheme, confirmation) {
   const socket = net.connect(port, '127.0.0.1');
   await once(socket, 'connect');
-  socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: ${authorization}\r\n${scheme ? `X-Agent-Monitor-Target-Scheme: ${scheme}\r\n` : ''}\r\n`);
+  socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: ${authorization}\r\n${scheme ? `X-Agent-Monitor-Target-Scheme: ${scheme}\r\n` : ''}${confirmation ? `X-Agent-Monitor-Confirmation: ${Buffer.from(JSON.stringify(confirmation)).toString('base64url')}\r\n` : ''}\r\n`);
   const [data] = await once(socket, 'data');
   return {socket, response: data.toString()};
 }
@@ -49,6 +49,88 @@ test('empty/malformed/unsupported results never become DIRECT', async t => {
   const response = await get(proxy.port, `http://127.0.0.1:${sourcePort}/`);
   assert.equal(response.status, 502); assert.equal(seen, 0);
   assert.equal(response.headers['x-agent-monitor-error'], 'proxy_resolution_failed');
+});
+
+test('confirmed routes reject same-generation changes and never fall back to an unconfirmed proxy', async t => {
+  const unused = net.createServer(); const dead = await listen(unused); await new Promise(resolve => unused.close(resolve));
+  let reached = 0;
+  const upstream = net.createServer(socket => {
+    reached++; socket.once('data', () => socket.write('HTTP/1.1 200 OK\r\n\r\n'));
+  });
+  const port = await listen(upstream); dispose(t, upstream);
+  const first = `PROXY 127.0.0.1:${dead}`, second = `PROXY 127.0.0.1:${port}`;
+  let resolution = `${first}; ${second}`;
+  const proxy = await bridge(t, async () => resolution);
+  const confirmation = {generation: 0, routes: {'https://chatgpt.com': first, 'https://auth.openai.com': first}};
+  const refused = await tunnel(proxy.port, 'chatgpt.com:443', undefined, confirmation);
+  assert.match(refused.response, /^HTTP\/1.1 502/); refused.socket.destroy(); assert.equal(reached, 0);
+  resolution = second;
+  const changed = await tunnel(proxy.port, 'chatgpt.com:443', undefined, confirmation);
+  assert.match(changed.response, /confirmed_route_changed/); changed.socket.destroy(); assert.equal(reached, 0);
+  const ordinary = await tunnel(proxy.port, 'chatgpt.com:443');
+  assert.match(ordinary.response, /^HTTP\/1.1 200/); ordinary.socket.destroy(); assert.equal(reached, 1);
+});
+
+test('confirmed generation applies to dynamic auth origins without a 120-second expiry', async t => {
+  let reached = 0, now = 1000;
+  const upstream = net.createServer(socket => {
+    reached++; socket.once('data', () => socket.write('HTTP/1.1 200 OK\r\n\r\n'));
+  });
+  const port = await listen(upstream); dispose(t, upstream);
+  const key = `PROXY 127.0.0.1:${port}`;
+  const proxy = await bridge(t, async () => key, {now: () => now});
+  const confirmation = {generation: 0, routes: {'https://chatgpt.com': key, 'https://auth.openai.com': key}};
+  now += 600000;
+  const dynamic = await tunnel(proxy.port, 'login.openai.com:443', undefined, confirmation);
+  assert.match(dynamic.response, /^HTTP\/1.1 200/); dynamic.socket.destroy();
+  proxy.router.invalidate();
+  const changed = await tunnel(proxy.port, 'login.openai.com:443', undefined, confirmation);
+  assert.match(changed.response, /confirmed_generation_changed/); changed.socket.destroy(); assert.equal(reached, 1);
+});
+
+test('confirmed CONNECT rejects generation changes during resolution and handshake before application bytes', async t => {
+  let finishHandshake, started;
+  const pending = new Promise(resolve => { started = resolve; });
+  let reached = 0, bytes = 0;
+  const upstream = net.createServer(socket => {
+    reached++;
+    socket.once('data', () => {
+      socket.on('data', data => { bytes += data.length; });
+      finishHandshake = () => socket.write('HTTP/1.1 200 OK\r\n\r\n'); started();
+    });
+  });
+  const port = await listen(upstream); dispose(t, upstream);
+  const key = `PROXY 127.0.0.1:${port}`;
+  let changeDuringResolve = true;
+  const proxy = await bridge(t, async () => { if (changeDuringResolve) proxy.router.invalidate(); return key; });
+  const confirmation = {generation: 0, routes: {'https://chatgpt.com': key, 'https://auth.openai.com': key}};
+  const denied = await tunnel(proxy.port, 'chatgpt.com:443', undefined, confirmation);
+  assert.match(denied.response, /confirmed_generation_changed/); denied.socket.destroy(); assert.equal(reached, 0);
+  changeDuringResolve = false; confirmation.generation = proxy.router.generation;
+  const client = net.connect(proxy.port, '127.0.0.1'); t.after(() => client.destroy());
+  await once(client, 'connect');
+  const encoded = Buffer.from(JSON.stringify(confirmation)).toString('base64url');
+  client.write(`CONNECT chatgpt.com:443 HTTP/1.1\r\nHost: chatgpt.com\r\nProxy-Authorization: ${authorization}\r\nX-Agent-Monitor-Confirmation: ${encoded}\r\n\r\nSECRET`);
+  const response = once(client, 'data');
+  await pending; proxy.router.invalidate(); finishHandshake();
+  assert.match((await response)[0].toString(), /confirmed_generation_changed/); assert.equal(bytes, 0);
+});
+
+test('confirmed active tunnels close on generation changes; malformed constraints fail closed', async t => {
+  let reached = 0;
+  const upstream = net.createServer(socket => {
+    reached++; socket.once('data', () => socket.write('HTTP/1.1 200 OK\r\n\r\n'));
+  });
+  const port = await listen(upstream); dispose(t, upstream);
+  const key = `PROXY 127.0.0.1:${port}`;
+  const proxy = await bridge(t, async () => key);
+  const malformed = await tunnel(proxy.port, 'chatgpt.com:443', undefined, {generation: 0, routes: {}});
+  assert.match(malformed.response, /confirmed_route_invalid/); malformed.socket.destroy(); assert.equal(reached, 0);
+  const confirmation = {generation: 0, routes: {'https://chatgpt.com': key, 'https://auth.openai.com': key}};
+  const result = await tunnel(proxy.port, 'chatgpt.com:443', undefined, confirmation);
+  assert.match(result.response, /^HTTP\/1.1 200/);
+  const closed = once(result.socket, 'close'); proxy.router.invalidate(); await closed;
+  assert.equal(reached, 1);
 });
 
 test('DIRECT forwards HTTP bytes without local proxy credentials', async t => {

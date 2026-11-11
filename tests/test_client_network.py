@@ -14,6 +14,7 @@ import time
 import tempfile
 import unittest
 from unittest import mock
+from urllib.parse import urlsplit
 
 from agent_monitor.network import account_egress
 from agent_monitor.network import client_connector
@@ -96,6 +97,7 @@ class NetworkTests(unittest.TestCase):
         port = json.loads(proc.stdout.readline())['port']
         route = f'http://agent-monitor:fixture-local-capability@127.0.0.1:{port}'
         connector = client_connector.Connector(self.url, marker.decode(), route, pair_port=0)
+        connector.fixture_process = proc
         failures = []
         def run():
             try: connector.run()
@@ -239,12 +241,94 @@ class NetworkTests(unittest.TestCase):
             return account_egress.unknown(host, 'controlled unknown')
         with mock.patch.object(account_egress, '_run_probe', side_effect=probe):
             for route in (a, b, a):
-                self.assertEqual(account_egress.preview(route)['checked_host'], route.label)
-        self.assertCountEqual(calls, [a.endpoint] * 2 + [b.endpoint] * 2)
+                routes = {origin: 'DIRECT' for origin in client_network.PREVIEW_ORIGINS}
+                snapshot = {'generation': 0, 'routes': routes, 'events': [
+                    {'target': origin, 'route': 'DIRECT', 'result': 'connected', 'generation': 0} for origin in routes]}
+                with mock.patch.object(route, 'observe', return_value=snapshot):
+                    self.assertEqual(account_egress.preview(route)['checked_host'], route.label)
+        self.assertCountEqual([urlsplit(value).port for value in calls], [a.server.server_port] * 2 + [b.server.server_port] * 2)
         with mock.patch.dict(os.environ, {network_policy.INTERNAL: 'http://agent-monitor:server@127.0.0.1:1234'}):
             with network_policy.using_route(a.endpoint):
                 self.assertEqual(network_policy.child_environment({})[network_policy.INTERNAL], a.endpoint)
             self.assertIn(':server@', network_policy.endpoint())
+
+    def test_observe_uses_live_connector_and_does_not_send_provider_requests(self):
+        _, route, seen = self.connector(b'device-A')
+        route.facts['generation'] = 999  # The asynchronous Hub tail is not authority.
+        observed = route.observe()
+        self.assertEqual(observed['generation'], 0)
+        self.assertEqual(set(observed['routes']), set(client_network.PREVIEW_ORIGINS))
+        self.assertEqual(seen, [])
+        legacy = self.hub.register('old connector')
+        with self.assertRaisesRegex(client_network.NetworkError, '版本不支持'):
+            legacy.observe()
+
+    def change_fixture(self, connector, **command):
+        import select
+        connector.fixture_process.stdin.write(json.dumps(command) + '\n')
+        connector.fixture_process.stdin.flush()
+        self.assertTrue(select.select([connector.fixture_process.stdout], [], [], 3)[0])
+        self.assertTrue(json.loads(connector.fixture_process.stdout.readline())['changed'])
+
+    def device_preview(self, route):
+        def probe(host, env):
+            address = urlsplit(env[network_policy.INTERNAL])
+            scope = address.username.partition('.')[2] or None
+            with client_connector.connect_via(env[network_policy.INTERNAL], host + ':443', scope=scope) as sock:
+                self.assertEqual(sock.recv(8), b'device-A')
+            return account_egress.unknown(host, 'fixture unknown geography')
+        with mock.patch.object(account_egress, '_run_probe', side_effect=probe):
+            return account_egress.preview(route)
+
+    def test_confirmed_capability_survives_child_scope_and_rejects_changed_route(self):
+        connector, route, seen = self.connector(b'device-A')
+        preview = self.device_preview(route)
+        token = route.issue(['one'], None, action='recover', preview=preview)
+        confirmed = route.consume(token, ['one'], None, action='recover')
+        self.assertIsInstance(confirmed, client_network.ConfirmedRoute)
+        self.assertEqual(confirmed.approval_context['routes'], preview['routes'])
+        self.assertNotIn(route.secret, json.dumps(confirmed.approval_context))
+        forged = confirmed.endpoint.replace('confirmed.', 'confirmed.A', 1)
+        with self.assertRaises(client_network.NetworkError):
+            client_connector.connect_via(forged, 'chatgpt.com:443')
+        with network_policy.using_route(confirmed.endpoint):
+            scoped = network_policy.child_environment({}, scope='c' * 32)[network_policy.INTERNAL]
+        with client_connector.connect_via(scoped, 'chatgpt.com:443', scope='c' * 32) as sock:
+            self.assertEqual(sock.recv(8), b'device-A')
+        before = len(seen)
+        self.change_fixture(connector, route='PROXY 127.0.0.1:1')
+        with self.assertRaises(client_network.NetworkError):
+            client_connector.connect_via(scoped, 'chatgpt.com:443', scope='d' * 32)
+        self.assertEqual(len(seen), before)
+        with self.assertRaises(client_network.NetworkError):
+            account_egress.preview(route)
+        self.assertEqual(len(seen), before, 'cache change must not trigger another public probe')
+
+    def test_confirmation_revalidates_at_consume_and_dynamic_targets_check_generation(self):
+        connector, route, seen = self.connector(b'device-A')
+        preview = self.device_preview(route)
+        token = route.issue(['one'], None, preview=preview)
+        confirmed = route.consume(token, ['one'], None)
+        stale = route.issue(['one'], None, preview=preview)
+        self.change_fixture(connector, invalidate=True)
+        with self.assertRaises(client_network.NetworkError):
+            route.consume(stale, ['one'], None)
+        before = len(seen)
+        with self.assertRaises(client_network.NetworkError):
+            client_connector.connect_via(confirmed.endpoint, 'login.openai.com:443')
+        self.assertEqual(len(seen), before)
+        route.close()
+        with self.assertRaises(client_network.NetworkError):
+            confirmed.require()
+
+    def test_observation_without_reply_is_bounded_and_cleans_queued_task(self):
+        route = self.hub.register('fixture', [client_network.OBSERVATION_CAPABILITY])
+        with mock.patch.object(client_network, 'CONNECT_SECONDS', .01):
+            with self.assertRaises(client_network.NetworkError):
+                route.observe()
+        self.assertEqual(route.pending, {})
+        queued = route.queue.get_nowait()
+        self.assertTrue(queued.done.is_set())
 
     def test_receipts_bind_route_selection_cas_expiry_and_replay(self):
         a, b = self.hub.register('a'), self.hub.register('b')

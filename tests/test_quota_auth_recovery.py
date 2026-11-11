@@ -333,7 +333,7 @@ class RecoveryApprovalTests(unittest.TestCase):
         from types import SimpleNamespace
         from agent_monitor import http_server as server
         from agent_monitor.accounts import codex_accounts as ca
-        from agent_monitor.network.client_network import ApprovalStore
+        from agent_monitor.network.client_network import ApprovalStore, Route
         machine=SimpleNamespace(name='fixture-owner',is_self=True)
         request={'machine':'fixture-owner','account_id':'workspace','account_label':'One@Example.test',
             'profile':'monitor-11111111-1111-4111-8111-111111111111','pause_id':'f'*32,
@@ -345,9 +345,16 @@ class RecoveryApprovalTests(unittest.TestCase):
         quota_manager.recovery_status.return_value={'source_host_identity':'fixture-host','account':{'login_recovery':binding,'quota_profile':request['profile']}}
         manager=mock.Mock();manager.start_reauthorization.return_value={'operation':{'stage':'queued'}}
         approvals=ApprovalStore();scope=quota_recovery.approval_scope(request)
+        context={"operation_id":request["operation_id"],"device":None,"quota_batch_id":None,"preview":None}
+        route=Route("fixture device")
+        self.addCleanup(route.close)
+        connection={"id":route.id,"capability":route.browser}
+        expected={"pause_id":request["pause_id"],"network_context":context}
         with mock.patch.object(server,'UPSTREAM_APPROVALS',approvals), \
              mock.patch.object(server,'QUOTA_REFRESH',quota_manager), \
              mock.patch.object(ca,'manager',manager), \
+             mock.patch.object(quota_recovery,'managed_network_context',return_value=context), \
+             mock.patch.object(server.client_network.hub,'browser_route',return_value=route), \
              mock.patch.object(server.hub,'enabled',return_value=False), \
              mock.patch.object(server.hub,'is_hub',return_value=True), \
              mock.patch.object(server.sync,'load_machine_config',return_value=SimpleNamespace(by_name={'fixture-owner':machine})):
@@ -356,21 +363,21 @@ class RecoveryApprovalTests(unittest.TestCase):
             def post(token):
                 conn=http.client.HTTPConnection('127.0.0.1',httpd.server_port,timeout=3)
                 try:
-                    conn.request('POST','/api/quota-recovery',json.dumps({**request,'confirmation':token}),
+                    conn.request('POST','/api/quota-recovery',json.dumps({**request,'confirmation':token,'network_context':context,'connection':connection}),
                         {'Content-Type':'application/json','X-Agent-Monitor':'action','Origin':f'http://127.0.0.1:{httpd.server_port}'})
                     response=conn.getresponse();return response.status,json.loads(response.read())
                 finally:conn.close()
             try:
                 old=approvals.issue('quota-auth-recovery',scope,request['pause_id'])
                 self.assertEqual(post(old)[0],409)
-                wrong=approvals.issue('quota-login-recovery',[*scope[:-1],'wrong-operation'],request['pause_id'])
+                wrong=route.issue([*scope[:-1],'wrong-operation'],expected,'quota-login-recovery')
                 self.assertEqual(post(wrong)[0],409)
                 manager.start_reauthorization.assert_not_called()
-                valid=approvals.issue('quota-login-recovery',scope,request['pause_id'])
+                valid=route.issue(scope,expected,'quota-login-recovery')
                 status,receipt=post(valid)
                 self.assertEqual(status,202);self.assertTrue(receipt['login_pending'])
                 self.assertEqual(post(valid)[0],409)
-                manager.start_reauthorization.assert_called_once_with('11111111-1111-4111-8111-111111111111',binding,publication=mock.ANY)
+                manager.start_reauthorization.assert_called_once_with('11111111-1111-4111-8111-111111111111',binding,publication=mock.ANY,network_route=mock.ANY)
                 quota_manager.recover.assert_not_called()
             finally:
                 httpd.shutdown();httpd.server_close();thread.join(3)
@@ -387,7 +394,7 @@ class RecoveryApprovalTests(unittest.TestCase):
         manager.recover.return_value = ({"ok": True}, 200)
         approvals = ApprovalStore()
         request = {"machine": "fixture-owner", "account_id": "workspace", "account_label": "one@example.test",
-                   "profile": "monitor-fixture", "pause_id": "a" * 32, "mode": "renew_auth"}
+                   "profile": "existing", "pause_id": "a" * 32, "mode": "renew_auth", "source_digest": "b" * 64}
         scope = quota_recovery.approval_scope(request)
         with mock.patch.object(server, "UPSTREAM_APPROVALS", approvals), \
                 mock.patch.object(server, "QUOTA_REFRESH", manager), \

@@ -43,7 +43,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     for (const account of targets) identities.append(node("li", `${account.email}（${account.account_id}）`));
     dialog.append(identities, node("p", "会使用账号额度；这是新一轮，之前已发送的账号也会再次发送。暂停中的账号不会发送；发送不保证固定或重置额度窗口。", "quota-scope"));
   } else if (needsApproval) {
-    dialog.append(node("p", `确认后将${actionLabel}。预览只读取匿名出口信息，不携带账号凭据；取消或无法取得完整出口时不会继续。`, "quota-scope"));
+    dialog.append(node("p", `确认后将${actionLabel}。预览只读取匿名出口信息，不携带账号凭据；取消或无法确认所需网络路径时不会继续。IP 或地区未知会明确标出，预览不保证实际请求的公网出口。`, "quota-scope"));
     if (["refresh-all", "refresh-selected", "refresh-retry", "quota-settings"].includes(payload.approval_action)) {
       dialog.append(node("p", payload.approval_action === "quota-settings"
         ? (followRunning
@@ -56,7 +56,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     }
     const machine = Array.isArray(payload.approval_scope) ? payload.approval_scope[0] : null;
     if (["quota-recovery", "quota-auth-recovery", "quota-login-recovery", "quota-settings"].includes(payload.approval_action) && machine) {
-      dialog.append(node("p", `本次后台操作将在 ${machine} 上执行，并使用该机器的 Agent Monitor 路由桥。`, "quota-scope"));
+      dialog.append(node("p", `凭据与执行主机：${machine}；出站设备以本次预览结果为准。`, "quota-scope"));
     }
     if (payload.approval_action === "quota-auth-recovery") {
       dialog.append(node("p", "将为所选账号调用一次官方认证刷新 RPC；仅同身份的新凭据已保存时，再查询一次配额。共用原总时限，失败即停。官方内部可能有多次 HTTP/OAuth 请求；不发送消息，也不保证恢复。", "quota-scope"));
@@ -65,7 +65,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
       const identities = node("ul", undefined, "account-egress-identities");
       for (const account of targets) identities.append(node("li", `${account.email}（${account.account_id}）`));
       dialog.append(identities, node("p", "将申请一次官方设备码，需要本人完成授权。设备确认等待最多 10 分钟，另有初始化、身份核验、一次配额复验及清理的有界阶段；期间占用本机 Codex 通道。只有同账号新凭据与有效配额已保存后才结清原任务和暂停；失败即停，不发送消息。官方内部可能产生多次 HTTP/OAuth 请求。", "quota-scope"));
-      dialog.append(node("p", "设备码申请、轮询与配额检查使用上述机器路由。你打开官方授权页时使用浏览器自己的网络，不会自动接入此路由桥；如也要求授权网页使用相同出口，请先核实浏览器路由再授权。", "quota-scope"));
+      dialog.append(node("p", "设备码申请、轮询与配额检查使用本次确认的出站设备路由。你打开官方授权页时使用浏览器自己的网络，不会自动接入此路由桥；如也要求授权网页使用相同出口，请先核实浏览器路由再授权。", "quota-scope"));
     }
   }
   dialog.append(controls);
@@ -91,11 +91,22 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     if (needsApproval && !data.confirmation) throw new Error("服务未返回本轮出口确认，请重新预览");
     receipt = data.confirmation || null;
     status.textContent = `出站设备：${data.checked_host} · 探测不会登录、发送消息或读取额度。`;
+    const oldDevice = data.network_context?.device;
+    const currentDevice = data.network_device;
+    const deviceLabel = device => device ? `${device.label || "未命名设备"}（临时连接 ${String(device.id).slice(0, 8)}）` : "未知";
+    if (payload.recovery_request) {
+      results.append(node("p", oldDevice
+        ? `原任务出站设备：${deviceLabel(oldDevice)} → 本次：${deviceLabel(currentDevice)}`
+        : `原任务未记录网络设备，本次将使用 ${deviceLabel(currentDevice)}。`, "quota-scope"));
+      results.append(node("p", "连接 ID 标识临时网络连接，不是物理机器身份；以下旧值与新值均为预览观测。", "quota-scope"));
+    }
     for (const target of data.targets) {
       const row = node("section", undefined, "account-egress-target");
       row.append(node("h3", target.host === "chatgpt.com" ? "ChatGPT 业务 · chatgpt.com" : "认证 · auth.openai.com"));
       row.append(node("p", `${target.ip || "IP 未知"} · ${countryName(target.country_code)}`,
         target.country_code === "CN" ? "account-egress-address is-china" : "account-egress-address"));
+      const previous = data.network_context?.preview?.targets?.find(item => item.host === target.host);
+      if (payload.recovery_request) row.append(node("p", `原预览：${previous?.ip || "IP 未知"} · ${countryName(previous?.country_code)} → 本次预览：${target.ip || "IP 未知"} · ${countryName(target.country_code)}`, "quota-scope"));
       if (target.country_code === "CN") row.append(node("p", sending ? "出口地区为中国，请确认后再发送。" : "出口地区为中国，请核对后再继续。", "is-china"));
       if (target.error) row.append(node("p", target.error, "quota-scope"));
       const observed = new Date(target.observed_at * 1000);
@@ -104,11 +115,14 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     }
     const incomplete = data.targets.some(target => !target.ip || !target.country_code);
     confirm.textContent = incomplete ? `出口信息不完整，仍然${actionLabel}` : `确认${actionLabel}`;
+    if (data.route_change) confirm.textContent = `确认改用 ${deviceLabel(currentDevice)} 并${actionLabel}`;
     confirm.disabled = false;
   }).catch(error => {
     if (!dialog.open) return;
     const detail = String(error?.message || "出口预览失败").replace(/[。！？；：]+$/u, "");
-    const prefix = ["quota-recovery", "quota-settings"].includes(payload.approval_action) ? "目标机器的 Agent Monitor 路由桥出口预览未完成" : "出口 IP 和地区未知";
+    const prefix = payload.recovery_request ? "所选设备的 Agent Monitor 路由桥出口预览未完成"
+      : ["quota-recovery", "quota-auth-recovery", "quota-login-recovery", "quota-settings"].includes(payload.approval_action)
+        ? "目标机器的 Agent Monitor 路由桥出口预览未完成" : "出口 IP 和地区未知";
     status.textContent = `${prefix}：${detail}；${operationPending}。`;
     confirm.textContent = "未能确认设备出口，请关闭后重试";
     confirm.disabled = true;
