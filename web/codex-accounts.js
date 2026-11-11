@@ -38,6 +38,22 @@ export function accountNeedsLogin(account) {
     || account?.operation?.failure?.category === "needsLogin");
 }
 
+export function accountSendBlocked(account) {
+  return Boolean(account.disabled || account.account_quota_pause || accountNeedsLogin(account)
+    || Object.keys(account.restrictions || {}).length);
+}
+
+function quotaWindowExpired(reading) {
+  return ["five_hour_resets_at", "seven_day_resets_at"].some(key =>
+    reading?.[key] != null && reading[key] * 1000 <= Date.now());
+}
+
+function sendResultLabel(op) {
+  if (!op?.refresh_only && !op?.login_only && op?.message_status === "not_sent"
+      && ["failed", "interrupted", "cancelled"].includes(op.stage)) return "未发送";
+  return STAGES[op?.stage] || op?.stage || "";
+}
+
 function accountRefreshBlocked(account) {
   return account.disabled || Boolean(account.account_quota_pause) || account.quota_query_allowed === false || accountNeedsLogin(account) || ["authentication", "unknown", "rate_limit", "login_rate_limit"]
     .some(key => account.restrictions?.[key]);
@@ -597,7 +613,7 @@ export function init({ autoLoad = true } = {}) {
         .filter(reading => Number.isFinite(Date.parse(reading?.observed_at)))
         .sort((a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at))[0];
       const resetLabel = window.AgentMonitor.formatQuotaReset?.(latestReading?.seven_day_resets_at);
-      const windowExpired = ["five_hour_resets_at", "seven_day_resets_at"].some(key => latestReading?.[key] != null && latestReading[key] * 1000 <= Date.now());
+      const windowExpired = quotaWindowExpired(latestReading);
       const signature = JSON.stringify([account, batchItem, resetLabel, windowExpired, actions.busy, upstreamPause, accounts.some(a => a.busy)]);
       const old = existing.get(account.id);
       existing.delete(account.id);
@@ -624,7 +640,7 @@ export function init({ autoLoad = true } = {}) {
         ? "配额认证被拒绝"
         : op?.refresh_only && op.stage === "failed"
         ? (op.failure?.category === "locallyPaused" ? "配额查询未执行" : "配额查询失败")
-        : op ? STAGES[op.stage] || op.stage : "";
+        : op ? sendResultLabel(op) : "";
       heading.append(element("strong", account.email));
       if (operationLabel) heading.append(element("span", operationLabel, "status-pill " + tone));
       if (account.eligible !== false) {
@@ -653,8 +669,17 @@ export function init({ autoLoad = true } = {}) {
       const restrictionDetails = account.restriction_messages
         ? Object.entries(account.restriction_messages).map(([key, detail]) => key === "quota" ? quotaHoldMessage(account, upstreamPause) : detail)
         : account.restriction_details || [];
+      if (account.restrictions?.quota) {
+        const next = upstreamPause ? "请先查看本页的通道暂停与检查。"
+          : accountRefreshBlocked(account) ? "请先处理此账号的其他限制，再刷新配额。"
+          : "请点击「刷新配额」检查是否恢复；确认可用后再发送。";
+        card.append(element("p", `${windowExpired ? "上次配额窗口已过，当前额度待复查。" : "此前额度受限，发送已暂停。"}${next}`, "quota-scope account-send-guidance"));
+      }
+      if (op?.failure?.category === "locallyPaused" && op.failure.stage === "queued" && !op.refresh_only && !op.login_only && op.message_status === "not_sent") {
+        card.append(element("p", "本次未发送：被已有的本地限制拦截，未查询新配额。", "quota-scope"));
+      }
       if (restrictionDetails.length) heading.append(element("span", (accountNeedsLogin(account) || account.restrictions?.authentication) ? "登录态不可用" : account.restrictions?.quota ? "发送受限" : "账号有限制", "codex-batch-result"));
-      if (op && !(op.refresh_only && op.stage === "succeeded")) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送"}：${STAGES[op.stage] || op.stage} · ${timestamp(op.recovery_pause_id && op.stage === "succeeded" ? op.after?.observed_at : op.started_at)}`, "quota-scope account-last-result"));
+      if (op && !(op.refresh_only && op.stage === "succeeded")) card.append(element("p", `最近${op.login_only ? "登录" : op.refresh_only ? "配额查询" : "发送"}：${sendResultLabel(op)} · ${timestamp(op.recovery_pause_id && op.stage === "succeeded" ? op.after?.observed_at : op.started_at)}`, "quota-scope account-last-result"));
       const details = element("details", undefined, "note-disclosure");
       details.append(element("summary", "详情与维护"));
       const detailBody = element("div", undefined, "disclosure-body");
@@ -726,7 +751,7 @@ export function init({ autoLoad = true } = {}) {
       if (failureExplanation) card.append(element("p", failureExplanation, "quota-scope"));
       const summary = element("p", undefined, "quota-scope account-quota-summary");
       const usage = key => latestReading?.[key] == null ? "未知" : `${latestReading[key]}%`;
-      summary.textContent = latestReading ? `已用：5 小时 ${usage("five_hour_used_pct")} · 7 天 ${usage("seven_day_used_pct")}` : "配额未知：尚无观测";
+      summary.textContent = latestReading ? `${windowExpired ? "上次窗口已用" : "已用"}：5 小时 ${usage("five_hour_used_pct")} · 7 天 ${usage("seven_day_used_pct")}` : "配额未知：尚无观测";
       card.append(summary);
       if (latestReading) {
         card.append(element("p", `观测于 ${timestamp(latestReading.observed_at)}${windowExpired ? " · 窗口已过期，读数待更新" : ""}`, "quota-scope"));
@@ -743,7 +768,7 @@ export function init({ autoLoad = true } = {}) {
         const send = element("button", "发送一条消息", "btn");
         send.type = "button";
         send.dataset.readerState = `codex-account:${account.id}:send`;
-        send.disabled = actions.busy || accounts.some(a => a.busy) || Boolean(upstreamPause) || Boolean(account.account_quota_pause) || Boolean(account.disabled) || loginRequired || Object.keys(account.restrictions || {}).length > 0;
+        send.disabled = actions.busy || accounts.some(a => a.busy) || Boolean(upstreamPause) || accountSendBlocked(account);
         send.addEventListener("click", () => actions.performBatch("batch-start", [account.id]));
         controls.append(send);
       }
@@ -758,7 +783,7 @@ export function init({ autoLoad = true } = {}) {
       }
       if (restrictions.authentication || restrictions.unknown || restrictions.rate_limit || restrictions.login_rate_limit) controls.append(button("核对后解除此账号限制", "resume", account));
       if (account.last_failure && (account.last_failure.id !== op?.id || op?.recovery_pause_id)) {
-        historyDetail.append(element("p", `保留的失败摘要（${timestamp(account.last_failure.started_at)}）：${account.last_failure.detail}`, "quota-scope"));
+        historyDetail.append(element("p", `历史失败摘要（非当前状态，${timestamp(account.last_failure.started_at)}）：${account.last_failure.detail}`, "quota-scope"));
         appendRpcFailure(historyDetail, account.last_failure.diagnostics, "历史请求错误");
         if (account.last_failure.diagnostics?.login_completion) historyDetail.append(element("p", `历史官方授权完成回执：${account.last_failure.diagnostics.login_completion.detail || "未提供详细原因"}。回执失败不证明未保存凭据。`, "quota-scope"));
       }
@@ -931,6 +956,7 @@ export function renderAccountBatch(state, controls) {
     const eligible = accounts.filter((account) => account.eligible !== false);
     const count = eligible.filter(account => selectedIds?.has(account.id)).length;
     const selectedLoginRequired = eligible.filter(account => selectedIds?.has(account.id) && accountNeedsLogin(account)).length;
+    const selectedBlocked = eligible.filter(account => selectedIds?.has(account.id) && accountSendBlocked(account)).length;
     const selectedPaused = eligible.filter(account => selectedIds?.has(account.id) && account.account_quota_pause).length;
     const selectionCount = root.querySelector("#codex-selection-count");
     if (selectionCount) selectionCount.textContent = `已选 ${count} / ${eligible.length} 个账号`;
@@ -938,16 +964,17 @@ export function renderAccountBatch(state, controls) {
     if (continuationPanel) continuationPanel.hidden = !batch;
     batchStart.hidden = Boolean(batch);
     batchStart.textContent = `给所选 ${count} 个账号发送`;
-    batchStart.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || selectedPaused > 0 || Boolean(upstreamPause);
+    batchStart.disabled = submittingBatch || busy || !count || selectedBlocked > 0 || Boolean(upstreamPause);
     batchNext.hidden = !batch;
     batchNext.textContent = `再次发送 · 所选 ${count} 个账号`;
-    batchNext.disabled = submittingBatch || busy || !count || selectedLoginRequired > 0 || selectedPaused > 0 || Boolean(upstreamPause);
+    batchNext.disabled = submittingBatch || busy || !count || selectedBlocked > 0 || Boolean(upstreamPause);
     if (blockedReason) {
       blockedReason.textContent = upstreamPause ? ""
         : submittingBatch ? "正在连接、确认或提交本次操作，请等待完成。"
         : busy ? "有账号操作正在进行；完成或取消后才能开始新一轮。"
         : selectedPaused ? `所选账号中有 ${selectedPaused} 个配额查询已暂停，请先「恢复此账号的额度查询」，或取消选择这些账号后发送。`
         : selectedLoginRequired ? `所选账号中有 ${selectedLoginRequired} 个需要登录，请先「单独登录」，或取消勾选这些账号后发送。`
+        : selectedBlocked ? `所选账号中有 ${selectedBlocked} 个发送受限；请在账号卡片按提示刷新配额或处理其他限制，或取消选择后发送。`
         : !count ? "请至少选择一个账号。" : "";
       blockedReason.hidden = !blockedReason.textContent;
     }
@@ -1014,6 +1041,13 @@ export function renderAccountBatch(state, controls) {
     });
     const pausedUnsent = batch.items.filter(item => accounts.some(account => account.id === item.profile_id
       && account.eligible !== false && account.account_quota_pause && (!item.operation || item.operation.message_status === "not_sent")));
+    const blockedUnsent = batch.items.filter(item => accounts.some(account => account.id === item.profile_id
+      && account.eligible !== false && !account.disabled && accountSendBlocked(account) && (!item.operation || item.operation.message_status === "not_sent")));
+    if (blockedUnsent.length) batchRetry.disabled = true;
+    if (continuationReason && blockedUnsent.length && !submittingBatch && !busy && !upstreamPause) {
+      continuationReason.textContent = "未发送账号仍有限制，请在对应账号卡片处理后继续；不会重复已成功或结果未知的消息。";
+      continuationReason.hidden = false;
+    }
     if (loginUnsent.length) batchRetry.disabled = true;
     if (continuationReason && loginUnsent.length && !submittingBatch && !busy && !upstreamPause) {
       continuationReason.textContent = `未发送账号中有 ${loginUnsent.length} 个登录态不可用，请先单独登录后再继续未发送账号。`;

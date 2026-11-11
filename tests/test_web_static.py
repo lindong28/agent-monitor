@@ -13,6 +13,50 @@ def app_source():
 
 
 class WebStaticTests(unittest.TestCase):
+    def test_send_admission_and_quota_refresh_recovery(self):
+        script = r'''
+const assert = require('assert');
+const {renderAccountBatch, accountSendBlocked} = require('./web/codex-accounts.js');
+const node = () => ({textContent:'', hidden:false, disabled:false, children:[], append(...n){this.children.push(...n)}, replaceChildren(...n){this.children=n}});
+global.document = {createElement:node};
+global.window = {AgentMonitor:{formatDate:x=>x, latestCodexQuotaReading:()=>null}};
+const nodes = {};
+const root = {querySelector:id=>nodes[id] ||= node()};
+const controls = {root};
+for (const key of ['batchStart','batchNext','batchRetry','batchStatus','batchHelp','blockedReason']) controls[key]=node();
+const account = {id:'a',email:'a@example.test',has_credentials:true,eligible:true,restrictions:{quota:{}}};
+const other = {id:'b',email:'b@example.test',has_credentials:true,eligible:true};
+const unsent = {message_status:'not_sent',stage:'failed'};
+const state = {accounts:[account,other],selectedIds:new Set(['a']),unavailable:[],busy:false};
+const render = () => renderAccountBatch(state,controls);
+render();
+assert(controls.batchStart.disabled, 'new batch must reject a quota-held selection');
+assert(controls.blockedReason.textContent.includes('刷新配额'));
+state.batch = {id:'batch',created_at:'2026-01-01T00:00:00Z',items:[{profile_id:'a',operation:unsent}]};
+render();
+assert(controls.batchNext.disabled && controls.batchRetry.disabled);
+assert(nodes['#codex-batch-continuation-blocked'].textContent.includes('刷新配额'));
+state.selectedIds.add('b'); render();
+assert(controls.batchNext.disabled, 'mixed selection must explain held members');
+for (const restrictions of [{authentication:{}},{unknown:{}},{rate_limit:{}},{login_rate_limit:{}}]) {
+  account.restrictions=restrictions;render();
+  assert(controls.batchNext.disabled && controls.batchRetry.disabled);
+}
+account.restrictions={}; render();
+assert(!accountSendBlocked(account));
+assert(!controls.batchNext.disabled && !controls.batchRetry.disabled, 'confirmed recovery enables explicit continuation');
+account.account_quota_pause={};render();assert(controls.batchNext.disabled && controls.batchRetry.disabled);
+delete account.account_quota_pause;
+state.selectedIds=new Set(['b']);account.restrictions={quota:{}};render();
+assert(!controls.batchNext.disabled, 'independent selection remains available');
+account.disabled=true;render();assert(!controls.batchRetry.disabled, 'disabled members are skipped without blocking healthy continuation');
+delete account.disabled;
+for (const message_status of ['succeeded','unknown','failed']) {
+ state.batch.items[0].operation={stage:'failed',message_status};render();assert(controls.batchRetry.hidden, message_status);
+}
+'''
+        subprocess.run(['node', '-e', script], cwd=ROOT, check=True, capture_output=True, text=True)
+
     def test_codex_latest_plan_replaces_old_login_plan(self):
         script = r'''
 const assert = require('assert');
@@ -696,6 +740,14 @@ values[0].restriction_messages = {quota: "旧的额度限制说明"};
 values[0].restriction_details = ["旧的额度限制说明"];
 values[0].last_quota = {observed_at: oldTime, seven_day_used_pct: 100, seven_day_resets_at: 1,
   ordinary_usage_allowed: false, rate_limit_reached_type: "workspace_member_credits_depleted"};
+values[0].operation = {id: "blocked-send", stage: "failed", started_at: oldTime,
+  message_status: "not_sent", failure: {category: "locallyPaused", stage: "queued"}};
+renderAccounts(values);
+assert(visible(list.children[0]).includes("未发送"));
+assert(visible(list.children[0]).includes("上次配额窗口已过，当前额度待复查"));
+assert(visible(list.children[0]).includes("上次窗口已用"));
+assert(visible(list.children[0]).includes("刷新配额"));
+assert(!visible(list.children[0]).includes("最近发送：未完成"));
 values[0].operation = {id: "failed-query", refresh_only: true, stage: "failed", started_at: "2026-11-05T08:27:21Z",
   detail: "本次未取得新读数", message_status: "not_sent", failure: {category: "unknown", stage: "reading"},
   diagnostics: {last_request: "account/rateLimits/read", rpc_failure: {rpc_code: -32603, http_status: 401,
