@@ -683,7 +683,7 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
 
 .quota-table th.numeric,
 .quota-table td.numeric {
-  text-align: left;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
