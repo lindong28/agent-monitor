@@ -867,8 +867,12 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
   margin-top: 0;
 }
 
+/* Keep plain labels and the taller sort controls on the same centerline. */
+#quota-accounts th { vertical-align: middle; }
+
 #quota-accounts .quota-sort-button {
   display: inline-flex;
+  vertical-align: top;
   align-items: center;
   gap: 6px;
   border: 0;
