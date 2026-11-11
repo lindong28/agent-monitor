@@ -43,6 +43,25 @@ class RpcEvidenceTests(unittest.TestCase):
         self.assertNotIn("secret-header", encoded)
         self.assertNotIn("secret-url", encoded)
 
+    def test_json_escaped_body_cannot_restore_known_credentials(self):
+        secret = "SYNTHETIC_FIXTURE_TOKEN"
+        for encoded in ("".join("\\u%04x" % ord(c) for c in secret),
+                        secret[:5] + "".join("\\u%04x" % ord(c) for c in secret[5:])):
+            body = json.dumps({"error": {"code": secret, "message": "failed " + secret}}).replace(secret, encoded)
+            facts = rpc_failure({"code": -32603, "message": "request failed body=" + body}, secrets=(secret,))
+            restored = json.loads(facts["rpc_message"].partition("body=")[2])
+            self.assertNotIn(secret, json.dumps(restored))
+            self.assertIn("failed", facts["rpc_message"])
+
+    def test_json_body_preserves_fields_after_sensitive_headers(self):
+        body = json.dumps({"headers": {"Authorization": "Bearer synthetic-secret"},
+                           "request_id": "correlation-marker", "error": {"message": "cause-marker"}}, indent=2)
+        facts = rpc_failure({"code": -32603, "message": "request failed body=" + body})
+        self.assertNotIn("synthetic-secret", facts["rpc_message"])
+        self.assertIn("correlation-marker", facts["rpc_message"])
+        self.assertIn("cause-marker", facts["rpc_message"])
+        self.assertFalse(facts["rpc_message_truncated"])
+
 
 if __name__ == "__main__":
     unittest.main()

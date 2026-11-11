@@ -96,6 +96,15 @@ def rpc_error_context(error, *, secrets=()):
         result[key + "_truncated"] = clipped or len(value) > 2048
     message = error.get("message")
     if isinstance(message, str):
+        prefix, separator, body = message.partition("body=")
+        if separator:
+            try:
+                # Decode the client's embedded JSON escapes before redacting
+                # known credentials in this diagnostic projection.
+                decoded = json.loads(body)
+                message = prefix + separator + json.dumps(decoded, ensure_ascii=False, indent=2)
+            except (ValueError, RecursionError):
+                pass
         text(message, "rpc_message")
     if "data" in error:
         budget = [128]
