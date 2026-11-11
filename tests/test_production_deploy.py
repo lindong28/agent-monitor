@@ -1,5 +1,6 @@
 """Deployment admission against real isolated Git repositories and an inert installer."""
 import os
+import json
 import fcntl
 from pathlib import Path
 import shutil
@@ -52,6 +53,47 @@ class ProductionDeploymentTests(unittest.TestCase):
     def run_git(self, root, *args):
         return subprocess.check_output(["git", "-C", str(root), *args], env=self.env,
                                        stderr=subprocess.DEVNULL, text=True, timeout=20).strip()
+
+    def test_public_abandon_preserves_ahead_source_and_recovers_from_conflict_and_lock(self):
+        identity = '1' * 32
+        state = self.repo / 'state'; state.mkdir()
+        record = {'id': identity, 'revision': self.head, 'status': 'incomplete',
+                  'targets': {'local': 'localhost'}, 'nodes': {'local': {
+                  'status': 'reserved', 'observed': {'root': str(self.repo)}, 'required_runtime': []}}}
+        (state / 'release.json').write_text(json.dumps(record))
+        reservation = state / 'release-reservation.json'
+        other = {'id': '2' * 32, 'revision': self.head}
+        reservation.write_text(json.dumps(other))
+        (self.repo / 'source.txt').write_text('newer source remains intact')
+        self.run_git(self.repo, 'add', 'source.txt'); self.run_git(self.repo, 'commit', '-m', 'ahead')
+        ahead = self.run_git(self.repo, 'rev-parse', 'HEAD')
+        command = [str(self.repo / 'agent-monitor'), 'service', 'release', 'abandon',
+                   '--id', identity, '--expect', self.head, '--reason', 'published successor']
+        def run():
+            return subprocess.run(command, cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=15)
+        conflict = run()
+        self.assertNotEqual(conflict.returncode, 0, conflict.stdout)
+        self.assertEqual(json.loads(reservation.read_text()), other)
+        self.assertEqual(json.loads((state / 'release.json').read_text())['status'], 'abandoning')
+        reservation.write_text(json.dumps({'id': identity, 'revision': self.head}))
+        lock = state / 'deployment.lock'
+        with lock.open('w') as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            inode = lock.stat().st_ino
+            blocked = run()
+            self.assertNotEqual(blocked.returncode, 0, blocked.stdout)
+            self.assertTrue(reservation.exists())
+        success = run()
+        self.assertEqual(success.returncode, 0, success.stderr + success.stdout)
+        self.assertIn('Reservations released', success.stdout)
+        self.assertFalse(reservation.exists())
+        self.assertEqual(lock.stat().st_ino, inode)
+        self.assertEqual(self.run_git(self.repo, 'rev-parse', 'HEAD'), ahead)
+        self.assertFalse((self.repo / 'installed').exists())
+        archive = json.loads((state / 'release-history' / (identity + '.json')).read_text())
+        self.assertEqual(archive['original'], record)
+        self.assertEqual(archive['abandonment']['pending'], [])
+        self.assertEqual(run().returncode, 0)
 
     def deploy(self, *args, root=None):
         repo = root or self.repo

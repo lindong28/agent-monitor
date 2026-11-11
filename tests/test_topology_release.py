@@ -53,6 +53,7 @@ class TopologyReleaseTests(unittest.TestCase):
         self.stack.enter_context(mock.patch.object(rollout.hub_config, 'configuration', return_value={'hub': 'hub', 'machines': sorted(self.config.by_name)}))
         self.stack.enter_context(mock.patch.object(deploy, 'preflight', side_effect=lambda expected: expected or self.revision))
         self.stack.enter_context(mock.patch.object(rollout, 'node', side_effect=self.node))
+        self.stack.enter_context(mock.patch.object(deploy, 'check_local', return_value='b' * 40))
         self.output = self.stack.enter_context(redirect_stdout(io.StringIO()))
 
     def node(self, machine, action, **kwargs):
@@ -70,7 +71,10 @@ class TopologyReleaseTests(unittest.TestCase):
             current['revision'] = kwargs['revision']
             current['signature'] = 'new'
         elif action == 'release':
-            del self.reservations[machine.name]
+            wanted = (kwargs['release_id'], kwargs['revision'])
+            if self.reservations.get(machine.name, wanted) != wanted:
+                raise ValueError('conflicting reservation')
+            self.reservations.pop(machine.name, None)
         return copy.deepcopy(current)
 
     def record(self):
@@ -203,6 +207,154 @@ class TopologyReleaseTests(unittest.TestCase):
         self.assertEqual(rollout.run(self.revision), 1)
         self.assertEqual(self.record()['status'], 'incomplete')
         self.assertEqual(len(self.reservations), 3)
+
+
+    def incomplete(self):
+        self.failures.add(('mini', 'apply'))
+        self.assertEqual(rollout.run(self.revision), 1)
+        self.failures.clear()
+        self.calls.clear()
+        return self.record()
+
+    def abandon(self, record, reason='superseded by published fix'):
+        return rollout.abandon(record['id'], record['revision'], reason)
+
+    def test_abandon_archives_original_then_releases_and_allows_new_version(self):
+        original = self.incomplete()
+        perform = self.node
+        def checked(machine, action, **kwargs):
+            if action == 'release':
+                self.assertEqual(self.record()['status'], 'abandoning')
+                archive = json.loads(rollout.history_path(original['id']).read_text())
+                self.assertEqual(archive['original'], original)
+            return perform(machine, action, **kwargs)
+        with mock.patch.object(rollout, 'node', side_effect=checked):
+            self.assertEqual(self.abandon(original), 0)
+        self.assertEqual(self.record()['status'], 'abandoned')
+        self.assertFalse(self.reservations)
+        self.assertFalse(any(a == 'apply' for _, a in self.calls))
+        calls = list(self.calls)
+        self.assertEqual(self.abandon(original), 0)
+        self.assertEqual(self.calls, calls)
+        self.assertEqual(rollout.run('c' * 40), 0)
+        history = rollout.release_status(original['id'])
+        self.assertEqual(history['original'], original)
+        self.assertTrue(history['abandonment']['finished_at'])
+        with self.assertRaisesRegex(deploy.PreflightError, 'ID/revision'):
+            self.abandon(original)
+
+    def test_abandon_refuses_wrong_identity_and_completed_release(self):
+        original = self.incomplete()
+        before = (self.root / 'state/release.json').read_bytes()
+        for identity, revision in [('f' * 32, self.revision), (original['id'], 'c' * 40)]:
+            with self.assertRaisesRegex(deploy.PreflightError, 'ID/revision'):
+                rollout.abandon(identity, revision, 'reason')
+        self.assertFalse(self.calls)
+        self.assertEqual((self.root / 'state/release.json').read_bytes(), before)
+        self.assertEqual(rollout.run(self.revision), 0)
+        with self.assertRaisesRegex(deploy.PreflightError, 'Only incomplete'):
+            self.abandon(self.record())
+
+    def test_partial_abandon_resumes_only_pending_and_blocks_single_node_bypass(self):
+        original = self.incomplete()
+        self.failures.add(('mini', 'release'))
+        self.assertEqual(self.abandon(original), 1)
+        self.assertEqual(self.record()['abandonment']['pending'], ['mini'])
+        with mock.patch.object(rollout, 'load_machine_config', return_value=MachineConfig((self.config.machines[-1],), frozenset())):
+            with self.assertRaisesRegex(deploy.PreflightError, 'abandonment is unfinished'):
+                rollout.run('c' * 40)
+        self.failures.clear(); self.calls.clear()
+        self.assertEqual(self.abandon(original), 0)
+        self.assertEqual(self.calls, [('mini', 'release')])
+
+    def test_lost_release_receipt_is_retryable_without_touching_other_reservation(self):
+        original = self.incomplete()
+        perform = self.node
+        def lose(machine, action, **kwargs):
+            result = perform(machine, action, **kwargs)
+            if machine.name == 'mini' and action == 'release':
+                raise ValueError('lost receipt')
+            return result
+        with mock.patch.object(rollout, 'node', side_effect=lose):
+            self.assertEqual(self.abandon(original), 1)
+        self.reservations['mini'] = ('newer-id', 'c' * 40)
+        self.assertEqual(self.abandon(original), 1)
+        self.assertEqual(self.reservations['mini'], ('newer-id', 'c' * 40))
+        self.reservations.pop('mini')
+        self.assertEqual(self.abandon(original), 0)
+
+    def test_archive_or_current_write_failure_preserves_resume_authority(self):
+        original = self.incomplete()
+        write = rollout_node.write_record
+        with mock.patch.object(rollout_node, 'write_record', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                self.abandon(original)
+        self.assertFalse(self.calls)
+        self.assertEqual(self.record(), original)
+        current_writes = 0
+        def fail_after_release(path, record):
+            nonlocal current_writes
+            if path.name == 'release.json':
+                current_writes += 1
+                if current_writes == 2:
+                    raise OSError('current write lost')
+            return write(path, record)
+        with mock.patch.object(rollout_node, 'write_record', side_effect=fail_after_release):
+            with self.assertRaises(OSError):
+                self.abandon(original)
+        self.assertEqual(self.record()['status'], 'abandoning')
+        self.assertEqual(self.abandon(original), 0)
+
+    def test_first_inspection_failure_never_guesses_an_installation_root(self):
+        self.failures.add(('mini', 'inspect'))
+        self.assertEqual(rollout.run(self.revision), 1)
+        original = self.record()
+        self.assertNotIn('observed', original['nodes']['mini'])
+        self.calls.clear()
+        self.assertEqual(self.abandon(original), 0)
+        self.assertNotIn(('mini', 'release'), self.calls)
+        self.assertEqual(self.record()['abandonment']['results']['mini'], 'not_reserved')
+
+    def test_invalid_node_history_and_archive_conflicts_fail_before_release(self):
+        original = self.incomplete()
+        bad = copy.deepcopy(original)
+        bad['nodes']['mini'].pop('observed')
+        rollout_node.write_record(self.root / 'state/release.json', bad)
+        with self.assertRaises(deploy.PreflightError):
+            self.abandon(bad)
+        self.assertFalse(self.calls)
+        rollout_node.write_record(self.root / 'state/release.json', original)
+        archive = rollout.history_path(original['id']); archive.parent.mkdir()
+        rollout_node.write_record(archive, {'original': {'id': original['id']}})
+        with self.assertRaisesRegex(deploy.PreflightError, 'different release'):
+            self.abandon(original)
+        self.assertFalse(self.calls)
+
+    def test_status_reports_completed_installation_with_failed_reservation_cleanup(self):
+        self.failures.add(('mini', 'release'))
+        self.assertEqual(rollout.run(self.revision), 1)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(rollout.main(['status']), 0)
+        self.assertIn('reservation cleanup pending', output.getvalue())
+        self.assertIn('fixture failure', output.getvalue())
+        self.assertIn('service deploy --expect ' + self.revision, output.getvalue())
+        before = self.record()
+        with self.assertRaisesRegex(deploy.PreflightError, 'Only incomplete'):
+            self.abandon(before)
+        self.assertEqual(self.record(), before)
+
+    def test_status_is_local_even_with_broken_topology_or_git(self):
+        original = self.incomplete()
+        with mock.patch.object(deploy, 'check_local', side_effect=AssertionError('Git must not be read')), mock.patch.object(rollout, 'topology', side_effect=AssertionError('No topology discovery')):
+            self.assertEqual(rollout.main(['status', '--json']), 0)
+            self.assertEqual(rollout.release_status()['original'], original)
+        self.calls.clear()
+        self.assertEqual(self.abandon(original), 0)
+        archive = rollout.history_path(original['id'])
+        archive.unlink()
+        with self.assertRaisesRegex(deploy.PreflightError, 'archive is missing'):
+            rollout.run('c' * 40)
 
 
 class ReservationTests(unittest.TestCase):

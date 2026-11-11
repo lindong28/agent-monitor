@@ -125,6 +125,8 @@ def restart(component):
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     # Preserve the original deploy parser and all its source verification.
+    if args[:1] == ['release']:
+        os.execv(sys.executable, module_command('agent_monitor.runtime.rollout', *args[1:]))
     if args[:1] == ['deploy']:
         os.execv(sys.executable, module_command('agent_monitor.runtime.deploy', *args[1:]))
     if args[:1] == ['rebuild-runtime']:
@@ -142,6 +144,9 @@ def main(argv=None):
         os.execv(str(python), module_command('agent_monitor.runtime.runtime_rebuild', *args[1:], python=python))
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
+    sub.add_parser('release', help='inspect or explicitly abandon a topology release')
+    sub.add_parser('deploy', help='deploy a fixed published version')
+    sub.add_parser('rebuild-runtime', help='rebuild the managed Python runtime')
     status_parser = sub.add_parser('status')
     status_parser.add_argument('component', nargs='?', default='all',
                               choices=('all', 'web', 'rollup-daemon', 'connector'))

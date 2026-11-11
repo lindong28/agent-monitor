@@ -75,6 +75,25 @@ FixtureServer((a.host, a.port), Handler).serve_forever()
         result = subprocess.run([str(self.root / 'agent-monitor'), 'local', 'start'], capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_public_release_status_is_read_only_and_release_commands_are_discoverable(self):
+        state = self.root / 'state'
+        state.mkdir(exist_ok=True)
+        record = {'id': 'a' * 32, 'revision': 'b' * 40, 'status': 'incomplete', 'targets': {}, 'nodes': {}}
+        path = state / 'release.json'; path.write_text(json.dumps(record))
+        before = path.read_bytes()
+        result = subprocess.run([str(self.root / 'agent-monitor'), 'service', 'release', 'status', '--json'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['original'], record)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse((state / 'release.lock').exists())
+        help_result = subprocess.run([str(self.root / 'agent-monitor'), 'service', '--help'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(help_result.returncode, 0)
+        self.assertIn('release', help_result.stdout)
+        abandon_help = subprocess.run([str(self.root / 'agent-monitor'), 'service', 'release', 'abandon', '--help'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(abandon_help.returncode, 0)
+        for flag in ['--id', '--expect', '--reason']:
+            self.assertIn(flag, abandon_help.stdout)
+
     def test_capture_preserves_full_environment_and_private_recipe(self):
         os.environ['MANAGEMENT_TEST_VALUE'] = 'spaces and = signs'
         self.addCleanup(os.environ.pop, 'MANAGEMENT_TEST_VALUE', None)

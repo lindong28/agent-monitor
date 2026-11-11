@@ -126,6 +126,7 @@ AGENT_MONITOR_BIND=127.0.0.1 ./agent-monitor start
 | --- | --- |
 | 查看或停止手动启动的仪表盘 | `./agent-monitor status` / `./agent-monitor stop` |
 | 查看项目管理的全部组件 | `./agent-monitor service status` |
+| 查看或废止未完成的拓扑发布 | `./agent-monitor service release status`；[协调操作](docs/public-usage.md#release-coordination) |
 | 启用定时采集或 macOS Hub | [服务配置与组件操作](docs/public-usage.md#services-and-deployment) |
 | 汇总已配置的机器 | [多机配置](docs/public-usage.md#optional-multi-machine-collection) |
 | 使用可选的账号或浏览器设备操作 | [账号与连接器指南](docs/public-usage.md#optional-quota-and-account-actions) |
