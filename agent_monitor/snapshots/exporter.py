@@ -104,6 +104,27 @@ def export_quota(*, gui_quota=False, blocked_accounts=None, automatic_quota=Fals
     }
 
 
+def export_cached_bundle(db_path=rollup.DEFAULT_DB_PATH, output_path=None):
+    """Copy retained records without provider discovery or business-state updates."""
+    db_path = Path(db_path)
+    if not db_path.is_file():
+        raise ExportError("saved rollup database is missing; no cached statistics were exported")
+    cache_path = db_path.parent / "quota_snapshot.json"
+    try:
+        limits = json.loads(cache_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        limits = {}
+    except (OSError, ValueError):
+        raise ExportError("saved quota cache is unreadable or invalid; inspect state/quota_snapshot.json") from None
+    if (not isinstance(limits, dict) or set(limits) - {"claude", "codex"}
+            or any(not isinstance(block, dict) for block in limits.values())):
+        raise ExportError("saved quota cache is invalid; inspect state/quota_snapshot.json")
+    try:
+        return export_bundle(db_path, output_path, refresh=False, rate_limits=limits)
+    except sqlite3.Error:
+        raise ExportError("saved rollup database could not be exported; inspect its schema and readability") from None
+
+
 def export_bundle(
     db_path=rollup.DEFAULT_DB_PATH,
     output_path=None,
