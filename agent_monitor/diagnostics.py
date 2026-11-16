@@ -15,7 +15,7 @@ from agent_monitor.paths import PROJECT_ROOT
 import threading
 import time
 import uuid
-from urllib.parse import unquote_plus
+from urllib.parse import unquote_plus, urlsplit
 
 
 # Only protocol facts and bounded, redacted upstream reasons cross this boundary.
@@ -126,6 +126,42 @@ def rpc_error_context(error, *, secrets=()):
     return result
 
 
+def safe_network(value):
+    """Keep bounded bridge facts, excluding capabilities and full target URLs."""
+    result = {"policy": "chromium-system", "coverage": "unavailable", "events": []}
+    if not isinstance(value, dict) or value.get("coverage") != "recent_connections_only":
+        return result
+    result["coverage"] = "recent_connections_only"
+    rows = value.get("events", [])
+    if not isinstance(rows, list):
+        return result
+    for row in rows[-64:]:
+        if not isinstance(row, dict):
+            continue
+        try:
+            target = urlsplit(str(row.get("target", "")))
+            if target.scheme not in ("http", "https") or not target.hostname:
+                continue
+            origin = target.scheme + "://" + target.hostname
+        except ValueError:
+            continue
+        route = str(row.get("route", ""))
+        if not re.fullmatch(r"(?:DIRECT|(?:PROXY|HTTPS|SOCKS|SOCKS4|SOCKS5) [a-zA-Z0-9.\[\]:_-]+)", route):
+            route = "unavailable"
+        outcome = row.get("result")
+        item = {"target": origin, "route": route,
+                "result": outcome if isinstance(outcome, str) and re.fullmatch(r"[a-z_]{1,64}", outcome) else "unknown"}
+        if type(row.get("generation")) is int and row["generation"] >= 0:
+            item["generation"] = row["generation"]
+        if isinstance(row.get("at"), str):
+            try:
+                item["at"] = datetime.fromisoformat(row["at"].replace("Z", "+00:00")).isoformat()
+            except ValueError:
+                pass
+        result["events"].append(item)
+    return result
+
+
 def safe_failure(value):
     if not isinstance(value, dict):
         return {}
@@ -139,6 +175,16 @@ def safe_failure(value):
         if item is not None:
             result[key] = item[:2048]
             result[key + "_truncated"] = bool(value.get(key + "_truncated")) or len(item) > 2048
+    for key, limit in (("client_diagnostics", 512), ("client_version", 256)):
+        item = safe_upstream_detail(value.get(key), limit=limit + 1)
+        if item is not None:
+            result[key] = item[:limit]
+            if key == "client_diagnostics":
+                result[key + "_truncated"] = bool(value.get(key + "_truncated")) or len(item) > limit
+    if isinstance(value.get("network"), dict):
+        result["network"] = safe_network(value["network"])
+        if value["network"].get("scope") in {"automatic_batch", "recovery_operation"}:
+            result["network"]["scope"] = value["network"]["scope"]
     for key, allowed in (("stage", _STAGES), ("kind", _KINDS), ("error_type", _ERROR_TYPES)):
         item = value.get(key)
         if isinstance(item, str) and item in allowed:

@@ -2,6 +2,18 @@
 
 Reader: Agent. These source observations are outside the 2026-10-28 recovery guidance change; they are not evidence of the incident's root cause.
 
+## ISSUE-DIAGNOSTICS-20261116-e43e — Automatic quota transport failure needs causal evidence
+
+Status: diagnostic gaps repaired; original transport cause remains unknown. Owner: agent-monitor quota maintenance.
+
+The MacBook incident had already consumed the permitted two quota RPC attempts before pausing. Its generic `-32603` transport wrapper did not distinguish the failing network layer or establish an authentication failure. The approved recovery succeeded, and a later active-query reading was saved locally and consumed by the normal overview. That recovery does not identify the original cause or justify a larger retry budget.
+
+Normal quota subprocess failures now retain bounded, credential-redacted client diagnostics and the initialized client version. Available proxy-bridge facts are retained with their scope: automatic-batch observations may include other accounts and cannot establish which connection belonged to the failed RPC. Recovery records preserve their matching original pause, and the UI presents a new pause separately from historical recovery. Legacy records only recover an original failure when the pause identity matches exactly. See [quota recovery diagnostics](../operations/services.md#paused-codex-quota-queries) for interpretation and handling boundaries.
+
+Acceptance used isolated child processes with native and explicit credential homes, oversized stderr containing synthetic credentials, and successive pauses. Bridge checks covered success, failure, unavailable observations and unscoped routes. In the real browser against the isolated recovery service, cancelling preview made zero provider-boundary calls; one confirmed synthetic recovery saved and published a quota reading. A subsequent injected pause displayed the current failure, client version/log and batch-scope caveat alongside the original HTTP 401; copying diagnostics included both failures and did not issue another query. These are synthetic provider results, not a new live recovery or proof that every transport cause is distinguishable.
+
+Continuation: when this generic failure recurs, use the saved client/bridge evidence and applicable upstream documentation to decide whether a specific safe automatic handler is warranted. If the client still supplies no causal detail, report that remaining uncertainty and preserve the existing bounded recovery path; do not infer login failure, change egress, or add automatic retries from `-32603` alone. No additional live provider probe is required while the account is working.
+
 ## ISSUE-RECOVERY-20261028-8c27 — Legacy resume can clear the shared pause
 
 Status: open. Owner: agent-monitor backend maintenance. Priority: review before changing recovery admission.

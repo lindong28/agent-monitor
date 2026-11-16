@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import threading
+from urllib.parse import urlsplit
 from contextlib import contextmanager
 import urllib.error
 import urllib.request
@@ -267,6 +268,15 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
         facts = diagnostics.failure_details(exc, stage=stage,
                     kind="timeout" if isinstance(exc, subprocess.TimeoutExpired) else "exception",
                     returncode=child.returncode if child is not None else None)
+        if provider == "codex" and child is not None:
+            route = env[network_policy.INTERNAL]
+            username = urlsplit(route).username or ""
+            scoped = username.removeprefix("agent-monitor.")
+            if automatic_batch or (len(scoped) == 32 and all(c in "0123456789abcdef" for c in scoped)):
+                facts["network"] = {**diagnostics.safe_network(network_policy.observations(route)),
+                    "scope": "automatic_batch" if automatic_batch else "recovery_operation"}
+            else:
+                facts["network"] = diagnostics.safe_network(None)
         facts["account_fingerprint"] = hashlib.sha256(
             quota_identity(provider, account.account_id, account.label).encode()).hexdigest()
         if account_profile is not None:
@@ -510,7 +520,7 @@ def _codex(account, *, recovery=None):
                 arguments += ["-c", 'forced_login_method="chatgpt"']
         process = subprocess.Popen(arguments,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE if account.get("renew_auth") else subprocess.DEVNULL, env=env)
+                                   stderr=subprocess.PIPE, env=env)
     except OSError as exc:
         raise LocalUnavailable("Codex CLI 无法启动，请检查这台机器上的安装；" +
                                diagnostics.failure_summary(diagnostics.failure_details(exc, stage="child_start"))) from None
@@ -570,6 +580,8 @@ def _codex(account, *, recovery=None):
                                        failure={"kind": "process_exit", "returncode": process.poll()})
                 buffer += chunk
 
+    failed = None
+    client_info = {}
     try:
         with _failure_stage("initialize"):
             send({"id": 1, "method": "initialize", "params": {
@@ -600,6 +612,9 @@ def _codex(account, *, recovery=None):
         return dataclasses.replace(value, **{key: reading[key] for key in (
             "codex_quota_available", "ordinary_usage_allowed", "spend_control_reached", "rate_limit_reached_type", "reset_credits")})
 
+    except BaseException as exc:
+        failed = exc
+        raise
     finally:
         selector.close()
         process.terminate()
@@ -619,16 +634,25 @@ def _codex(account, *, recovery=None):
                     break
                 retain_client_output(chunk)
             process.stderr.close()
-            if recovery is not None and client_output:
-                recovery["client_diagnostics"] = _safe_client_excerpt(
+            if (failed is not None or account.get("renew_auth")) and client_output:
+                excerpt = _safe_client_excerpt(
                     client_output.decode(errors="replace"),
                     redactions + codex_quota.credential_secrets(auth_path),
-                    truncated=client_output_truncated)
+                    truncated=client_output_truncated, limit=513)
+                if account.get("renew_auth") and recovery is not None:
+                    recovery["client_diagnostics"] = excerpt[:512]
+                if failed is not None:
+                    failed.failure = {**diagnostics.failure_details(failed),
+                        "client_diagnostics": excerpt[:512],
+                        "client_diagnostics_truncated": client_output_truncated or len(excerpt) > 512}
+        if failed is not None and isinstance(client_info, dict) and isinstance(client_info.get("userAgent"), str):
+            failed.failure = {**diagnostics.failure_details(failed), "client_version": _safe_client_excerpt(
+                client_info["userAgent"], redactions, limit=256)}
         process.stdin.close()
         process.stdout.close()
 
 
-def _safe_client_excerpt(value, secrets, *, truncated=False):
+def _safe_client_excerpt(value, secrets, *, truncated=False, limit=512):
     # Redact before the display limit, including a credential cut by the bounded
     # input buffer. Never classify free-form client logs as an upstream result.
     for secret in sorted(set(secrets), key=len, reverse=True):
@@ -640,7 +664,7 @@ def _safe_client_excerpt(value, secrets, *, truncated=False):
                     value = value[:-size] + "[redacted truncated credential]"
                     break
         value = value.replace(secret, "[redacted]")
-    return diagnostics.safe_upstream_detail(value)
+    return diagnostics.safe_upstream_detail(value, limit=limit)
 
 
 if __name__ == "__main__":

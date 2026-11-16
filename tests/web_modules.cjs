@@ -195,10 +195,13 @@ assert.match(resetUi.resetText(3, 2000), /预计/);
   await legacy.refresh();
   assert.match(legacy.children[3].textContent, /original@example.test/);
   assert.doesNotMatch(legacy.textContent, /检查对象：self · current@example.test/);
-  value = {...value, pause:{id:'new-pause'}, last_recovery:{...value.last_recovery, ok:false}};
+  value = {...value, pause:{id:'new-pause', failure:{stage:'quota_read', detail:'CURRENT_FAILURE_MARKER'}}, last_recovery:{...value.last_recovery, ok:false,
+    original_pause:{id:'old-pause', at:1700000000, failure:{detail:'ORIGINAL_FAILURE_MARKER'}}}};
   await legacy.refresh();
   assert.match(legacy.textContent, /检查对象：self · current@example.test/);
   assert.match(legacy.children[3].textContent, /original@example.test/);
+  assert.match(legacy.textContent, /CURRENT_FAILURE_MARKER/);
+  assert.match(legacy.textContent, /ORIGINAL_FAILURE_MARKER/);
   value = {...value, pause:null, last_recovery:{ok:true, observed_at:'2026-11-10T00:00:00Z'}};
   await legacy.refresh();
   assert.match(legacy.textContent, /检查对象未记录/);

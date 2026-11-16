@@ -82,6 +82,28 @@ class UpstreamControlsTests(unittest.TestCase):
                 with self.assertRaises(Paused):
                     self.controls.resume("codex", "unreadable")
 
+    def test_recovery_retains_original_failure_after_a_later_pause(self):
+        lease = self.controls.acquire("codex")
+        lease.pause("quotaRefreshFailed", failure={"stage": "quota_read", "rpc_code": -32603,
+                    "detail": "original transport failure"})
+        lease.close()
+        original = self.controls.read("codex")["pause"]
+        probe = self.controls.acquire("codex", probe_pause_id=original["id"])
+        attempt = probe.state["pause"]["probe_attempt"]["id"]
+        probe.close()
+        self.controls.resume("codex", original["id"])
+        self.controls.record_recovery({"ok": True, "request": {"pause_id": original["id"]},
+                                       "pause_id": None, "failure": {}}, attempt_id=attempt)
+        for detail in ("later failure", "another failure"):
+            lease = self.controls.acquire("codex")
+            lease.pause("quotaRefreshFailed", failure={"detail": detail})
+            lease.close()
+            self.controls.resume("codex", self.controls.read("codex")["pause"]["id"])
+        saved = Controls(self.root).read("codex")["last_recovery"]
+        self.assertEqual(saved["original_pause"]["id"], original["id"])
+        self.assertEqual(saved["original_pause"]["failure"]["detail"], "original transport failure")
+        self.assertEqual(saved["failure"], {})
+
     def test_cancelled_admission_and_bounded_wait_do_not_mark_active(self):
         cancelled = threading.Event()
         cancelled.set()

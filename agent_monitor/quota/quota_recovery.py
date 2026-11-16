@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from agent_monitor import diagnostics
+from agent_monitor.accounts import upstream_controls
 from agent_monitor.network import network_policy
 
 
@@ -192,7 +193,7 @@ def local_status(*, profile=None, pause_scope=None):
                         "resolution_reason": resolution_reason,
                         "credential_path": str(auth), "quota_profile": profile or ""},
             "last_quota_retry": state.get("last_quota_retry"),
-            "last_recovery": state.get("last_recovery")}
+            "last_recovery": upstream_controls.recovery_receipt(state)}
 
 
 def read_status(machine, *, profile=None, pause_scope=None):
@@ -235,41 +236,6 @@ def preview_egress(machine):
         raise EgressPreviewError("目标机器未返回可核验的路由桥出口预览。")
     return value
 
-
-def safe_network(value):
-    """Keep bounded bridge facts, excluding capabilities and full target URLs."""
-    result = {"policy": "chromium-system", "coverage": "unavailable", "events": []}
-    if not isinstance(value, dict) or value.get("coverage") != "recent_connections_only":
-        return result
-    result["coverage"] = "recent_connections_only"
-    rows = value.get("events", [])
-    if not isinstance(rows, list):
-        return result
-    for row in rows[-64:]:
-        if not isinstance(row, dict):
-            continue
-        try:
-            target = urlsplit(str(row.get("target", "")))
-            if target.scheme not in ("http", "https") or not target.hostname:
-                continue
-            origin = target.scheme + "://" + target.hostname
-        except ValueError:
-            continue
-        route = str(row.get("route", ""))
-        if not re.fullmatch(r"(?:DIRECT|(?:PROXY|HTTPS|SOCKS|SOCKS4|SOCKS5) [a-zA-Z0-9.\[\]:_-]+)", route):
-            route = "unavailable"
-        outcome = row.get("result")
-        item = {"target": origin, "route": route,
-                "result": outcome if isinstance(outcome, str) and re.fullmatch(r"[a-z_]{1,64}", outcome) else "unknown"}
-        if type(row.get("generation")) is int and row["generation"] >= 0:
-            item["generation"] = row["generation"]
-        if isinstance(row.get("at"), str):
-            try:
-                item["at"] = datetime.fromisoformat(row["at"].replace("Z", "+00:00")).isoformat()
-            except ValueError:
-                pass
-        result["events"].append(item)
-    return result
 
 
 def local_recovery(value, *, network_route=None):
@@ -316,7 +282,7 @@ def local_recovery(value, *, network_route=None):
                    "exporter_commit": commit}
     # Loopback bridge evidence only; unavailable observations do not replay or
     # change the provider outcome. Empty events do not establish no request.
-    receipt["network"] = safe_network(network_policy.observations(route))
+    receipt["network"] = diagnostics.safe_network(network_policy.observations(route))
     from agent_monitor.quota.codex_quota import safe_auth_recovery
     auth_recovery = safe_auth_recovery(admitted_probe.get("authentication_recovery"))
     if auth_recovery:

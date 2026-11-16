@@ -416,7 +416,7 @@ class ProviderTests(unittest.TestCase):
                     self.assertEqual(result["signed_out"], signed_out)
                     self.assertEqual(result["refresh_error"], None if signed_out else "still offline")
 
-    def codex_cli(self, response, account_id="account-a", error=None, error_id=2, changed_account=None, explicit_home=False):
+    def codex_cli(self, response, account_id="account-a", error=None, error_id=2, changed_account=None, explicit_home=False, client_log="", client_info=None):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             import base64
@@ -426,13 +426,14 @@ class ProviderTests(unittest.TestCase):
             auth.write_text(json.dumps({"tokens": {"account_id": account_id, "id_token": token}}))
             shim = home / ".local/libexec/agent-shims/codex"
             shim.parent.mkdir(parents=True)
-            shim.write_text("#!%s\nimport sys,json,os,pathlib\nresponse=%r\nerror=%r\nerror_id=%r\nchanged_account=%r\n" %
-                            (sys.executable, response, error, error_id, changed_account) +
+            shim.write_text("#!%s\nimport sys,json,os,pathlib\nresponse=%r\nerror=%r\nerror_id=%r\nchanged_account=%r\nclient_log=%r\nclient_info=%r\n" %
+                            (sys.executable, response, error, error_id, changed_account, client_log, client_info or {}) +
                             "for line in sys.stdin:\n m=json.loads(line)\n if 'id' in m:\n"
+                            "  if m['id']==2: sys.stderr.write(client_log);sys.stderr.flush()\n"
                             "  if m['id']==2 and changed_account:\n"
                             "   p=pathlib.Path(os.environ['CODEX_HOME'])/'auth.json'\n"
                             "   a=json.loads(p.read_text());a['tokens']['account_id']=changed_account;p.write_text(json.dumps(a))\n"
-                            "  reply={'error':error} if error is not None and m['id']==error_id else {'result':{} if m['id']==1 else response}\n"
+                            "  reply={'error':error} if error is not None and m['id']==error_id else {'result':client_info if m['id']==1 else response}\n"
                             "  print(json.dumps({'id':m['id'],**reply}),flush=True)\n")
             shim.chmod(0o700)
             with mock.patch("agent_monitor.quota.quota_refresh.Path.home", return_value=home),\
@@ -442,6 +443,20 @@ class ProviderTests(unittest.TestCase):
                 if explicit_home:
                     target["codex_home"] = str(auth.parent)
                 return quota_refresh._codex(target)
+
+    def test_normal_quota_failure_retains_bounded_child_context(self):
+        for explicit in (False, True):
+            with self.subTest(explicit_home=explicit), self.assertRaises(quota_refresh.RefreshError) as raised:
+                self.codex_cli({}, explicit_home=explicit,
+                    error={"code": -32603, "message": "unknown transport failure"},
+                    client_info={"userAgent": "agent_monitor/0.167.0 (fixture)"},
+                    client_log="TLS fixture cause https://fixture.test/?access_token=SECRET_FIXTURE\n" + "x" * 200000)
+            facts = raised.exception.failure
+            self.assertIn("TLS fixture cause", facts["client_diagnostics"])
+            self.assertNotIn("SECRET_FIXTURE", str(facts))
+            self.assertLessEqual(len(facts["client_diagnostics"]), 512)
+            self.assertTrue(facts["client_diagnostics_truncated"])
+            self.assertEqual(facts["client_version"], "agent_monitor/0.167.0 (fixture)")
 
     def test_native_and_explicit_home_reject_identity_changed_during_read(self):
         for explicit in (False, True):

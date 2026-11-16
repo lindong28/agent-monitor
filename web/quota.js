@@ -660,10 +660,10 @@
     }
   }
 
-  function recoveryDiagnostics(receipt, httpStatus) {
+  function recoveryDiagnostics(receipt, httpStatus, title = "查看本次诊断") {
     const box = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "查看本次诊断";
+    summary.textContent = title;
     box.className = "recovery-diagnostic";
     box.appendChild(summary);
     const body = document.createElement("div");
@@ -681,6 +681,13 @@
     if (f.detail) add(`已记录的错误摘要：${f.detail}`);
     if (f.rpc_message && f.rpc_message !== f.detail) add(`RPC message（已脱敏${f.rpc_message_truncated ? "并截断" : ""}）：${f.rpc_message}`);
     if (f.rpc_data !== undefined) add(`RPC error.data（脱敏文本投影${f.rpc_data_truncated ? "，已截断" : ""}）：${f.rpc_data}`);
+    if (f.client_version) add(`当时的 Codex 客户端：${f.client_version}`);
+    if (f.client_diagnostics) add(`客户端日志摘录（已脱敏${f.client_diagnostics_truncated ? "并截断" : ""}，最多 512 字符）：${f.client_diagnostics}。日志不单独作为上游错误分类或恢复依据。`);
+    if (f.quota_retry) {
+      add(`当次有限重读已使用 ${f.quota_retry.quota_rpc_budget_used} 次配额 RPC 机会；${f.quota_retry.outcome === "quota_confirmed" ? "已取得配额" : "仍未取得配额，已停止自动请求"}。RPC 次数不代表客户端内部 HTTP 请求次数。`);
+      const first = f.quota_retry.first_failure || {};
+      if (first.rpc_message || first.detail) add(`重读前首次错误：${first.rpc_message || first.detail}`);
+    }
     const auth = receipt.authentication_recovery;
     if (auth) {
       const outcomes = {quota_confirmed: "已取得新配额", quota_failed: "新凭据后的配额查询仍失败", no_new_credentials: "未确认取得新凭据，未查询配额", new_credentials: "已保存新候选凭据，配额未确认", identity_changed: "身份发生变化，已停止", refresh_failed: "认证修复未完成"};
@@ -692,14 +699,24 @@
     describeDiagnosticSummary(add, f.detail);
     if (f.returncode != null) add(`CLI 退出码：${f.returncode}`);
     if (receipt.record_error) add(receipt.record_error);
-    const network = receipt.network;
+    const network = receipt.network || f.network;
     const selected = receipt.network_context;
     if (selected?.device) add(`本次选择的出站设备：${selected.device.label}（临时连接 ${String(selected.device.id).slice(0, 8)}）；执行与凭据主机：${receipt.request?.machine || "见本次对象"}。`);
     add(`出站策略：${network?.policy === "chromium-system" ? "所选出站设备的系统代理" : "未记录"}；实际配额请求的公网出口 IP／地区：未核实。`);
     for (const target of selected?.preview?.targets || []) add(`确认时的匿名预览：${target.host} · ${target.ip || "IP 未知"} · ${target.country_code || "地区未知"} · ${target.observed_at ? new Date(target.observed_at * 1000).toLocaleString("zh-CN") : "时间未记录"}${target.cached ? " · 缓存结果" : ""}。`);
-    add("以下仅为本次连接观测；connected 表示代理桥建立了连接，不证明配额请求成功，也不能证明最终公网出口。其他设备的出口预览不能代替此读数。");
+    add(network?.scope === "automatic_batch"
+      ? "以下是本自动查询批次最近至多 64 条连接观测，可能包含其他账号，不能归因到本账号或本次 RPC。connected 只表示记录中的连接已建立，不证明配额成功或最终公网出口；缺少记录不证明未连接。"
+      : "以下仅为本次连接观测；connected 表示代理桥建立了连接，不证明配额请求成功，也不能证明最终公网出口。其他设备的出口预览不能代替此读数。");
     if (!network?.events?.length) add("未保存可用的连接观测；不能据此断定没有发出请求。");
     for (const e of network?.events || []) add(`${e.at || "时间未记录"} · ${e.target} → ${e.route} · ${e.result}`);
+    if (receipt.original_pause) {
+      const original = receipt.original_pause;
+      add(`本次恢复对应的原暂停：${original.id}。以下记录与恢复结果分开保留。`);
+      const earlier = recoveryDiagnostics({ok:false, failure:original.failure,
+        observed_at:Number.isFinite(original.at) ? new Date(original.at * 1000).toISOString() : null}, null, "恢复前的原始失败");
+      earlier.open = true;
+      body.appendChild(earlier);
+    } else if (receipt.request) add("未保留可匹配的原暂停详细诊断，不能从本次恢复结果倒推原故障原因。");
     return box;
   }
 
@@ -972,12 +989,17 @@
       }
       add("诊断包含账号、机器、路径和地址。对外分享前请核对接收者及内容，不要直接公开发布。");
       details.replaceChildren();
-      if (last || pause?.failure) {
-        const diagnostic = recoveryDiagnostics(pause?.failure?.stage === "recovery_commit"
-          ? {ok:false,failure:pause.failure} : last || {ok:false,failure:pause.failure});
+      if (pause?.failure) {
+        const diagnostic = recoveryDiagnostics({ok:false, failure:pause.failure}, null, "当前暂停的诊断");
         diagnostic.open = true;
         details.appendChild(diagnostic);
-      } else details.appendChild(make("p", "尚无已保存的检查诊断。"));
+      }
+      if (last) {
+        const diagnostic = recoveryDiagnostics(last, null, "最近一次恢复检查的诊断");
+        diagnostic.open = true;
+        details.appendChild(diagnostic);
+      }
+      if (!last && !pause?.failure) details.appendChild(make("p", "尚无已保存的检查诊断。"));
     }
     async function refresh() {
       if (controller.signal.aborted) return;

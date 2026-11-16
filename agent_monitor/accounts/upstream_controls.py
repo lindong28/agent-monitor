@@ -141,16 +141,39 @@ class Controls:
         try:
             state = self.read("codex")
             requested = receipt["request"]["pause_id"]
-            matching = any(p.get("id") == requested and attempt_id
+            matching = next((p for p in (state.get("pause") or {}, state.get("last_pause") or {})
+                           if p.get("id") == requested and attempt_id
                            and (p.get("probe_attempt") or {}).get("id") == attempt_id
-                           for p in (state.get("pause") or {}, state.get("last_pause") or {}))
+                           ), None)
             if (state.get("active") or not matching
                     or (state.get("pause") or {}).get("id") != receipt.get("pause_id")):
                 raise Paused("恢复记录对应的暂停已变化或操作未结束；未覆盖现有记录。")
-            state["last_recovery"] = receipt
+            state["last_recovery"] = {**receipt, "original_pause": _pause_snapshot(matching)}
             self._save("codex", state)
         finally:
             handle.close()
+
+
+def _pause_snapshot(pause):
+    return {"id": pause.get("id"), "at": pause.get("at"),
+            "failure": diagnostics.safe_failure(pause.get("failure"))}
+
+
+def recovery_receipt(state):
+    """Read old receipts without inventing a link to an unrelated later pause."""
+    receipt = state.get("last_recovery")
+    if not isinstance(receipt, dict):
+        return None
+    result = dict(receipt)
+    original = receipt.get("original_pause")
+    requested = (receipt.get("request") or {}).get("pause_id")
+    if not isinstance(original, dict) or original.get("id") != requested:
+        original = state.get("last_pause") or {}
+    if requested and original.get("id") == requested:
+        result["original_pause"] = _pause_snapshot(original)
+    else:
+        result.pop("original_pause", None)
+    return result
 
 
 class Lease:

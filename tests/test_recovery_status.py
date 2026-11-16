@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 from types import SimpleNamespace
+from agent_monitor import diagnostics
 from agent_monitor.accounts.upstream_controls import Controls
 from agent_monitor.quota import quota_recovery, quota_refresh, quota_sync
 from agent_monitor.snapshots import exporter
@@ -93,14 +94,14 @@ class RecoveryStatusTests(unittest.TestCase):
         event = dict(target='https://user:password@host.test/path?token=secret',
                      route='PROXY 127.0.0.1:1234', result='proxy_connect_timeout',
                      at='2026-10-28T00:00:00Z', generation=2)
-        value = quota_recovery.safe_network({'coverage':'recent_connections_only', 'events':[event]*70})
+        value = diagnostics.safe_network({'coverage':'recent_connections_only', 'events':[event]*70})
         self.assertEqual(len(value['events']), 64)
         self.assertEqual(value['events'][0]['target'], 'https://host.test')
         self.assertEqual(value['events'][0]['result'], 'proxy_connect_timeout')
         self.assertEqual(value['events'][0]['generation'], 2)
         self.assertNotIn('secret', str(value))
         self.assertNotIn('password', str(value))
-        self.assertEqual(quota_recovery.safe_network(None)['coverage'], 'unavailable')
+        self.assertEqual(diagnostics.safe_network(None)['coverage'], 'unavailable')
 
     def test_receipt_requires_consumed_matching_probe_and_cannot_change_pause(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -119,11 +120,13 @@ class RecoveryStatusTests(unittest.TestCase):
             before = controls.read('codex')['pause']
             value['pause_id'] = before['id']
             controls.record_recovery(value, attempt_id=attempt_id)
-            self.assertEqual(Controls(Path(tmp)).read('codex')['last_recovery'], value)
+            saved = Controls(Path(tmp)).read('codex')['last_recovery']
+            self.assertEqual({k: saved[k] for k in value}, value)
+            self.assertEqual(saved['original_pause']['id'], original)
             self.assertEqual(controls.read('codex')['pause'], before)
             with self.assertRaises(RuntimeError):
                 controls.record_recovery({'request': {'pause_id': 'stale'}, 'ok': True}, attempt_id=attempt_id)
-            self.assertEqual(controls.read('codex')['last_recovery'], value)
+            self.assertEqual(controls.read('codex')['last_recovery'], saved)
             with self.assertRaises(RuntimeError):
                 controls.record_recovery({'request': {'pause_id': original}, 'ok': True}, attempt_id=attempt_id)
             with self.assertRaises(RuntimeError):
