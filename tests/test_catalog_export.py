@@ -46,7 +46,7 @@ class CatalogExportTests(ArtifactTestCase):
         manifest = json.loads((bundle / "export.json").read_text())
         record = data["entities"][2]["payload"]
         self.assertEqual(record["observed_at"], manifest["generated_at"])
-        self.assertEqual(record["source_version"], manifest["exporter_commit"])
+        self.assertEqual(record["source_version"], "sha256:" + manifest["manifest_digest"])
         self.assertIn("unknown", record["summary"])
         for private in ("fixture-account", "fixture failure", "rate_limits", "metric_totals"):
             self.assertNotIn(private, first.read_text())
@@ -99,7 +99,7 @@ class CatalogExportTests(ArtifactTestCase):
             self.assertFalse(out.exists())
             self.assertNotIn("SECRET-MARKER", result.stdout + result.stderr)
 
-    def test_export_identity_tracks_manifest_version_time_and_content(self):
+    def test_export_identity_keeps_parents_across_exporter_versions_and_capture_times(self):
         from agent_monitor.snapshots import exporter
         bundle = self.export_bundle()
         manifest_path = bundle / "export.json"
@@ -118,7 +118,70 @@ class CatalogExportTests(ArtifactTestCase):
             self.assertEqual(entities[2]["payload"]["observed_at"], stamp)
         self.assertEqual(ids[0][:2], ids[1][:2])
         self.assertNotEqual(ids[0][2], ids[1][2])
-        self.assertNotEqual(ids[1][0], ids[2][0])
+        self.assertEqual(ids[1][:2], ids[2][:2])
+        self.assertNotEqual(ids[1][2], ids[2][2])
+
+    def test_source_identity_changes_only_with_scope_or_source_locator(self):
+        bundle = self.export_bundle()
+        def project(name, *args):
+            out = self.root / (name + ".json")
+            result = self.invoke(bundle, out, *args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(out.read_text())["entities"]
+        original = project("scope-baseline")
+        for flag in ("--instance-id", "--organization", "--project-id", "--source-uri"):
+            with self.subTest(flag=flag):
+                value = "urn:fixture:other-source" if flag == "--source-uri" else "other"
+                changed = project(flag[2:], flag, value)
+                self.assertNotEqual(original[0]["id"], changed[0]["id"])
+                self.assertNotEqual(original[1]["id"], changed[1]["id"])
+        material = project("material", "--material-uri", "urn:fixture:other-material")
+        self.assertEqual([e["id"] for e in original[:2]], [e["id"] for e in material[:2]])
+        self.assertNotEqual(original[2]["id"], material[2]["id"])
+        self.assertEqual(original[2]["payload"]["source_version"], material[2]["payload"]["source_version"])
+        with sqlite3.connect(bundle / "snapshot.db") as connection:
+            connection.execute("UPDATE daily_usage_rollup SET input_tokens=input_tokens+10")
+        self.refresh_manifest(bundle)
+        content = project("content")
+        self.assertEqual(original[:2], content[:2])
+        self.assertNotEqual(original[2]["id"], content[2]["id"])
+        self.assertNotEqual(original[2]["payload"]["source_version"], content[2]["payload"]["source_version"])
+        self.refresh_manifest(bundle, source_host_identity="host-v1:" + "9" * 64)
+        host = project("host")
+        self.assertNotEqual(original[0]["id"], host[0]["id"])
+
+    def test_material_schema_changes_family_but_not_source(self):
+        bundle = self.export_bundle()
+        out = self.root / "schema-current.json"
+        self.assertEqual(self.invoke(bundle, out).returncode, 0)
+        current = json.loads(out.read_text())["entities"]
+        with sqlite3.connect(bundle / "snapshot.db") as connection:
+            connection.execute("DROP TABLE daily_usage_rollup")
+            connection.execute("DELETE FROM rollup_meta WHERE key='usage_rollup_schema'")
+        self.refresh_manifest(bundle)
+        out = self.root / "schema-legacy.json"
+        self.assertEqual(self.invoke(bundle, out).returncode, 0)
+        legacy = json.loads(out.read_text())["entities"]
+        self.assertEqual(current[0], legacy[0])
+        self.assertNotEqual(current[1]["id"], legacy[1]["id"])
+        self.assertEqual(current[1]["payload"]["source_version"], "agent-monitor.statistics-export.v2")
+        self.assertEqual(legacy[1]["payload"]["source_version"], "agent-monitor.statistics-export.v1")
+
+    def test_uri_validation_never_claims_locator_availability(self):
+        bundle = self.export_bundle()
+        for index, (source, material) in enumerate((
+                ("https://fixture/monitor", "https://fixture/bundle"),
+                ("urn:fixture:monitor", "file:///fixture/bundle"),
+                ("ssh://fixture/monitor", "urn:fixture:bundle"))):
+            out = self.root / ("uri-%s.json" % index)
+            self.assertEqual(self.invoke(bundle, out, "--source-uri", source, "--material-uri", material).returncode, 0)
+            entities = json.loads(out.read_text())["entities"]
+            self.assertEqual(entities[0]["payload"]["locator"], source)
+            self.assertEqual(entities[2]["payload"]["locator"], material)
+            self.assertEqual(entities[0]["payload"]["source_version"], "agent-monitor.saved-statistics.v1")
+            self.assertEqual(entities[2]["payload"]["availability"]["state"], "unknown")
+            self.assertIn("Local bundle validated", entities[2]["payload"]["availability"]["reason"])
+            self.assertIn("unverified", entities[2]["payload"]["availability"]["reason"])
 
     def test_symlink_material_and_output_are_not_followed(self):
         bundle = self.export_bundle()

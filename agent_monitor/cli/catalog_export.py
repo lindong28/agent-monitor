@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 from agent_monitor.snapshots import exporter
 
+SOURCE_CONTRACT = "agent-monitor.saved-statistics.v1"
+
 COMPARISON_CONTRACT = "agent-monitor.rollup.v1"
 
 
@@ -67,16 +69,17 @@ def project_bundle(bundle, *, instance_id, organization, project_id, source_uri,
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         exporter.validate_export_manifest(manifest, snapshot_path)
-        version = _identifier(manifest["exporter_commit"])
+        _identifier(manifest["exporter_commit"])
         observed = manifest["generated_at"]
         if len(observed) > 64 or datetime.fromisoformat(observed.replace("Z", "+00:00")).utcoffset() is None:
             raise ValueError("timezone required")
     except Exception as exc:
         # Validators can contain material values in errors; do not echo those.
         raise CatalogExportError("bundle manifest or snapshot validation failed") from exc
-    identity = [instance_id, organization, project_id, manifest["source_host_identity"], source_uri, version]
+    identity = [SOURCE_CONTRACT, instance_id, organization, project_id, manifest["source_host_identity"], source_uri]
+    material_contract = "agent-monitor.statistics-export.v%s" % manifest["schema_version"]
     source_id = _id("source", identity)
-    family_id = _id("family", [source_id, "statistics-export", manifest["schema_version"]])
+    family_id = _id("family", [source_id, material_contract])
     record_id = _id("record", [family_id, manifest["manifest_digest"], manifest["transfer_digest"], material_uri])
     common = {"visibility": "private", "schema_version": 1, "confirmation": "proposal",
               "description": "metadata_only; original export materials remain owned and authorized by Agent Monitor."}
@@ -90,14 +93,14 @@ def project_bundle(bundle, *, instance_id, organization, project_id, source_uri,
                    manifest["row_count"], basis, manifest["data_start_date"], manifest["bucket_timezone"], manifest["schema_version"])
     return {"version": 1, "instance_id": instance_id, "organization": organization, "entities": [
         entity(source_id, "runtime_source", "Agent Monitor saved statistics", {
-            "project_id": project_id, "locator": source_uri, "source_version": version}, source_uri),
+            "project_id": project_id, "locator": source_uri, "source_version": SOURCE_CONTRACT}, source_uri),
         entity(family_id, "runtime_family", "Saved statistics exports", {
-            "project_id": project_id, "source_id": source_id, "source_version": version,
+            "project_id": project_id, "source_id": source_id, "source_version": material_contract,
             "purpose": "metadata_only: validated export inventory; statistics and original material are read at source."}, source_uri),
         entity(record_id, "runtime_record", "Saved statistics observation", {
             "project_id": project_id, "family_id": family_id, "category": "observation",
-            "source_version": version, "observed_at": observed, "summary": summary,
-            "availability": {"state": "available", "reason": "Local bundle validated; remote URI access is not verified."},
+            "source_version": "sha256:" + manifest["manifest_digest"], "observed_at": observed, "summary": summary,
+            "availability": {"state": "unknown", "reason": "Local bundle validated; locator availability and reader access are unverified."},
             "locator": material_uri, "input_ids": [],
             "comparison": _comparison(manifest, instance_id, organization, project_id)}, material_uri)]}
 
