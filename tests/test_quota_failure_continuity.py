@@ -15,7 +15,7 @@ from parsers import accounts, RateLimits
 
 class FailureContinuityTests(unittest.TestCase):
     def test_batch_facts_survive_pause_but_are_not_account_observations(self):
-        for mode in ("failed", "unavailable", "success", "unscoped"):
+        for mode in ("failed", "unavailable", "success", "unscoped", "missing_route", "missing_batch_route"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 route = "http://agent-monitor.auto-" + "a" * 32 + ":SECRET_ROUTE@127.0.0.1:9"
@@ -35,6 +35,10 @@ class FailureContinuityTests(unittest.TestCase):
                 if mode == "unscoped":
                     batch = None
                     env[network_policy.INTERNAL] = "http://agent-monitor:SECRET_ROUTE@127.0.0.1:9"
+                if mode in ("missing_route", "missing_batch_route"):
+                    env.clear()
+                    if mode == "missing_route":
+                        batch = None
                 with mock.patch.object(accounts, "CODEX_AUTH", root / "auth.json"), \
                      mock.patch.object(quota_refresh.subprocess, "Popen", return_value=peer), \
                      mock.patch.object(network_policy, "child_environment", return_value=env), \
@@ -51,7 +55,7 @@ class FailureContinuityTests(unittest.TestCase):
                 self.assertEqual(facts["client_diagnostics"], "synthetic TLS failure")
                 self.assertEqual(facts["client_version"], "fixture/0.167.0")
                 self.assertNotIn("SECRET", json.dumps(facts))
-                if mode == "unscoped":
+                if mode in ("unscoped", "missing_route", "missing_batch_route"):
                     observe.assert_not_called()
                     self.assertEqual(facts["network"]["coverage"], "unavailable")
                 else:

@@ -269,10 +269,10 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                     kind="timeout" if isinstance(exc, subprocess.TimeoutExpired) else "exception",
                     returncode=child.returncode if child is not None else None)
         if provider == "codex" and child is not None:
-            route = env[network_policy.INTERNAL]
+            route = env.get(network_policy.INTERNAL, "")
             username = urlsplit(route).username or ""
             scoped = username.removeprefix("agent-monitor.")
-            if automatic_batch or (len(scoped) == 32 and all(c in "0123456789abcdef" for c in scoped)):
+            if route and (automatic_batch or (len(scoped) == 32 and all(c in "0123456789abcdef" for c in scoped))):
                 facts["network"] = {**diagnostics.safe_network(network_policy.observations(route)),
                     "scope": "automatic_batch" if automatic_batch else "recovery_operation"}
             else:
