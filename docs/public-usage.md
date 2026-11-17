@@ -93,6 +93,8 @@ The command does not update the source business records. It creates the destinat
 
 ### Offline catalog projection
 
+Monitor and its saved bundles remain authoritative for statistics. If the bundle is already known, read it through the normal `bundle-read` entry; no catalog registration is required merely because an agent reads it. Use this optional projection when a concrete cross-project discovery or registered-evidence consumer needs it.
+
 After creating a private bundle with `export --cached-state`, project its validated metadata into a Context Lake version 1 import file:
 
 ```bash
@@ -103,6 +105,8 @@ After creating a private bundle with `export --cached-state`, project its valida
   --material-uri ssh://your-host/absolute/existing-bundle
 context-lake catalog-ingest --service YOUR_PERSONAL_SERVICE --reuse-parents /absolute/new-catalog.json
 ```
+
+Creating the import file is not publication. The caller that needs shared discovery is responsible for ingesting it into the authorized service and reading it back through the intended consumer. An ingest failure leaves the saved bundle intact; report discovery as pending when it is required, rather than claiming the whole task complete. Future captures create new observations under the identity rules below; keep the referenced originals usable and preserve human-edited parent descriptions when reusing parents. This command does not run a background synchronization or retention service.
 
 The optional Context Lake client is installed separately; Monitor has no dependency on it and never contacts it. Choose the authorized instance and organization explicitly and create the referenced project there first. The projection is always private and creates exactly one source, one statistics family and one observation. It is `metadata_only`: originals, detailed statistics, account/session records and their access controls remain with Monitor. Do not import personal metadata into a company service without authorization.
 
