@@ -889,18 +889,22 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
 #quota-accounts th[aria-sort="descending"] { color: var(--accent); }
 #quota-accounts .quota-reset-cell { min-width: 130px; }
 
-.quota-reset-credit-count {
+#quota-accounts .quota-reset-credit-count,
+#quota-accounts .quota-reset-time-trigger {
   border: 0;
-  border-bottom: 1px dotted var(--ink-muted);
-  padding: 4px;
+  box-shadow: none;
+  min-height: 0;
+  padding: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
   white-space: nowrap;
 }
-.quota-reset-credit-count:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.quota-reset-credit-details {
+#quota-accounts .quota-reset-time-trigger { color: var(--ink-muted); font: 400 12px/16px var(--font-sans); }
+.quota-reset-credit-count:focus-visible,
+.quota-reset-time-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.quota-tooltip-details {
   max-width: min(340px, calc(100vw - 16px));
   max-height: min(420px, calc(100dvh - 16px));
   overflow: auto;
@@ -913,9 +917,9 @@ details > .supplementary-body { border: 1px solid var(--line); border-radius: va
   text-align: left;
   font: 400 12px/20px var(--font-sans);
 }
-.quota-reset-credit-details[popover] { position: fixed; inset: auto; margin: 0; }
-.quota-reset-credit-details p { margin: 0; }
-.quota-reset-credit-details p + p { margin-top: 6px; }
+.quota-tooltip-details[popover] { position: fixed; inset: auto; margin: 0; }
+.quota-tooltip-details p { margin: 0; }
+.quota-tooltip-details p + p { margin-top: 6px; }
 
 
 .quota-observation-details > summary { cursor: pointer; white-space: nowrap; }

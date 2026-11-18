@@ -1553,7 +1553,7 @@ function reading(row) {
     fills: windows.map((cell) => byClass(cell, "quota-meter-fill")[0]?.style.values["--quota-fill"] || null),
     resets: [row.cells[4], row.cells[6]].map((cell) => {
       const reset = byClass(cell, "quota-window-reset")[0];
-      return reset ? { text: reset.textContent, title: reset.title || "" } : null;
+      return reset ? { text: reset.textContent, title: reset.title || byClass(cell, "quota-tooltip-details")[0]?.textContent || "" } : null;
     }),
   };
 }
@@ -1567,7 +1567,7 @@ function windowReading(cell) {
     observedTexts: byClass(cell, "quota-window-observed").map((node) => node.textContent),
     amount: byClass(cell, "quota-window-value")[0]?.textContent || null,
     fill: byClass(cell, "quota-meter-fill")[0]?.style.values["--quota-fill"] || null,
-    reset: reset ? { text: reset.textContent, title: reset.title || "" } : null,
+    reset: reset ? { text: reset.textContent, title: reset.title || byClass(cell, "quota-tooltip-details")[0]?.textContent || "" } : null,
   };
 }
 
@@ -2077,7 +2077,7 @@ function makeNode(tagName = "div") {
 }
 
 function findButtons(node) {
-  return (node.tagName === "BUTTON" ? [node] : []).concat(
+  return (node.className === "quota-account-remove" ? [node] : []).concat(
     node.children.flatMap((child) => findButtons(child))
   );
 }

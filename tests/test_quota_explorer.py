@@ -20,10 +20,11 @@ function node(tag = 'div') {
     querySelector(selector) { return selector === '.quota-sort-icon' ? this.children[0] : null; },
     setAttribute(k,v) { this.attributes[k] = String(v); }, getAttribute(k) { return this.attributes[k]; },
     addEventListener(k,f) { this.listeners[k] = f; }, click() { this.listeners.click?.(); },
+    contains(other) { return descendants(this).includes(other); },
     focus() { document.activeElement=this; this.parentNode?.listeners.focusin?.(); },
     querySelectorAll(selector) {
       if (selector === 'button[data-quota-sort]') return descendants(this).filter(c => c.tagName === 'BUTTON' && c.dataset.quotaSort);
-      if (selector === '.quota-reset-credit-count') return descendants(this).filter(c => c.className === 'quota-reset-credit-count');
+      if (selector === '[data-quota-tooltip-key]') return descendants(this).filter(c => c.dataset.quotaTooltipKey);
       if (selector.startsWith('.quota-observation-details')) return descendants(this).filter(c =>
         c !== this && c.className.split(/\s+/).includes('quota-observation-details') && (!selector.endsWith('[open]') || c.open));
       return this.children;
@@ -92,6 +93,23 @@ const restoredCreditRow=table.tBodies.flatMap(b=>b.children).find(r=>r.dataset.a
 assert.equal(document.activeElement,restoredCreditRow.cells[7].children[0]);
 assert.equal(restoredCreditRow.cells[7].children[1].hidden,true,'dismissed focused detail stays closed after redraw');
 document.activeElement=null;
+// Both informational columns share immediate hover and keyboard dismissal.
+for (const index of [6, 7]) {
+  const cell=restoredCreditRow.cells[index], trigger=cell.children[0], detail=cell.children[1];
+  assert.equal(trigger.title,undefined,'custom tooltip must not also show a delayed native title');
+  assert.equal(trigger.attributes['aria-describedby'],detail.id);
+  cell.listeners.mouseenter();
+  assert.equal(detail.hidden,false,'opens synchronously without a hover timer');
+  cell.listeners.mouseleave();
+  assert.equal(detail.hidden,true);
+  trigger.focus();
+  assert.equal(detail.hidden,false);
+  cell.listeners.keydown({key:'Escape'});
+  assert.equal(detail.hidden,true);
+  document.activeElement=null;
+}
+assert(restoredCreditRow.cells[6].children[1].textContent.includes(ui.formatDate(4102444800000)));
+assert(restoredCreditRow.cells[4].children[0].title,'5-hour column keeps its existing native tooltip');
 const missingPlan={...account('plan'), account_plan:null, reading_plan:null, credential_plan:null, plan_verification:'unverified'};
 ui.updateCodexQuotaReadings([{account_id:'plan',email:'plan@example.test',last_quota:{observed_at:'2026-02-01T00:00:00Z',plan:'promax',seven_day_used_pct:42}}]);
 const displayed=ui.quotaDisplayReading({key:'codex'},missingPlan);

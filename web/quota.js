@@ -453,8 +453,8 @@
     const history = qs("#quota-past-accounts");
     const rememberedExpanded = options.rememberedExpanded ?? (history ? !history.hidden : initialQuotaHistoryExpanded);
     const focusedObservation = document.activeElement?.closest?.(".quota-observation-details")?.dataset.observationKey;
-    const focusedResetCredit = document.activeElement?.dataset?.resetCreditKey;
-    const openResetCredit = table.querySelector?.('.quota-reset-credit-count[aria-expanded="true"]')?.dataset.resetCreditKey;
+    const focusedTooltip = document.activeElement?.dataset?.quotaTooltipKey;
+    const openTooltip = table.querySelector?.('[data-quota-tooltip-key][aria-expanded="true"]')?.dataset.quotaTooltipKey;
     const openObservations = new Set(Array.from(table.querySelectorAll?.(".quota-observation-details[open]") || [])
       .filter((node) => node.tagName === "DETAILS").map((node) => node.dataset.observationKey));
     // Keep recovery cards alive across snapshot redraws, including an in-flight check.
@@ -533,10 +533,10 @@
       }
     });
     if (focusedRecovery && table.contains?.(focusedRecovery)) focusedRecovery.focus?.({preventScroll:true});
-    if (focusedResetCredit || openResetCredit) {
-      Array.from(table.querySelectorAll?.(".quota-reset-credit-count") || []).forEach((button) => {
-        if (button.dataset.resetCreditKey === focusedResetCredit) button.restoreResetCreditFocus?.();
-        if (button.dataset.resetCreditKey === openResetCredit) button.openResetCredits?.();
+    if (focusedTooltip || openTooltip) {
+      Array.from(table.querySelectorAll?.("[data-quota-tooltip-key]") || []).forEach((button) => {
+        if (button.dataset.quotaTooltipKey === focusedTooltip) button.restoreQuotaTooltipFocus?.();
+        if (button.dataset.quotaTooltipKey === openTooltip) button.openQuotaTooltip?.();
       });
     }
     renderQuotaSignedOut(rateLimits);
@@ -1463,7 +1463,7 @@
     return row;
   }
 
-  let resetCreditsDetailId = 0;
+  let quotaTooltipId = 0;
 
   function quotaResetCreditsCell(provider, account) {
     const cell = document.createElement("td");
@@ -1478,15 +1478,11 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = "quota-reset-credit-count";
-    button.dataset.resetCreditKey = JSON.stringify([provider.key, account.account_id, account.account_label]);
+    button.dataset.quotaTooltipKey = JSON.stringify([provider.key, account.account_id, account.account_label, "credits"]);
     button.textContent = known ? `${count} 次` : "未知";
     button.setAttribute("aria-label", `reset 额度：${button.textContent}，查看到期时间`);
     const detail = document.createElement("div");
-    detail.className = "quota-reset-credit-details";
-    detail.id = `quota-reset-credit-detail-${++resetCreditsDetailId}`;
-    detail.setAttribute("role", "tooltip");
-    button.setAttribute("aria-describedby", detail.id);
-    button.setAttribute("aria-expanded", "false");
+    detail.className = "quota-tooltip-details";
     const line = (text) => {
       const node = document.createElement("p");
       node.textContent = text;
@@ -1517,6 +1513,14 @@
       line("可通过现有配额查询获取；未取得记录不代表 0 次。");
     }
     if (known && account.updated_at) line(`观测时间：${formatDate(account.updated_at)}`);
+    return bindQuotaTooltip(cell, button, detail);
+  }
+
+  function bindQuotaTooltip(cell, button, detail) {
+    detail.id = `quota-tooltip-${++quotaTooltipId}`;
+    detail.setAttribute("role", "tooltip");
+    button.setAttribute("aria-describedby", detail.id);
+    button.setAttribute("aria-expanded", "false");
     const popover = typeof detail.showPopover === "function";
     if (popover) detail.setAttribute("popover", "auto");
     else detail.hidden = true;
@@ -1537,7 +1541,7 @@
         const anchor = button.getBoundingClientRect();
         const box = detail.getBoundingClientRect();
         detail.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8))}px`;
-        detail.style.top = `${Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - box.height - 8))}px`;
+        detail.style.top = `${Math.max(8, Math.min(anchor.bottom, window.innerHeight - box.height - 8))}px`;
       } else detail.hidden = false;
       button.setAttribute("aria-expanded", "true");
     };
@@ -1547,8 +1551,8 @@
     cell.addEventListener("focusin", () => { if (!restoringFocus) show(); });
     cell.addEventListener("focusout", (event) => { if (!cell.contains(event.relatedTarget)) hide(); });
     button.addEventListener("click", show);
-    button.openResetCredits = show;
-    button.restoreResetCreditFocus = () => {
+    button.openQuotaTooltip = show;
+    button.restoreQuotaTooltipFocus = () => {
       restoringFocus = true;
       try { button.focus?.({preventScroll:true}); }
       finally { restoringFocus = false; }
@@ -1924,12 +1928,20 @@
     const renderedAtMs = Date.now();
     const resetEpoch = account[spec.reset];
     const resetState = quotaResetState(resetEpoch, renderedAtMs);
-    const reset = document.createElement("div");
-    reset.className = "quota-window-reset";
+    const tooltip = spec.key === "7d" && resetState !== "unknown";
+    const reset = document.createElement(tooltip ? "button" : "div");
+    reset.className = "quota-window-reset" + (tooltip ? " quota-reset-time-trigger" : "");
     reset.textContent = quotaPresence(account) === "remembered" && resetState === "unknown"
       ? "重置时间未知"
       : quotaResetText(resetEpoch, resetState, renderedAtMs);
-    if (resetState !== "unknown") {
+    if (tooltip) {
+      reset.type = "button";
+      reset.dataset.quotaTooltipKey = JSON.stringify([provider.key, account.account_id, account.account_label, spec.key]);
+      const detail = document.createElement("div");
+      detail.className = "quota-tooltip-details";
+      detail.textContent = resetText(resetEpoch, renderedAtMs);
+      return bindQuotaTooltip(cell, reset, detail);
+    } else if (resetState !== "unknown") {
       reset.title = resetText(resetEpoch, renderedAtMs);
     }
     cell.appendChild(reset);
