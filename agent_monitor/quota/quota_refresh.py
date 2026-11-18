@@ -684,7 +684,7 @@ def _safe_client_excerpt(value, secrets, *, truncated=False, limit=512):
                     value = value[:-size] + "[redacted truncated credential]"
                     break
         value = value.replace(secret, "[redacted]")
-    return diagnostics.safe_upstream_detail(value, limit=len(value) + 1 if limit is None else limit)
+    return diagnostics.safe_upstream_detail(value, limit=limit)
 
 
 if __name__ == "__main__":

@@ -482,6 +482,19 @@ class ProviderTests(unittest.TestCase):
                 self.assertLessEqual(len(facts["client_diagnostics"]), 512)
                 self.assertTrue(facts["client_diagnostics_truncated"])
 
+    def test_redaction_expansion_keeps_final_cause_before_display_limit(self):
+        for count in (1000, 10000):
+            with self.subTest(credential_lines=count):
+                log = "startup fixture context\n" + "token=x\n" * count + "TLS fixture final cause\n"
+                with self.assertRaises(quota_refresh.RefreshError) as caught:
+                    self.codex_cli(None, error={"code": -32603, "message": "fixture failure"}, client_log=log)
+                excerpt = caught.exception.failure["client_diagnostics"]
+                self.assertIn("startup fixture context", excerpt)
+                self.assertIn("TLS fixture final cause", excerpt)
+                self.assertNotIn("token=x", excerpt)
+                self.assertLessEqual(len(excerpt), 512)
+                self.assertTrue(caught.exception.failure["client_diagnostics_truncated"])
+
     def test_oversized_credential_line_is_dropped_at_both_capture_cuts(self):
         log = ("startup fixture context\nAuthorization: Bearer " + "unlisted-private-fragment-" * 5000
                + "\nTLS fixture final cause")
