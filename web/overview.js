@@ -5,6 +5,9 @@
 })(typeof window === "undefined" ? globalThis : window, function createOverview(dependencies) {
   const { platform, assetVersion, qs, qsa, params, getRange, api, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal } = dependencies;
   const { window, document } = platform;
+  let trendMetric = "cost";
+  let latestTrend = null;
+
   function renderOverview(data, selectedRange) {
     let firstData = qs('#initial-data-notice');
     const missingData = data.sync?.coverage?.admitted === 0 && !data.rollup_coverage?.earliest_date && !data.range?.total_tokens && !data.range?.cost_usd;
@@ -31,57 +34,8 @@
     // charts and sync panel rendered — turning "one card is missing" into a
     // blank page, which is exactly the skew initOverview already handles.
     renderRangeCost(data.range, selectedRange || getRange(), data.rollup_coverage);
-    const costHistory = data.cost_over_time || legacyCostHistory(data.daily_cost_30d || []);
-    const costGranularity = data.cost_over_time_granularity || "day";
-    renderChartTable("daily-cost-data", ["时间", ...costHistory.columns.map((column) => `${agentLabel(column)} · USD`)],
-      costHistory.rows.map((row) => [row.x, ...costHistory.columns.map((column) => costTableReading(row.values[column], row.cost_coverage?.[column]))]));
-    chart("dailyCost", "daily-cost-chart", {
-      type: "line",
-      data: {
-        labels: costHistory.rows.map((row) => row.x),
-        datasets: costHistory.columns.map((column, index) =>
-          dataset(agentLabel(column), costHistory.rows.map((row) => row.values[column]), index, {
-            agentId: column,
-            fill: false,
-            spanGaps: true,
-          })
-        ),
-      },
-      options: chartOptions({ plugins: { tooltip: { callbacks: {
-        label: (context) => `${context.dataset.label}: ${costReading(context.raw, costHistory.rows[context.dataIndex].cost_coverage?.[costHistory.columns[context.datasetIndex]])}`,
-      } } }, scales: { y: { ticks: { callback: (value) => chartMoneyTick(value) } }, x: { ticks: { maxTicksLimit: 7,
-        callback(value) {
-          const label = String(this.getLabelForValue(value));
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(label)) return label;
-          const years = new Set(this.chart.data.labels.map((date) => String(date).slice(0, 4)));
-          return years.size > 1 ? label.replaceAll("-", "/") : label.slice(5).replace("-", "/");
-        },
-      } } } }),
-    });
-    const costMeta = qs("#cost-over-time-meta");
-    if (costMeta) {
-      costMeta.textContent = `${rangeSummaryLabel(selectedRange || getRange())} · ${granularityLabel(costGranularity)}`;
-    }
-    const coverage = qs("#cost-over-time-coverage");
-    if (coverage) {
-      const earliest = data.rollup_coverage && data.rollup_coverage.earliest_date;
-      if (earliest && data.rollup_coverage.partial_before_range) {
-        coverage.hidden = false;
-        coverage.textContent = `历史自 ${earliest} 起累积；更早未采集。`;
-      } else {
-        coverage.hidden = true;
-        coverage.textContent = "";
-      }
-    }
-    const costLink = qs("#cost-over-time-link");
-    if (costLink) {
-      const url = new URL("/explore", window.location.origin);
-      url.searchParams.set("range", selectedRange || getRange());
-      url.searchParams.set("x", costGranularity);
-      url.searchParams.set("group", "agent");
-      url.searchParams.set("metric", "cost");
-      costLink.href = url.pathname + url.search;
-    }
+    latestTrend = { data, selectedRange: selectedRange || getRange() };
+    renderTrend();
 
     [["#top-projects-link", "week"], ["#model-mix-link", "month"]].forEach(([selector, key]) => {
       const link = qs(selector), dates = data.attribution_windows?.[key];
@@ -259,7 +213,89 @@
     }
   }
 
+  function renderTrend() {
+    if (!latestTrend) return;
+    const { data, selectedRange } = latestTrend;
+    if (trendMetric === "total" && !data.tokens_over_time) trendMetric = "cost";
+    const tokens = trendMetric === "total";
+    const costHistory = tokens ? data.tokens_over_time : data.cost_over_time || legacyCostHistory(data.daily_cost_30d || []);
+    const title = tokens ? "总 Token 趋势" : "成本趋势";
+    const heading = qs("#cost-trend-title");
+    if (heading) heading.textContent = title;
+    qs("#daily-cost-chart")?.setAttribute("aria-label", `${title}；完整读数见下方数据表`);
+    qs("#daily-cost-data .chart-data-scroll")?.setAttribute("aria-label", `${title}数据`);
+    const note = qs("#trend-token-note");
+    if (note) note.hidden = !tokens;
+    const costNotes = qs("#trend-cost-notes");
+    if (costNotes) costNotes.hidden = tokens;
+    qsa("[data-trend-metric]").forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.trendMetric === trendMetric));
+      button.disabled = button.dataset.trendMetric === "total" && !data.tokens_over_time;
+    });
+    if (!costHistory) return;
+    const costGranularity = data.cost_over_time_granularity || "day";
+    renderChartTable("daily-cost-data", ["时间", ...costHistory.columns.map((column) => `${agentLabel(column)} · ${tokens ? "tokens" : "USD"}`)],
+      costHistory.rows.map((row) => [row.x, ...costHistory.columns.map((column) => tokens ? chartReading(row.values[column], "tokens") : costTableReading(row.values[column], row.cost_coverage?.[column]))]));
+    chart("dailyCost", "daily-cost-chart", {
+      type: "line",
+      data: {
+        labels: costHistory.rows.map((row) => row.x),
+        datasets: costHistory.columns.map((column, index) =>
+          dataset(agentLabel(column), costHistory.rows.map((row) => row.values[column]), index, {
+            agentId: column,
+            fill: false,
+            spanGaps: true,
+          })
+        ),
+      },
+      options: chartOptions({ plugins: { tooltip: { callbacks: {
+        label: (context) => `${context.dataset.label}: ${tokens ? chartReading(context.raw, "tokens") : costReading(context.raw, costHistory.rows[context.dataIndex].cost_coverage?.[costHistory.columns[context.datasetIndex]])}`,
+      } } }, scales: { y: { ticks: { callback: (value) => tokens ? compactNumber(value) : chartMoneyTick(value) } }, x: { ticks: { maxTicksLimit: 7,
+        callback(value) {
+          const label = String(this.getLabelForValue(value));
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(label)) return label;
+          const years = new Set(this.chart.data.labels.map((date) => String(date).slice(0, 4)));
+          return years.size > 1 ? label.replaceAll("-", "/") : label.slice(5).replace("-", "/");
+        },
+      } } } }),
+    });
+    const costMeta = qs("#cost-over-time-meta");
+    if (costMeta) {
+      costMeta.textContent = `${rangeSummaryLabel(selectedRange || getRange())} · ${granularityLabel(costGranularity)}`;
+    }
+    const coverage = qs("#cost-over-time-coverage");
+    if (coverage) {
+      const earliest = data.rollup_coverage && data.rollup_coverage.earliest_date;
+      if (earliest && data.rollup_coverage.partial_before_range) {
+        coverage.hidden = false;
+        coverage.textContent = `历史自 ${earliest} 起累积；更早未采集。`;
+      } else {
+        coverage.hidden = true;
+        coverage.textContent = "";
+      }
+    }
+    const costLink = qs("#cost-over-time-link");
+    if (costLink) {
+      const url = new URL("/explore", window.location.origin);
+      url.searchParams.set("range", selectedRange || getRange());
+      url.searchParams.set("x", costGranularity);
+      url.searchParams.set("group", "agent");
+      url.searchParams.set("metric", trendMetric);
+      costLink.textContent = tokens ? "按来源分析 Token" : "按来源分析成本";
+      costLink.href = url.pathname + url.search;
+    }
+
+  }
+
   async function initOverview() {
+    trendMetric = "cost";
+    latestTrend = null;
+    qsa("[data-trend-metric]").forEach(button => {
+      button.addEventListener("click", () => {
+        trendMetric = button.dataset.trendMetric;
+        renderTrend();
+      });
+    });
     const initializationCurrent = pageScope();
     await dependencies.runtimeContext?.();
     if (!initializationCurrent()) return;

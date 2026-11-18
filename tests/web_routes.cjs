@@ -44,7 +44,13 @@ function fixture() {
   const requests = [], errors = [], charts = [], intervals = new Set(), windowEvents = new Map(), documentEvents = new Map();
   const status = {instance_id: 'fixture-server', syncing: false, machines: [], coverage: {admitted: 0, declared: 0}};
   const overview = {today: {cost_usd: 2}, week: {cost_usd: 3}, range: {cost_usd: 4},
-    cost_over_time: {columns: [], rows: []}, top_projects_week: [], model_mix_month: [],
+    cost_over_time: {columns: ['codex', 'claude-code'], rows: [
+      {x: '2026-11-17', values: {codex: 2, 'claude-code': null}},
+      {x: '2026-11-18', values: {codex: 0, 'claude-code': 3}}]},
+    tokens_over_time: {columns: ['codex', 'claude-code'], rows: [
+      {x: '2026-11-17', values: {codex: 1600, 'claude-code': 800}},
+      {x: '2026-11-18', values: {codex: 0, 'claude-code': 2400}}]},
+    top_projects_week: [], model_mix_month: [],
     rate_limits: {}, sync: status};
   const payloads = {
     '/api/timezone': {timezone: 'UTC'}, '/api/overview': overview,
@@ -92,7 +98,8 @@ function fixture() {
     createElement: element, createTextNode: text => Object.assign(element('#text'), {textContent: text}),
     querySelector: selector => selector === 'main' ? active.main : active.nodes.get(selector) || null,
     querySelectorAll: selector => selector === '[data-filter-control]'
-      ? [...active.nodes.values()].filter(node => node.dataset.filterControl) : [],
+      ? [...active.nodes.values()].filter(node => node.dataset.filterControl)
+      : selector === '[data-trend-metric]' ? [...active.nodes.values()].filter(node => node.dataset.trendMetric) : [],
   };
   const window = {
     location: new URL('http://fixture/'),
@@ -253,6 +260,33 @@ async function run() {
   assert.equal(ui.qs('#today-cost').textContent, '$2.00');
   assert.equal(ui.qs('#range-label').textContent, '近 7 天成本');
   assert.equal(env.requests.find(url => url.pathname === '/api/overview').searchParams.get('range'), '7d');
+  const trendButtons = ui.qsa('[data-trend-metric]');
+  assert.equal(trendButtons.length, 2);
+  const [costButton, tokenButton] = trendButtons;
+  const requestsBeforeSwitch = env.requests.length;
+  tokenButton.listeners.click();
+  assert.equal(ui.qs('#cost-trend-title').textContent, '总 Token 趋势');
+  assert.equal(tokenButton['aria-pressed'], 'true');
+  assert.equal(costButton['aria-pressed'], 'false');
+  let trend = env.window.ttWebCharts.dailyCost.config;
+  assert.deepEqual(trend.data.datasets.map(series => series.data), [[1600, 0], [800, 2400]]);
+  assert.equal(trend.options.scales.y.ticks.callback(1600), '1.6K');
+  assert.equal(trend.options.plugins.tooltip.callbacks.label({dataset: {label: 'Codex'}, raw: 1600}), 'Codex: 1,600 tokens');
+  assert.match(ui.qs('#cost-over-time-link').href, /metric=total/);
+  assert.equal(ui.qs('#trend-cost-notes').hidden, true);
+  assert.equal(ui.qs('#trend-token-note').hidden, false);
+  // A new range/refresh must keep the chosen metric and use its new data.
+  env.overview.tokens_over_time.rows[0].values.codex = 3200;
+  await [...env.intervals][0].handler();
+  assert.equal(env.window.ttWebCharts.dailyCost.config.data.datasets[0].data[0], 3200);
+  costButton.listeners.click();
+  assert.equal(ui.qs('#cost-trend-title').textContent, '成本趋势');
+  trend = env.window.ttWebCharts.dailyCost.config;
+  assert.deepEqual(trend.data.datasets.map(series => series.data), [[2, 0], [null, 3]]);
+  assert.match(trend.options.scales.y.ticks.callback(2), /^\$/);
+  assert.equal(ui.qs('#trend-cost-notes').hidden, false);
+  assert.match(ui.qs('#cost-over-time-link').href, /metric=cost/);
+  assert.equal(env.requests.length, requestsBeforeSwitch + 2, 'only the periodic overview/account reads may request data');
   assert.equal(env.intervals.size, 1);
   assert.equal([...env.intervals][0].ms, 30000);
   const firstOverviewTimer = [...env.intervals][0];

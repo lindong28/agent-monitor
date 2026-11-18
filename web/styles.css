@@ -483,6 +483,15 @@ button:disabled {
 .overview-trend .panel-head {
   flex-wrap: wrap;
 }
+.trend-metric-switch {
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+.trend-metric-switch [aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
 
 @media (max-width: 900px) {
   .overview-cost .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

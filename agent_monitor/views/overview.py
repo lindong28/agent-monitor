@@ -65,6 +65,9 @@ class OverviewView:
                 )
             ),
             "cost_over_time": cost_over_time,
+            "tokens_over_time": self.rollups.query_pivot(
+                cost_granularity, "agent", "total", time_range=rollup_range_window
+            ),
             "cost_over_time_granularity": cost_granularity,
             "rollup_coverage": self.coverage(rollup_range_window),
             "top_projects_week": self.top_projects(week_window, limit=5),

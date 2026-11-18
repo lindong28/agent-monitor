@@ -505,11 +505,39 @@ class OverviewApiShapeTests(unittest.TestCase):
             payload = server.create_views().overview.read({"range": ["1y"]})
 
         self.assertIs(payload["cost_over_time"], expected)
+        self.assertIs(payload["tokens_over_time"], expected)
+        self.assertIn(
+            mock.call("week", "agent", "total", time_range=mock.ANY),
+            query_pivot.call_args_list,
+        )
         self.assertEqual(payload["cost_over_time_granularity"], "week")
         self.assertIn(
             mock.call("week", "agent", "cost", time_range=mock.ANY),
             query_pivot.call_args_list,
         )
+
+    def test_token_trend_uses_all_token_categories_even_without_known_cost(self):
+        rows = [dict(date="2026-11-18", agent_id=agent, project="fixture", model="fixture",
+                     input_tokens=10, output_tokens=2, cache_read_tokens=3, cache_creation_tokens=1,
+                     message_count=1, entry_count=1, cost_usd=0, cost_known_count=known,
+                     _totals_source="project_independent_usage", _usage_schema=2)
+                for agent, known in [("codex", 0), ("codex", 1), ("claude-code", 0)]]
+        for range_value, granularity in [("7d", "day"), ("1y", "week"), ("all", "month")]:
+            with self.subTest(range=range_value), mock.patch(
+                "agent_monitor.accounting.rollup._daily_rows", return_value=rows
+            ):
+                payload = server.create_views().overview.read({"range": [range_value]})
+            trend = payload["tokens_over_time"]
+            totals = {agent: sum(row["values"][agent] for row in trend["rows"])
+                      for agent in trend["columns"]}
+            self.assertEqual(totals, {"codex": 32, "claude-code": 16})
+            self.assertEqual(sum(totals.values()), payload["range"]["tokens"])
+            self.assertEqual(payload["cost_over_time_granularity"], granularity)
+            self.assertEqual([r["x"] for r in trend["rows"]],
+                             [r["x"] for r in payload["cost_over_time"]["rows"]])
+        with mock.patch("agent_monitor.accounting.rollup._daily_rows", return_value=[]):
+            payload = server.create_views().overview.read({"range": ["7d"]})
+        self.assertEqual(payload["tokens_over_time"]["rows"], [])
 
     def test_overview_includes_rollup_coverage_for_long_ranges(self):
         with (

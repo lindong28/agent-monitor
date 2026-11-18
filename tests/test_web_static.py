@@ -431,7 +431,7 @@ const ui = require("./web/app.js")();
 ui.callback = ui.chartMoneyTick;
 const configs = {};
 const createOverview = require("./web/overview.js");
-createOverview({platform: {window, document}, qs: () => ({}), money: ui.money,
+createOverview({platform: {window, document}, qs: () => ({setAttribute() {}}), qsa: () => [], money: ui.money,
   integer: ui.integer, chart: (key, id, config) => { configs[key] = config; },
   chartOptions: ui.chartOptions, dataset: ui.dataset, chartMoneyTick: ui.chartMoneyTick,
   barValueLabels: ui.barValueLabels, compactNumber: ui.compactNumber,
