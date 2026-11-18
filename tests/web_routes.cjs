@@ -265,7 +265,7 @@ async function run() {
   const [costButton, tokenButton] = trendButtons;
   const requestsBeforeSwitch = env.requests.length;
   tokenButton.listeners.click();
-  assert.equal(ui.qs('#cost-trend-title').textContent, '总 Token 趋势');
+  assert.match(ui.qs('#daily-cost-chart').getAttribute('aria-label'), /Token/);
   assert.equal(tokenButton['aria-pressed'], 'true');
   assert.equal(costButton['aria-pressed'], 'false');
   let trend = env.window.ttWebCharts.dailyCost.config;
@@ -280,7 +280,9 @@ async function run() {
   await [...env.intervals][0].handler();
   assert.equal(env.window.ttWebCharts.dailyCost.config.data.datasets[0].data[0], 3200);
   costButton.listeners.click();
-  assert.equal(ui.qs('#cost-trend-title').textContent, '成本趋势');
+  assert.match(ui.qs('#daily-cost-chart').getAttribute('aria-label'), /成本/);
+  assert.equal(costButton['aria-pressed'], 'true');
+  assert.equal(tokenButton['aria-pressed'], 'false');
   trend = env.window.ttWebCharts.dailyCost.config;
   assert.deepEqual(trend.data.datasets.map(series => series.data), [[2, 0], [null, 3]]);
   assert.match(trend.options.scales.y.ticks.callback(2), /^\$/);

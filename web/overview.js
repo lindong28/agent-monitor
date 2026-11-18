@@ -219,9 +219,7 @@
     if (trendMetric === "total" && !data.tokens_over_time) trendMetric = "cost";
     const tokens = trendMetric === "total";
     const costHistory = tokens ? data.tokens_over_time : data.cost_over_time || legacyCostHistory(data.daily_cost_30d || []);
-    const title = tokens ? "总 Token 趋势" : "成本趋势";
-    const heading = qs("#cost-trend-title");
-    if (heading) heading.textContent = title;
+    const title = tokens ? "Token 趋势" : "成本趋势";
     qs("#daily-cost-chart")?.setAttribute("aria-label", `${title}；完整读数见下方数据表`);
     qs("#daily-cost-data .chart-data-scroll")?.setAttribute("aria-label", `${title}数据`);
     const note = qs("#trend-token-note");

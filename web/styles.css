@@ -480,6 +480,13 @@ button:disabled {
 .overview-cost .kpi-card:first-child { padding-left: 0; }
 .overview-cost .kpi-card + .kpi-card { border-left: 1px solid var(--line); }
 
+.overview-trend .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 .overview-trend .panel-head {
   flex-wrap: wrap;
 }
