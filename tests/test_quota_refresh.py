@@ -467,6 +467,32 @@ class ProviderTests(unittest.TestCase):
                         changed_account="another-workspace", explicit_home=explicit)
                 self.assertEqual(caught.exception.failure["kind"], "account_mismatch")
 
+    def test_noisy_cli_failure_retains_start_and_final_cause_without_credentials(self):
+        for padding in (2000, 90000):
+            with self.subTest(stderr_padding=padding):
+                log = ("startup fixture context\n" + "warning fixture\n" * (padding // 16)
+                       + "Authorization: Bearer fixture-sensitive-value\nTLS fixture final cause\n")
+                with self.assertRaises(quota_refresh.RefreshError) as caught:
+                    self.codex_cli(None, error={"code": -32603, "message": "fixture RPC failure"},
+                                   client_log=log, client_info={"userAgent": "fixture/1.0"})
+                facts = caught.exception.failure
+                self.assertIn("startup fixture context", facts["client_diagnostics"])
+                self.assertIn("TLS fixture final cause", facts["client_diagnostics"])
+                self.assertNotIn("fixture-sensitive-value", facts["client_diagnostics"])
+                self.assertLessEqual(len(facts["client_diagnostics"]), 512)
+                self.assertTrue(facts["client_diagnostics_truncated"])
+
+    def test_oversized_credential_line_is_dropped_at_both_capture_cuts(self):
+        log = ("startup fixture context\nAuthorization: Bearer " + "unlisted-private-fragment-" * 5000
+               + "\nTLS fixture final cause")
+        with self.assertRaises(quota_refresh.RefreshError) as caught:
+            self.codex_cli(None, error={"code": -32603, "message": "fixture failure"}, client_log=log)
+        excerpt = caught.exception.failure["client_diagnostics"]
+        self.assertIn("startup fixture context", excerpt)
+        self.assertIn("TLS fixture final cause", excerpt)
+        self.assertNotIn("unlisted-private", excerpt)
+        self.assertTrue(caught.exception.failure["client_diagnostics_truncated"])
+
     def test_managed_home_is_passed_exactly_and_identity_checked_before_spawn(self):
         import base64
         home = self.root / "registry/alpha/codex"
@@ -749,6 +775,59 @@ class ProviderTests(unittest.TestCase):
         for provider in ("claude", "codex"):
             self.assertEqual(written[provider]["refresh_error"], "Quota request timed out")
             self.assertIs(written[provider]["signed_out"], False)
+
+    def test_scheduled_passive_cache_save_keeps_newer_observation_and_active_outcome(self):
+        from parsers.codex_profiles import SessionLinks
+        account = accounts.Account("fixture-workspace", "fixture@example.test", "pro")
+        cache = self.root / "state/quota_snapshot.json"
+        links = SessionLinks()
+        for provider in ("claude", "codex"):
+            for error in (None, "previous active query failed"):
+                with self.subTest(provider=provider, previous_error=error):
+                    newer = quota_service.rate_limit_block(RateLimits(8, None, 41, None,
+                        updated_at="2026-11-18T13:00:00+00:00"), account)
+                    newer.update(refresh_error=error, query_state="succeeded" if error is None else "failed",
+                        refresh_attempted_at="2026-11-18T13:00:00+00:00", signed_out=False)
+                    passive = quota_service.rate_limit_block(RateLimits(20, None, 60, None,
+                        updated_at="2026-11-18T12:00:00+00:00"), account)
+                    self.assertNotIn("refresh_error", passive)
+                    quota_service.save_cache(cache, {provider: newer}, session_links=links)
+                    quota_service.save_cache(cache, {provider: passive}, session_links=links)
+                    saved = quota_service.read_cache(cache)[provider]
+                    for field in ("updated_at", "five_hour_pct", "seven_day_pct", "refresh_error",
+                                  "query_state", "refresh_attempted_at"):
+                        self.assertEqual(saved[field], newer[field], field)
+
+    def test_scheduled_collection_continues_after_a_newer_recovery_cache_write(self):
+        from agent_monitor.runtime import hub
+        from parsers.codex_profiles import SessionLinks
+        account = accounts.Account("fixture-workspace", "fixture@example.test", "pro")
+        older = RateLimits(20, None, 60, None, updated_at="2026-11-18T12:00:00+00:00")
+        newer = quota_service.rate_limit_block(RateLimits(8, None, 41, None,
+            updated_at="2026-11-18T13:00:00+00:00"), account)
+        newer.update(refresh_error=None, query_state="succeeded", signed_out=False)
+        save = quota_service.save_cache
+        injected = False
+        def interleaved_save(path, result, **options):
+            nonlocal injected
+            if not injected:
+                injected = True
+                save(path, {provider: dict(newer) for provider in ("claude", "codex")}, **options)
+            return save(path, result, **options)
+        with mock.patch.object(hub, "native_quota_due", return_value=False), \
+                mock.patch.object(quota_service.accounts, "claude_account", return_value=account), \
+                mock.patch.object(quota_service.accounts, "codex_account", return_value=account), \
+                mock.patch.object(quota_service.claude_status, "load_rate_limits", return_value=older), \
+                mock.patch.object(quota_service.codex, "load_rate_limits", return_value=older), \
+                mock.patch.object(quota_service, "managed_codex_rate_limits", return_value=[]), \
+                mock.patch.object(quota_service, "save_cache", side_effect=interleaved_save), \
+                mock.patch.object(quota_refresh, "load_rate_limits", side_effect=AssertionError("no active native query")):
+            result = quota_service.rate_limits(refresh=True, scheduled=True, root=self.root)
+        self.assertEqual(set(result), {"claude", "codex"})
+        saved = quota_service.read_cache(self.root / "state/quota_snapshot.json")
+        for provider in ("claude", "codex"):
+            self.assertEqual(saved[provider]["updated_at"], newer["updated_at"])
+            self.assertEqual(saved[provider]["query_state"], "succeeded")
 
     def test_no_account_is_a_state_rather_than_an_error(self):
         """Not signing a machine into a provider is a choice, not a fault.

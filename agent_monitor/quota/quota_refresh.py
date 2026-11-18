@@ -529,12 +529,19 @@ def _codex(account, *, recovery=None):
     if process.stderr is not None:
         selector.register(process.stderr, selectors.EVENT_READ)
     client_output = bytearray()
+    client_tail = bytearray()
     client_output_truncated = False
     def retain_client_output(chunk):
         nonlocal client_output_truncated
-        available = 65536 - len(client_output)
-        client_output.extend(chunk[:available])
-        client_output_truncated |= len(chunk) > available
+        if client_output_truncated:
+            client_tail.extend(chunk)
+            del client_tail[:-32768]
+        else:
+            client_output.extend(chunk)
+            if len(client_output) > 65536:
+                client_tail.extend(client_output[-32768:])
+                del client_output[32768:]
+                client_output_truncated = True
     buffer = b""
     deadline = time.monotonic() + CODEX_RPC_SECONDS
 
@@ -634,17 +641,30 @@ def _codex(account, *, recovery=None):
                     break
                 retain_client_output(chunk)
             process.stderr.close()
-            if (failed is not None or account.get("renew_auth")) and client_output:
-                excerpt = _safe_client_excerpt(
-                    client_output.decode(errors="replace"),
+            if (failed is not None or account.get("renew_auth")) and (client_output or client_tail):
+                captured = bytes(client_output)
+                if client_output_truncated:
+                    # Discard cut lines: their header/URL context may have held
+                    # the only clue needed by credential redaction.
+                    marker = b"\n[stderr middle omitted]\n"
+                    captured = captured[:-len(marker)]
+                    head = captured.rpartition(b"\n")[0] if b"\n" in captured else b""
+                    tail = bytes(client_tail).partition(b"\n")[2]
+                    captured = head + marker + tail
+                safe_output = _safe_client_excerpt(
+                    captured.decode(errors="replace"),
                     redactions + codex_quota.credential_secrets(auth_path),
-                    truncated=client_output_truncated, limit=513)
+                    limit=None)
+                excerpt = safe_output
+                if len(excerpt) > 512:
+                    marker = " [middle omitted] "
+                    excerpt = excerpt[:128] + marker + excerpt[-(512 - 128 - len(marker)):]
                 if account.get("renew_auth") and recovery is not None:
-                    recovery["client_diagnostics"] = excerpt[:512]
+                    recovery["client_diagnostics"] = excerpt
                 if failed is not None:
                     failed.failure = {**diagnostics.failure_details(failed),
-                        "client_diagnostics": excerpt[:512],
-                        "client_diagnostics_truncated": client_output_truncated or len(excerpt) > 512}
+                        "client_diagnostics": excerpt,
+                        "client_diagnostics_truncated": client_output_truncated or len(safe_output) > 512}
         if failed is not None and isinstance(client_info, dict) and isinstance(client_info.get("userAgent"), str):
             failed.failure = {**diagnostics.failure_details(failed), "client_version": _safe_client_excerpt(
                 client_info["userAgent"], redactions, limit=256)}
@@ -664,7 +684,7 @@ def _safe_client_excerpt(value, secrets, *, truncated=False, limit=512):
                     value = value[:-size] + "[redacted truncated credential]"
                     break
         value = value.replace(secret, "[redacted]")
-    return diagnostics.safe_upstream_detail(value, limit=limit)
+    return diagnostics.safe_upstream_detail(value, limit=len(value) + 1 if limit is None else limit)
 
 
 if __name__ == "__main__":

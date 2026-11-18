@@ -425,17 +425,20 @@ def save_cache(cache_path, result, *, session_links=None):
                 # `signed_out` forward under the new error, so a machine
                 # that timed out once went on being republished as "not
                 # signed in" every round while its error was dropped.
-                previous[provider] = {
-                    **(_with_credential_plan(old, block) if provider == "codex" else old),
-                    "refresh_error": block["refresh_error"],
-                    "signed_out": block.get("signed_out", False),
-                    "refresh_failure": block.get("refresh_failure"),
-                    "refresh_pause": block.get("refresh_pause"),
-                    "query_state": block.get("query_state"),
-                    "refresh_skip": block.get("refresh_skip"),
-                    "refresh_attempted_at": block.get("refresh_attempted_at"),
-                    "subscription_confirmation": block.get("subscription_confirmation"),
-                }
+                previous[provider] = _with_credential_plan(old, block) if provider == "codex" else dict(old)
+                # A scheduled pass can contain only an older passive reading.
+                # Absence of refresh_error means no active outcome to replace.
+                if "refresh_error" in block:
+                    previous[provider].update({
+                        "refresh_error": block["refresh_error"],
+                        "signed_out": block.get("signed_out", False),
+                        "refresh_failure": block.get("refresh_failure"),
+                        "refresh_pause": block.get("refresh_pause"),
+                        "query_state": block.get("query_state"),
+                        "refresh_skip": block.get("refresh_skip"),
+                        "refresh_attempted_at": block.get("refresh_attempted_at"),
+                        "subscription_confirmation": block.get("subscription_confirmation"),
+                    })
             if provider == "codex" and block is not None and ("managed_accounts" in block or "managed_accounts" in (old or {})):
                 managed = _merge_managed_accounts(
                     (old or {}).get("managed_accounts"), block.get("managed_accounts")

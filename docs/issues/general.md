@@ -14,6 +14,10 @@ Acceptance used isolated child processes with native and explicit credential hom
 
 Continuation: when this generic failure recurs, use the saved client/bridge evidence and applicable upstream documentation to decide whether a specific safe automatic handler is warranted. If the client still supplies no causal detail, report that remaining uncertainty and preserve the existing bounded recovery path; do not infer login failure, change egress, or add automatic retries from `-32603` alone. No additional live provider probe is required while the account is working.
 
+On 2026-11-18 the MacBook paused again after the same two-opportunity transport failure. Its saved stderr prefix contained only startup configuration warnings. A separately approved recovery for the bound account succeeded and saved a new active observation through the original route. New captures retain bounded beginning and final output, and Overview links directly to the current machine recovery card; see [the decision](../adr/20261118-4c9a-quota-recovery-entry-and-diagnostics.md). These changes improve access and evidence, without establishing the transport cause or adding retries.
+
+Checking normal continuation also exposed a local collector failure: `save_cache` indexed `refresh_error` when merging an older passive reading with a newer saved observation. A passive reading intentionally omits that field because no active query ran. The merge now preserves the saved active outcome in that case, while retaining existing active-failure updates and managed-account merging. Isolated regression checks cover both providers, prior success/failure, and a newer recovery write interleaved before a scheduled collection save. A restored one-time query alone does not establish subsequent scheduler success; deployed collection results remain a separate check.
+
 ## ISSUE-RECOVERY-20261028-8c27 — Legacy resume can clear the shared pause
 
 Status: open. Owner: agent-monitor backend maintenance. Priority: review before changing recovery admission.

@@ -7,6 +7,59 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class QuotaCurrentStateTests(unittest.TestCase):
+    def test_current_pause_link_opens_one_read_only_machine_card_without_history(self):
+        script = r"""
+const assert=require('node:assert/strict');
+(async()=>{
+  function element(tag) {
+    let text='';
+    return {tag,children:[],dataset:{},listeners:{},style:{},hidden:false,
+      set textContent(v){text=String(v);this.children=[];},
+      get textContent(){return text+this.children.map(c=>c.textContent).join('');},
+      append(...c){this.children.push(...c);},appendChild(c){this.children.push(c);return c;},
+      replaceChildren(...c){text='';this.children=c;},setAttribute(){},
+      addEventListener(k,f){this.listeners[k]=f;},scrollIntoView(){},focus(){}};
+  }
+  const flatten=n=>[n,...n.children.flatMap(flatten)];
+  const table=element('table'),location=new URL('http://fixture/'),calls=[],cleanup=[];
+  let hold=false;
+  const account={account_state:'known',account_id:'a',account_label:'one@example.test',
+    machines:['held machine','clear'],updated_at:'2026-11-18T00:00:00Z'};
+  const ui=require('./web/quota.js')({qs:s=>s==='#quota-diagnostic-table'?table:null,
+    formatDate:String,fmtAbs:String,collectionUrl:hash=>'/collection?return=%2F'+hash,
+    platform:{document:{createElement:element,dispatchEvent(){}},
+      window:{location,AgentMonitor:{onPageCleanup:f=>cleanup.push(f)}},fetch:async(url,options)=>{
+        calls.push({url,options});
+        if(hold)await new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));
+        return {ok:true,json:async()=>({machine:'held machine',
+          observed_at:'2026-11-18T00:00:00Z',pause:{id:'current'},active:null,account:{}})};
+      }}});
+  ui.updateQuotaMachineState('held machine',{machine:'held machine',observed_at:account.updated_at,pause:{id:'current'},active:null});
+  ui.updateQuotaMachineState('clear',{machine:'clear',observed_at:account.updated_at,pause:null,active:null});
+  const cell=ui.quotaUpdatedCell({key:'codex'},account,false,ui.quotaRefreshNotice({key:'codex'},account));
+  const links=flatten(cell).filter(n=>n.tag==='a');
+  assert.equal(links.length,1);assert.match(links[0].textContent,/held machine.*恢复/);
+  const target=new URL(links[0].href,'http://fixture');
+  assert.equal(target.pathname,'/collection');assert.equal(target.searchParams.get('return'),'/');
+  location.hash=target.hash;
+  const data={codex:{accounts:[account]}};
+  ui.renderQuotaDiagnostics(data);
+  await new Promise(r=>setImmediate(r));
+  const panel=flatten(table).find(n=>n.className==='quota-recovery-panel');
+  assert(panel,'current protection must be reachable without a historical failure row');
+  assert.equal(calls.length,1);assert.equal(calls[0].options.method,undefined);
+  assert.equal(new URL(calls[0].url,'http://fixture').searchParams.get('machine'),'held machine');
+  ui.renderQuotaDiagnostics(data);
+  assert.equal(flatten(table).find(n=>n.className==='quota-recovery-panel'),panel);
+  assert.equal(calls.length,1,'snapshot refresh must not restart checks or discard the card');
+  hold=true;const pending=panel.refresh();await new Promise(r=>setImmediate(r));
+  cleanup.forEach(f=>f());await pending;assert(calls[1].options.signal.aborted);
+  console.log('current machine link; no history required; one GET; card retained; page cancellation');
+})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+        result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_read_only_refresh_races_failures_and_page_lifetime(self):
         script = r"""
 const assert = require('assert');

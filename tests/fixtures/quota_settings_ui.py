@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--artifacts', type=Path, required=True)
     parser.add_argument('--vendor', type=Path, required=True)
     parser.add_argument('--automatic-egress', action='store_true')
+    parser.add_argument('--paused-recovery', action='store_true')
     args = parser.parse_args()
     sys.addaudithook(source_guard)
     try:
@@ -41,6 +42,23 @@ def main():
         (folder / 'codex').mkdir()
     profile('alpha'); profile('beta')
     counts = {'previews': 0, 'writes': 0, 'provider_requests': 0}
+    if args.paused_recovery:
+        from agent_monitor.accounts.upstream_controls import Controls
+        controls = Controls(args.artifacts / 'state/upstream_controls')
+        lease = controls.acquire('codex')
+        try:
+            lease.pause('quotaRefreshFailed', failure={'stage': 'quota_read', 'kind': 'rpc_error',
+                'rpc_code': -32603, 'client_diagnostics': 'fixture startup [middle omitted] TLS fixture final cause',
+                'client_diagnostics_truncated': True, 'client_version': 'fixture/1.0'})
+        finally:
+            lease.close()
+        def recovery_status(selected, **_options):
+            counts['status_reads'] = counts.get('status_reads', 0) + 1
+            state = controls.read('codex')
+            return {'machine': selected.name, 'observed_at': '2026-11-18T00:00:00Z',
+                'pause': state.get('pause'), 'active': state.get('active'),
+                'account': {'account_id': 'workspace', 'account_label': 'alpha@example.test',
+                    'quota_profile': 'alpha', 'source': 'managed'}}
     catalog = quota_settings.catalog
     observed = '2026-11-03T00:00:00+00:00'
     machine = SimpleNamespace(name='fixture-machine', is_self=True)
@@ -102,6 +120,8 @@ def main():
     http.views = server.create_views()
     http.routes = server.create_routes(http.views)
     with contextlib.ExitStack() as stack:
+        if args.paused_recovery:
+            stack.enter_context(mock.patch.object(server.QUOTA_REFRESH, 'recovery_status', side_effect=recovery_status))
         for patch in (mock.patch.object(hub_reads, 'origin', return_value=None),
                       mock.patch.object(quota_settings, 'PROJECT_ROOT', args.artifacts),
                       mock.patch.object(quota_settings, 'catalog', side_effect=lambda **kw: [] if counts.get('empty') else catalog(**kw)),

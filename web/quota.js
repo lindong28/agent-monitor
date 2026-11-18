@@ -1150,6 +1150,20 @@
     const table = qs('#quota-diagnostic-table');
     if (!table) return;
     if (!table.children.length) table.textContent = '';
+    const requestedMachine = new URLSearchParams(window.location?.hash?.slice(1) || '').get('quota-recovery');
+    const knownMachine = requestedMachine && (
+      (rateLimits?.codex?.accounts || []).some(account => account.machines?.includes(requestedMachine)) ||
+      (rateLimits?.codex?.refresh_errors || []).some(failure => failure.machine === requestedMachine));
+    if (knownMachine && !Array.from(table.children).some(body => body.quotaRecoveryMachine === requestedMachine)) {
+      const body = document.createElement('tbody'), row = document.createElement('tr'), cell = document.createElement('td');
+      body.quotaRecoveryMachine = requestedMachine;
+      cell.colSpan = 10;
+      const heading = document.createElement('h3');
+      heading.textContent = `${requestedMachine} 当前查询状态与恢复`;
+      const panel = createRecoveryPanel(requestedMachine);
+      cell.append(heading, panel); row.appendChild(cell); body.appendChild(row); table.appendChild(body);
+      panel.scrollIntoView?.({block: 'center'});
+    }
     QUOTA_PROVIDERS.forEach(provider => {
       const old = Array.from(table.children).find(body => body.quotaDiagnostics?.provider === provider.key);
       const failures = rateLimits?.[provider.key]?.refresh_errors || [];
@@ -2136,7 +2150,22 @@
       }
       if (refreshNotice) {
         const currentNotice = quotaRefreshNotice(provider, account, true);
-        if (currentNotice) note(currentNotice);
+        if (currentNotice) {
+          const pausedMachines = provider.key === 'codex'
+            ? (account.machines || []).filter(machine => quotaMachineStates.get(machine)?.pause) : [];
+          if (!pausedMachines.length) note(currentNotice);
+          else {
+            for (const machine of pausedMachines) {
+              const link = document.createElement('a');
+              link.className = 'quota-history-note';
+              link.textContent = `${machine} 自动查询已暂停：查看状态与恢复`;
+              link.href = collectionUrl(`#quota-recovery=${encodeURIComponent(machine)}`);
+              cell.appendChild(link);
+            }
+            const unknown = (account.machines || []).filter(machine => quotaMachineStates.has(machine) && !quotaMachineStates.get(machine));
+            if (unknown.length) note(unknown.map(machine => `${machine} 暂停状态未核实`).join('；'));
+          }
+        }
         const cause = document.createElement("span");
         cause.className = "quota-history-note";
         cause.textContent = refreshNotice;
