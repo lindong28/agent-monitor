@@ -1,9 +1,11 @@
 """Owned local sync scratch; unknown or unfinished transfers are not reaped."""
 import contextlib
+import errno
 import fcntl
 import logging
 import os
 from pathlib import Path
+import re
 import signal
 import stat
 import subprocess
@@ -16,6 +18,8 @@ REGISTRY = ".sync-registry.lock"
 LEASE = ".lease"
 OWNER = ".owner"
 TRANSFER = ".transfer-inflight"
+# export_bundle creates this private directory before publishing "bundle".
+EXPORT_SCRATCH = re.compile(r"\.bundle\.staging-[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}")
 
 def _identity(lease):
     value = os.fstat(lease)
@@ -98,13 +102,30 @@ def _reap_one(rootfd, name, retained):
         names = set(os.listdir(directory))
         if TRANSFER in names:
             return keep("unfinished-transfer")
-        if names - {LEASE, OWNER, "bundle"}:
-            return keep("unknown-contents")
+        payload = names - {LEASE, OWNER}
+        scratch = None
+        if payload and payload != {"bundle"}:
+            if len(payload) != 1:
+                return keep("unknown-contents")
+            scratch, = payload
+            if not EXPORT_SCRATCH.fullmatch(scratch):
+                return keep("unknown-contents")
+            value = os.stat(scratch, dir_fd=directory, follow_symlinks=False)
+            if not stat.S_ISDIR(value.st_mode) or value.st_uid != os.getuid():
+                return keep("unknown-contents")
         if not _same(lease, directory, LEASE) or not _same(directory, rootfd, name):
             return keep("identity-changed")
         # Keep metadata until large payload deletion finishes, including retries.
         phase = "cleanup"
-        if "bundle" in names:
+        if scratch is not None:
+            # rmdir tests emptiness atomically and never traverses the candidate.
+            try:
+                os.rmdir(scratch, dir_fd=directory)
+            except OSError as exc:
+                if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                    return keep("unknown-contents")
+                raise
+        elif "bundle" in names:
             _remove_tree(directory, "bundle")
         os.unlink(OWNER, dir_fd=directory)
         os.unlink(LEASE, dir_fd=directory)

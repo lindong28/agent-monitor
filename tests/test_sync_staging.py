@@ -107,6 +107,58 @@ with Staging(Path(sys.argv[1])) as s:
         self.assertEqual(staging.reap(self.root), 1)
         self.assertFalse(directory.exists())
 
+    def test_interrupted_native_export_reaped_after_lease_release(self):
+        child = self.child("""
+import sys,time
+from pathlib import Path
+from unittest import mock
+from agent_monitor.snapshots import exporter, staging
+root = Path(sys.argv[1])
+with staging.Staging(root) as stage:
+    def wait_at_snapshot(*args):
+        print(stage.path, flush=True)
+        time.sleep(20)
+    with (mock.patch.object(exporter, 'exporter_version', return_value='a' * 40),
+          mock.patch.object(exporter.rollup, 'rollup_lock', wait_at_snapshot)):
+        exporter.export_bundle(root / 'fixture.db', stage.path / 'bundle', refresh=False)
+""", self.root)
+        directory = Path(self.line(child))
+        scratch, = directory.glob(".bundle.staging-*")
+        self.assertEqual(list(scratch.iterdir()), [])
+        self.assertEqual(staging.reap(self.root), 0)
+        self.assertTrue(scratch.is_dir())
+        child.kill()
+        child.wait(timeout=5)
+        with staging.Staging(self.root):
+            self.assertFalse(directory.exists())
+        self.assertEqual(staging.reap(self.root), 0)
+
+    def test_ambiguous_or_unfinished_export_scratch_preserved(self):
+        for kind in ("payload", "link", "file", "wrong-name", "extra", "transfer"):
+            with self.subTest(kind=kind):
+                root = self.root / kind
+                root.mkdir()
+                with staging.Staging(root) as stage:
+                    scratch = stage.path / ".bundle.staging-90df17bc3d634db4a3fe5e35a6d3960e"
+                    if kind == "link":
+                        scratch.symlink_to(root)
+                    elif kind == "file":
+                        scratch.touch()
+                    elif kind == "wrong-name":
+                        scratch = stage.path / ".bundle.staging-unknown"
+                        scratch.mkdir()
+                    else:
+                        scratch.mkdir()
+                        if kind == "payload":
+                            (scratch / "partial").touch()
+                        if kind == "extra":
+                            (stage.path / "unknown").touch()
+                        if kind == "transfer":
+                            (stage.path / staging.TRANSFER).touch()
+                self.assertEqual(staging.reap(root), 0)
+                self.assertTrue(scratch.exists())
+                self.assertTrue((stage.path / staging.OWNER).is_file())
+
     def test_legacy_unknown_and_links_preserved(self):
         outside = self.root / "outside"
         outside.mkdir()
