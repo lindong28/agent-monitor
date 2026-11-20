@@ -41,6 +41,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     dialog.append(node("p", "普通配额读取仅在身份、认证有效期和原出口条件已核实时，允许同次操作内最多一次诊断复读；总时限不延长，已有暂停不会自动解除。", "quota-scope"));
   }
   if (sending) {
+    dialog.append(node("p", "消息完成后会读取配额。如果遇到可识别的连接错误，且账号、凭据有效期和已确认的设备路由仍符合条件，将在原时限内自动补读一次配额。消息只发送一次。", "quota-scope"));
     dialog.append(node("p", `将为以下 ${targets.length} 个账号各随机抽取并发送一条日常短消息（可能重复）：`));
     const identities = node("ul", undefined, "account-egress-identities");
     for (const account of targets) identities.append(node("li", `${account.email}（${account.account_id}）`));
@@ -88,7 +89,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
   if (signal.aborted) dialog.close();
   // Do not await the probe before returning the close promise: Cancel/Escape
   // must remain immediate, and late results must not reopen a dismissed dialog.
-  request("egress-preview", payload).then(data => {
+  request("egress-preview", sending ? {...payload, post_send_reread: true} : payload).then(data => {
     if (!dialog.open) return;
     if (!Array.isArray(data.targets) || !data.targets.length) throw new Error("未取得出口信息");
     if (needsApproval && !data.confirmation) throw new Error("服务未返回本轮出口确认，请重新预览");

@@ -631,7 +631,10 @@ class Handler(BaseHTTPRequestHandler):
                     if approval_action:
                         if approval_action not in {"batch-start", "batch-retry", "refresh", "refresh-all", "refresh-selected", "refresh-retry", "login"}:
                             raise codex_accounts.ActionError("预览操作类型无效。")
-                        result["confirmation"] = route.issue(selected, payload.get("approval_expected"), approval_action, preview=result)
+                        preview = dict(result)
+                        if approval_action in {"batch-start", "batch-retry"}:
+                            preview["post_send_reread"] = payload.get("post_send_reread") is True
+                        result["confirmation"] = route.issue(selected, payload.get("approval_expected"), approval_action, preview=preview)
                         result["approval_action"] = approval_action
                     elif selected:
                         result["confirmation"] = route.issue(selected, payload.get("expected_batch_id"), preview=result)

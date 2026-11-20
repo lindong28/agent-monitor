@@ -77,25 +77,28 @@ def quota_transport_failure(error, method):
             and error.get("message") == "failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage)")
 
 
-def _reread_allowed(auth_path, retry):
+def reread_block_reason(auth_path, retry):
     if not retry or retry.get("used"):
-        return False
+        return "本次没有可用的补读次数"
     try:
-        version = retry["client_info"]["userAgent"].partition("/")[2].partition(" ")[0]
+        agent = (retry.get("client_info") or {}).get("userAgent")
+        version = agent.partition("/")[2].partition(" ")[0] if isinstance(agent, str) else None
         if version not in {"0.166.0", "0.167.0"}:
-            return False
+            return "当前 Codex 版本未核实补读行为"
         remaining = retry["deadline"] - time.monotonic()
-        if remaining <= 0 or not retry.get("original_digest") or retry["original_digest"] != credential_digest(auth_path):
-            return False
+        if remaining <= 0:
+            return "原配额查询已到截止时间"
+        if not retry.get("original_digest") or retry["original_digest"] != credential_digest(auth_path):
+            return "无法确认仍使用操作开始时的凭据"
         file_auth_recovery_preflight(auth_path)
         token = json.loads(Path(auth_path).read_text())["tokens"]["access_token"]
         parts = token.split(".")
         if len(parts) != 3 or not all(parts) or not re.fullmatch(r"[A-Za-z0-9_-]+", parts[1]):
-            return False
+            return "无法核实凭据有效期"
         part = parts[1]
         payload = base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
         if base64.urlsafe_b64encode(payload).decode().rstrip("=") != part:
-            return False
+            return "无法核实凭据有效期"
         def unique(pairs):
             result = {}
             for key, item in pairs:
@@ -109,13 +112,15 @@ def _reread_allowed(auth_path, retry):
         json.dumps(claims, ensure_ascii=False).encode("utf-8")
         expires = claims["exp"]
         if type(expires) is not int:
-            return False
+            return "无法核实凭据有效期"
         datetime.fromtimestamp(expires, timezone.utc)
         # Codex 0.166/0.167 auth::AuthManager proactively refreshes in the
         # five-minute expiry window. Reserve the remaining operation deadline.
-        return expires > time.time() + 300 + remaining
+        if expires <= time.time() + 300 + remaining:
+            return "凭据可能在本次查询期间进入刷新窗口"
+        return None
     except (OSError, ValueError, OverflowError, RecursionError, KeyError, IndexError, TypeError, AttributeError):
-        return False
+        return "无法核实文件凭据来源或有效期"
 
 
 class ReadingError(ValueError):
@@ -271,7 +276,8 @@ def file_auth_recovery_preflight(auth_path):
         raise ReadingError("此来源未确认使用标准文件 OAuth 凭据，未开始认证修复。", "invalid_result", "credentials")
 
 
-def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recovery=None, retry=None):
+def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recovery=None, retry=None,
+               allow_empty_first_read=False):
     """Quota reading bound to the same identity, with an optional finite reread.
 
     Callers retain transport, cancellation, admission and pause ownership.
@@ -324,7 +330,19 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
                 identity_error.failure = {**diagnostics.safe_failure(getattr(first, "failure", None)),
                                           **identity_error.failure}
                 raise
-            if not _reread_allowed(auth_path, retry):
+            reason = reread_block_reason(auth_path, retry)
+            if not reason and retry.get("check_context"):
+                reason = retry["check_context"]()
+                if not reason:
+                    try:
+                        check_identity(auth_path, account_id, label)
+                    except ReadingError as changed:
+                        reason = str(changed)
+                    else:
+                        reason = reread_block_reason(auth_path, retry)
+            if reason:
+                if retry is not None:
+                    retry["blocked"] = reason
                 raise
             retry["used"] = True  # Consume before dispatch; cancellation cannot renew it.
             retry["receipt"] = {"quota_rpc_budget_used": 2, "outcome": "quota_failed",
@@ -350,7 +368,8 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
     try:
         check_identity(auth_path, account_id, label)
         reading = decode(result, account_id)
-        if reading["five_hour_used_pct"] is None and reading["seven_day_used_pct"] is None:
+        if (not allow_empty_first_read or (retry and retry.get("used"))) and (
+                reading["five_hour_used_pct"] is None and reading["seven_day_used_pct"] is None):
             raise ReadingError("服务端未返回可用配额窗口，本次保留上次读数。", "missing_windows", "quota_parse")
     except Exception as exc:
         if retry and retry.get("receipt"):

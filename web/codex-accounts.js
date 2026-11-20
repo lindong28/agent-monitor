@@ -150,6 +150,7 @@ function appendRpcFailure(section, diag, label = "请求错误") {
   if (retry) section.append(element("p", retry.outcome === "quota_confirmed"
     ? "本次已通过一次有限复读取得配额；首次错误仍保留供维护者调查。"
     : "本次有限复查机会已使用，仍未取得配额；请由维护者按当前保护状态排查。", "quota-scope"));
+  if (retry?.first_failure) appendRpcFailure(section, {rpc_failure: retry.first_failure}, "补读前的配额错误");
   if (rpc || diag?.rpc_error_code != null) section.append(element("p", `${label}：RPC ${rpc?.rpc_code ?? diag?.rpc_error_code ?? "未返回"}${rpc?.http_status ? " · 上游 HTTP " + rpc.http_status : ""}${rpc?.upstream_code ? " · 上游代码 " + rpc.upstream_code : ""}`, "quota-scope"));
   if (rpc?.detail) section.append(element("p", `${label}摘要（已脱敏）：${rpc.detail}`, "quota-scope"));
   if (rpc?.rpc_message && rpc.rpc_message !== rpc.detail) section.append(element("p", `RPC message（已脱敏${rpc.rpc_message_truncated ? "并截断" : ""}）：${rpc.rpc_message}`, "quota-scope"));

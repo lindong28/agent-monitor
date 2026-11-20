@@ -1685,16 +1685,49 @@ class Manager:
                     reason += " HTTP %s。" % failure["http_status"]
                 raise ActionError("消息发送阶段：" + reason + "可能已消耗额度；不会自动重发。", 502)
             self.update(directory, record, stage="reading", message_status="succeeded", detail="消息已完成，正在查询服务端配额。")
+            quota_deadline = time.monotonic() + 20
+            def check_reread_context():
+                route = job.get("network_route")
+                if not isinstance(route, client_network.ConfirmedRoute) or not route.post_send_reread:
+                    return "原发送确认未包含本次补读"
+                try:
+                    route.check_reread_route(rpc.network_route, quota_deadline, job["cancelled"])
+                except client_network.NetworkError as exc:
+                    return str(exc)
+                if job["cancelled"].is_set():
+                    return "操作已取消"
+                try:
+                    check_account_hold()
+                except ActionError as exc:
+                    return str(exc)
+                return None
+
+            retry = {"original_digest": original_digest, "deadline": quota_deadline,
+                     "client_info": getattr(rpc, "client_info", {}), "check_context": check_reread_context}
             try:
-                after = quota_reading(rpc.request("account/rateLimits/read", {}, time.monotonic() + 20), record["account_id"])
+                after = codex_quota.read_bound(lambda method, params: rpc.request(method, params, quota_deadline),
+                    directory / "codex/auth.json", record["account_id"], record["email"],
+                    retry=retry, allow_empty_first_read=True)
                 self.observe_permission(directory, record, after)
                 has_reset = after["seven_day_resets_at"] is not None
-                self.update(directory, record, stage="succeeded" if has_reset else "partial", quota_status="observed", after=after,
-                            detail="消息已完成，已读取服务端重置时间；这不保证窗口已固定或重置。" if has_reset else "消息已完成，但服务端未返回七天窗口重置时间。")
-            except ActionError as exc:
+                details = "消息已完成，" + ("自动补读已取得配额。" if retry.get("receipt") else "")
+                details += "已读取服务端重置时间；这不保证窗口已固定或重置。" if has_reset else "服务端未返回七天窗口重置时间。"
+                identifiers.update({"quota_retry": retry["receipt"]} if retry.get("receipt") else {})
+                self.update(directory, record, stage="succeeded" if has_reset else "partial", quota_status="observed",
+                            after=after, diagnostics=identifiers, detail=details)
+            except (ActionError, codex_quota.ReadingError) as exc:
+                if retry.get("receipt"):
+                    rpc.diagnostics["quota_retry"] = retry["receipt"]
+                    decision = "自动补读一次后仍未取得可用配额。"
+                else:
+                    reason = retry.get("blocked") or (str(exc) if isinstance(exc, (codex_quota.ReadingError, Cancelled))
+                        else "此次错误不符合自动补读条件")
+                    decision = "已跳过自动补读：" + reason + "。"
+                if getattr(exc, "failure", None):
+                    rpc.diagnostics["rpc_failure"] = diagnostic_evidence.safe_failure(exc.failure)
                 rpc.diagnostics.setdefault("rpc_failure", {})["network"] = diagnostic_evidence.safe_network(
                     network_policy.observations(rpc.network_route))
-                failure = {"category": exc.category, "stage": "reading"}
+                failure = {"category": getattr(exc, "category", "unknown"), "stage": "reading"}
                 self.restrict(directory, record, failure)
                 if lease:
                     self.pause_operation(lease, record, rpc, "quotaReadFailed")
@@ -1702,7 +1735,7 @@ class Manager:
                     job["batch_stopped"].set()
                 self.update(directory, record, stage="partial", quota_status="failed", failure=failure,
                             diagnostics={**record["operation"].get("diagnostics", {}), **copy.deepcopy(rpc.diagnostics)},
-                            detail="消息已完成，但配额查询未成功，已暂停后续请求。不要为了查询结果重复发送。")
+                            detail="消息已完成。" + decision + "后续请求已暂停，可从原机器的恢复卡继续查询配额。")
                 record["last_failure"] = copy.deepcopy(record["operation"])
                 self.save(directory, record)
         except Cancelled:

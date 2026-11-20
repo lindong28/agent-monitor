@@ -56,6 +56,7 @@ class ConfirmedRoute:
         self._route = route
         self.id, self.label = route.id, route.label
         self._confirmation = confirmation(preview)
+        self.post_send_reread = preview.get("post_send_reread") is True
         self.approval_context = copy.deepcopy({key: preview[key] for key in
             ("generation", "routes", "targets", "checked_host", "observed_at") if key in preview})
         payload = base64.urlsafe_b64encode(json.dumps(self._confirmation, separators=(",", ":")).encode()).decode().rstrip("=")
@@ -64,6 +65,16 @@ class ConfirmedRoute:
 
     def require(self):
         self._route.require()
+
+    def check_reread_route(self, child_route, deadline, cancelled):
+        address = urlsplit(child_route)
+        if (address.hostname != "127.0.0.1" or address.port != self._route.server.server_port
+                or not re.fullmatch(r"agent-monitor\.[a-f0-9]{32}", address.username or "")
+                or not secrets.compare_digest(address.password or "", self._password)):
+            raise NetworkError("无法核实原子进程使用的设备连接")
+        observed = self._route.observe(deadline=deadline, cancelled=cancelled)
+        if confirmation(observed) != self._confirmation:
+            raise NetworkError("设备网络配置或目标域名的代理路径已变化")
 
     @property
     def endpoint(self):
@@ -299,15 +310,19 @@ class Route:
                 close_socket(item.socket)
             item.done.set()
 
-    def observe(self, scope=None):
+    def observe(self, scope=None, *, deadline=None, cancelled=None):
         """Ask the owning connector now; async report tails are not current evidence."""
         self.require()
         if OBSERVATION_CAPABILITY not in self.capabilities:
             raise NetworkError("设备连接端版本不支持出口确认，请更新并重新连接；不会切换出口。")
         item = self.enqueue(None, scope, kind="observe")
         try:
-            deadline = time.monotonic() + CONNECT_SECONDS
-            while not item.ready.wait(.2) and time.monotonic() < deadline:
+            deadline = min(deadline if deadline is not None else float("inf"), time.monotonic() + CONNECT_SECONDS)
+            while time.monotonic() < deadline:
+                if cancelled is not None and cancelled.is_set():
+                    raise NetworkError("操作已取消")
+                if item.ready.wait(min(.2, max(0, deadline - time.monotonic()))):
+                    break
                 self.require()
             self.require()
             if not item.observation:

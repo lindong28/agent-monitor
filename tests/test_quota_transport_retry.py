@@ -54,6 +54,18 @@ class TransportRetryTests(unittest.TestCase):
         self.assertEqual(self.context["receipt"]["quota_rpc_budget_used"], 2)
         self.assertEqual(self.context["receipt"]["first_failure"]["rpc_code"], -32603)
 
+    def test_identity_changes_while_connector_checks_route(self):
+        def switch_identity():
+            value = json.loads(self.auth.read_text())
+            value["tokens"]["account_id"] = "other-workspace"
+            self.auth.write_text(json.dumps(value))
+        self.context["check_context"] = switch_identity
+        with self.assertRaises(Failure) as caught:
+            self.read()
+        self.assertEqual(self.calls, ["account/rateLimits/read"])
+        self.assertIn("身份", self.context["blocked"])
+        self.assertEqual(caught.exception.failure["rpc_code"], -32603)
+
     def test_persistent_transport_stops_after_two_and_retains_both(self):
         with self.assertRaises(Failure) as raised: self.read(failures=100)
         self.assertEqual(len(self.calls), 2)
@@ -143,6 +155,57 @@ class ManagedTransportTests(unittest.TestCase):
     account = actions.AccountActionsTests.account
     wait = actions.AccountActionsTests.wait
     calls = actions.AccountActionsTests.calls
+
+    def test_completed_send_decides_inside_original_batch(self):
+        cases = [
+            ("post_bounded_once", True, False, 2, "自动补读已取得配额"),
+            ("post_bounded_persistent", True, False, 2, "自动补读一次后"),
+            ("post_bounded_changed", True, False, 1, "开始时的凭据"),
+            ("post_bounded_once", True, True, 1, "代理路径已变化"),
+            ("post_bounded_once", False, False, 1, "原发送确认"),
+            ("post_quota_diagnostic", True, False, 1, "此次错误不符合"),
+        ]
+        routes = {origin: "DIRECT" for origin in ca.client_network.PREVIEW_ORIGINS}
+        for index, (scenario, approved, changed, reads, detail) in enumerate(cases):
+            with self.subTest(scenario=scenario, approved=approved, changed=changed):
+                self.manager.close()
+                self.manager = ca.Manager(self.root / str(index) / "profiles")
+                self.addCleanup(self.manager.close)
+                self.scenario = scenario
+                account = self.account()
+                seed_fresh(self.manager.directory(account["id"]) / "codex/auth.json")
+                bridge = mock.Mock(id="fixture-device", label="fixture", secret="fixture-secret")
+                bridge.server.server_port = 9
+                bridge.observe.return_value = {"generation": int(changed), "routes": routes}
+                route = ca.client_network.ConfirmedRoute(bridge, {"generation": 0, "routes": routes,
+                    "post_send_reread": approved})
+                with mock.patch.object(ca.network_policy, "endpoint", return_value=route.endpoint):
+                    self.manager.start_batch(None, [account["id"]], network_route=route)
+                    result = self.wait(account["id"])
+                operations = self.calls(account)
+                methods = [call["method"] for call in operations]
+                self.assertEqual(methods.count("turn/start"), 1)
+                self.assertEqual(methods[methods.index("turn/start")+1:].count("account/rateLimits/read"), reads)
+                self.assertNotIn("account/login/start", methods)
+                self.assertFalse(any(call.get("params", {}).get("refreshToken") for call in operations))
+                restarted = ca.Manager(self.manager.root)
+                try:
+                    state = restarted.list()
+                    op = state["batch"]["items"][0]["operation"]
+                    self.assertEqual(op["id"], result["operation"]["id"])
+                    self.assertEqual(op["message_status"], "succeeded")
+                    self.assertIn(detail, op["detail"])
+                    self.assertEqual(bool(state.get("upstream_pause")), index != 0)
+                    if reads == 2:
+                        self.assertEqual(op["diagnostics"]["quota_retry"]["first_failure"]["rpc_code"], -32603)
+                    if index == 0:
+                        self.assertEqual(op["stage"], "succeeded")
+                        self.assertEqual(op["after"]["seven_day_used_pct"], 0)
+                    else:
+                        self.assertTrue(ca.post_send_quota_pending(result, state["upstream_pause"]))
+                    self.assertEqual(len(self.calls(account)), len(operations))
+                finally:
+                    restarted.close()
 
     def start_case(self, scenario, *, expires=4102444800):
         self.scenario = scenario

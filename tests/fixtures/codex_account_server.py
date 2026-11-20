@@ -38,7 +38,7 @@ for line in sys.stdin:
     if "id" not in message:
         continue
     result = {}
-    if method == "initialize" and scenario.startswith("bounded_"):
+    if method == "initialize" and scenario.startswith(("bounded_", "post_bounded_")):
         result = {"userAgent": "agent_monitor_accounts/0.167.0 (fixture)"}
     elif method == "account/read":
         read_errors = {
@@ -96,8 +96,10 @@ for line in sys.stdin:
             emit({"method": "account/login/completed", "params": {"loginId": "fixture-login", "success": True}})
     elif method == "account/rateLimits/read":
         quota_reads += 1
-        if scenario.startswith("bounded_") and (quota_reads == 1 or scenario == "bounded_persistent"):
-            if scenario == "bounded_changed":
+        first = 2 if scenario.startswith("post_bounded_") else 1
+        if scenario.startswith(("bounded_", "post_bounded_")) and (quota_reads == first or
+                quota_reads > first and scenario.endswith("_persistent")):
+            if scenario in ("bounded_changed", "post_bounded_changed"):
                 auth = json.loads((home / "auth.json").read_text())
                 auth["tokens"]["access_token"] = "changed-fixture"
                 (home / "auth.json").write_text(json.dumps(auth))
