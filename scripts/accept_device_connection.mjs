@@ -13,8 +13,10 @@ const {values:args} = parseArgs({options:{
   'quota-settings-only':{type:'boolean'}, 'dashboard-only':{type:'boolean'}, vendor:{type:'string'}, facade:{type:'boolean'}, 'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
   'account-scopes-only':{type:'boolean'}, 'automatic-egress-only':{type:'boolean'},
   'quota-actions-only':{type:'boolean'},
+  'post-send-only':{type:'boolean'},
 }});
 if (args.help) {
+  console.log('--post-send-only exercises completed sends with a stable or changed device route and a synthetic Codex peer.');
   console.log('Usage: npm ci && node scripts/accept_device_connection.mjs --browser /absolute/path/to/Chrome [--python /path/to/python] [--launchd] [--disclosures-only] [--network-only] [--facade] [--dashboard-only] [--quota-settings-only] [--automatic-egress-only] [--quota-actions-only] [--vendor /path/to/web/vendor]\nRuns six synthetic accounts using the pinned public agent-browser CLI and an isolated headless Chrome. --network-only checks automatic system diagnostics, cache reuse, restart restoration and failure recovery using synthetic probes. --facade runs account actions through the local facade. --dashboard-only checks full overview removal and refresh with persisted synthetic state. --automatic-egress-only checks automatic-region skips and retained readings without provider requests. --quota-settings-only checks account enrollment, cancellation, persistence and disabling on the full dashboard. --agent-browser can select an alternate CLI executable. --launchd additionally creates and removes an isolated macOS test job. No provider account requests.');
   process.exit(0);
 }
@@ -129,7 +131,8 @@ async function click(selector, expect) {
 async function stats() { return (await fetch(url+'/fixture/stats',{signal:AbortSignal.timeout(3000)})).json(); }
 async function configure(value) { const r=await fetch(url+'/fixture/config',{method:'POST',body:JSON.stringify(value),signal:AbortSignal.timeout(3000)}); assert.equal(r.status,200); }
 async function startFixture() {
-  const command=args['network-only'] ? [path.join(repo,'tests/fixtures/network_cache_ui.py'),'--artifacts',root] : (args['quota-settings-only'] || args['automatic-egress-only']) ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor'), ...(args['automatic-egress-only'] ? ['--automatic-egress'] : [])] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
+  const command = args['post-send-only'] ? [path.join(repo,'tests/fixtures/codex_accounts_ui.py'),'--post-send'] :
+    args['network-only'] ? [path.join(repo,'tests/fixtures/network_cache_ui.py'),'--artifacts',root] : (args['quota-settings-only'] || args['automatic-egress-only']) ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor'), ...(args['automatic-egress-only'] ? ['--automatic-egress'] : [])] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
   if (args['quota-actions-only']) command.push('--overview','--vendor',args.vendor || path.join(repo,'web/vendor'));
   fixture=spawn(python,command,{env,cwd:repo,stdio:['ignore','pipe','pipe']});
   children.push(fixture);
@@ -165,7 +168,8 @@ const timer=setTimeout(()=>{
 },acceptanceBudgetMs);
 let failure;
 try {
-  console.log(args['automatic-egress-only'] ? 'Checking automatic-region skips on the full dashboard; provider execution is disabled.' : args['quota-settings-only'] ? 'Checking full dashboard quota settings with isolated accounts and provider execution disabled.' : args['dashboard-only'] ? 'Checking the full dashboard with isolated persisted account records; provider calls are disabled.' : args['network-only'] ? 'Checking synthetic system diagnostics in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
+  if (args['post-send-only']) console.log('Checking completed sends and bounded quota reads in the isolated account UI.');
+  else console.log(args['automatic-egress-only'] ? 'Checking automatic-region skips on the full dashboard; provider execution is disabled.' : args['quota-settings-only'] ? 'Checking full dashboard quota settings with isolated accounts and provider execution disabled.' : args['dashboard-only'] ? 'Checking the full dashboard with isolated persisted account records; provider calls are disabled.' : args['network-only'] ? 'Checking synthetic system diagnostics in an isolated browser; provider calls are disabled by the fixture.' : 'Checking six synthetic accounts in an isolated browser; provider calls are disabled by the fixture.');
   await startFixture();
   assert.equal((await fetch(url,{signal:AbortSignal.timeout(3000)})).status,200,'fixture page reachable');
   browserAttempted=true;
@@ -177,7 +181,44 @@ try {
   await browserCommand(['get','url'],false,false);
   assert.equal((await bt('get','url')).data.url,new URL(url).href,'pinned fixture origin');
   console.log('Isolated browser opened the local fixture.');
-  if (args['quota-actions-only']) {
+  if (args['post-send-only']) {
+    const {profiles} = await stats();
+    for (const name of ['stable','changed']) {
+      const card = `article[data-id="${profiles[name]}"]`;
+      const send = `[data-reader-state="codex-account:${profiles[name]}:send"]`;
+      await until('selected fixture account',()=>read(`!!document.querySelector('${send}')`));
+      await click(send,"!!document.querySelector('dialog[open] .btn-primary:not(:disabled)')");
+      assert(await read("document.querySelector('dialog[open]').innerText.includes('自动补读一次')"));
+      await click('dialog[open] .btn-primary',"!document.querySelector('dialog[open]')");
+      const outcome = name === 'stable' ? '自动补读已取得配额' : '代理路径已变化';
+      const finished = `/最近发送：(已完成|配额待确认|未完成)/.test(document.querySelector('${card} .account-last-result')?.textContent)`;
+      await until('original account result',()=>read(finished));
+      await bt('reload');
+      await until('saved result after reload',()=>read(finished));
+      await click(card+' details > summary',`document.querySelector('${card} details').open`);
+      const details = await read(`document.querySelector('${card} details').innerText`);
+      assert(details.includes(outcome), `${name}: expected '${outcome}' in the saved account result`);
+      assert(details.includes('消息结果：发送成功'));
+      assert(details.includes('RPC -32603'), 'the original error is visible on the affected account');
+      if (name === 'stable') {
+        const resetTime = await read('window.AgentMonitor.formatDate(new Date(1900000003 * 1000).toISOString())');
+        assert(details.includes(resetTime), 'the card shows the post-send reset time');
+      } else {
+        await click('#codex-pause-recovery',"document.querySelector('#codex-recovery-body').innerText.includes('只补读该账号的配额')");
+        assert(await read("document.querySelector('#codex-recovery-body').innerText.includes('changed@example.test')"));
+        assert(await read("[...document.querySelectorAll('#codex-recovery-body button')].some(b=>b.checkVisibility() && !b.disabled && b.textContent==='确认出口并检查配额')"));
+      }
+    }
+    const {methods} = await stats();
+    for (const name of ['stable','changed']) {
+      const calls = methods[name];
+      const turn = calls.indexOf('turn/start');
+      assert.equal(calls.filter(m=>m==='turn/start').length,1);
+      assert.equal(calls.slice(0,turn).filter(m=>m==='account/rateLimits/read').length,1);
+      assert.deepEqual(calls.slice(turn+1),Array(name==='stable'?2:1).fill('account/rateLimits/read'));
+      console.log(`${name}: one turn, ${calls.length-turn-1} post-send quota RPC(s); account result verified.`);
+    }
+  } else if (args['quota-actions-only']) {
     const row='tr[data-account-id="workspace-0"]', refresh=row+' .quota-account-links button';
     await until('overview quota actions',()=>read(`!!document.querySelector('${refresh}') && !document.querySelector('${refresh}').disabled`));
     assert(!await read("document.querySelector('#quota-accounts').innerText.includes('管理账号')"));

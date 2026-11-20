@@ -22,6 +22,32 @@ sys.path.insert(0, str(ROOT))
 from account_egress_ui import source_guard
 
 
+def loopback_only(event, args):
+    if event == "socket.connect" and isinstance(args[1], tuple) and args[1][0] not in ("127.0.0.1", "::1"):
+        raise RuntimeError("fixture forbids non-loopback connections")
+
+
+def account_page():
+    source = (ROOT / "web/accounts.html").read_text()
+    # Literal HTML tag boundary; avoid depending on page-shell services.
+    panel = re.search(r"<main\b[^>]*>(.*?)</main>", source, re.S).group(1)
+    return """<!doctype html><html lang=zh><meta charset=utf-8><link rel=stylesheet href=/web/styles.css>
+<body><main>""" + panel + """</main><script>
+window.AgentMonitor={pageScope:()=>()=>true,ensureTimezone:async()=>{},formatDate:x=>new Date(x).toLocaleString(),
+onPageCleanup:()=>{},pageInterval:()=>{},latestCodexQuotaReading:a=>a.operation?.after||a.last_quota};
+window.open=()=>{const frame=document.createElement("iframe");frame.hidden=true;document.body.append(frame);
+const popup=frame.contentWindow;fetch("/fixture/connection").then(r=>r.json()).then(connection=>window.dispatchEvent(new MessageEvent("message",{
+origin:"http://127.0.0.1:39002",source:popup,data:{type:"agent-monitor-network",nonce:window.fixtureNonce,connection}})));return popup;};
+const oldRandom=crypto.getRandomValues.bind(crypto);crypto.getRandomValues=a=>{oldRandom(a);if(a.length===16)window.fixtureNonce=[...a].map(n=>n.toString(16).padStart(2,"0")).join("");return a;};
+</script><script src=/web/quota.js></script><script type=module>
+import {init} from "/web/codex-accounts.js";import {previewEgress} from "/web/account-egress.js";
+window.AgentMonitor.previewUpstream=(targets,payload,signal)=>previewEgress(async(action,body)=>{
+const r=await fetch("/api/codex-accounts/"+action,{method:"POST",headers:{"Content-Type":"application/json","X-Agent-Monitor":"codex-accounts"},body:JSON.stringify(body),signal});
+const value=await r.json();if(!r.ok)throw Error(value.error);return value;},targets,signal,payload);
+Object.assign(window.AgentMonitor,window.AgentMonitorModules.quota({platform:{window,document,fetch:(...a)=>fetch(...a)},qs:s=>document.querySelector(s),fmtAbs:String,formatDate:String,updateSyncOverviewLink:()=>{}}));init();
+</script></html>"""
+
+
 def main():
     root = Path(sys.argv[1]).resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -38,10 +64,7 @@ def main():
     from agent_monitor.contracts.usage import RateLimits
     import test_codex_accounts
 
-    def socket_guard(event, args):
-        if event == "socket.connect" and isinstance(args[1], tuple) and args[1][0] not in ("127.0.0.1", "::1"):
-            raise RuntimeError("fixture forbids non-loopback connections")
-    sys.addaudithook(socket_guard)
+    sys.addaudithook(loopback_only)
     manager = ca.Manager(root / "state/codex-accounts")
     quota = quota_sync.Manager(root / "state/machine_quota.json")
     machine = SimpleNamespace(name="credential-host", ssh_host="self", is_self=True)
@@ -75,24 +98,7 @@ def main():
     connection = {"id": route.id, "capability": route.browser, "label": route.label}
     replacement_connection = {"id": replacement.id, "capability": replacement.browser, "label": replacement.label}
     state = {"connection": connection}
-    source = (ROOT / "web/accounts.html").read_text()
-    # Literal HTML tag boundary; avoid depending on page-shell services.
-    panel = re.search(r"<main\b[^>]*>(.*?)</main>", source, re.S).group(1)
-    html = """<!doctype html><html lang=zh><meta charset=utf-8><link rel=stylesheet href=/web/styles.css>
-<body><main>""" + panel + """</main><script>
-window.AgentMonitor={pageScope:()=>()=>true,ensureTimezone:async()=>{},formatDate:x=>new Date(x).toLocaleString(),
-onPageCleanup:()=>{},pageInterval:()=>{},latestCodexQuotaReading:a=>a.operation?.after||a.last_quota};
-window.open=()=>{const frame=document.createElement("iframe");frame.hidden=true;document.body.append(frame);
-const popup=frame.contentWindow;fetch("/fixture/connection").then(r=>r.json()).then(connection=>window.dispatchEvent(new MessageEvent("message",{
-origin:"http://127.0.0.1:39002",source:popup,data:{type:"agent-monitor-network",nonce:window.fixtureNonce,connection}})));return popup;};
-const oldRandom=crypto.getRandomValues.bind(crypto);crypto.getRandomValues=a=>{oldRandom(a);if(a.length===16)window.fixtureNonce=[...a].map(n=>n.toString(16).padStart(2,"0")).join("");return a;};
-</script><script src=/web/quota.js></script><script type=module>
-import {init} from "/web/codex-accounts.js";import {previewEgress} from "/web/account-egress.js";
-window.AgentMonitor.previewUpstream=(targets,payload,signal)=>previewEgress(async(action,body)=>{
-const r=await fetch("/api/codex-accounts/"+action,{method:"POST",headers:{"Content-Type":"application/json","X-Agent-Monitor":"codex-accounts"},body:JSON.stringify(body),signal});
-const value=await r.json();if(!r.ok)throw Error(value.error);return value;},targets,signal,payload);
-Object.assign(window.AgentMonitor,window.AgentMonitorModules.quota({platform:{window,document,fetch:(...a)=>fetch(...a)},qs:s=>document.querySelector(s),fmtAbs:String,formatDate:String,updateSyncOverviewLink:()=>{}}));init();
-</script></html>"""
+    html = account_page()
     def preview(selected):
         counts["previews"] += 1
         return {"checked_host": selected.label, "generation": 0, "routes": facts["routes"],
