@@ -533,6 +533,24 @@ def retain_quota(record):
         record["last_quota"] = max(readings, key=lambda reading: datetime.fromisoformat(reading["observed_at"].replace("Z", "+00:00")))
 
 
+def post_send_quota_pending(record, pause):
+    """Only the quota read following this confirmed, completed message is missing."""
+    op = record.get("operation") or {}
+    source = (pause or {}).get("source") or {}
+    return bool(op.get("id") and source.get("operation_id") == op["id"]
+                and source.get("profile_id") == record["id"] and source.get("action") == "send"
+                and pause.get("reason") in {"quotaReadFailed", "quotaRefreshFailed"} and op.get("stage") == "partial"
+                and op.get("refresh_only") is False and not op.get("login_only")
+                and op.get("message_status") == "succeeded" and op.get("quota_status") == "failed")
+
+
+def recoverable_quota_operation(record, pause, *, allow_post_send):
+    op = record.get("operation") or {}
+    return ((op.get("refresh_only") and not op.get("login_only")
+             and op.get("stage") in {"failed", "interrupted"} and op.get("message_status") == "not_sent")
+            or (allow_post_send and post_send_quota_pending(record, pause)))
+
+
 class Manager:
     def __init__(self, root, rpc_factory=Rpc):
         self.root = Path(root)
@@ -763,6 +781,10 @@ class Manager:
             batch = self.read_quota_batch() or {}
             if batch.get("id") == operation["quota_batch_id"] and profile_id in batch.get("profile_ids", []):
                 device = copy.deepcopy(batch.get("network_device"))
+        if not device and operation.get("batch_id") and not operation.get("refresh_only"):
+            batch = self.read_batch() or {}
+            if batch.get("id") == operation["batch_id"] and profile_id in batch.get("profile_ids", []):
+                device = copy.deepcopy(batch.get("network_device"))
         return {"operation_id": operation.get("id"), "quota_batch_id": operation.get("quota_batch_id"),
                 "device": device, "preview": context.get("preview")}
 
@@ -785,13 +807,15 @@ class Manager:
                             if pause_scope == "account" else self.controls)
                 state = controls.read("codex")
                 if (operation.get("id") != operation_id or current != expected
-                        or not operation.get("refresh_only") or operation.get("login_only")
-                        or operation.get("stage") not in {"failed", "interrupted"}
-                        or operation.get("message_status") != "not_sent"
+                        or not recoverable_quota_operation(record, state.get("pause"), allow_post_send=pause_scope is None)
                         or state.get("active") or (state.get("pause") or {}).get("id") != pause_id
                         or (state.get("pause") or {}).get("probe_attempt")):
                     raise ActionError("原配额任务、暂停或网络选择已变化，请更新状态后重新确认。", 409)
                 route.require()
+                if post_send_quota_pending(record, state.get("pause")):
+                    # The sent turn keeps its original device. The one-time
+                    # route and recovery receipt own this probe's selection.
+                    return self.selected_network(route, operation)
                 operation["previous_network_context"] = current
                 operation["network_context"] = self.selected_network(route, operation)
                 self.save(directory, record)
@@ -1170,6 +1194,9 @@ class Manager:
                         prepared.append(self.prepare(pid, published_id=published_id, batch_id=batch["id"]))
                         if network_route:
                             prepared[-1][2]["network_route"] = network_route
+                            directory, record = prepared[-1][:2]
+                            record["operation"]["network_context"] = self.selected_network(network_route, record["operation"])
+                            self.save(directory, record)
                     write_record(self.root / "batch.json", batch)
                 except Exception:
                     self.rollback_prepared(prepared)
@@ -1204,6 +1231,9 @@ class Manager:
                         prepared.append(self.prepare(pid, published_id=batch_id, batch_id=batch_id))
                         if network_route:
                             prepared[-1][2]["network_route"] = network_route
+                            directory, record = prepared[-1][:2]
+                            record["operation"]["network_context"] = self.selected_network(network_route, record["operation"])
+                            self.save(directory, record)
                 except Exception:
                     self.rollback_prepared(prepared)
                     raise
@@ -1363,8 +1393,7 @@ class Manager:
             with lock_file(directory / ".lock"):
                 record = self.read(directory)
                 operation = record.get("operation") or {}
-                if (operation.get("id") != operation_id or not operation.get("refresh_only")
-                        or operation.get("login_only") or operation.get("message_status") != "not_sent"):
+                if operation.get("id") != operation_id:
                     raise ActionError("恢复目标操作已变化；暂停保留，请重新核对。", 409)
                 selected_controls = (account_holds.controls(self.root.parent, record.get("account_id"), record["email"])
                                      if pause_scope == "account" else self.controls)
@@ -1372,11 +1401,23 @@ class Manager:
                     state = selected_controls.read("codex")
                     if (state.get("pause") or {}).get("id") != pause_id or state.get("active"):
                         raise ActionError("恢复暂停已变化；未更新原操作。", 409)
-                    record["last_failure"] = copy.deepcopy(operation)
-                    operation.update(stage="succeeded", quota_status="observed", after=reading,
-                                     recovery_pause_id=pause_id, detail="恢复检查已取得配额，本次未发送消息。")
+                    if not recoverable_quota_operation(record, state["pause"], allow_post_send=pause_scope is None):
+                        raise ActionError("恢复目标操作已变化；暂停保留，请重新核对。", 409)
+                    post_send = post_send_quota_pending(record, state["pause"])
+                    if not post_send or (record.get("last_failure") or {}).get("id") != operation_id:
+                        record["last_failure"] = copy.deepcopy(operation)
+                    stage, detail = "succeeded", "恢复检查已取得配额，本次未发送消息。"
+                    if post_send:
+                        stage = "succeeded" if reading.get("seven_day_resets_at") is not None else "partial"
+                        detail = ("消息已完成，恢复检查已补齐发送后的配额和七天重置时间。" if stage == "succeeded"
+                                  else "消息已完成，已补读配额，但服务端未返回七天窗口重置时间。")
+                        operation["diagnostics"] = {key: val for key, val in operation.get("diagnostics", {}).items()
+                                                    if key in {"thread_id", "turn_id"}}
+                    else:
+                        operation.pop("diagnostics", None)
+                    operation.update(stage=stage, quota_status="observed", after=reading,
+                                     recovery_pause_id=pause_id, detail=detail)
                     operation.pop("failure", None)
-                    operation.pop("diagnostics", None)  # Preserved above in last_failure.
                     self.observe_permission(directory, record, reading, explicit=True)
                     self.save(directory, record)
 
@@ -1651,6 +1692,8 @@ class Manager:
                 self.update(directory, record, stage="succeeded" if has_reset else "partial", quota_status="observed", after=after,
                             detail="消息已完成，已读取服务端重置时间；这不保证窗口已固定或重置。" if has_reset else "消息已完成，但服务端未返回七天窗口重置时间。")
             except ActionError as exc:
+                rpc.diagnostics.setdefault("rpc_failure", {})["network"] = diagnostic_evidence.safe_network(
+                    network_policy.observations(rpc.network_route))
                 failure = {"category": exc.category, "stage": "reading"}
                 self.restrict(directory, record, failure)
                 if lease:

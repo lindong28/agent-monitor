@@ -58,6 +58,10 @@ async function render(changes={}, error=false) {
   assert.equal(all(p).filter(n=>n.tag==='button' && n.className.includes('btn-primary') && !n.hidden).length,1,'one recommended action');
 
   assert.match(visibleText(p),/配额读取失败，需要一次受控检查/);
+  const sent = await render({pause:{...base.pause, reason:"quotaReadFailed", source:{action:"send"}}});
+  assert.match(visibleText(sent),/消息已完成，发送后的配额读取失败/);
+  assert.match(visibleText(sent),/只补读该账号的配额/);
+  p=await render();
   assert.match(visibleText(p),/检查只查询一次配额/);
   assert.match(p.textContent,/不会.*发送|不.*重发/);
   const copy=all(p).find(n=>n.tag==='button' && n.textContent==='复制诊断信息');

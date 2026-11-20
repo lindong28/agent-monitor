@@ -100,6 +100,85 @@ class ProviderTests(unittest.TestCase):
                 self.assertEqual(result["last_quota"].get("spend_control_reached"), spend)
                 self.assertNotIn("pause", manager.controls.read("codex"))
 
+    def test_confirmed_post_send_recovery_finishes_only_the_missing_read(self):
+        from agent_monitor.accounts import codex_accounts as ca
+        from agent_monitor.quota import quota_recovery
+        for seven_day_reset in (4102444800, None):
+            with self.subTest(seven_day_reset=seven_day_reset):
+                manager = ca.Manager(self.root / "state/codex-accounts")
+                self.addCleanup(manager.close)
+                row = manager.add("sent@example.test", "sent-workspace")
+                pid = row["id"]
+                directory = manager.directory(pid)
+                record = manager.read(directory)
+                operation_id = "12345678-1111-4111-8111-123456789012"
+                record["operation"] = dict(id=operation_id, batch_id="send-batch", stage="partial",
+                    refresh_only=False, login_only=False, message_status="succeeded", quota_status="failed",
+                    before={"observed_at": "2026-10-01T12:00:00Z"}, diagnostics={"turn_id": "completed-turn"})
+                manager.save(directory, record)
+                account = accounts.Account(record["account_id"], record["email"])
+                device = {"id": "old-device", "label": "original"}
+                ca.write_record(manager.root / "batch.json", dict(id="send-batch", profile_ids=[pid], network_device=device))
+                lease = manager.controls.acquire("codex")
+                lease.pause("quotaReadFailed", failure=dict(stage="quota_read", account_profile="monitor-" + pid,
+                    account_fingerprint=quota_refresh.account_fingerprint("codex", account)),
+                    source=dict(profile_id=pid, operation_id=operation_id, action="send"))
+                pause = lease.state["pause"]
+                lease.close()
+                request = dict(profile="monitor-" + pid, machine="fixture", operation_id=operation_id,
+                    account_id=account.account_id, account_label=account.label, pause_id=pause["id"])
+                context = manager.recovery_network_context(pid)
+                self.assertEqual(context["device"], device)
+                with mock.patch.object(ca, "manager", manager):
+                    self.assertEqual(quota_recovery.managed_network_context(request, context), context)
+                    for override in ({"mode": "renew_auth"}, {"mode": "reauthorize"}, {"operation_id": "other"}):
+                        with self.assertRaises(ca.ActionError):
+                            quota_recovery.managed_network_context({**request, **override}, context)
+                route = SimpleNamespace(id="confirmed-device", label="confirmed", approval_context={}, require=lambda: None)
+                bound = manager.bind_recovery_network(pid, operation_id, pause["id"], context, route)
+                self.assertEqual(bound["device"]["id"], route.id)
+                self.assertEqual(manager.recovery_network_context(pid), context)
+                # A failed confirmed check retains the original task. Re-reading
+                # local status after restart does not dispatch a second child.
+                (directory / "codex").mkdir(exist_ok=True)
+                child = SimpleNamespace(pid=0, returncode=1, communicate=lambda *a, **k:
+                    (json.dumps({"error":"fixture", "failure":{"stage":"quota_read", "rpc_code":-32603}}), ""))
+                with mock.patch.object(quota_service.accounts, "codex_account", return_value=account), \
+                     mock.patch.object(quota_refresh.subprocess, "Popen", return_value=child) as spawn:
+                    with self.assertRaises(quota_refresh.RefreshError):
+                        quota_service.recover_codex_quota(account.label, pause["id"], root=self.root,
+                            profile="monitor-" + pid, confirmed_operation_id=operation_id)
+                    spawn.assert_called_once()
+                replacement = manager.controls.read("codex")["pause"]
+                self.assertNotEqual(replacement["id"], pause["id"])
+                self.assertEqual(replacement["source"], pause["source"])
+                with mock.patch.object(ca, "manager", manager):
+                    with self.assertRaises(ca.ActionError):
+                        quota_recovery.managed_network_context(request, context)
+                    request["pause_id"] = replacement["id"]
+                    self.assertEqual(quota_recovery.managed_network_context(request, context), context)
+                pause = replacement
+                reading = RateLimits(5, 4102444800, 20 if seven_day_reset else None, seven_day_reset,
+                                     updated_at="2026-11-20T03:00:00Z")
+                with mock.patch.object(quota_service.accounts, "codex_account", return_value=account), \
+                     mock.patch.object(quota_refresh, "load_rate_limits", return_value=reading) as query:
+                    for approved in (None, "other"):
+                        with self.assertRaises(quota_refresh.LocalUnavailable):
+                            quota_service.recover_codex_quota(account.label, pause["id"], root=self.root,
+                                profile="monitor-" + pid, confirmed_operation_id=approved)
+                    query.assert_not_called()
+                    quota_service.recover_codex_quota(account.label, pause["id"], root=self.root,
+                        profile="monitor-" + pid, confirmed_operation_id=operation_id)
+                    query.assert_called_once()
+                saved = manager.read(directory)
+                op = manager.batch_operation(saved, "send-batch")
+                self.assertEqual((op["id"], op["stage"], op["message_status"], op["quota_status"]),
+                    (operation_id, "succeeded" if seven_day_reset else "partial", "succeeded", "observed"))
+                self.assertEqual(op["diagnostics"]["turn_id"], "completed-turn")
+                self.assertEqual(saved["last_failure"]["quota_status"], "failed")
+                self.assertEqual(op["after"]["seven_day_resets_at"], seven_day_reset)
+                self.assertNotIn("pause", manager.controls.read("codex"))
+
     def test_codex_permissions_survive_child_result(self):
         account = accounts.Account("account-a", "fixture@example.test")
         for allowed in (True, False, None):

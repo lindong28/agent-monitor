@@ -89,8 +89,8 @@ def managed_network_context(value, supplied):
     state = controls.read("codex")
     if (record.get("account_id") != value["account_id"] or record.get("email", "").casefold() != value["account_label"].casefold()
             or operation.get("id") != value.get("operation_id") or supplied != context
-            or not operation.get("refresh_only") or operation.get("login_only")
-            or operation.get("stage") not in {"failed", "interrupted"} or operation.get("message_status") != "not_sent"
+            or not codex_accounts.recoverable_quota_operation(record, state.get("pause"),
+                allow_post_send=not value.get("mode") and not value.get("pause_scope"))
             or state.get("active") or (state.get("pause") or {}).get("id") != value["pause_id"]
             or (state.get("pause") or {}).get("probe_attempt")):
         raise codex_accounts.ActionError("原配额任务、暂停或网络上下文已变化，请更新状态后重新确认。", 409)
@@ -268,6 +268,8 @@ def local_recovery(value, *, network_route=None):
             route = network_policy.child_environment(os.environ, scope=uuid.uuid4().hex)[network_policy.INTERNAL]
         with network_policy.using_route(route):
             options = {"renew_auth": True} if value.get("mode") == "renew_auth" else {}
+            if network_route and value.get("operation_id") and not value.get("mode"):
+                options["confirmed_operation_id"] = value["operation_id"]
             if "source_digest" in value:
                 options["source_digest"] = value["source_digest"]
             if value.get("pause_scope") == "account":

@@ -656,7 +656,7 @@ def resolve_recovery_source(failure, root=None):
     return None, auth, None, "ambiguous" if candidates else reason
 
 
-def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None, profile=None, renew_auth=False, pause_scope=None, source_digest=None):
+def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None, profile=None, renew_auth=False, pause_scope=None, source_digest=None, confirmed_operation_id=None):
     """One operator-approved probe; retain the pause until its reading is saved."""
     root = Path(root) if root is not None else ROOT
     from agent_monitor.accounts.upstream_controls import Controls
@@ -687,6 +687,18 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
             raise quota_refresh.LocalUnavailable("账号恢复范围无效，未发出请求。")
         options["pause_scope"] = "account"
     recovery_operation = None
+    source = pause.get("source") or {}
+    if source.get("action") == "send" and pause.get("reason") in {"quotaReadFailed", "quotaRefreshFailed"}:
+        from agent_monitor.accounts.codex_accounts import Manager, post_send_quota_pending
+        if (not confirmed_operation_id or confirmed_operation_id != source.get("operation_id") or renew_auth
+                or pause_scope or profile != "monitor-" + str(source.get("profile_id"))):
+            raise quota_refresh.LocalUnavailable("请从原发送任务的恢复卡确认设备并补读配额。")
+        manager = Manager(root / "state/codex-accounts")
+        record = manager.read(manager.directory(source["profile_id"]))
+        if not post_send_quota_pending(record, pause):
+            raise quota_refresh.LocalUnavailable("原发送任务已变化，未开始配额检查。")
+        options["post_send_operation_id"] = confirmed_operation_id
+        recovery_operation = confirmed_operation_id
     if renew_auth:
         from agent_monitor.quota import codex_quota
         if not codex_quota.authentication_quota_failure(failure):

@@ -849,6 +849,10 @@
         paused: ["Codex 请求已暂停", "此前请求异常触发本机通道保护，不表示所有账号不可用。已确认仅某账号异常时，可在账号卡片停用该账号并核对暂停归属；其他情况先检查下面的目标与诊断。"],
       };
       [title.textContent, guidance.textContent] = copyText[mode];
+      if (mode === "read-error" && pause?.reason === "quotaReadFailed" && pause.source?.action === "send") {
+        title.textContent = "消息已完成，发送后的配额读取失败";
+        guidance.textContent = "确认原设备出口后，只补读该账号的配额。成功读数会保存到原发送记录；无需重新发送消息。";
+      }
       if (mode === "identity" && value?.pause_scope !== "account" && a.resolution_reason) {
         const resolutionCopy = {
           missing: ["未找到暂停原账号的凭据", "在目标机器恢复原账号的独立配置后更新状态；无需切换默认登录。"],

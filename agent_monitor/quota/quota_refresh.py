@@ -109,11 +109,21 @@ def load_rate_limits(provider, account, *, codex_home=None, **options):
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise LocalUnavailable("该账号已有操作，未开始查询。") from None
+        post_send = options.get("post_send_operation_id")
+        if post_send:
+            from agent_monitor.accounts.codex_accounts import Manager, post_send_quota_pending
+            manager = Manager(Path(options["root"]) / "state/codex-accounts")
+            record = manager.read(Path(codex_home).parent)
+            pause = manager.controls.read("codex").get("pause") or {}
+            if ((record.get("operation") or {}).get("id") != post_send or not post_send_quota_pending(record, pause)
+                    or pause.get("id") != options.get("probe_pause_id")):
+                raise LocalUnavailable("原发送任务或暂停已变化，未发出配额请求。")
         return _load_rate_limits(provider, account, codex_home=codex_home, **options)
 
 
 def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None,
-                     codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None, automatic_batch=None, source_digest=None):
+                     codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None, automatic_batch=None, source_digest=None,
+                     post_send_operation_id=None):
     root = Path(root) if root is not None else ROOT
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
@@ -293,7 +303,12 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 if account_rejection:
                     lease.state.setdefault("rejected_credentials", {}).setdefault(account_rejection, datetime.now(timezone.utc).isoformat())
                 pause = lease.pause_local if no_new or account_rejection else lease.pause
-                pause("quotaRefreshFailed", failure=facts)
+                if post_send_operation_id:
+                    # The replacement pause still protects the same missing
+                    # read. A later check requires its own explicit approval.
+                    pause("quotaRefreshFailed", failure=facts, source=lease.state["pause"]["source"])
+                else:
+                    pause("quotaRefreshFailed", failure=facts)
             except OSError as error:
                 save_error = diagnostics.failure_summary(diagnostics.failure_details(error, stage="pause_save"))
         if not isinstance(exc, (RefreshError, subprocess.TimeoutExpired)):
