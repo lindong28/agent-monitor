@@ -39,6 +39,7 @@ def main():
     parser.add_argument('--facade', action='store_true', help='Exercise real same-origin forwarding to the synthetic owner.')
     parser.add_argument('--loopback', action='store_true', help='Use a loopback page origin for automated acceptance.')
     parser.add_argument('--overview', action='store_true', help='Serve the real overview and account pages for quota action acceptance.')
+    parser.add_argument('--profile-recovery', action='store_true')
     parser.add_argument('--vendor', type=Path)
     parser.add_argument('--state-root', type=Path, help='Explicit facade installation root for isolated acceptance.')
     args = parser.parse_args()
@@ -93,6 +94,9 @@ def main():
         if state['recovery_state'] == 'auth':
             failure.update(kind='rpc_error', http_status=401, upstream_code='token_revoked')
         return dict(id='f' * 32 if state['account_scopes'] and state['paused'] else state['pause_id'], at=1793004570, failure=failure, **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
+    def source_profile(account):
+        return ('source-' if args.profile_recovery else 'monitor-') + account['id']
+
     def quota():
         target = dict(machine='fixture-hub', account_id='workspace-0', account_label='fixture0@example.test',
                       reason='本机已暂停该服务的自动请求', query_state='paused', pause=pause())
@@ -107,8 +111,17 @@ def main():
         failures = [other, target] if state['paused'] else []
         if state['pause_record'] == 'duplicate' and state['paused']:
             failures.append(dict(target))
+        if args.profile_recovery:
+            failures = [dict(machine='fixture-hub', account_id=a['account_id'], account_label=a['email'],
+                account_profile=source_profile(a) if a['id'] == '1' else '', query_state='paused', reason='fixture account pause',
+                pause=dict(id=account_pause(a['id'])['id'], scope='account', profile=source_profile(a)))
+                for a in accounts[:2] if a['id'] not in state['cleared_scopes']]
         return dict(codex=dict(accounts=[], refresh_errors=failures), claude=dict(accounts=[]))
     def account_pause(profile_id):
+        if args.profile_recovery:
+            return dict(id=(str(int(profile_id) + 1) * 32), at=1793004570,
+                failure=dict(stage='quota_read', kind='rpc_error', http_status=401, upstream_code='token_expired',
+                    authentication_recovery=dict(outcome='no_new_credentials')))
         return dict(id='account-pause-' + profile_id, at=1793004570,
                     failure=dict(stage='quota_read', kind='rpc_error', http_status=401, upstream_code='token_expired' if profile_id == '0' else 'token_revoked'))
     source = (ROOT / 'web/accounts.html').read_text()
@@ -148,8 +161,8 @@ def main():
         def do_GET(self):
             if args.overview:
                 path = urlsplit(self.path).path
-                if path in ('/', '/accounts'):
-                    return self.send((ROOT / 'web' / ('index.html' if path == '/' else 'accounts.html')).read_bytes(), 'text/html; charset=utf-8')
+                if path in ('/', '/accounts', '/collection'):
+                    return self.send((ROOT / 'web' / ('index.html' if path == '/' else path[1:]+'.html')).read_bytes(), 'text/html; charset=utf-8')
                 if path.startswith('/web/') and '..' not in path.split('/'):
                     file = args.vendor / Path(path).name if path.startswith('/web/vendor/') else ROOT / path.lstrip('/')
                     body = file.read_bytes()
@@ -157,12 +170,12 @@ def main():
                         body = body.replace(b'127.0.0.1:39002', f'127.0.0.1:{pair.server_port}'.encode())
                     return self.send(body, 'text/css' if path.endswith('.css') else 'text/javascript')
                 sync = dict(machines=[], coverage={'admitted': 0, 'declared': 0}, syncing=False, terminal=True)
-                if path == '/api/overview':
+                if path in ('/api/overview', '/api/collection'):
                     rows = [dict(account_state='known', account_id=a['account_id'], account_label=a['email'],
                         updated_at='2026-11-01T00:00:00Z', five_hour_used_pct=12, seven_day_used_pct=23,
-                        machines=[], presence='in_use') for a in accounts]
+                        machines=['fixture-hub'] if args.profile_recovery else [], presence='in_use') for a in accounts]
                     return self.send(dict(today={'cost_usd': 12}, week={'cost_usd': 34}, range={'cost_usd': 56, 'total_tokens': 100},
-                        rate_limits={'claude': {'accounts': []}, 'codex': {'accounts': rows}},
+                        rate_limits={'claude': {'accounts': []}, 'codex': {**quota()['codex'], 'accounts': rows}},
                         daily_cost_30d=[], top_projects_week=[], model_mix_month=[], sync=sync))
                 if path == '/api/runtime-context': return self.send({'local_network': False})
                 if path == '/api/timezone': return self.send({'timezone': 'UTC'})
@@ -222,17 +235,18 @@ def main():
             elif self.path.startswith('/api/quota-recovery?'):
                 state['recovery_reads'] += 1
                 query = parse_qs(urlsplit(self.path).query)
-                if state['account_scopes'] and query.get('pause_scope') == ['account']:
+                if (state['account_scopes'] or args.profile_recovery) and query.get('pause_scope') == ['account']:
                     profile = query.get('profile', [''])[0]
-                    account = next((a for a in accounts[:2] if 'monitor-' + a['id'] == profile), None)
+                    account = next((a for a in accounts[:2] if source_profile(a) == profile), None)
                     if not account:
                         self.send(dict(error='Unknown synthetic account'), status=400)
                         return
                     state['scoped_reads'].append(profile)
-                    self.send(dict(machine='self', observed_at='2026-11-07T00:00:00Z', pause_scope='account', active=None,
+                    self.send(dict(machine='fixture-hub' if args.profile_recovery else 'self', observed_at='2026-11-07T00:00:00Z', pause_scope='account', active=None,
                         pause=account_pause(account['id']) if account['id'] not in state['cleared_scopes'] else None,
                         shared_pause=pause() if state['paused'] else None,
-                        account=dict(account_id=account['account_id'], account_label=account['email'], quota_profile=profile,
+                        account=dict(account_id=account['account_id'], account_label='different@example.test' if state.get('wrong_identity') else account['email'], quota_profile=profile,
+                            replacement_credential_available=state.get('replacement') == profile,
                             source='managed', auth_recovery_available=not state['paused'] and not account.get('disabled'),
                             account_quota_pause=account_pause(account['id']),
                             blocked_reason='此账号已停用' if account.get('disabled') else '共享通道已暂停' if state['paused'] else None),
@@ -314,7 +328,7 @@ def main():
             elif self.path == '/fixture/config':
                 if 'disabled' in payload:
                     accounts[0]['disabled'] = payload['disabled']
-                for key in ('disclosure', 'quota_failure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state', 'process_mode', 'account_scopes'):
+                for key in ('disclosure', 'quota_failure', 'mode', 'delay', 'paused', 'pair_mode', 'status_mode', 'pause_record', 'probe_used', 'recovery_mode', 'restricted', 'recovery_state', 'process_mode', 'account_scopes', 'wrong_identity', 'replacement'):
                     if key in payload:
                         state[key] = payload[key]
                 self.send(state)
@@ -331,8 +345,12 @@ def main():
                     return
                 state['recoveries'].append(payload)
                 if payload.get('pause_scope') == 'account':
-                    account = next((a for a in accounts[:2] if 'monitor-' + a['id'] == payload.get('profile')), None)
+                    account = next((a for a in accounts[:2] if source_profile(a) == payload.get('profile')), None)
                     assert account and payload['pause_id'] == account_pause(account['id'])['id']
+                    if args.profile_recovery:
+                        assert (payload['machine'], payload['account_id'], payload['account_label'], payload.get('mode')) == (
+                            'fixture-hub', account['account_id'], account['email'], None)
+                        assert state.get('replacement') == source_profile(account)
                     state['cleared_scopes'].append(account['id'])
                     receipt = dict(ok=True, request=payload, observed_at='2026-11-07T00:00:01Z', pause_id=payload['pause_id'])
                     state['scoped_receipts'][payload['profile']] = receipt

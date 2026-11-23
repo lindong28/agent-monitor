@@ -12,7 +12,7 @@ const {values:args} = parseArgs({options:{
   'agent-browser':{type:'string'}, browser:{type:'string'}, python:{type:'string'},
   'quota-settings-only':{type:'boolean'}, 'dashboard-only':{type:'boolean'}, vendor:{type:'string'}, facade:{type:'boolean'}, 'disclosures-only':{type:'boolean'}, 'network-only':{type:'boolean'}, launchd:{type:'boolean'}, help:{type:'boolean'},
   'account-scopes-only':{type:'boolean'}, 'automatic-egress-only':{type:'boolean'},
-  'quota-actions-only':{type:'boolean'},
+  'quota-actions-only':{type:'boolean'}, 'profile-recovery-only':{type:'boolean'},
   'post-send-only':{type:'boolean'},
 }});
 if (args.help) {
@@ -133,7 +133,8 @@ async function configure(value) { const r=await fetch(url+'/fixture/config',{met
 async function startFixture() {
   const command = args['post-send-only'] ? [path.join(repo,'tests/fixtures/codex_accounts_ui.py'),'--post-send'] :
     args['network-only'] ? [path.join(repo,'tests/fixtures/network_cache_ui.py'),'--artifacts',root] : (args['quota-settings-only'] || args['automatic-egress-only']) ? [path.join(repo,'tests/fixtures/quota_settings_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor'), ...(args['automatic-egress-only'] ? ['--automatic-egress'] : [])] : args['dashboard-only'] ? [path.join(repo,'tests/fixtures/local_network_ui.py'),'--artifacts',root,'--vendor',args.vendor || path.join(repo,'web/vendor')] : [path.join(repo,'tests/fixtures/account_egress_ui.py'),'--loopback',...(args.facade?['--facade']:[])];
-  if (args['quota-actions-only']) command.push('--overview','--vendor',args.vendor || path.join(repo,'web/vendor'));
+  if (args['profile-recovery-only']) command.push('--profile-recovery');
+  if (args['quota-actions-only'] || args['profile-recovery-only']) command.push('--overview','--vendor',args.vendor || path.join(repo,'web/vendor'));
   fixture=spawn(python,command,{env,cwd:repo,stdio:['ignore','pipe','pipe']});
   children.push(fixture);
   let line='',error='';
@@ -218,6 +219,49 @@ try {
       assert.deepEqual(calls.slice(turn+1),Array(name==='stable'?2:1).fill('account/rateLimits/read'));
       console.log(`${name}: one turn, ${calls.length-turn-1} post-send quota RPC(s); account result verified.`);
     }
+  } else if (args['profile-recovery-only']) {
+    const sourceRow = id => 'tr[data-account-id="workspace-' + id + '"]';
+    const sourceLink = id => sourceRow(id) + ' a[href*="pause="]';
+    const panel = '#quota-diagnostic-table .quota-recovery-panel';
+    const button = name => panel + ' [data-recovery-action="' + name + '"]';
+    await until('overview shows each affected account',()=>read(`!!document.querySelector('${sourceLink(1)}')`));
+    assert.match(await read(`document.querySelector('${sourceLink(0)}').innerText`), /source-0/);
+    assert.match(await read(`document.querySelector('${sourceLink(1)}').innerText`), /source-1/);
+    assert.equal(await read(`!!document.querySelector('${sourceLink(2)}')`), false);
+    await click(sourceLink(1),`document.querySelector('${panel} h3')?.innerText==='认证刷新未取得新凭据'`);
+    assert.match(await read(`document.querySelector('${panel}').innerText`), /fixture-hub.*source-1.*fixture1@example.test/);
+    assert.equal(await read(`document.querySelector('${button('probe')}').checkVisibility()`), false);
+    assert.deepEqual((await stats()).scoped_reads,['source-1']);
+    const oldLink=(await bt('get','url')).data.url;
+    await configure({wrong_identity:true});
+    await click(button('read'),`document.querySelector('${panel}').textContent.includes('目标机器或账号来源已变化')`);
+    assert.equal(await read(`document.querySelector('${button('probe')}').checkVisibility()`), false);
+    await configure({wrong_identity:false,replacement:'source-1'});
+    await click(button('read'),`document.querySelector('${panel} h3').innerText==='已检测到此账号的新凭据'`);
+    assert.deepEqual((await stats()).recoveries,[]);
+    await click(button('probe'),"!!document.querySelector('dialog.account-egress-dialog[open] .btn-primary:not(:disabled)')");
+    await click('dialog.account-egress-dialog button:not(.btn-primary)',"!document.querySelector('dialog[open]')");
+    assert.deepEqual((await stats()).recoveries,[]);
+    await click(button('probe'),"!!document.querySelector('dialog.account-egress-dialog[open] .btn-primary:not(:disabled)')");
+    await click('dialog.account-egress-dialog .btn-primary',`document.querySelector('${panel} h3')?.innerText==='此账号当前没有配额暂停'`);
+    const recorded=(await stats()).recoveries;
+    assert.equal(recorded.length,1);
+    assert.deepEqual([recorded[0].profile,recorded[0].account_label,recorded[0].mode,recorded[0].pause_scope],
+      ['source-1','fixture1@example.test',undefined,'account']);
+    await bt('open',url);
+    await until('restored overview',()=>read(`!!document.querySelector('${sourceLink(0)}')`));
+    assert.equal(await read(`!!document.querySelector('${sourceLink(1)}')`), false);
+    await click(sourceLink(0),`document.querySelector('${panel} h3')?.innerText==='认证刷新未取得新凭据'`);
+    assert.match(await read(`document.querySelector('${panel}').innerText`), /source-0.*fixture0@example.test/);
+    const entry = '#quota-diagnostic-table [data-codex-pause-id="'+'1'.repeat(32)+'"]';
+    await click('#quota-diagnostic-table .quota-failure-details > summary',"document.querySelector('#quota-diagnostic-table .quota-failure-details').open");
+    await click(entry+' > button',`document.querySelector('${entry} .quota-recovery-panel h3')?.innerText==='认证刷新未取得新凭据'`);
+    assert.match(await read(`document.querySelector('${entry} .quota-recovery-panel').innerText`), /source-0.*fixture0@example.test/);
+    await bt('open',oldLink);
+    await until('closed historical link',()=>read("document.querySelector('#quota-diagnostic-table')?.textContent.includes('这条账号暂停记录已更新')"));
+    assert.equal(await read(`!!document.querySelector('[data-quota-recovery-target]')`),false,'stale scoped link never opens a shared or different account target');
+    assert.equal((await stats()).recoveries.length,1);
+    console.log('PASS: two account pauses on the same host have distinct overview links. Changed identity blocked, same-source replacement enabled one confirmed quota-only check; the other pause survived reload.');
   } else if (args['quota-actions-only']) {
     const row='tr[data-account-id="workspace-0"]', refresh=row+' .quota-account-links button';
     await until('overview quota actions',()=>read(`!!document.querySelector('${refresh}') && !document.querySelector('${refresh}').disabled`));

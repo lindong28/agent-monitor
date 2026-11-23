@@ -755,7 +755,7 @@
   function createRecoveryPanel(machine = "self", {onContinue, onSaved, getConnection, sourceFailure = null, profile = "", pauseScope = ""} = {}) {
     function canRenewAuth(value) {
       // Recovery eligibility belongs to the server; do not duplicate its code list.
-      return value?.account?.auth_recovery_available === true;
+      return value?.account?.auth_recovery_available === true && !value.account.replacement_credential_available;
     }
     const make = (tag, text, className) => {
       const node = document.createElement(tag);
@@ -834,8 +834,10 @@
         && String(lastRequest.account_label || "").toLowerCase() === String(a.account_label || "").toLowerCase()
         && (lastRequest.profile || "") === (a.quota_profile || "");
       const failure = pause?.failure || (lastMatchesPause ? last.failure : null);
-      const authUnresolved = lastMatchesPause && lastRequest.mode === "renew_auth"
-        && last.authentication_recovery?.outcome === "no_new_credentials";
+      const unchangedAfterRenewal = failure?.authentication_recovery?.outcome === "no_new_credentials"
+        || (lastMatchesPause && lastRequest.mode === "renew_auth" && last.authentication_recovery?.outcome === "no_new_credentials");
+      const replacementAvailable = a.replacement_credential_available === true;
+      const externalLogin = value?.pause_scope === "account" && profile && !profile.startsWith("monitor-");
       const hasFailure = failure && typeof failure === "object" && Object.keys(failure).length > 0;
       const failureGuidance = hasFailure ? quotaFailureGuidance({
         reason: failure.detail || "", failure, query_state: "paused",
@@ -851,12 +853,13 @@
         ? `页面汇总显示“${sourceGuidance.summary}”，目标机器状态显示“${failureGuidance.summary}”`
         : "";
       const mode = !value ? "unknown" : value.active ? "active"
-        : pendingPauseId ? "unknown-outcome" : !pause ? "ready"
+        : pendingPauseId ? "unknown-outcome" : externalLogin && a.resolution_reason ? "identity" : !pause ? "ready"
         : pause.id === "unreadable" ? "unreadable" : pause.probe_attempt ? "used"
         : a.blocked_reason || value.shared_pause ? "account-blocked"
         : !a.account_id || !a.account_label ? "identity"
         : failure?.stage === "recovery_commit" ? "local-commit"
-        : authUnresolved ? "auth-unresolved"
+        : replacementAvailable ? "replacement"
+        : unchangedAfterRenewal ? "auth-unresolved"
         : lastMatchesPause ? "failed"
         : sourceMismatch ? "source-mismatch"
         : failureGuidance?.key === "identity" ? "identity"
@@ -876,6 +879,7 @@
         "upstream-auth": ["上游认证响应需要核对", `已记录${authEvidence}；这条读数不能区分凭据、权限或服务端原因。先通过本次确认的出站路径只检查一次；若仍失败，页面不能替你修复该机器的账号或部署。`],
         "read-error": ["配额读取失败，需要一次受控检查", "已记录读取阶段失败，但原因未核实。先通过本次确认的出站路径只检查一次；仍失败时复制诊断交由管理员排查。"],
         failed: ["配额检查未成功，发送仍暂停", "具体原因尚未确认。先查看排查步骤，处理后可再次检查；已有发送结果和账号选择保留。"],
+        replacement: ["已检测到此账号的新凭据", "可以使用原来源的新凭据检查一次配额。取得并保存有效读数后，此账号的配额暂停会解除。"],
         "auth-unresolved": ["认证刷新未取得新凭据", "本次没有继续查询配额，暂停保留。官方接口未提供明确失败原因；先查看诊断，不要重复查询同一份凭据。"],
         "local-commit": ["配额已有候选结果，本地结清未完成", "暂停保留。先查看本地保存或发布错误及已有结果；不要重新授权或再次查询配额。"],
         paused: ["Codex 请求已暂停", "此前请求异常触发本机通道保护，不表示所有账号不可用。已确认仅某账号异常时，可在账号卡片停用该账号并核对暂停归属；其他情况先检查下面的目标与诊断。"],
@@ -905,13 +909,15 @@
       if (value?.pause_scope === "account") {
         if (mode === "ready") {
           title.textContent = "此账号当前没有配额暂停";
-          guidance.textContent = "可以返回账号操作。不会自动查询、登录或发送；其他账号及通道限制分别保留。";
+          guidance.textContent = externalLogin ? "后续配额查询按此账号原有的自动查询设置执行。" : "可以返回账号操作。不会自动查询、登录或发送；其他账号及通道限制分别保留。";
         } else if (mode === "paused") {
           title.textContent = "此账号的配额查询已暂停";
           guidance.textContent = "本次失败已隔离，其他独立账号可继续刷新。处理此账号后才恢复它的查询。";
         } else if (mode === "account-blocked" && value.shared_pause) {
           title.textContent = "账号与本机通道均已暂停";
           guidance.textContent = "先由维护者核对并处理通道故障，再明确解除通道暂停；此账号的暂停继续保留。查看下方排查步骤。";
+        } else if (mode === "auth-unresolved" && externalLogin) {
+          guidance.textContent = `请在 ${value.machine} 沿原有出口，用账号来源 ${profile} 登录 ${a.account_label}，然后点击“更新状态”。检测到同一账号的新凭据后，这里会提供配额检查。`;
         } else if (mode === "failed") {
           title.textContent = "此账号的配额检查未成功";
           guidance.textContent = "此账号暂停保留。先查看本次诊断；其他账号的结果与限制分别保留。";
@@ -937,7 +943,7 @@
       if (last && pause?.at && Date.parse(last.observed_at) < pause.at * 1000) result.textContent += " 该检查早于本次暂停，不能证明本次故障已恢复。";
       if (value && !pause && !last) result.textContent = `状态更新：${when(value.observed_at)}。`;
       if (value && unrecordedOutcome) result.textContent = "最近检查：未取得该次结果记录。当前是否暂停以上方状态为准。";
-      probe.hidden = !["paused", "failed", "source-mismatch", "upstream-auth", "read-error"].includes(mode);
+      probe.hidden = !["replacement", "paused", "failed", "source-mismatch", "upstream-auth", "read-error"].includes(mode);
       probe.disabled = busy || probe.hidden;
       probe.textContent = mode === "failed" ? "处理后再次检查配额" : "确认出口并检查配额";
       effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，使用本次确认的出站路径；不会发送消息。";
@@ -958,7 +964,7 @@
       resume.hidden = mode !== "ready" || !onContinue;
       read.disabled = busy;
       read.textContent = ["unknown", "unknown-outcome"].includes(mode) ? "重新读取状态" : mode === "active" ? "更新进度" : "更新状态";
-      const primary = !commit.hidden ? commit : !relogin.hidden ? relogin : mode === "account-blocked" && layeredPause ? help : renewAuth || ["paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["local-commit","auth-unresolved","failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
+      const primary = !commit.hidden ? commit : !relogin.hidden ? relogin : mode === "account-blocked" && layeredPause ? help : renewAuth || ["replacement", "paused", "source-mismatch", "upstream-auth", "read-error"].includes(mode) ? probe : ["local-commit","auth-unresolved","failed","unreadable","identity"].includes(mode) ? help : !resume.hidden ? resume : read;
       for (const button of [read,probe,relogin,commit,help,resume]) button.className = "btn" + (button === primary ? " btn-primary" : "");
       steps.replaceChildren();
       const list = make("ol");
@@ -976,7 +982,7 @@
       ] : mode === "auth-unresolved" ? [
         "本次官方认证刷新没有确认写入新凭据，程序未查询配额，原错误和暂停仍保留。",
         "展开技术详情查看认证修复结果及已保存的客户端诊断；没有明确上游原因时，不据此认定必须重新登录。",
-        !relogin.hidden ? "若决定重新授权，点击“重新授权并复验配额”。账号卡片将显示本次官方设备码；在官方页面确认本账号身份，程序只在同身份新凭据与一次配额验证成功后结清原任务及暂停。" : `由维护者核对 ${host} 上本账号的后续认证恢复路径。普通登录可能仍受当前暂停约束；不要清除暂停、切换出口或重复检查。`
+        externalLogin ? `在 ${host} 按原配置 ${profile} 的登录流程完成授权，返回此卡片更新状态；系统会核对同一来源、账号与工作区。请保留本次暂停记录。` : !relogin.hidden ? "若决定重新授权，点击“重新授权并复验配额”。账号卡片将显示本次官方设备码；在官方页面确认本账号身份，程序只在同身份新凭据与一次配额验证成功后结清原任务及暂停。" : `由维护者核对 ${host} 上本账号的后续认证恢复路径。普通登录可能仍受当前暂停约束；不要清除暂停、切换出口或重复检查。`
       ] : mode === "unreadable" ? [
         `在 ${host} 的终端运行 agent-monitor status，核对服务状态及显示的日志位置。`,
         "查看日志中的状态文件读取错误，修复对应文件的权限或格式；不要删除暂停记录来恢复发送。",
@@ -1054,6 +1060,11 @@
         const {response, value} = await requestJSON(`/api/quota-recovery?${query}`);
         if (!response.ok || !value.machine || !value.observed_at || !Object.hasOwn(value, "pause") || !Object.hasOwn(value, "active")) throw new Error(value.error || "状态回执不完整");
         if (pauseScope === "account" && (value.pause_scope !== "account" || value.account?.quota_profile !== profile)) throw new Error("账号恢复状态与所选对象不一致");
+        if (pauseScope === "account" && sourceFailure && (value.machine !== machine ||
+            (value.account.account_id && value.account.account_id !== sourceFailure.account_id)
+            || (value.account.account_label && value.account.account_label.toLowerCase() !== sourceFailure.account_label.toLowerCase()))) {
+          throw new Error("目标机器或账号来源已变化，请在原机器核对账号后更新状态。");
+        }
         if (controller.signal.aborted) return;
         state = value;
         if (pauseScope !== "account") updateQuotaMachineState(machine, value, readVersion);
@@ -1175,14 +1186,22 @@
     return JSON.stringify([failure.account_id, failure.account_label.trim().toLowerCase()]);
   }
 
+  function accountPauseProfile(failure) {
+    if (failure?.pause?.scope !== "account" || !failure.pause.id || !failureAccountKey({key:"codex"}, failure)) return null;
+    const profile = failure.pause.profile;
+    return typeof profile === "string" && profile && (!failure.account_profile || profile === failure.account_profile) ? profile : null;
+  }
+
   function quotaFailureGroups(provider, failures) {
     const groups = new Map();
     failures.forEach((failure, index) => {
       const kind = failure.pause?.id ? "paused" : quotaFailureKind(failure.reason, failure.query_state);
-      const key = JSON.stringify([failure.machine, kind, kind === "paused"
+      const scope = failure.pause?.scope === "account"
+        ? JSON.stringify(["account", failure.pause.profile, failureAccountKey(provider, failure)]) : "machine";
+      const key = JSON.stringify([failure.machine, scope, kind, kind === "paused"
         ? failure.pause?.id || null
         : failureAccountKey(provider, failure) || failure.account_profile || index]);
-      if (!groups.has(key)) groups.set(key, {key, machine:failure.machine, kind, failures:[]});
+      if (!groups.has(key)) groups.set(key, {key, machine:failure.machine, scope, kind, failures:[]});
       groups.get(key).failures.push(failure);
     });
     return [...groups.values()];
@@ -1191,18 +1210,43 @@
   function renderQuotaDiagnostics(rateLimits) {
     const table = qs('#quota-diagnostic-table');
     if (!table) return;
+    table.quotaDiagnosticSnapshot = rateLimits;
+    if (!table.quotaHashListener && window.addEventListener) {
+      table.quotaHashListener = () => renderQuotaDiagnostics(table.quotaDiagnosticSnapshot);
+      window.addEventListener("hashchange", table.quotaHashListener);
+      window.AgentMonitor?.onPageCleanup?.(() => {
+        window.removeEventListener("hashchange", table.quotaHashListener);
+        delete table.quotaHashListener;
+      });
+    }
     if (!table.children.length) table.textContent = '';
-    const requestedMachine = new URLSearchParams(window.location?.hash?.slice(1) || '').get('quota-recovery');
+    const params = new URLSearchParams(window.location?.hash?.slice(1) || '');
+    const requestedMachine = params.get('quota-recovery'), pauseId = params.get('pause');
+    const sourceFailure = pauseId && (rateLimits?.codex?.refresh_errors || []).find(f =>
+      f.machine === requestedMachine && f.pause?.id === pauseId && accountPauseProfile(f));
     const knownMachine = requestedMachine && (
       (rateLimits?.codex?.accounts || []).some(account => account.machines?.includes(requestedMachine)) ||
       (rateLimits?.codex?.refresh_errors || []).some(failure => failure.machine === requestedMachine));
-    if (knownMachine && !Array.from(table.children).some(body => body.quotaRecoveryMachine === requestedMachine)) {
+    for (const body of Array.from(table.children)) {
+      if (!body.quotaRecoveryMachine) continue;
+      if (body.quotaRecoveryMachine !== requestedMachine || body.quotaRecoveryPause !== pauseId ||
+          (body.staleQuotaRecoveryNotice && sourceFailure)) {
+        body.quotaRecoveryPanel?.dispose();
+        body.remove();
+      }
+    }
+    if (knownMachine && (!pauseId || sourceFailure) && !Array.from(table.children).some(body =>
+        body.quotaRecoveryMachine === requestedMachine && body.quotaRecoveryPause === pauseId)) {
       const body = document.createElement('tbody'), row = document.createElement('tr'), cell = document.createElement('td');
       body.quotaRecoveryMachine = requestedMachine;
+      body.quotaRecoveryPause = pauseId;
       cell.colSpan = 10;
       const heading = document.createElement('h3');
-      heading.textContent = `${requestedMachine} 当前查询状态与恢复`;
-      const panel = createRecoveryPanel(requestedMachine);
+      heading.textContent = sourceFailure ? `${requestedMachine} · ${sourceFailure.account_label} 的配额恢复` : `${requestedMachine} 当前查询状态与恢复`;
+      const panel = createRecoveryPanel(requestedMachine, sourceFailure
+        ? {sourceFailure, profile:accountPauseProfile(sourceFailure), pauseScope:"account"} : {});
+      body.quotaRecoveryPanel = panel;
+      body.dataset.quotaRecoveryTarget = requestedMachine;
       cell.append(heading, panel); row.appendChild(cell); body.appendChild(row); table.appendChild(body);
       panel.scrollIntoView?.({block: 'center'});
     }
@@ -1211,6 +1255,15 @@
       const failures = rateLimits?.[provider.key]?.refresh_errors || [];
       if (failures.length || old) table.appendChild(quotaFailureDetails(provider, failures, old));
     });
+    if (requestedMachine && pauseId && !sourceFailure && !Array.from(table.children).some(body => body.quotaRecoveryPause === pauseId)) {
+      const body = document.createElement("tbody"), row = document.createElement("tr"), cell = document.createElement("td");
+      body.quotaRecoveryPause = pauseId;
+      body.quotaRecoveryMachine = requestedMachine;
+      body.staleQuotaRecoveryNotice = true;
+      cell.colSpan = 10;
+      cell.textContent = "这条账号暂停记录已更新。请在概览中查看该账号的最新配额与恢复入口。";
+      row.appendChild(cell); body.appendChild(row); table.prepend(body);
+    }
     if (!table.children.length) table.textContent = '没有已记录的配额更新异常。';
   }
 
@@ -1228,9 +1281,12 @@
     const saved = body.quotaDiagnostics;
     const groups = quotaFailureGroups(provider, failures);
     const counts = {paused:new Set(), skipped:new Set(), busy:new Set(), error:new Set()};
-    groups.forEach(group => { if (group.machine) counts[group.kind].add(group.machine); });
+    const accountPauses = groups.filter(group => group.kind === "paused" && group.scope !== "machine").length;
+    groups.forEach(group => { if (group.machine && group.scope === "machine") counts[group.kind].add(group.machine); });
     const labels = [["paused","暂停"],["skipped",failures.some(f => f.query_state === "skipped") ? "本轮跳过或停止" : "本轮未尝试"],["busy","通道占用未查询"],["error","查询异常"]];
-    const status = labels.filter(([key]) => counts[key].size).map(([key,label]) => `${counts[key].size} 台${label}`).join("，");
+    const statuses = labels.filter(([key]) => counts[key].size).map(([key,label]) => `${counts[key].size} 台${label}`);
+    if (accountPauses) statuses.push(`${accountPauses} 条账号暂停`);
+    const status = statuses.join("，");
     const identities = new Set(failures.map(f => failureAccountKey(provider, f)).filter(Boolean));
     const unknown = failures.some(failure => !failureAccountKey(provider, failure));
     const accountsText = identities.size ? `；涉及 ${identities.size} 个账号${unknown ? "，另有账号身份未确认" : ""}` : "；账号身份未确认";
@@ -1243,12 +1299,12 @@
       const failure = group.failures.find(f => f.failure && Object.keys(f.failure).length) || group.failures[0];
       let index = remaining.findIndex(record => record.key === group.key);
       if (index < 0 && group.kind === "paused") index = remaining.findIndex(record =>
-        record.machine === group.machine && record.kind === "paused" && !currentKeys.has(record.key));
+        record.machine === group.machine && record.scope === group.scope && record.kind === "paused" && !currentKeys.has(record.key));
       let record = index < 0 ? null : remaining.splice(index,1)[0];
       if (!record) {
         const entry = document.createElement("div"), note = document.createElement("p");
         entry.appendChild(note);
-        record = {machine:failure.machine, entry, note, panel:null, pauseId:failure.pause?.id};
+        record = {machine:failure.machine, scope:group.scope, entry, note, panel:null, pauseId:failure.pause?.id};
         record.accounts = document.createElement("ul");
         entry.appendChild(record.accounts);
         if (failure.machine && (provider.key === "codex" || failure.query_state === "skipped")) {
@@ -1257,7 +1313,13 @@
           open.addEventListener("click", () => {
             if (record.panel) return;
             open.disabled = true;
-            record.panel = createRecoveryPanel(record.machine, {sourceFailure: record.failure});
+            const sourceFailure = record.failure;
+            const options = {sourceFailure};
+            if (sourceFailure.pause?.scope === "account") {
+              if (!accountPauseProfile(sourceFailure)) return;
+              Object.assign(options, {profile:accountPauseProfile(sourceFailure), pauseScope:"account"});
+            }
+            record.panel = createRecoveryPanel(record.machine, options);
             entry.appendChild(record.panel);
           });
           entry.appendChild(open); record.open = open;
@@ -1279,7 +1341,7 @@
       }
       record.key = group.key; record.kind = group.kind; record.failure = failure;
       if (record.open) {
-        if (failure.query_state === "skipped") record.open.remove();
+        if (failure.query_state === "skipped" || (failure.pause?.scope === "account" && !accountPauseProfile(failure))) record.open.remove();
         else if (!record.open.parentNode) record.entry.insertBefore(record.open, record.sourceText.parentElement);
       }
       record.accounts.textContent = "";
@@ -1291,7 +1353,7 @@
       });
       for (const items of accountGroups.values()) {
         const item = items[0], row = document.createElement("li");
-        const sources = [...new Set(items.map(f => f.account_profile ? `托管账号 ${f.account_profile}`
+        const sources = [...new Set(items.map(f => accountPauseProfile(f) ? `恢复来源 ${accountPauseProfile(f)}` : f.account_profile ? `托管账号 ${f.account_profile}`
           : f.account_profile === "" ? "默认来源" : "来源未记录"))];
         const label = typeof item.account_label === "string" && item.account_label.trim()
           ? item.account_label : failureAccountKey(provider, item) ? item.account_id : "账号身份未确认";
@@ -1310,7 +1372,7 @@
         const guidance = quotaFailureGuidance(failure);
         record.note.dataset.failureCategory = guidance.key;
         record.note.textContent = failure.machine + "：上次配额采集" + statusText + "；"
-          + (group.kind === "paused" ? "下列账号受该机器暂停影响，不代表每个账号均查询失败。暂停关联的采集记录：" : "") + guidance.summary + "。" + guidance.action;
+          + (group.scope !== "machine" ? "下列凭据来源有账号级暂停记录。关联的采集记录：" : group.kind === "paused" ? "下列账号受该机器暂停影响，不代表每个账号均查询失败。暂停关联的采集记录：" : "") + guidance.summary + "。" + guidance.action;
       } else {
         record.note.textContent = `${failure.machine}：上次配额采集记录；当前暂停状态需另行核对。`
           + (provider.key === "claude" && failure.machine ? "只读核对：agent-monitor upstream-holds status claude。" : "");
@@ -2189,6 +2251,20 @@
         recovery.className = "quota-history-note";
         recovery.textContent = `当前显示来自 ${account.reading_from} 的最后一次配额读数。该机器未登录 ${provider.label}；如需继续从此机器更新，请在该机器登录此账号，再点击“更新统计与配额”。`;
         details.appendChild(recovery);
+      }
+      if (provider.key === "codex") {
+        const failures = renderedQuotaRateLimits?.codex?.refresh_errors || [];
+        const seen = new Set();
+        for (const failure of failures) {
+          const profile = accountPauseProfile(failure);
+          if (!profile || !quotaFailureMatchesAccount(failure, account) || seen.has(failure.pause.id)) continue;
+          seen.add(failure.pause.id);
+          const link = document.createElement("a");
+          link.className = "quota-history-note";
+          link.textContent = `${failure.machine} · ${profile} 有账号暂停记录：查看当前状态与恢复`;
+          link.href = collectionUrl("#" + new URLSearchParams({"quota-recovery":failure.machine, pause:failure.pause.id}));
+          cell.appendChild(link);
+        }
       }
       if (refreshNotice) {
         const currentNotice = quotaRefreshNotice(provider, account, true);
