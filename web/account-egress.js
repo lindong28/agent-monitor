@@ -62,13 +62,16 @@ export async function previewEgress(request, targets, signal, payload = {}) {
     if (["quota-recovery", "quota-auth-recovery", "quota-login-recovery", "quota-settings"].includes(payload.approval_action) && machine) {
       dialog.append(node("p", `凭据与执行主机：${machine}；出站设备以本次预览结果为准。`, "quota-scope"));
     }
+    if (["quota-recovery", "quota-auth-recovery", "quota-login-recovery"].includes(payload.approval_action)
+        && payload.approval_scope?.[1] && payload.approval_scope[2]) {
+      const [, accountId, label] = payload.approval_scope;
+      dialog.append(node("p", `本次恢复账号：${label}（${accountId}）`, "account-egress-identities"));
+    }
     if (payload.approval_action === "quota-auth-recovery") {
       dialog.append(node("p", "将为所选账号调用一次官方认证刷新 RPC；仅同身份的新凭据已保存时，再查询一次配额。共用原总时限，失败即停。官方内部可能有多次 HTTP/OAuth 请求；不发送消息，也不保证恢复。", "quota-scope"));
     }
     if (payload.approval_action === "quota-login-recovery") {
-      const identities = node("ul", undefined, "account-egress-identities");
-      for (const account of targets) identities.append(node("li", `${account.email}（${account.account_id}）`));
-      dialog.append(identities, node("p", "将申请一次官方设备码，需要本人完成授权。设备确认等待最多 10 分钟，另有初始化、身份核验、一次配额复验及清理的有界阶段；期间占用本机 Codex 通道。只有同账号新凭据与有效配额已保存后才结清原任务和暂停；失败即停，不发送消息。官方内部可能产生多次 HTTP/OAuth 请求。", "quota-scope"));
+      dialog.append(node("p", "将申请一次官方设备码，需要本人完成授权。设备确认等待最多 10 分钟，另有初始化、身份核验、一次配额复验及清理的有界阶段；期间占用本机 Codex 通道。只有同账号新凭据与有效配额已保存后才结清原任务和暂停；失败即停，不发送消息。官方内部可能产生多次 HTTP/OAuth 请求。", "quota-scope"));
       dialog.append(node("p", "设备码申请、轮询与配额检查使用本次确认的出站设备路由。你打开官方授权页时使用浏览器自己的网络，不会自动接入此路由桥；如也要求授权网页使用相同出口，请先核实浏览器路由再授权。", "quota-scope"));
     }
   }

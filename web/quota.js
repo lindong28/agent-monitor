@@ -899,6 +899,9 @@
       result.textContent = value ? (last
         ? `最近检查：${when(last.observed_at)} · ${checkedTarget} · ${last.ok ? "当次成功" : "未成功"}。当前状态以本卡片为准。`
         : `暂停记录：${when(pause?.at ? pause.at * 1000 : null)}。`) : "";
+      if (last?.ok && last.authentication_recovery?.outcome === "quota_confirmed") {
+        result.textContent += " 该次认证刷新已取得同账号的新凭据，配额读数已保存。";
+      }
       if (last && pause?.at && Date.parse(last.observed_at) < pause.at * 1000) result.textContent += " 该检查早于本次暂停，不能证明本次故障已恢复。";
       if (value && !pause && !last) result.textContent = `状态更新：${when(value.observed_at)}。`;
       if (value && unrecordedOutcome) result.textContent = "最近检查：未取得该次结果记录。当前是否暂停以上方状态为准。";
@@ -1073,7 +1076,7 @@
       title.textContent = "正在检查配额…";
       guidance.textContent = "请等待本次检查结束。不会发送消息，请勿重复提交。";
       notice.textContent = "";
-      let receipt, code, attempted = false;
+      let receipt, code, previewError, attempted = false;
       try {
         if (request.profile.startsWith("monitor-")) {
           request.network_context = state.network_context;
@@ -1089,10 +1092,13 @@
         attempted = true;
         const {response, value} = await requestJSON("/api/quota-recovery", {method:"POST",headers:{"Content-Type":"application/json","X-Agent-Monitor":"action"},body:JSON.stringify({...request, confirmation: approval})},90000);
         code = response.status; receipt = value;
-      } catch (error) { notice.textContent = error?.message || "出口确认未完成；未发出检查请求。"; }
+      } catch (error) {
+        if (!attempted) previewError = error?.message || "出口确认未完成，未发出检查请求。";
+      }
       pendingPauseId = attempted && (!receipt || (typeof receipt.ok !== "boolean" && !receipt.failure)) ? request.pause_id : null;
       busy = false;
       await refresh();
+      if (previewError) notice.textContent = [previewError, notice.textContent].filter(Boolean).join(" ");
       if (receipt?.ok && !receipt.login_pending) await onSaved?.();
       if (!receipt?.login_pending && (receipt?.ok || receipt?.failure)) {
         const diagnostic = recoveryDiagnostics({...receipt,request}, code);
@@ -2162,7 +2168,10 @@
             for (const machine of pausedMachines) {
               const link = document.createElement('a');
               link.className = 'quota-history-note';
-              link.textContent = `${machine} 自动查询已暂停：查看状态与恢复`;
+              const recoveryAccount = quotaMachineStates.get(machine).account?.account_label;
+              link.textContent = recoveryAccount
+                ? `${machine} 自动查询已暂停：查看 ${recoveryAccount} 的恢复步骤`
+                : `${machine} 自动查询已暂停：查看状态与恢复`;
               link.href = collectionUrl(`#quota-recovery=${encodeURIComponent(machine)}`);
               cell.appendChild(link);
             }

@@ -280,7 +280,7 @@ try {
     await click('#codex-batch-mode',"!document.querySelector('#codex-batch-panel').hidden");
     await click('[data-id="0"] input[type=checkbox]',"document.querySelector('[data-id=\"0\"] input[type=checkbox]').checked");
     assert.equal(await read("document.querySelector('#codex-batch-next').disabled"),true,'paused member cannot overwrite its recovery task through batch send');
-    assert.match(await read("document.querySelector('#codex-batch-blocked').textContent"),/修复登录/);
+    assert.match(await read("document.querySelector('#codex-batch-blocked').textContent"),/恢复此账号的额度查询/);
     await click('#codex-batch-mode',"document.querySelector('#codex-batch-panel').hidden");
     const repair=id=>`[data-reader-state="codex-account:${id}:repair-login"]`;
     await click(repair('0'),`document.querySelector('${panel} .recovery-target')?.textContent.includes('fixture0@example.test')`);
@@ -289,6 +289,10 @@ try {
     await click(repair('0'),`document.querySelector('${panel} .recovery-target')?.textContent.includes('fixture0@example.test')`);
     assert.deepEqual((await stats()).scoped_reads,['monitor-0','monitor-1','monitor-0']);
     const probe=panel+' [data-recovery-action=probe]';
+    await click(probe,"!!document.querySelector('dialog.account-egress-dialog[open]')");
+    assert.match(await read("document.querySelector('dialog[open] .account-egress-identities').textContent"),/fixture0@example\.test/);
+    await click('dialog[open] button:not(.btn-primary)',`document.querySelector('${panel} [role=status]').textContent.includes('已取消检查')`);
+    assert.equal((await stats()).recoveries.length,0,'cancelled preview does not initiate recovery');
     await click(probe,"!!document.querySelector('dialog.account-egress-dialog[open]')");
     await until('scoped preview ready',()=>read("!document.querySelector('dialog.account-egress-dialog .btn-primary').disabled"));
     await click('dialog.account-egress-dialog .btn-primary',`document.querySelector('${panel} h3')?.textContent==='此账号当前没有配额暂停'`);
