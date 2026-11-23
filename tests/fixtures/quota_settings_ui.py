@@ -1,5 +1,6 @@
 """Isolated full-page settings acceptance using the real settings HTTP handlers."""
 import argparse
+import base64
 import contextlib
 import json
 import os
@@ -40,6 +41,9 @@ def main():
         (folder / 'profile.json').write_text(json.dumps({'schema_version': 1, 'name': name,
             'identity': {'account_id': 'workspace', 'email': name+'@example.test', 'subject': name}}))
         (folder / 'codex').mkdir()
+        claim = base64.urlsafe_b64encode(json.dumps({'email': name+'@example.test'}).encode()).decode().rstrip('=')
+        (folder / 'codex/auth.json').write_text(json.dumps({'tokens': {'account_id': 'workspace',
+            'id_token': 'fixture.' + claim + '.fixture', 'access_token': 'fixture', 'refresh_token': 'fixture'}}))
     profile('alpha'); profile('beta')
     counts = {'previews': 0, 'writes': 0, 'provider_requests': 0}
     if args.paused_recovery:
@@ -103,6 +107,14 @@ def main():
             if self.path == '/fixture/config':
                 value = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))))
                 if value.get('add'): profile(value['add'])
+                if value.get('move_source'):
+                    auth = registry / value['move_source'] / 'codex/auth.json'
+                    auth.rename(auth.with_suffix('.moved'))
+                    auth.symlink_to(auth.with_suffix('.moved'))
+                if value.get('restore_source'):
+                    auth = registry / value['restore_source'] / 'codex/auth.json'
+                    auth.unlink()
+                    auth.with_suffix('.moved').rename(auth)
                 if value.get('empty'): counts['empty'] = True
                 if value.get('running'):
                     from agent_monitor.runtime.process_identity import identity

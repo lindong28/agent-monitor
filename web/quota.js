@@ -360,7 +360,11 @@
         signal: AbortSignal.timeout(30000), ...options,
       });
       const value = await response.json();
-      if (!response.ok) throw new Error(value.error || "设置未能确认");
+      if (!response.ok) {
+        const error = new Error(value.error || "设置未能确认");
+        error.rejected = response.status >= 400 && response.status < 500;
+        throw error;
+      }
       return value;
     }
     function render(value) {
@@ -374,6 +378,14 @@
       const explanation = document.createElement("p");
       explanation.textContent = "任务运行期间按上述周期查询，最后一个任务退出后停止跟随。下列固定勾选的账号退出后仍会查询。只检测新版启动器登记的任务。";
       form.append(explanation);
+      const renewalHelp = document.createElement("p");
+      renewalHelp.textContent = "可为指定账号授权自动续期。该账号自动查询遇到 token_expired 时，系统可用同一凭据来源和已核实的出口刷新一次认证，保存同身份凭据后复验一次配额。失败时保留暂停，可在此撤销授权。";
+      if (value.unavailable_renewals) {
+        const unavailable = document.createElement("p");
+        unavailable.textContent = `有 ${value.unavailable_renewals} 个已授权的账号或凭据来源当前无法匹配。保存自动查询设置即可撤销这些授权，原来源恢复后也需重新授权。`;
+        form.append(unavailable);
+      }
+      if (value.accounts.some(row => row.renewal_key)) form.append(renewalHelp);
       for (const row of value.accounts) {
         const label = document.createElement("label"), checkbox = document.createElement("input");
         checkbox.type = "checkbox"; checkbox.dataset.quotaProfile = ""; checkbox.value = row.key; checkbox.checked = row.enabled;
@@ -389,6 +401,20 @@
         }
         if (row.activity_error) label.append(document.createTextNode(` · ${row.activity_error}`));
         const line = document.createElement("p"); line.appendChild(label); form.appendChild(line);
+        if (row.renewal_key) {
+          const renewalLabel = document.createElement("label"), renewal = document.createElement("input");
+          renewal.type = "checkbox"; renewal.dataset.quotaRenewal = ""; renewal.value = row.renewal_key;
+          renewal.checked = row.renewal_enabled;
+          const updateEligibility = () => {
+            renewal.disabled = !checkbox.checked && !follow.checked;
+            if (renewal.disabled) renewal.checked = false;
+          };
+          updateEligibility();
+          checkbox.addEventListener("change", updateEligibility);
+          follow.addEventListener("change", updateEligibility);
+          renewalLabel.append(renewal, document.createTextNode(` 允许 ${row.profile} 在认证过期时自动续期`));
+          line.append(document.createElement("br"), renewalLabel);
+        }
       }
       if (!value.accounts.length) {
         const empty = document.createElement("p"); empty.textContent = "这台机器尚未发现额外登录账号；开启跟随后，新注册账号运行任务时也会加入。"; form.append(empty);
@@ -403,29 +429,35 @@
       catch (error) { state = null; notice.textContent = error.message; }
       finally { busy = false; read.disabled = false; save.disabled = !state; }
     }
+    form.addEventListener("change", () => { notice.textContent = "有未保存的设置。"; });
     read.addEventListener("click", refresh);
     save.addEventListener("click", async () => {
       if (busy || !state) return;
       const selected = Array.from(form.querySelectorAll("input[data-quota-profile]:checked")).map(node => node.value).sort();
       const previous = state.accounts.filter(row => row.enabled).map(row => row.key).sort();
       const follow_running = form.querySelector("[data-follow-running]").checked;
-      if (follow_running === Boolean(state.follow_running) && JSON.stringify(selected) === JSON.stringify(previous)) { notice.textContent = "设置未变化。"; return; }
+      const renewals = Array.from(form.querySelectorAll("[data-quota-renewal]:checked"), node => node.value).sort();
+      const previousRenewals = state.accounts.filter(row => row.renewal_enabled).map(row => row.renewal_key).sort();
+      if (!state.unavailable_renewals && follow_running === Boolean(state.follow_running) && JSON.stringify(selected) === JSON.stringify(previous)
+          && JSON.stringify(renewals) === JSON.stringify(previousRenewals)) { notice.textContent = "设置未变化。"; return; }
       busy = true; read.disabled = save.disabled = true;
       let submitted = false;
       try {
         let confirmation;
-        if (selected.some(key => !previous.includes(key)) || (follow_running && !state.follow_running)) {
-          const rows = state.accounts.filter(row => selected.includes(row.key));
+        if (selected.some(key => !previous.includes(key)) || (follow_running && !state.follow_running)
+            || renewals.some(key => !previousRenewals.includes(key))) {
+          const rows = state.accounts.filter(row => selected.includes(row.key) || renewals.includes(row.renewal_key));
           confirmation = await window.AgentMonitor.previewUpstream?.(
-            rows.map(row => ({email: row.account_label, account_id: row.account_id})),
-            {approval_action: "quota-settings", approval_scope: [machine, ...selected, ...(follow_running ? ["follow-running"] : [])], approval_expected: state.revision, approval_machine: machine});
+            rows.map(row => ({email: row.account_label, account_id: row.account_id, profile: row.profile,
+              fixed: selected.includes(row.key), renewal: renewals.includes(row.renewal_key)})),
+            {approval_action: "quota-settings", approval_scope: [machine, ...selected, ...(follow_running ? ["follow-running"] : []), ...renewals.map(key => "renew:" + key)], approval_expected: state.revision, approval_machine: machine});
           if (!confirmation) { notice.textContent = "已取消，设置未改变。"; return; }
         }
         submitted = true;
-        render(await request({method: "POST", body: JSON.stringify({machine, revision: state.revision, selected, follow_running, confirmation})}));
-        notice.textContent = "设置已保存；固定勾选或运行跟随中的账号将按周期查询。关闭后停止后续查询，已发出的请求会完成。";
+        render(await request({method: "POST", body: JSON.stringify({machine, revision: state.revision, selected, follow_running, renewals, confirmation})}));
+        notice.textContent = `设置已保存。${renewals.length} 个账号已授权自动续期。关闭查询或撤销续期后，已发出的请求会完成。`;
       } catch (error) {
-        notice.textContent = submitted ? "保存结果未确认；请先更新设置状态，勿重复提交。" : error.message;
+        notice.textContent = submitted && !error.rejected ? "保存结果未确认；请先更新设置状态，勿重复提交。" : error.message;
         if (submitted) state = null;
       } finally { busy = false; read.disabled = false; save.disabled = !state; }
     });

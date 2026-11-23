@@ -15,7 +15,8 @@ export function countryName(code) {
 export async function previewEgress(request, targets, signal, payload = {}) {
   const sending = Array.isArray(targets) && ["batch-start", "batch-retry"].includes(payload.approval_action);
   const needsApproval = Boolean(payload.approval_action);
-  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","refresh-selected":"查询所选账号配额","refresh-retry":"继续未完成的配额查询","login":"单独登录","quota-recovery":"检查并恢复配额","quota-auth-recovery":"刷新认证并检查配额","quota-login-recovery":"重新授权并复验配额","quota-settings":"启用所选账号的自动查询"})[payload.approval_action] || "发起上游操作";
+  const hasRenewals = payload.approval_action === "quota-settings" && targets?.some(account => account.renewal);
+  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","refresh-selected":"查询所选账号配额","refresh-retry":"继续未完成的配额查询","login":"单独登录","quota-recovery":"检查并恢复配额","quota-auth-recovery":"刷新认证并检查配额","quota-login-recovery":"重新授权并复验配额","quota-settings":hasRenewals ? "授权自动查询和认证续期" : "启用所选账号的自动查询"})[payload.approval_action] || "发起上游操作";
   const followRunning = payload.approval_action === "quota-settings" && payload.approval_scope?.includes("follow-running");
   const operationPending = ({"quota-settings":"自动查询设置尚未改变","quota-recovery":"尚未发送配额检查请求","quota-auth-recovery":"尚未刷新认证或查询配额","quota-login-recovery":"尚未申请设备码或查询配额", refresh:"尚未发送配额刷新请求", "refresh-all":"尚未发送配额刷新请求", "refresh-selected":"尚未发送配额刷新请求", "refresh-retry":"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
   let receipt = null;
@@ -49,14 +50,23 @@ export async function previewEgress(request, targets, signal, payload = {}) {
   } else if (needsApproval) {
     dialog.append(node("p", `确认后将${actionLabel}。预览只读取匿名出口信息，不携带账号凭据；取消或无法确认所需网络路径时不会继续。IP 或地区未知会明确标出，预览不保证实际请求的公网出口。`, "quota-scope"));
     if (["refresh-all", "refresh-selected", "refresh-retry", "quota-settings"].includes(payload.approval_action)) {
-      dialog.append(node("p", payload.approval_action === "quota-settings"
+      const settings = payload.approval_action === "quota-settings";
+      const fixed = settings ? targets.filter(account => account.fixed) : targets;
+      dialog.append(node("p", settings
         ? (followRunning
-          ? `将按页面所示周期自动查询这台机器上现在及以后注册的、正在运行 codex-account 任务的账号，直到关闭跟随。任务退出后停止跟随；以下 ${targets.length} 个固定勾选账号仍会持续查询。不会发送消息：`
-          : `将持续为以下 ${targets.length} 个账号按页面所示周期查询配额，直到取消勾选。新发现或身份变化的账号不会自动加入；不会发送消息：`)
+          ? `将按页面所示周期自动查询这台机器上现在及以后注册的、正在运行 codex-account 任务的账号，直到关闭跟随。任务退出后停止跟随；以下 ${fixed.length} 个固定勾选账号仍会持续查询。不会发送消息：`
+          : `将持续为以下 ${fixed.length} 个账号按页面所示周期查询配额，直到取消勾选。新发现或身份变化的账号不会自动加入；不会发送消息：`)
         : `本次将逐个查询以下 ${targets.length} 个账号的配额，不发送消息：`));
       const identities = node("ul", undefined, "account-egress-identities");
-      for (const account of targets) identities.append(node("li", `${account.email}（${account.account_id}）`));
+      for (const account of fixed) identities.append(node("li", `${account.email}（${account.account_id}）`));
       dialog.append(identities);
+      const renewals = settings ? targets.filter(account => account.renewal) : [];
+      if (renewals.length) {
+        dialog.append(node("p", "以下账号自动查询遇到 token_expired 时，允许在原时限内按已核实的路由调用一次官方认证刷新，同身份新凭据保存后复验一次配额。官方刷新可能包含多次网络请求。授权仅限此机器上列出的账号及其当前凭据来源，可在自动查询设置中撤销。"));
+        const list = node("ul", undefined, "account-egress-identities");
+        for (const account of renewals) list.append(node("li", `${account.profile} · ${account.email}（${account.account_id}）`));
+        dialog.append(list);
+      }
     }
     const machine = Array.isArray(payload.approval_scope) ? payload.approval_scope[0] : null;
     if (["quota-recovery", "quota-auth-recovery", "quota-login-recovery", "quota-settings"].includes(payload.approval_action) && machine) {

@@ -1020,9 +1020,74 @@ assert.equal(ui.quotaAccountName({account_id:'abcdefghijk',account_profile:'work
             self.assertEqual(status, 200)
             self.assertTrue(enabled['follow_running'])
             self.assertNotEqual(call(dict(payload, confirmation=token))[0], 200)
+            row = enabled['accounts'][0]
+            implicit = approvals.issue('quota-settings', ['fixture', 'follow-running'], enabled['revision'])
+            with_renewal = dict(payload, revision=enabled['revision'], renewals=[row['renewal_key']])
+            self.assertNotEqual(call(dict(with_renewal, confirmation=implicit))[0], 200)
+            self.assertFalse(quota_settings.read(self.root)['accounts'][0]['renewal_enabled'])
             # Disabling uses no upstream confirmation and leaves fixed selection unchanged.
             status, disabled = call(dict(payload, revision=enabled['revision'], follow_running=False))
             self.assertEqual(status, 200); self.assertFalse(disabled['follow_running'])
+
+    def test_renewal_grant_binds_source_identity_and_survives_only_eligible_selection(self):
+        from agent_monitor.quota import quota_settings
+        from parsers.accounts import Account
+        home = self.profile('alpha')
+        self.profile('beta')
+        auth = home / 'auth.json'
+        account = Account('shared-workspace', 'alpha@example.test')
+        current = quota_settings.read(self.root)
+        row = next(row for row in current['accounts'] if row['profile'] == 'alpha')
+        path = self.root / 'state/quota-settings.json'
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps({'version': 1, 'revision': 'legacy', 'selected': [row['key']], 'follow_running': True}))
+        current = quota_settings.read(self.root)
+        self.assertFalse(any(r['renewal_enabled'] for r in current['accounts']))
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'alpha', account, auth))
+        request = dict(revision=current['revision'], selected=[row['key']], renewals=[row['renewal_key']])
+        with self.assertRaises(ValueError):
+            quota_settings.change(request, self.root)
+        self.assertEqual(json.loads(path.read_text())['revision'], 'legacy')
+        data = json.loads(auth.read_text())
+        data['tokens'].update(access_token='fixture', refresh_token='fixture')
+        auth.write_text(json.dumps(data))
+        granted = quota_settings.change(request, self.root)
+        self.assertTrue(quota_settings.renewal_authorized(self.root, 'alpha', account, auth))
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'beta', account, auth))
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'alpha', Account('other', account.label), auth))
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'alpha', Account(account.account_id, 'beta@example.test'), auth))
+        other = home / 'moved.json'
+        auth.rename(other); auth.symlink_to(other)
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'alpha', account, auth))
+        self.assertFalse(any(r['renewal_enabled'] for r in quota_settings.read(self.root)['accounts']))
+        with self.assertRaises(ValueError):
+            quota_settings.change(dict(request, revision=granted['revision']), self.root)
+        orphaned = quota_settings.read(self.root)
+        self.assertEqual(orphaned['unavailable_renewals'], 1)
+        quota_settings.change(dict(revision=orphaned['revision'], selected=[row['key']], renewals=[]), self.root)
+        auth.unlink(); other.rename(auth)
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'alpha', account, auth))
+        current = quota_settings.read(self.root)
+        granted = quota_settings.change(dict(request, revision=current['revision']), self.root)
+        follow_only = quota_settings.change(dict(revision=granted['revision'], selected=[], follow_running=True), self.root)
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'alpha', account, auth))
+        record = json.loads(self.activity('alpha').read_text())
+        self.assertTrue(quota_settings.renewal_authorized(self.root, 'alpha', account, auth, activity_records=[record]))
+        record['process_identity'] = {'uid': os.getuid(), 'start': 'reused'}
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'alpha', account, auth, activity_records=[record]))
+        # An older client may omit the new field; unenrollment still revokes the grant.
+        quota_settings.change(dict(revision=follow_only['revision'], selected=[], follow_running=False), self.root)
+        self.assertFalse(quota_settings.renewal_authorized(self.root, 'alpha', account, auth))
+        self.assertEqual(json.loads(path.read_text())['renewals'], [])
+
+    def test_remote_renewal_preflight_rejection_returns_safe_operator_guidance(self):
+        from agent_monitor.quota import quota_settings
+        response = SimpleNamespace(stdout=json.dumps({'code': 'renewal_source_unavailable', 'error': 'untrusted content'}))
+        with mock.patch.object(quota_settings.subprocess, 'run', return_value=response):
+            with self.assertRaises(quota_settings.RenewalSourceUnavailable) as error:
+                quota_settings.on_machine(SimpleNamespace(is_self=False, ssh_host='fixture'), {})
+        self.assertIn('更新设置', str(error.exception))
+        self.assertNotIn('untrusted content', str(error.exception))
 
     def test_settings_disabled_during_batch_stop_undispatched_requests(self):
         from agent_monitor.quota import quota_settings

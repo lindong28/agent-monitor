@@ -485,7 +485,8 @@ class Handler(BaseHTTPRequestHandler):
         if post:
             try:
                 length = int(self.headers.get('Content-Length', '0'))
-                if self.headers.get('Transfer-Encoding') or not 0 <= length <= 4096:
+                limit = 16384 if parsed.path in ('/api/quota-settings', '/api/codex-accounts/egress-preview') else 4096
+                if self.headers.get('Transfer-Encoding') or not 0 <= length <= limit:
                     raise ValueError()
                 if parsed.path == '/api/refresh' and length == 0:
                     payload = {}
@@ -560,10 +561,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise codex_accounts.ActionError("请求必须使用 JSON。")
             try:
                 length = int(self.headers.get("Content-Length", ""))
-                if not 0 < length <= 4096:
+                limit = 16384 if path == "/api/codex-accounts/egress-preview" else 4096
+                if not 0 < length <= limit:
                     raise ValueError()
                 payload = json.loads(self.rfile.read(length))
-                if not isinstance(payload, dict):
+                if not isinstance(payload, dict) or (length > 4096 and payload.get("approval_action") != "quota-settings"):
                     raise ValueError()
             except (ValueError, UnicodeDecodeError):
                 raise codex_accounts.ActionError("请求内容无效或超过大小限制。")
@@ -775,7 +777,7 @@ class Handler(BaseHTTPRequestHandler):
             raw = {}
             if post:
                 length = int(self.headers.get("Content-Length", "0"))
-                if self.headers.get_content_type() != "application/json" or not 0 < length <= 4096:
+                if self.headers.get_content_type() != "application/json" or not 0 < length <= 16384:
                     raise ValueError("请求格式无效。")
                 raw = json.loads(self.rfile.read(length))
                 if not isinstance(raw, dict):
@@ -786,19 +788,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("请选择已配置的机器。")
             current = quota_settings.on_machine(machine)
             if post:
-                selected = raw.get("selected")
-                if (raw.get("revision") != current["revision"] or not isinstance(selected, list)
-                        or any(not isinstance(key, str) for key in selected) or len(set(selected)) != len(selected)
-                        or not set(selected).issubset({row["key"] for row in current["accounts"]})):
-                    raise ValueError("账号或设置已变化，请更新状态后重新选择。")
+                selected, follow, renewals = quota_settings.settings_selection(raw, current)
                 previous = {row["key"] for row in current["accounts"] if row["enabled"]}
-                follow = raw.get('follow_running', current.get('follow_running', False))
-                if type(follow) is not bool:
-                    raise ValueError('运行账号跟随设置必须为布尔值。')
-                if set(selected) - previous or (follow and not current.get('follow_running', False)):
-                    UPSTREAM_APPROVALS.consume(raw.get("confirmation"), "quota-settings",
-                                              [name, *sorted(selected), *(["follow-running"] if follow else [])], current["revision"])
-                current = quota_settings.on_machine(machine, {"revision": current["revision"], "selected": selected, "follow_running": follow})
+                previous_renewals = {row["renewal_key"] for row in current["accounts"] if row.get("renewal_enabled")}
+                if set(selected) - previous or (follow and not current.get('follow_running')) or set(renewals) - previous_renewals:
+                    scope = [name, *selected, *(["follow-running"] if follow else []), *["renew:" + key for key in renewals]]
+                    UPSTREAM_APPROVALS.consume(raw.get("confirmation"), "quota-settings", scope, current["revision"])
+                current = quota_settings.on_machine(machine, {"revision": current["revision"], "selected": selected,
+                                                            "follow_running": follow, "renewals": renewals})
             self._send_json({**current, "machine": machine.name}, send_body=send_body)
         except (ValueError, UnicodeDecodeError) as exc:
             self._send_json({"error": str(exc)}, status=400, send_body=send_body)
