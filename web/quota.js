@@ -753,6 +753,8 @@
   }
 
   function createRecoveryPanel(machine = "self", {onContinue, onSaved, getConnection, sourceFailure = null, profile = "", pauseScope = ""} = {}) {
+    const discoveredProfile = pauseScope === "profile";
+    const scoped = discoveredProfile || pauseScope === "account";
     function canRenewAuth(value) {
       // Recovery eligibility belongs to the server; do not duplicate its code list.
       return value?.account?.auth_recovery_available === true && !value.account.replacement_credential_available;
@@ -785,7 +787,7 @@
     const commit = make("button", "保存已有配额结果");
     commit.hidden = true;
     const help = make("button", "查看排查步骤");
-    const resume = make("button", profile.startsWith("monitor-") ? "返回配额查询" : "返回账号操作");
+    const resume = make("button", !discoveredProfile && profile.startsWith("monitor-") ? "返回配额查询" : "返回账号操作");
     const copy = make("button", "复制诊断信息", "btn");
     for (const [button, action] of [[read,"read"],[probe,"probe"],[relogin,"reauthorize"],[commit,"commit"],[help,"help"],[resume,"continue"],[copy,"copy"]]) {
       button.type = "button";
@@ -837,7 +839,7 @@
       const unchangedAfterRenewal = failure?.authentication_recovery?.outcome === "no_new_credentials"
         || (lastMatchesPause && lastRequest.mode === "renew_auth" && last.authentication_recovery?.outcome === "no_new_credentials");
       const replacementAvailable = a.replacement_credential_available === true;
-      const externalLogin = value?.pause_scope === "account" && profile && !profile.startsWith("monitor-");
+      const externalLogin = discoveredProfile && value?.pause_scope === "account";
       const hasFailure = failure && typeof failure === "object" && Object.keys(failure).length > 0;
       const failureGuidance = hasFailure ? quotaFailureGuidance({
         reason: failure.detail || "", failure, query_state: "paused",
@@ -948,10 +950,10 @@
       probe.textContent = mode === "failed" ? "处理后再次检查配额" : "确认出口并检查配额";
       effect.textContent = probe.hidden ? "更新状态只读取已有记录，不查询上游。" : "检查只查询一次配额，使用本次确认的出站路径；不会发送消息。";
       const renewAuth = canRenewAuth(value) && !probe.hidden;
-      relogin.hidden = mode !== "auth-unresolved" || !a.login_recovery
+      relogin.hidden = discoveredProfile || mode !== "auth-unresolved" || !a.login_recovery
         || a.login_recovery.pause_id !== pause?.id;
       relogin.disabled = busy || relogin.hidden;
-      commit.hidden = mode !== "local-commit" || !a.local_commit || a.local_commit.pause_id !== pause?.id;
+      commit.hidden = discoveredProfile || mode !== "local-commit" || !a.local_commit || a.local_commit.pause_id !== pause?.id;
       commit.disabled = busy || commit.hidden;
       if (!commit.hidden) effect.textContent = "只保存并发布已取得的结果，不登录、不查询上游，也不发送消息。";
       if (!relogin.hidden) effect.textContent = "需要本人在官方页面授权。设备确认等待最多 10 分钟，另有初始化、身份及配额检查的有界阶段；期间占用本机 Codex 通道，不发送消息。";
@@ -1053,21 +1055,21 @@
       busy = true; read.disabled = probe.disabled = true;
       panel.setAttribute("aria-busy", "true");
       notice.textContent = "正在读取状态，不查询上游…";
-      const readVersion = pauseScope !== "account" ? beginQuotaMachineRead(machine) : null;
+      const readVersion = !scoped ? beginQuotaMachineRead(machine) : null;
       try {
         const query = new URLSearchParams({machine});
-        if (pauseScope === "account") { query.set("profile", profile); query.set("pause_scope", "account"); }
+        if (scoped) { query.set("profile", profile); query.set("pause_scope", pauseScope); }
         const {response, value} = await requestJSON(`/api/quota-recovery?${query}`);
         if (!response.ok || !value.machine || !value.observed_at || !Object.hasOwn(value, "pause") || !Object.hasOwn(value, "active")) throw new Error(value.error || "状态回执不完整");
-        if (pauseScope === "account" && (value.pause_scope !== "account" || value.account?.quota_profile !== profile)) throw new Error("账号恢复状态与所选对象不一致");
-        if (pauseScope === "account" && sourceFailure && (value.machine !== machine ||
+        if (scoped && (value.pause_scope !== "account" || value.account?.quota_profile !== profile)) throw new Error("账号恢复状态与所选对象不一致");
+        if (scoped && sourceFailure && (value.machine !== machine ||
             (value.account.account_id && value.account.account_id !== sourceFailure.account_id)
             || (value.account.account_label && value.account.account_label.toLowerCase() !== sourceFailure.account_label.toLowerCase()))) {
           throw new Error("目标机器或账号来源已变化，请在原机器核对账号后更新状态。");
         }
         if (controller.signal.aborted) return;
         state = value;
-        if (pauseScope !== "account") updateQuotaMachineState(machine, value, readVersion);
+        if (!scoped) updateQuotaMachineState(machine, value, readVersion);
         if (pendingPauseId && value.last_recovery?.request?.pause_id === pendingPauseId) pendingPauseId = null;
         if (pendingPauseId && !value.active && !value.pause) {
           pendingPauseId = null;
@@ -1078,7 +1080,7 @@
         document.dispatchEvent?.(new Event("agent-monitor:recovery-state"));
       } catch (error) {
         state = null; busy = false; render(null);
-        if (pauseScope !== "account") updateQuotaMachineState(machine, null, readVersion);
+        if (!scoped) updateQuotaMachineState(machine, null, readVersion);
         notice.textContent = `状态读取失败：${error.message}`;
       } finally {
         busy = false; read.disabled = false; panel.setAttribute("aria-busy", "false");
@@ -1105,7 +1107,7 @@
     async function requestRecovery(reauthorize = false) {
       if (busy || (reauthorize ? relogin.disabled : probe.disabled) || !state) return;
       const request = {machine:state.machine,account_id:state.account.account_id,account_label:state.account.account_label,pause_id:state.pause.id,profile:state.account.quota_profile || ""};
-      if (state.pause_scope === "account") request.pause_scope = "account";
+      if (state.pause_scope === "account") request.pause_scope = discoveredProfile ? "profile" : "account";
       if (canRenewAuth(state)) request.mode = "renew_auth";
       if (request.mode === "renew_auth" && state.account.source_digest) request.source_digest = state.account.source_digest;
       if (reauthorize) {
@@ -1121,7 +1123,7 @@
       notice.textContent = "";
       let receipt, code, previewError, attempted = false;
       try {
-        if (request.profile.startsWith("monitor-")) {
+        if (!discoveredProfile && request.profile.startsWith("monitor-")) {
           request.network_context = state.network_context;
           request.operation_id = state.network_context?.operation_id || request.operation_id;
           request.connection = await (getConnection ? getConnection() : window.AgentMonitor.requireRecoveryDevice?.(controller.signal));
@@ -1154,7 +1156,7 @@
     commit.addEventListener("click", async () => {
       const binding = state?.account?.local_commit;
       const profile = state?.account?.quota_profile;
-      if (busy || !binding || !profile?.startsWith("monitor-")) return;
+      if (busy || discoveredProfile || !binding || !profile?.startsWith("monitor-")) return;
       busy = true; render(state);
       notice.textContent = "正在保存已有结果，不查询上游…";
       let success = false, message = "";
@@ -1244,7 +1246,7 @@
       const heading = document.createElement('h3');
       heading.textContent = sourceFailure ? `${requestedMachine} · ${sourceFailure.account_label} 的配额恢复` : `${requestedMachine} 当前查询状态与恢复`;
       const panel = createRecoveryPanel(requestedMachine, sourceFailure
-        ? {sourceFailure, profile:accountPauseProfile(sourceFailure), pauseScope:"account"} : {});
+        ? {sourceFailure, profile:accountPauseProfile(sourceFailure), pauseScope:"profile"} : {});
       body.quotaRecoveryPanel = panel;
       body.dataset.quotaRecoveryTarget = requestedMachine;
       cell.append(heading, panel); row.appendChild(cell); body.appendChild(row); table.appendChild(body);
@@ -1317,7 +1319,7 @@
             const options = {sourceFailure};
             if (sourceFailure.pause?.scope === "account") {
               if (!accountPauseProfile(sourceFailure)) return;
-              Object.assign(options, {profile:accountPauseProfile(sourceFailure), pauseScope:"account"});
+              Object.assign(options, {profile:accountPauseProfile(sourceFailure), pauseScope:"profile"});
             }
             record.panel = createRecoveryPanel(record.machine, options);
             entry.appendChild(record.panel);

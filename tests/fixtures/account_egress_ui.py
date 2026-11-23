@@ -95,7 +95,9 @@ def main():
             failure.update(kind='rpc_error', http_status=401, upstream_code='token_revoked')
         return dict(id='f' * 32 if state['account_scopes'] and state['paused'] else state['pause_id'], at=1793004570, failure=failure, **({'probe_attempt':dict(id='used')} if state['probe_used'] else {}))
     def source_profile(account):
-        return ('source-' if args.profile_recovery else 'monitor-') + account['id']
+        if args.profile_recovery:
+            return 'monitor-team' if account['id'] == '1' else 'monitor-00000000-0000-4000-8000-000000000000'
+        return 'monitor-' + account['id']
 
     def quota():
         target = dict(machine='fixture-hub', account_id='workspace-0', account_label='fixture0@example.test',
@@ -235,7 +237,7 @@ def main():
             elif self.path.startswith('/api/quota-recovery?'):
                 state['recovery_reads'] += 1
                 query = parse_qs(urlsplit(self.path).query)
-                if (state['account_scopes'] or args.profile_recovery) and query.get('pause_scope') == ['account']:
+                if (state['account_scopes'] or args.profile_recovery) and query.get('pause_scope') == ['profile' if args.profile_recovery else 'account']:
                     profile = query.get('profile', [''])[0]
                     account = next((a for a in accounts[:2] if source_profile(a) == profile), None)
                     if not account:
@@ -344,7 +346,7 @@ def main():
                     self.send(dict(error=str(exc)), status=exc.status)
                     return
                 state['recoveries'].append(payload)
-                if payload.get('pause_scope') == 'account':
+                if payload.get('pause_scope') == ('profile' if args.profile_recovery else 'account'):
                     account = next((a for a in accounts[:2] if source_profile(a) == payload.get('profile')), None)
                     assert account and payload['pause_id'] == account_pause(account['id'])['id']
                     if args.profile_recovery:
