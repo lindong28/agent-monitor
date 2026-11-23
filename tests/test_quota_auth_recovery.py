@@ -512,7 +512,7 @@ class ExistingSourceRecoveryTests(unittest.TestCase):
         home.mkdir(parents=True)
         self.auth = home / 'auth.json'
         self.write_auth('before')
-        profile = 'existing' if kind == 'profile' else ''
+        profile = ('existing' if kind == 'profile' else kind) if kind not in ('native', 'configured') else ''
         account = accounts.Account('workspace', 'one@example.test')
         controls = Controls(root / 'state/upstream_controls')
         lease = controls.acquire('codex')
@@ -589,6 +589,68 @@ class ExistingSourceRecoveryTests(unittest.TestCase):
                     quota_recovery.validate_request(missing)
                 changed = {**request, 'source_digest': '0' * 64}
                 self.assertNotEqual(quota_recovery.approval_scope(request), quota_recovery.approval_scope(changed))
+
+    def test_discovered_account_hold_requires_original_source_and_new_credentials(self):
+        from agent_monitor.accounts import account_holds
+        from agent_monitor.quota import quota_service, quota_refresh
+        root, shared, request = self.source("monitor-team")
+        original = shared.read("codex")["pause"]
+        shared.resume("codex", original["id"])
+        controls = account_holds.controls(root / "state", request["account_id"], request["account_label"])
+        lease = controls.acquire("codex")
+        lease.state["rejected_credentials"] = {quota.credential_digest(self.auth): "fixture"}
+        lease.pause("quotaRefreshFailed", failure={**original["failure"], "source_digest": request["source_digest"]})
+        lease.close()
+        pause = controls.read("codex")["pause"]
+        args = dict(profile=request["profile"], pause_scope="profile")
+        status = quota_recovery.local_status(**args)
+        self.assertEqual(status["pause"]["id"], pause["id"])
+        self.assertFalse(status["account"]["replacement_credential_available"])
+        self.write_auth("rotated")
+        status = quota_recovery.local_status(**args)
+        self.assertTrue(status["account"]["replacement_credential_available"])
+        self.assertFalse(status["account"]["auth_recovery_available"])
+        self.write_auth("rotated", email="changed@example.test")
+        status = quota_recovery.local_status(**args)
+        self.assertEqual(status["pause"]["id"], pause["id"])
+        self.assertEqual(status["account"]["resolution_reason"], "identity_changed")
+        self.assertFalse(status["account"]["replacement_credential_available"])
+        with mock.patch.object(quota_refresh, "load_rate_limits") as fetch:
+            with self.assertRaises(quota_refresh.RefreshError):
+                quota_service.recover_codex_quota(request["account_label"], pause["id"], root=root,
+                    expected_id=request["account_id"], **args)
+            fetch.assert_not_called()
+        self.assertIsNone(shared.read("codex").get("pause"))
+
+        # A same-source sign-in resumes the original task by reading quota once.
+        self.write_auth("replacement")
+        import dataclasses
+        from datetime import datetime, timezone
+        from agent_monitor.contracts.usage import RateLimits
+        reading = RateLimits(17, 4102444800, None, None, updated_at=datetime.now(timezone.utc).isoformat())
+        peer = mock.Mock(returncode=0)
+        peer.communicate.return_value = (json.dumps({"reading": dataclasses.asdict(reading)}), "")
+        with mock.patch.object(quota_refresh.subprocess, "Popen", return_value=peer):
+            block = quota_service.recover_codex_quota(request["account_label"], pause["id"], root=root,
+                expected_id=request["account_id"], **args)
+        target = json.loads(peer.communicate.call_args.args[0])
+        self.assertFalse(target.get("renew_auth"))
+        self.assertEqual(block["five_hour_pct"], 17)
+        self.assertIsNone(controls.read("codex").get("pause"))
+        self.assertEqual(json.loads((root / "state/quota_snapshot.json").read_text())
+                         ["codex"]["managed_accounts"][0]["account_profile"], request["profile"])
+
+    def test_remote_status_selects_only_the_discovered_profile(self):
+        from types import SimpleNamespace
+        machine = SimpleNamespace(is_self=False, ssh_host="fixture")
+        with mock.patch.object(quota_recovery.subprocess, "run",
+                return_value=SimpleNamespace(stdout='{"source_host_identity": "fixture"}')) as ssh:
+            quota_recovery.read_status(machine, profile="existing", pause_scope="account")
+            self.assertEqual(ssh.call_args.args[0][-1], "~/.local/bin/agent-monitor quota-recover --status --pause-scope account --profile existing")
+            for name in ("../existing", "monitor-123", "monitor-00000000-0000-0000-0000-000000000000"):
+                with self.assertRaises(ValueError):
+                    quota_recovery.read_status(machine, profile=name, pause_scope="account")
+            self.assertEqual(ssh.call_count, 1)
 
     def test_save_failure_retains_pause_after_valid_reading(self):
         from datetime import datetime, timezone

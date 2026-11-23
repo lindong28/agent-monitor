@@ -76,6 +76,200 @@ class ManagedCodexTests(unittest.TestCase):
             (codex_home / "auth.json").write_text(json.dumps({"tokens": {"account_id": "shared-workspace", "id_token": "fixture." + claim + ".fixture"}}))
         return codex_home
 
+    def test_scheduled_expiration_and_account_hold(self):
+        import sys
+        from agent_monitor.accounts import account_holds
+        from agent_monitor.accounts.upstream_controls import Controls
+        from agent_monitor.network import network_policy
+        from agent_monitor.quota import codex_quota, quota_refresh, quota_settings
+
+        shim = self.root / ".local/libexec/agent-shims/codex"
+        shim.parent.mkdir(parents=True)
+        shim.write_text("#!" + sys.executable + "\nimport sys\nsys.path.insert(0, " + repr(str(quota_refresh.ROOT)) + ")\n" + """
+import json, os, sys
+from pathlib import Path
+from agent_monitor.quota import quota_settings
+home = Path(os.environ["CODEX_HOME"])
+def edit_grant(mode):
+    root = Path((home / "fixture_root").read_text())
+    current = quota_settings.read(root)
+    selected = [row["key"] for row in current["accounts"] if row["enabled"]]
+    changes = {"revision": current["revision"], "selected": selected}
+    if mode == "follow_idle":
+        changes.update(follow_running=True, selected=[row["key"] for row in current["accounts"] if row["profile"] == "beta"])
+    else:
+        changes["renewals"] = []
+    quota_settings.change(changes, root)
+
+for line in sys.stdin:
+    m = json.loads(line)
+    if "id" not in m:
+        continue
+    method = m["method"]
+    if method == "initialize":
+        result = {"userAgent": "codex/0.167.0"}
+    else:
+        with (home / "calls").open("a") as f:
+            print(method, file=f)
+        path = home / "auth.json"
+        auth = json.loads(path.read_text())
+        mode = (home / "mode").read_text()
+        if method == "account/read":
+            assert m["params"] == {"refreshToken": True}
+            if mode != "no_change":
+                auth["tokens"]["access_token"] += "-new"
+                path.write_text(json.dumps(auth))
+            if mode == "late_revoke":
+                edit_grant(mode)
+            result = {}
+        elif method == "account/rateLimits/read":
+            if mode == "refused_again" or (mode != "healthy" and not auth["tokens"]["access_token"].endswith("-new")):
+                if mode in {"revoke", "follow_idle"}:
+                    edit_grant(mode)
+                if mode == "changed_route":
+                    (home / "route").unlink()
+                if mode == "changed_file":
+                    auth["tokens"]["refresh_token"] += "-replacement"
+                    path.write_text(json.dumps(auth))
+                code = "token_revoked" if mode == "revoked" else "token_expired"
+                body = json.dumps({"error":{"code":code}})
+                prefix = "failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; content-type=application/json; body="
+                print(json.dumps({"id":m["id"],"error":{"code":-32603,"message":prefix+body}}),flush=True)
+                continue
+            result = {"accountId": "wrong" if mode == "wrong_result" else "shared-workspace",
+                      "rateLimits":{"primary":{"windowDurationMins":300,"usedPercent":17,"resetsAt":4102444800}}}
+            if mode == "missing_reset":
+                del result["rateLimits"]["primary"]["resetsAt"]
+            if mode == "expired_window":
+                result["rateLimits"]["primary"].update(usedPercent=105, resetsAt=1)
+        else:
+            raise AssertionError(method)
+    print(json.dumps({"id":m["id"],"result":result}),flush=True)
+""")
+        shim.chmod(0o700)
+        route = "http://agent-monitor.auto-" + "a" * 32 + ":test@127.0.0.1:9"
+        env = {"HOME": str(self.root), "PATH": os.defpath, network_policy.INTERNAL: route}
+        batch = SimpleNamespace(environment=lambda: env, renewal_environment=lambda: env, check=lambda: None)
+        real_command = quota_refresh.module_command
+        # The real isolated child and stdio peer see mutable, offline consent and route authorities.
+        def child_command(*args):
+            argv = real_command(*args)
+            argv[2] = argv[2].replace("import runpy;", """
+from pathlib import Path
+from agent_monitor.network import automatic_egress
+def check_route(env):
+    from agent_monitor.quota import quota_settings
+    home = Path.home() / '.local/share/codex-accounts/alpha/codex'
+    if (home / 'mode').read_text() == 'revoke_during_check' and (home / 'calls').is_file():
+        root = Path((home / 'fixture_root').read_text())
+        current = quota_settings.read(root)
+        quota_settings.change({'revision':current['revision'],'selected':[r['key'] for r in current['accounts']], 'renewals':[]}, root)
+    return (home / 'route').is_file()
+automatic_egress.check_renewal_route = check_route
+import runpy;""")
+            return argv
+
+        homes = {name: self.profile(name) for name in ("alpha", "beta")}
+        for mode, expected, scope in [
+                ("expired", 3, None), ("no_consent", 1, "account"), ("revoke", 1, "account"), ("follow_idle", 1, "account"),
+                ("changed_route", 1, "account"), ("revoke_during_check", 1, "account"), ("changed_file", 1, "machine"),
+                ("no_change", 2, "account"), ("late_revoke", 2, "machine"),
+                ("wrong_result", 3, "machine"), ("revoked", 1, "account"), ("manual", 1, "machine"),
+                ("missing_reset", 3, "machine"), ("expired_window", 3, "machine"), ("cache_failure", 3, "machine"), ("refused_again", 3, "account"),
+                ("native_alias", 3, None), ("native_no_grant", 1, "account"), ("other_source", 0, "machine")]:
+            with self.subTest(mode=mode):
+                root = self.root / mode
+                old = {"account_profile": "alpha", "account_id": "shared-workspace", "account_label": "alpha@example.test",
+                       "five_hour_pct": 8, "updated_at": "2020-01-01T00:00:00+00:00"}
+                quota_service.save_cache(root / "state/quota_snapshot.json", {"codex": {"managed_accounts": [old]}})
+                for name, home in homes.items():
+                    auth = json.loads((home / "auth.json").read_text())
+                    auth["tokens"].update(access_token="fixture-" + name, refresh_token="fixture-" + name + "-refresh")
+                    (home / "auth.json").write_text(json.dumps(auth))
+                    (home / "mode").write_text(mode if name == "alpha" else "healthy")
+                    (home / "calls").unlink(missing_ok=True)
+                    (home / "route").touch()
+                    (home / "fixture_root").write_text(str(root))
+                current = quota_settings.read(root)
+                quota_settings.change({"revision": current["revision"], "selected": [row["key"] for row in current["accounts"]],
+                    "renewals": [row["renewal_key"] for row in current["accounts"]
+                                 if row["profile"] == "alpha" and mode not in {"no_consent", "native_no_grant"}]}, root)
+
+                native_auth = self.default / "auth.json"
+                if mode.startswith("native_"):
+                    native_auth = homes["alpha"] / "auth.json"
+                elif mode == "other_source":
+                    self.default.mkdir(exist_ok=True)
+                    native_auth.write_bytes((homes["alpha"] / "auth.json").read_bytes())
+                    (self.default / "mode").write_text(mode)
+
+                save_cache = quota_service.save_cache
+                def save(path, data, **options):
+                    rows = (data.get("codex") or {}).get("managed_accounts") or []
+                    if mode == "cache_failure" and any(row.get("query_state") == "succeeded"
+                            and (row.get("quota_observation") or {}).get("authentication_recovery") for row in rows):
+                        raise OSError("fixture cache unavailable")
+                    return save_cache(path, data, **options)
+
+                def run():
+                    with mock.patch.object(quota_service, "save_cache", side_effect=save), \
+                            mock.patch.object(quota_refresh, "module_command", side_effect=child_command), network_policy.using_route(route), \
+                            mock.patch.object(quota_service.accounts, "CODEX_AUTH", native_auth), \
+                            mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
+                            mock.patch.object(quota_service.automatic_egress, "Batch", return_value=batch):
+                        snapshot = quota_service.rate_limits(root=root, refresh=True, scheduled=mode != "manual", automatic=mode != "manual")
+                        if mode.startswith("native_"):
+                            self.assertEqual(snapshot["codex"]["query_state"], "paused" if scope else "succeeded")
+                            if scope:
+                                self.assertEqual(snapshot["codex"]["refresh_pause"]["scope"], "account")
+                        return snapshot["codex"]["managed_accounts"]
+                alpha, beta = run()
+                call_file = homes["alpha"] / "calls"
+                calls = call_file.read_text().splitlines() if call_file.exists() else []
+                quota_rpc = "account/rateLimits/read"
+                self.assertEqual(calls, [quota_rpc, "account/read", quota_rpc][:expected])
+                if mode == "other_source":
+                    self.assertEqual((self.default / "calls").read_text().splitlines(), [quota_rpc])
+                saved = quota_service.read_cache(root / "state/quota_snapshot.json")["codex"]["managed_accounts"]
+                self.assertEqual(saved[0]["query_state"], alpha["query_state"])
+                shared = Controls(root / "state/upstream_controls").read("codex").get("pause")
+                self.assertEqual(bool(shared), scope == "machine")
+                if scope:
+                    self.assertEqual(saved[0]["five_hour_pct"], 8)
+                    self.assertEqual(saved[0]["updated_at"], old["updated_at"])
+                if scope == "account":
+                    pause = account_holds.controls(root / "state", "shared-workspace", "alpha@example.test").read("codex")["pause"]
+                    self.assertEqual(alpha["refresh_pause"]["scope"], scope)
+                    self.assertEqual(alpha["refresh_pause"]["profile"], "alpha")
+                    self.assertEqual(alpha["refresh_pause"]["id"], pause["id"])
+                    self.assertEqual(pause["failure"]["source_digest"], codex_quota.recovery_source_digest(homes["alpha"] / "auth.json"))
+                    self.assertEqual(pause["failure"]["upstream_code"], "token_revoked" if mode == "revoked" else "token_expired")
+                    self.assertEqual(run()[0]["refresh_pause"]["id"], pause["id"])
+                    self.assertEqual((homes["alpha"] / "calls").read_text().splitlines(), calls)
+                if scope != "machine":
+                    self.assertEqual(beta["query_state"], "succeeded")
+                else:
+                    self.assertFalse((homes["beta"] / "calls").exists())
+                if mode in {"expired", "refused_again"}:
+                    generation_file = homes["alpha"] / "auth.json"
+                    hold = account_holds.controls(root / "state", "shared-workspace", "alpha@example.test").read("codex")
+                    rotated = codex_quota.credential_digest(generation_file)
+                    self.assertEqual(rotated in hold["rejected_credentials"], mode == "refused_again")
+                    if mode == "expired":
+                        with mock.patch("agent_monitor.hub_config.quota_interval", return_value=0):
+                            self.assertEqual(run()[0]["query_state"], "succeeded")
+                        calls.append(quota_rpc)
+                    rolled_back = json.loads(generation_file.read_text())
+                    rolled_back["tokens"]["access_token"] = "fixture-alpha"
+                    generation_file.write_text(json.dumps(rolled_back))
+                    self.assertIn(codex_quota.credential_digest(generation_file), hold["rejected_credentials"])
+                    with mock.patch("agent_monitor.hub_config.quota_interval", return_value=0):
+                        self.assertIn(run()[0]["query_state"], {"local_unavailable", "paused"})
+                    self.assertEqual((homes["alpha"] / "calls").read_text().splitlines(), calls)
+                if not scope:
+                    self.assertEqual(saved[0]["five_hour_pct"], 17)
+                    self.assertEqual(saved[0]["quota_observation"]["authentication_recovery"]["outcome"], "quota_confirmed")
+
     def test_automatic_managed_skip_keeps_old_reading_and_normal_cadence(self):
         from agent_monitor.network import automatic_egress as gate
         from agent_monitor.quota import quota_refresh

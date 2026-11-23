@@ -1,5 +1,6 @@
 """Machine-owned opt-in for discovered Codex profiles; never contacts a provider."""
 import argparse
+from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
@@ -112,6 +113,19 @@ def renewal_authorized(root, profile, account, auth_path, *, activity_records=()
         return False
     return bool(renewal_key and renewal_key in state.get('renewals', [])
                 and (key in (state['selected'] or []) or (state.get('follow_running') and codex_activity.live(activity_records))))
+
+
+@contextmanager
+def renewal_dispatch(root, profile, account, auth_path, *, activity_records=()):
+    """Serialize handing one RPC to Codex with saving or revoking its grant."""
+    try:
+        lock = (Path(root) / "state/quota-settings.lock").open("rb")
+    except OSError:
+        yield False
+        return
+    with lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_SH)
+        yield renewal_authorized(root, profile, account, auth_path, activity_records=activity_records)
 
 
 def settings_selection(request, current):

@@ -168,8 +168,8 @@ class Manager:
                 return {"error": "目标机器尚未通过来源确认。"}, 409
             meta = dict(current.meta)
             limits = self.merge(current, machine)
-        status = self.recovery_status(machine, **({"profile": value.get("profile"), "pause_scope": "account"}
-            if value.get("pause_scope") == "account" else {}))
+        status = self.recovery_status(machine, **({"profile": value.get("profile"), "pause_scope": value.get("pause_scope")}
+            if value.get("pause_scope") else {}))
         before = status.get("account") or {}
         if (value.get("profile", "") != before.get("quota_profile", "") or
                 (before.get("account_id"), before.get("account_label")) != (value["account_id"], value["account_label"])):
@@ -194,10 +194,10 @@ class Manager:
             else:
                 recovered_limits["codex"] = {**block, "managed_accounts": recovered_limits["codex"].get("managed_accounts", [])}
             from agent_monitor.quota.quota_service import clear_pause_projection
-            if value.get("pause_scope") != "account":
-                clear_pause_projection(recovered_limits["codex"])
-            for row in recovered_limits["codex"].get("managed_accounts", []):
-                if value.get("pause_scope") != "account" or row.get("account_profile") == value.get("profile"):
+            for row in [recovered_limits["codex"], *recovered_limits["codex"].get("managed_accounts", [])]:
+                if not value.get("pause_scope"):
+                    clear_pause_projection(row, shared_only=True)
+                elif (row.get("refresh_pause") or {}).get("id") == value["pause_id"]:
                     clear_pause_projection(row)
             payload = {"schema_version": 1, "source_host_identity": receipt["source_host_identity"],
                        "exporter_commit": receipt["exporter_commit"], "rate_limits": recovered_limits}
@@ -209,7 +209,8 @@ class Manager:
                 self.revision += 1
             from agent_monitor.quota.codex_quota import safe_auth_recovery
             auth_result = safe_auth_recovery(receipt.get("authentication_recovery"))
-            receipt = {"ok": True, "message": "有效读数已保存，目标机器的 Codex 自动查询已恢复。",
+            receipt = {"ok": True, "message": ("有效读数已保存，此账号的配额查询已恢复。"
+                       if value.get("pause_scope") else "有效读数已保存，目标机器的 Codex 自动查询已恢复。"),
                        **({"record_error": receipt["record_error"]} if receipt.get("record_error") else {}),
                        "network": receipt.get("network", {"coverage": "unavailable", "events": []}),
                        **({"network_context": receipt["network_context"]} if receipt.get("network_context") else {})}
@@ -275,7 +276,7 @@ class Manager:
                 limits = {p: dict(limits.get(p) or {}) for p in ("claude", "codex")}
                 limits["codex"]["managed_accounts"] = _merge_managed_accounts(existing, [block])
                 for row in [limits["codex"], *limits["codex"]["managed_accounts"]]:
-                    clear_pause_projection(row)
+                    clear_pause_projection(row, shared_only=True)
                 payload = {"schema_version": 1, "source_host_identity": expected_source,
                            "exporter_commit": exporter.exporter_version(), "rate_limits": limits}
                 _validate(payload)

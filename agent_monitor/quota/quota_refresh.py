@@ -18,7 +18,7 @@ import sys
 import time
 import threading
 from urllib.parse import urlsplit
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -26,7 +26,7 @@ from pathlib import Path
 
 from agent_monitor.contracts.usage import RateLimits
 from parsers.codex import select_codex_rate_limit
-from parsers.accounts import quota_identity
+from parsers.accounts import Account, quota_identity
 from agent_monitor.network import network_policy, automatic_egress
 from agent_monitor.accounts import claude_oauth
 from agent_monitor.accounts import upstream_controls
@@ -123,7 +123,7 @@ def load_rate_limits(provider, account, *, codex_home=None, **options):
 
 def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None,
                      codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None, automatic_batch=None, source_digest=None,
-                     post_send_operation_id=None):
+                     post_send_operation_id=None, scheduled_records=None):
     root = Path(root) if root is not None else ROOT
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
@@ -145,8 +145,17 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
     try:
         options = {} if probe_pause_id is None else {"probe_pause_id": probe_pause_id}
         if pause_scope == "account":
-            if provider != "codex" or not probe_pause_id or not (account_profile or "").startswith("monitor-"):
+            if provider != "codex" or not probe_pause_id or not account_profile:
                 raise LocalUnavailable("账号恢复范围无效，未发出请求。")
+            if source_digest or not account_profile.startswith("monitor-"):
+                from agent_monitor.quota import codex_quota
+                held = account_holds.controls(root / "state", account.account_id, account.label).read("codex")
+                first = (held.get("pause") or {}).get("failure") or {}
+                if (not source_digest or first.get("account_profile") != account_profile
+                        or first.get("account_fingerprint") != account_fingerprint("codex", account)
+                        or first.get("source_digest") != source_digest
+                        or source_digest != codex_quota.recovery_source_digest(auth_path)):
+                    raise LocalUnavailable("账号恢复来源已变化，未发出请求。")
             lease = account_holds.acquire(root / "state", account.account_id, account.label, pause_id=probe_pause_id)
         else:
             lease = upstream_controls.Controls(root / "state/upstream_controls").acquire(provider, **options)
@@ -172,10 +181,14 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
     account_rejection = None
     try:
         auth_failure = None
+        automatic_profile = bool(automatic_batch and provider == "codex" and account_profile and codex_home
+                                 and scheduled_records is not None and not probe_pause_id and not renew_auth)
+        source_at_start = None
+        auto_renewal = None
         if renew_auth:
             from agent_monitor.quota import codex_quota
             first = (lease.state.get("pause") or {}).get("failure") or {}
-            managed_auth = (account_profile or "").startswith("monitor-")
+            managed_auth = not source_digest and (account_profile or "").startswith("monitor-")
             if (provider != "codex" or probe_pause_id is None or not admitted_probe
                     or managed_auth and first.get("account_profile") != account_profile
                     or first.get("account_fingerprint") != account_fingerprint(provider, account)
@@ -197,6 +210,14 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
             if reason:
                 raise LocalUnavailable(reason)
         env = automatic_batch.environment() if automatic_batch else network_policy.child_environment(os.environ)
+        if automatic_profile:
+            from agent_monitor.quota import codex_quota, quota_settings
+            source_at_start = codex_quota.recovery_source_digest(auth_path)
+            if quota_settings.renewal_authorized(root, account_profile, account, auth_path, activity_records=scheduled_records):
+                strict_env = automatic_batch.renewal_environment()
+                if strict_env:
+                    env = strict_env
+                    auto_renewal = {"root": str(root.absolute()), "profile": account_profile, "records": scheduled_records}
         deadline = time.monotonic() + TIMEOUT
         parent_read, parent_write = os.pipe()
         child = subprocess.Popen(
@@ -211,14 +232,18 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
         try:
             # The lease remains held through the bounded child's cleanup.
             target = dataclasses.asdict(account)
+            if automatic_profile:
+                target["discovered_source_digest"] = source_at_start
+                if auto_renewal:
+                    target["automatic_renewal"] = auto_renewal
             if probe_pause_id is not None:
                 target["recovery_probe"] = True
+            if source_digest:
+                target["source_digest"] = source_digest
             if renew_auth:
                 target["renew_auth"] = True
                 target["auth_failure"] = auth_failure
                 target["managed_auth"] = managed_auth
-                if not managed_auth:
-                    target["source_digest"] = source_digest
             if codex_home is not None:
                 target["codex_home"] = str(Path(codex_home).absolute())
             output, _ = child.communicate(json.dumps(target),
@@ -240,7 +265,9 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 admitted_probe["authentication_recovery"] = safe_auth_recovery(payload.get("authentication_recovery"))
             if child.returncode or payload.get("error"):
                 detail = diagnostics.safe_failure(payload.get("failure"))
-                if provider == "codex" and pause_scope == "account":
+                if provider == "codex" and (pause_scope == "account" or (automatic_profile
+                        and payload.get("official_quota_rejection") is True
+                        and source_at_start == codex_quota.recovery_source_digest(auth_path))):
                     from agent_monitor.quota import codex_quota
                     proof = payload.get("account_quota_rejection")
                     if (isinstance(proof, str) and len(proof) == 64
@@ -248,6 +275,8 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                             and proof == codex_quota.credential_digest(auth_path)):
                         codex_quota.check_identity(auth_path, account.account_id, account.label)
                         account_rejection = proof
+                if auto_renewal and payload.get("authentication_recovery"):
+                    detail["authentication_recovery"] = codex_quota.safe_auth_recovery(payload["authentication_recovery"])
                 # A sibling can revoke this batch after our provider has already
                 # answered. Retain that result and its existing pause semantics.
                 # RPC transport errors alone do not prove an upstream response.
@@ -261,9 +290,20 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
             if retry_receipt:
                 lease.state["last_quota_retry"] = {"account_id": account.account_id, "account_label": account.label,
                     "at": reading.updated_at, **retry_receipt}
-            return dataclasses.replace(reading, quota_observation={
+            auth_receipt = {}
+            if auto_renewal and payload.get("authentication_recovery"):
+                if source_at_start != codex_quota.recovery_source_digest(auth_path):
+                    raise RefreshError("查询期间认证来源已变化，未采纳读数。", failure={"stage": "account_check", "kind": "account_mismatch"})
+                codex_quota.check_identity(auth_path, account.account_id, account.label)
+                auth_receipt = codex_quota.safe_auth_recovery(payload.get("authentication_recovery"))
+            reading = dataclasses.replace(reading, quota_observation={
+                **({"authentication_recovery": auth_receipt} if auth_receipt else {}),
                 **({"quota_retry": retry_receipt} if retry_receipt else {}),
                 "source": "active_query", "observed_at": reading.updated_at})
+            if auth_receipt:
+                from agent_monitor.quota import quota_service
+                quota_service.save_renewed_reading(root, account, account_profile, auth_path, reading)
+            return reading
         except (ValueError, KeyError, TypeError):
             raise RefreshError("配额读取返回了无效结果，请核对后解除本地暂停。",
                                failure={"stage": stage, "kind": "invalid_result"}) from None
@@ -289,6 +329,10 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 facts["network"] = diagnostics.safe_network(None)
         facts["account_fingerprint"] = hashlib.sha256(
             quota_identity(provider, account.account_id, account.label).encode()).hexdigest()
+        if automatic_profile and source_at_start:
+            facts["source_digest"] = source_at_start
+        elif pause_scope == "account" and source_digest:
+            facts["source_digest"] = source_digest
         if account_profile is not None:
             facts["account_profile"] = account_profile
         try:
@@ -300,6 +344,16 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
             try:
                 no_new = (pause_scope == "account" and renew_auth and admitted_probe is not None
                     and (admitted_probe.get("authentication_recovery") or {}).get("outcome") == "no_new_credentials")
+                if automatic_profile and account_rejection:
+                    # The shared lane remains locked while binding the account's
+                    # hold. Failure to establish the narrower hold falls back to
+                    # the already-held machine protection.
+                    try:
+                        local = account_holds.controls(root / "state", account.account_id, account.label).acquire("codex")
+                    except (OSError, upstream_controls.Paused, upstream_controls.Busy):
+                        account_rejection = None
+                    else:
+                        lease = account_holds.ScopedLease(local, lease)
                 if account_rejection:
                     lease.state.setdefault("rejected_credentials", {}).setdefault(account_rejection, datetime.now(timezone.utc).isoformat())
                 pause = lease.pause_local if no_new or account_rejection else lease.pause
@@ -308,7 +362,13 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                     # read. A later check requires its own explicit approval.
                     pause("quotaRefreshFailed", failure=facts, source=lease.state["pause"]["source"])
                 else:
-                    pause("quotaRefreshFailed", failure=facts)
+                    try:
+                        pause("quotaRefreshFailed", failure=facts)
+                    except OSError:
+                        if not (automatic_profile and account_rejection):
+                            raise
+                        lease.shared.pause("quotaRefreshFailed", failure=facts)
+                        raise
             except OSError as error:
                 save_error = diagnostics.failure_summary(diagnostics.failure_details(error, stage="pause_save"))
         if not isinstance(exc, (RefreshError, subprocess.TimeoutExpired)):
@@ -317,7 +377,7 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 exc.diagnostic_save_error = save_error
             raise
         message = str(exc) if isinstance(exc, RefreshError) else "配额请求失败。"
-        if child is not None:
+        if child is not None and lease.state.get("pause"):
             message += "；" + upstream_controls.pause_summary(lease.state["pause"])
         else:
             message += " 原始诊断：" + diagnostics.failure_summary(facts)
@@ -480,6 +540,94 @@ def account_fingerprint(provider, account):
     return hashlib.sha256(quota_identity(provider, account.account_id, account.label).encode()).hexdigest()
 
 
+def _file_digest(path):
+    try:
+        return hashlib.sha256(path.read_bytes()).digest()
+    except OSError:
+        return None
+
+
+def _read_discovered(request, auth_path, account, retry, env, recovery, original_file):
+    from agent_monitor.quota import codex_quota, quota_settings
+    from agent_monitor.accounts import account_holds
+
+    identity = Account(account["account_id"], account.get("label"))
+    source = account["discovered_source_digest"]
+
+    def read(**options):
+        return codex_quota.read_bound(request, auth_path, identity.account_id, identity.label, **options)
+
+    try:
+        return read(retry=retry)
+    except RefreshError as exc:
+        proof = getattr(exc, "account_quota_rejection", None)
+        if (not getattr(exc, "official_quota_transport", False) or retry.get("used")
+                or not proof or retry["original_digest"] != proof
+                or source != codex_quota.recovery_source_digest(auth_path)):
+            raise
+        exc.official_quota_rejection = True
+        first = exc
+    auto = account.get("automatic_renewal")
+    if not auto or recovery is None or first.failure.get("upstream_code") != "token_expired":
+        raise first
+
+    expected_digest = None
+    def guard(token):
+        nonlocal expected_digest
+        expected_digest = hashlib.sha256(token.encode()).hexdigest()
+        before_refresh = recovery.get("outcome") == "refresh_failed"
+        if before_refresh:
+            recovery["outcome"] = "not_attempted"
+        codex_quota.check_identity(auth_path, identity.account_id, identity.label)
+        codex_quota.file_auth_recovery_preflight(auth_path)
+        if before_refresh:
+            if not original_file or original_file != _file_digest(auth_path):
+                raise codex_quota.ReadingError("凭据已变化，未发出自动认证修复。")
+            account_holds.remember_rejection(Path(auto["root"]) / "state", identity.account_id, identity.label, proof)
+        elif account_holds.rejected_credential(Path(auto["root"]) / "state", auth_path):
+            raise codex_quota.ReadingError("刷新返回已被拒绝的凭据，未再次查询额度。")
+        if not automatic_egress.check_renewal_route(env):
+            raise codex_quota.ReadingError("自动认证修复出口已变化，已停止。", "invalid_result", "admission")
+
+    @contextmanager
+    def dispatch(method):
+        # Revocation and handing a single RPC to the official client share the
+        # settings lock. Release it before waiting for the provider's response.
+        with quota_settings.renewal_dispatch(Path(auto["root"]), auto["profile"], identity, auth_path,
+                                            activity_records=auto["records"]) as allowed:
+            if (not allowed or time.monotonic() >= retry["deadline"]
+                    or source != codex_quota.recovery_source_digest(auth_path)):
+                raise codex_quota.ReadingError("自动认证修复条件已变化，已停止。", "invalid_result", "admission")
+            codex_quota.check_identity(auth_path, identity.account_id, identity.label)
+            codex_quota.file_auth_recovery_preflight(auth_path)
+            if method == "account/read":
+                if original_file != _file_digest(auth_path):
+                    raise codex_quota.ReadingError("凭据已变化，未发出自动认证修复。")
+                recovery["outcome"] = "refresh_failed"
+            elif codex_quota.credential_digest(auth_path) != expected_digest:
+                raise codex_quota.ReadingError("凭据已变化，未发出额度复查。")
+            yield
+
+    def authorized_request(method, params):
+        return request(method, params, admission=dispatch(method))
+
+    recovery["initial_failure"] = first.failure
+    try:
+        return codex_quota.read_bound(authorized_request, auth_path, identity.account_id, identity.label,
+                                      renew_auth=True, recovery=recovery, renewal_guard=guard)
+    except RefreshError as second:
+        if (getattr(second, "official_quota_transport", False) and getattr(second, "account_quota_rejection", None)
+                and source == codex_quota.recovery_source_digest(auth_path)):
+            second.official_quota_rejection = True
+        raise
+    except codex_quota.ReadingError:
+        if (recovery.get("outcome") in {"not_attempted", "no_new_credentials"}
+                and original_file and original_file == _file_digest(auth_path)
+                and source == codex_quota.recovery_source_digest(auth_path)):
+            raise first
+        raise
+
+
 def _codex(account, *, recovery=None):
     from agent_monitor.quota import codex_quota
     if account.get("renew_auth"):
@@ -496,10 +644,12 @@ def _codex(account, *, recovery=None):
     auth_path = home / "auth.json"
     try:
         codex_quota.check_identity(auth_path, account["account_id"], account.get("label"))
+        if account.get("source_digest") and account["source_digest"] != codex_quota.recovery_source_digest(auth_path):
+            raise codex_quota.ReadingError("认证来源已变化，未启动认证进程。")
         if account.get("renew_auth"):
             codex_quota.managed_access_token(auth_path)
             if not account.get("managed_auth"):
-                if account.get("source_digest") != codex_quota.recovery_source_digest(auth_path):
+                if not account.get("source_digest"):
                     raise codex_quota.ReadingError("认证来源已变化，未启动认证进程。")
                 codex_quota.file_auth_recovery_preflight(auth_path)
     except codex_quota.ReadingError as exc:
@@ -516,6 +666,9 @@ def _codex(account, *, recovery=None):
             env["HOME"] = str(Path.home())
     env["CODEX_HOME"] = str(home)
     original_digest = codex_quota.credential_digest(auth_path)
+    auto = account.get("automatic_renewal")
+    initial_source = account.get("discovered_source_digest")
+    original_file = _file_digest(auth_path) if auto else None
     env = {key: value for key, value in env.items()
            if key in codex_quota.FILE_AUTH_ENV_KEYS or key in {"HOME", "CODEX_HOME", network_policy.INTERNAL}}
     redactions = codex_quota.credential_secrets(auth_path)
@@ -527,6 +680,8 @@ def _codex(account, *, recovery=None):
     command = str(shim) if shim.is_file() else shutil.which("codex", path=env["PATH"])
     if not command:
         raise LocalUnavailable("Codex CLI 不可用，请在这台机器上安装后刷新。")
+    if auto and not automatic_egress.check_renewal_route(env):
+        raise LocalUnavailable("无法确认本次自动查询的原出口，未发出请求。")
     try:
         arguments = [command, "app-server", "--listen", "stdio://", "-c", "features.respect_system_proxy=false",
                      "-c", 'cli_auth_credentials_store="file"']
@@ -580,6 +735,8 @@ def _codex(account, *, recovery=None):
                         error = RefreshError(_codex_rpc_error(message["error"], request_id), failure=facts)
                         error.quota_transport_failure = codex_quota.quota_transport_failure(message["error"], method)
                         error.authentication_quota_transport = codex_quota.authentication_quota_transport(message["error"], method)
+                        error.official_quota_transport = codex_quota.authentication_quota_transport(
+                            message["error"], method, official_only=True)
                         if error.authentication_quota_transport:
                             error.failure["http_status"] = 401
                         raise error
@@ -612,19 +769,23 @@ def _codex(account, *, recovery=None):
         with _failure_stage("quota_read"):
             send({"method": "initialized"})
             sequence = 1
-            def request(method, params):
+            def request(method, params, *, admission=None):
                 nonlocal redactions, sequence
                 if time.monotonic() >= deadline:
                     raise RefreshError("本次检查已达到总时限，未发出下一阶段请求。", failure={"kind": "timeout", "timeout_seconds": CODEX_RPC_SECONDS})
                 redactions += codex_quota.credential_secrets(auth_path)
                 sequence += 1
-                send({"id": sequence, "method": method, "params": params})
+                with admission or nullcontext():
+                    send({"id": sequence, "method": method, "params": params})
                 return receive(sequence, method)
             try:
                 retry = {"original_digest": original_digest, "deadline": deadline, "client_info": client_info}
                 options = ({"renew_auth": True, "recovery": recovery} if account.get("renew_auth") else
                            {"retry": retry} if not account.get("recovery_probe") else {})
-                reading = codex_quota.read_bound(request, auth_path, account["account_id"], account.get("label"), **options)
+                if initial_source:
+                    reading = _read_discovered(request, auth_path, account, retry, env, recovery, original_file)
+                else:
+                    reading = codex_quota.read_bound(request, auth_path, account["account_id"], account.get("label"), **options)
             except codex_quota.ReadingError as exc:
                 raise RefreshError(str(exc), failure=exc.failure) from None
         value = _reading((reading["five_hour_used_pct"], reading["five_hour_resets_at"]),
@@ -716,11 +877,13 @@ if __name__ == "__main__":
         print(json.dumps({"error": str(exc), "signed_out": isinstance(exc, NotSignedIn),
                           "local_unavailable": isinstance(exc, LocalUnavailable),
                           "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery,
+                          "official_quota_rejection": getattr(exc, "official_quota_rejection", False),
                           "account_quota_rejection": getattr(exc, "account_quota_rejection", None)}))
         sys.exit(1)
     except Exception as exc:
         # External errors can contain request headers or provider payloads.
         print(json.dumps({"error": "配额请求失败，请检查这台机器的网络与登录状态后刷新。",
                           "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery,
+                          "official_quota_rejection": getattr(exc, "official_quota_rejection", False),
                           "account_quota_rejection": getattr(exc, "account_quota_rejection", None)}))
         sys.exit(1)

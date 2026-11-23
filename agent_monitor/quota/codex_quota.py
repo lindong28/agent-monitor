@@ -144,16 +144,17 @@ def authentication_quota_failure(failure):
             and failure.get("upstream_code") in {"token_revoked", "token_expired"})
 
 
-def authentication_quota_transport(error, method):
+def authentication_quota_transport(error, method, *, official_only=False):
     """Validate the fixed Codex RequestError wire format, not diagnostic facts."""
-    if method != "account/rateLimits/read" or not isinstance(error, dict) or error.get("code") != -32603:
+    if method != "account/rateLimits/read" or not isinstance(error, dict) or type(error.get("code")) is not int or error["code"] != -32603:
         return False
     message = error.get("message")
     if not isinstance(message, str):
         return False
     # account_processor.rs wraps RequestError in this exact fixed prefix.
     match = re.fullmatch(r"failed to fetch codex rate limits: GET https://[^\s;]+ failed: 401 Unauthorized; content-type=[^\r\n]*?; body=(.*)", message, re.DOTALL)
-    if not match:
+    if not match or (official_only and (error.get("data") is not None or not message.startswith(
+            "failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed:"))):
         return False
     try:
         body = json.loads(match[1])
@@ -176,7 +177,7 @@ def safe_auth_recovery(value):
     if not isinstance(value, dict):
         return {}
     result = {}
-    if value.get("outcome") in {"no_new_credentials", "new_credentials", "quota_confirmed", "quota_failed", "identity_changed", "refresh_failed"}:
+    if value.get("outcome") in {"no_new_credentials", "new_credentials", "quota_confirmed", "quota_failed", "identity_changed", "refresh_failed", "not_attempted"}:
         result["outcome"] = value["outcome"]
     for key in ("initial_failure", "refresh_failure"):
         if isinstance(value.get(key), dict):
@@ -277,7 +278,7 @@ def file_auth_recovery_preflight(auth_path):
 
 
 def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recovery=None, retry=None,
-               allow_empty_first_read=False):
+               allow_empty_first_read=False, renewal_guard=None):
     """Quota reading bound to the same identity, with an optional finite reread.
 
     Callers retain transport, cancellation, admission and pause ownership.
@@ -294,6 +295,8 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
         recovery["outcome"] = "refresh_failed"
         before = managed_access_token(auth_path)
         try:
+            if renewal_guard:
+                renewal_guard(before)
             request("account/read", {"refreshToken": True})
         except Exception as exc:
             facts = diagnostics.safe_failure(getattr(exc, "failure", None))
@@ -318,6 +321,8 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
         recovery["outcome"] = "new_credentials"
     before_digest = credential_digest(auth_path)
     try:
+        if renewal_guard:
+            renewal_guard(after)
         params = {"excludeResetCreditDetails": True} if renew_auth else {}
         try:
             result = request("account/rateLimits/read", params)
@@ -367,11 +372,19 @@ def read_bound(request, auth_path, account_id, label, *, renew_auth=False, recov
         raise
     try:
         check_identity(auth_path, account_id, label)
+        if renewal_guard and before_digest != credential_digest(auth_path):
+            raise ReadingError("凭据在复查期间已变化，未采纳配额读数。")
         reading = decode(result, account_id)
+        if renewal_guard:
+            from agent_monitor.quota import quota_applicability
+            if not quota_applicability.current_window(reading):
+                raise ReadingError("自动复查未返回当前有效额度窗口，已保留上次读数。", "missing_windows", "quota_parse")
         if (not allow_empty_first_read or (retry and retry.get("used"))) and (
                 reading["five_hour_used_pct"] is None and reading["seven_day_used_pct"] is None):
             raise ReadingError("服务端未返回可用配额窗口，本次保留上次读数。", "missing_windows", "quota_parse")
     except Exception as exc:
+        if renewal_guard:
+            recovery["outcome"] = "quota_failed"
         if retry and retry.get("receipt"):
             exc.failure = {**diagnostics.safe_failure(getattr(exc, "failure", None)), "quota_retry": retry["receipt"]}
         raise

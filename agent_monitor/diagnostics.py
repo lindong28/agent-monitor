@@ -202,7 +202,15 @@ def safe_failure(value):
     item = value.get("timeout_seconds")
     if type(item) in (int, float) and math.isfinite(item) and 0 <= item <= 86400:
         result["timeout_seconds"] = round(item, 3)
-    for key in ("account_fingerprint", "reader_sha256"):
+    recovery = value.get("authentication_recovery")
+    if isinstance(recovery, dict) and recovery.get("outcome") in (
+            "not_attempted", "no_new_credentials", "new_credentials", "quota_confirmed", "quota_failed", "identity_changed", "refresh_failed"):
+        result["authentication_recovery"] = {"outcome": recovery["outcome"]}
+        for name in ("initial_failure", "refresh_failure"):
+            if isinstance(recovery.get(name), dict):
+                result["authentication_recovery"][name] = safe_failure({key: item for key, item in
+                    recovery[name].items() if key not in {"quota_retry", "authentication_recovery"}})
+    for key in ("account_fingerprint", "reader_sha256", "source_digest"):
         item = value.get(key)
         if isinstance(item, str) and len(item) == 64 and all(c in "0123456789abcdef" for c in item):
             result[key] = item

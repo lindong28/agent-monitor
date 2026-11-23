@@ -39,6 +39,11 @@ def observation(value):
         retry = diagnostics.safe_failure({"quota_retry": value["quota_retry"]}).get("quota_retry")
         if retry:
             result["quota_retry"] = retry
+    if value["source"] == "active_query" and value.get("authentication_recovery"):
+        from agent_monitor.quota.codex_quota import safe_auth_recovery
+        recovery = safe_auth_recovery(value["authentication_recovery"])
+        if recovery.get("outcome") == "quota_confirmed":
+            result["authentication_recovery"] = recovery
     if value["source"] == "codex_session" and isinstance(value.get("session_id"), str) and value["session_id"]:
         result["session_id"] = value["session_id"]
     return result

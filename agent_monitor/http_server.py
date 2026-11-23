@@ -598,8 +598,8 @@ class Handler(BaseHTTPRequestHandler):
                         route_change=(context.get("device") or {}).get("id") != route.id)
                 elif approval_action in local_actions and not payload.get("connection"):
                     scope = payload.get("approval_scope")
-                    if approval_action in recovery_actions and isinstance(scope, list) and any(
-                            isinstance(part, str) and part.startswith("monitor-") for part in scope):
+                    if (approval_action in recovery_actions and isinstance(scope, list) and len(scope) >= 4
+                            and isinstance(scope[3], str) and scope[3].startswith("monitor-") and "profile" not in scope[4:]):
                         raise codex_accounts.ActionError("Monitor 账号恢复需要确认原任务的设备网络，请更新页面。", 409)
                     expected = payload.get("approval_expected")
                     if (not isinstance(scope, list) or not scope or
@@ -734,6 +734,8 @@ class Handler(BaseHTTPRequestHandler):
                         raise codex_accounts.ActionError("已有配额操作，请等待结束。", 409)
                     options = {}
                     if "pause_scope" in payload:
+                        if payload["pause_scope"] != "account":
+                            raise ValueError("Monitor 账号恢复范围无效。")
                         quota_recovery.validate_selection("monitor-" + str(payload.get("id")), payload["pause_scope"])
                         options = {"profile": "monitor-" + payload["id"], "pause_scope": "account"}
                     current = QUOTA_REFRESH.recovery_status(machine, **options)
@@ -820,7 +822,7 @@ class Handler(BaseHTTPRequestHandler):
             scope = quota_recovery.approval_scope(value)
             route = None
             context = None
-            if value.get("profile", "").startswith("monitor-"):
+            if quota_recovery.is_monitor_recovery(value.get("profile"), value.get("pause_scope")):
                 if not machine.is_self or not hub.is_hub():
                     raise ValueError("配对设备恢复只支持账号所在 Hub。")
                 context = quota_recovery.managed_network_context(value, raw.get("network_context"))

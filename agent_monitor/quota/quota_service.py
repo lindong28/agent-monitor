@@ -98,7 +98,11 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
             block = block or rate_limit_block(RateLimits(None, None, None, None), account)
             block["refresh_error"] = links.errors[0]["error"]
             block["query_state"] = "unknown"
-        pause = Controls(root / "state/upstream_controls").read(provider).get("pause")
+        if provider == "codex" and account:
+            pause, projection = _discovered_pause(root, account)
+        else:
+            pause = Controls(root / "state/upstream_controls").read(provider).get("pause")
+            projection = {key: pause[key] for key in ("id", "at", "probe_attempt") if key in pause} if pause else None
         if block is None:
             if not pause:
                 return None
@@ -106,7 +110,9 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
             block["signed_out"] = account is None
         if pause:
             remember_pre_pause_query(block)
-            block["refresh_pause"] = {key: pause[key] for key in ("id", "at", "probe_attempt") if key in pause}
+            block["refresh_pause"] = projection
+            if projection.get("scope") == "account":
+                block["refresh_error"] = "此账号的自动查询已暂停，请查看状态与恢复。"
             block["query_state"] = "paused"
             if not block.get("refresh_error"):
                 from agent_monitor.accounts import upstream_controls
@@ -191,8 +197,21 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
                 block = rate_limit_block(passive() or RateLimits(None, None, None, None), account)
                 block.update(refresh_error="本轮同服务账号已有失败或结果未知；本机未再次查询。", query_state="blocked", signed_out=False)
                 return provider, query_state(provider, account, block)
-            value = quota_refresh.load_rate_limits(provider, account, root=root,
-                **({"automatic_batch": automatic_batch} if automatic_batch else {}))
+            options = {"automatic_batch": automatic_batch} if automatic_batch else {}
+            if provider == "codex" and account and automatic_batch and scheduled:
+                # A configured native home can itself be a registered profile.
+                # Bind the actual directory and member before the first read.
+                # Other credentials for the same workspace/member stay separate.
+                from parsers import codex_activity
+                native_home = accounts.CODEX_AUTH.parent.resolve()
+                for profile in codex_profiles.discover():
+                    record = profile.account or {}
+                    if (profile.home.resolve() == native_home and (profile.home / "auth.json").resolve() == accounts.CODEX_AUTH.resolve()
+                            and account.account_id == record.get("account_id") and account.label == record.get("email")):
+                        options.update(codex_home=profile.home, account_profile=record["name"],
+                                       scheduled_records=codex_activity.observe(profile)["_records"])
+                        break
+            value = quota_refresh.load_rate_limits(provider, account, root=root, **options)
         except automatic_egress.Skipped as exc:
             state, error, skipped = "skipped", str(exc), exc.details
             value = passive() or RateLimits(None, None, None, None)
@@ -265,6 +284,22 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
     return result
 
 
+def _discovered_pause(root, account):
+    from agent_monitor.accounts import account_holds
+    from agent_monitor.accounts.upstream_controls import Controls
+    pause = Controls(root / "state/upstream_controls").read("codex").get("pause")
+    if pause:
+        return pause, {key: pause[key] for key in ("id", "at", "probe_attempt") if key in pause}
+    pause = account_holds.controls(root / "state", account.account_id, account.label).read("codex").get("pause")
+    failure = (pause or {}).get("failure") or {}
+    if (failure.get("account_profile") and failure.get("source_digest")
+            and failure.get("account_fingerprint") == quota_refresh.account_fingerprint("codex", account)):
+        projection = {key: pause[key] for key in ("id", "at", "probe_attempt") if key in pause}
+        projection.update(scope="account", profile=failure["account_profile"])
+        return pause, projection
+    return None, None
+
+
 def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, blocked_accounts=None, deadline=None, scheduled=False, enrollment=False, automatic_batch=None, settings=None):
     """Read managed profiles, optionally using the shared account quota reader.
 
@@ -273,7 +308,6 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
     interactive account actions.
     """
     from parsers import codex_profiles
-    from agent_monitor.accounts.upstream_controls import Controls
     links = session_links if session_links is not None else codex_profiles.session_links()
     root = Path(root) if root is not None else ROOT
     cached = {}
@@ -339,7 +373,7 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
             shared.pop('managed_accounts', None)
             block = _merge_managed_accounts([shared], [block])[0]
         block = _with_credential_plan(block, {"credential_plan": account.plan})
-        pause = Controls(root / "state/upstream_controls").read("codex").get("pause")
+        pause, projection = _discovered_pause(root, account)
         if not pause:
             clear_pause_projection(block)
         exclusions = (blocked_accounts or {}).get("codex", [])
@@ -349,7 +383,10 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
                          refresh_failure=None, refresh_pause=None)
         elif pause:
             remember_pre_pause_query(block)
-            block.update(query_state="paused", refresh_pause={key: pause[key] for key in ("id", "at", "probe_attempt") if key in pause})
+            block.update(query_state="paused", refresh_pause=projection)
+            if projection.get("scope") == "account":
+                block["refresh_failure"] = pause.get("failure")
+                block["refresh_error"] = "此账号的自动查询已暂停，请查看状态与恢复。"
             if not block.get("refresh_error"):
                 from agent_monitor.accounts import upstream_controls
                 block["refresh_error"] = "本机已暂停该服务的自动请求；" + upstream_controls.pause_summary(pause)
@@ -360,6 +397,7 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
             skipped = None
             try:
                 active = quota_refresh.load_rate_limits("codex", account, codex_home=profile.home, root=root, account_profile=profile.account["name"],
+                    **({"scheduled_records": selection.get("_records", [])} if automatic_batch and scheduled and enrollment else {}),
                     **({"automatic_batch": automatic_batch} if automatic_batch else {}))
                 current = accounts.codex_account(profile.home / "auth.json")
                 if current is None or accounts.quota_identity("codex", current.account_id, current.label) != accounts.quota_identity("codex", account.account_id, account.label):
@@ -377,9 +415,11 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
                     detail = str(exc)
                 else:
                     detail = "管理账号配额查询失败：" + type(exc).__name__
-                pause = Controls(root / "state/upstream_controls").read("codex").get("pause")
+                pause, projection = _discovered_pause(root, account)
                 block.update(query_state="local_unavailable" if isinstance(exc, quota_refresh.LocalUnavailable) else "failed",
-                             refresh_error=detail, refresh_failure=getattr(exc, "failure", None), refresh_pause=pause)
+                             refresh_error=detail, refresh_failure=getattr(exc, "failure", None), refresh_pause=projection)
+                if projection and projection.get("scope") == "account":
+                    block["query_state"] = "paused"
             block["refresh_skip"] = skipped
             if not skipped:
                 block["refresh_attempted_at"] = attempted
@@ -391,6 +431,26 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
             block.update(refresh_error=links.errors[0]["error"], query_state="unknown")
         result.append(block)
     return result
+
+
+def save_renewed_reading(root, account, profile, auth_path, reading):
+    """Commit the matched recovery under the original provider and source leases."""
+    block = rate_limit_block(reading, account)
+    receipt = (block.get("quota_observation") or {}).get("authentication_recovery") or {}
+    if receipt.get("outcome") != "quota_confirmed" or not quota_applicability.current_window(block):
+        raise quota_refresh.RefreshError("自动复查未返回当前有效额度窗口，已保留上次读数。",
+            failure={"stage": "quota_parse", "kind": "missing_windows",
+                     "authentication_recovery": {**receipt, "outcome": "quota_failed"}})
+    block.update(query_state="succeeded", signed_out=False, refresh_error=None, refresh_failure=None,
+                 refresh_pause=None, refresh_attempted_at=reading.updated_at)
+    payload = dict(block) if auth_path.parent.resolve() == accounts.CODEX_AUTH.parent.resolve() else {}
+    payload["managed_accounts"] = [dict(block, account_profile=profile)]
+    try:
+        save_cache(root / "state/quota_snapshot.json", {"codex": payload})
+    except OSError as exc:
+        from agent_monitor import diagnostics
+        facts = diagnostics.failure_details(exc, stage="recovery_commit")
+        raise quota_refresh.RefreshError("已取得额度，但本地保存失败；已停止自动查询。", failure=facts) from exc
 
 
 def save_cache(cache_path, result, *, session_links=None):
@@ -518,8 +578,10 @@ def remember_pre_pause_query(block):
                                     ("query_state", "refresh_error", "refresh_failure")}
 
 
-def clear_pause_projection(block):
+def clear_pause_projection(block, *, shared_only=False):
     """Restore the account outcome beneath a machine-wide pause overlay."""
+    if shared_only and (block.get("refresh_pause") or {}).get("scope") == "account":
+        return
     block["refresh_pause"] = None
     if block.get("query_state") != "paused":
         return
@@ -598,10 +660,10 @@ def record_codex_reading(cache_path, account, reading, *, account_profile=None, 
         save_cache(cache_path, {"codex": result}, session_links=SessionLinks())
 
 
-def recovery_home(profile, root=None):
+def recovery_home(profile, root=None, *, discovered=False):
     if not profile:
         return None
-    if profile.startswith("monitor-"):
+    if not discovered and profile.startswith("monitor-"):
         import uuid
         try:
             identity = str(uuid.UUID(profile.removeprefix("monitor-")))
@@ -618,14 +680,14 @@ def recovery_home(profile, root=None):
     return match.home
 
 
-def resolve_recovery_source(failure, root=None):
+def resolve_recovery_source(failure, root=None, *, discovered=False):
     """Resolve existing credentials, never alter the pause or current login."""
     profile = failure.get("account_profile")
     fingerprint = failure.get("account_fingerprint")
     auth = accounts.CODEX_AUTH
     if profile:
         try:
-            auth = recovery_home(profile, root) / "auth.json"
+            auth = recovery_home(profile, root, **({"discovered": True} if discovered or failure.get("source_digest") else {})) / "auth.json"
         except quota_refresh.RefreshError:
             return profile, None, None, "missing"
     account = accounts.codex_account(auth)
@@ -660,7 +722,10 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     """One operator-approved probe; retain the pause until its reading is saved."""
     root = Path(root) if root is not None else ROOT
     from agent_monitor.accounts.upstream_controls import Controls
-    home = recovery_home(profile, root)
+    discovered = pause_scope == "profile"
+    if discovered:
+        pause_scope = "account"
+    home = recovery_home(profile, root, **({"discovered": True} if discovered else {}))
     account = accounts.codex_account(home / "auth.json") if home else accounts.codex_account()
     if (not expected_label or account is None or account.label != expected_label
             or (expected_id is not None and account.account_id != expected_id)):
@@ -682,9 +747,16 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
             (failure.get("account_fingerprint") and failure["account_fingerprint"] != fingerprint)):
         raise quota_refresh.LocalUnavailable("暂停来源或账号已变化；未开始探测，请更新状态。")
     options = {} if admitted_probe is None else {"admitted_probe": admitted_probe}
+    bound_source = None
     if pause_scope == "account":
-        if not profile or not profile.startswith("monitor-"):
+        if not profile:
             raise quota_refresh.LocalUnavailable("账号恢复范围无效，未发出请求。")
+        if discovered or not profile.startswith("monitor-"):
+            from agent_monitor.quota import codex_quota
+            bound_source = failure.get("source_digest")
+            if not bound_source or bound_source != codex_quota.recovery_source_digest(home / "auth.json"):
+                raise quota_refresh.LocalUnavailable("凭据来源与暂停时不一致，请核对原账号目录。")
+            options["source_digest"] = bound_source
         options["pause_scope"] = "account"
     recovery_operation = None
     source = pause.get("source") or {}
@@ -704,7 +776,7 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
         if not codex_quota.authentication_quota_failure(failure):
             raise quota_refresh.LocalUnavailable("当前暂停不支持此认证修复；未发出上游请求。")
         options["renew_auth"] = True
-        if profile and profile.startswith("monitor-"):
+        if not discovered and profile and profile.startswith("monitor-"):
             from agent_monitor.accounts.codex_accounts import Manager
             manager = Manager(root / "state/codex-accounts")
             record = manager.read(manager.directory(profile.removeprefix("monitor-")))
@@ -727,7 +799,7 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     value = quota_refresh.load_rate_limits("codex", account, probe_pause_id=pause_id, root=root,
                                            codex_home=home, account_profile=profile or None, **options)
     current = accounts.codex_account(home / "auth.json") if home else accounts.codex_account()
-    if source_digest and codex_quota.recovery_source_digest(home / "auth.json") != source_digest:
+    if (source_digest or bound_source) and codex_quota.recovery_source_digest(home / "auth.json") != (source_digest or bound_source):
         raise quota_refresh.LocalUnavailable("探测期间认证来源已变化；未保存读数，暂停保留。")
     if current is None or accounts.quota_identity("codex", current.account_id, current.label) != accounts.quota_identity(
             "codex", account.account_id, account.label):
@@ -740,7 +812,7 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     if profile:
         block["account_profile"] = profile
     save_cache(root / "state/quota_snapshot.json", {"codex": {"managed_accounts": [block]} if profile else block})
-    if profile and profile.startswith("monitor-") and (recovery_operation or (pause.get("source") or {}).get("action") == "quota"):
+    if not discovered and profile and profile.startswith("monitor-") and (recovery_operation or (pause.get("source") or {}).get("action") == "quota"):
         from agent_monitor.accounts.codex_accounts import ActionError, Manager
         from agent_monitor.accounts.upstream_controls import Busy
         source = pause.get("source") or {}

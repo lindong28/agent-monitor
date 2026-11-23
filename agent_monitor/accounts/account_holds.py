@@ -6,6 +6,7 @@ operator changes take the same lock, so a disable cannot race a new request.
 
 import json
 import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from parsers.accounts import quota_identity
 from agent_monitor.accounts.upstream_controls import Controls
@@ -43,6 +44,15 @@ def rejected_credential(state_root, auth_path, *, skip_identity=None):
         if isinstance(rejected, dict) and digest in rejected:
             return True
     return False
+
+
+def remember_rejection(state_root, account_id, label, digest):
+    """Persist the refused generation before an admitted refresh can replace it."""
+    lease = controls(state_root, account_id, label).acquire("codex")
+    try:
+        lease.state.setdefault("rejected_credentials", {}).setdefault(digest, datetime.now(timezone.utc).isoformat())
+    finally:
+        lease.close()
 
 
 def acquire(state_root, account_id, label, *, pause_id, **options):
