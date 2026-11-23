@@ -220,19 +220,41 @@ def observations(route):
         return {"policy": "chromium-system", "coverage": "unavailable", "events": []}
 
 
-def admit_automatic(route, scope, generation, routes, seconds):
-    """Install a bounded capability on the existing loopback bridge."""
+def _automatic_request(route, path, data=None, timeout=.5):
     address = urllib.parse.urlsplit(_validate_endpoint(route))
     auth = base64.b64encode((address.username + ":" + address.password).encode()).decode()
-    request = urllib.request.Request(f"http://127.0.0.1:{address.port}/automatic-egress",
-        data=json.dumps(dict(scope=scope, generation=generation, routes=routes, seconds=seconds)).encode(),
+    request = urllib.request.Request(f"http://127.0.0.1:{address.port}/{path}",
+        data=None if data is None else json.dumps(data).encode(),
         headers={"Proxy-Authorization": "Basic " + auth, "Content-Type": "application/json"})
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=.5) as response:
-            if json.loads(response.read(1024)).get("admitted") is not True:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=timeout) as response:
+            value = json.loads(response.read(1024))
+            if not isinstance(value, dict):
                 raise ValueError()
+            return value
     except Exception:
         raise NetworkPolicyError("automatic_admission_unavailable") from None
+
+
+def admit_automatic(route, scope, generation, routes, seconds, *, origins=None):
+    """Install a bounded capability on the existing loopback bridge."""
+    data = dict(scope=scope, generation=generation, routes=routes, seconds=seconds, origins=origins)
+    if _automatic_request(route, "automatic-egress", data).get("admitted") is not True:
+        raise NetworkPolicyError("automatic_admission_unavailable")
+
+
+def narrow_automatic(route):
+    scope = _automatic_request(route, "automatic-renewal", {}).get("scope")
+    if not isinstance(scope, str) or not re.fullmatch(r"auto-[a-f0-9]{32}", scope):
+        raise NetworkPolicyError("automatic_admission_unavailable")
+    return scope
+
+
+def renewal_ready(route):
+    try:
+        return _automatic_request(route, "automatic-renewal-ready", timeout=11).get("ready") is True
+    except NetworkPolicyError:
+        return False
 
 
 def session():

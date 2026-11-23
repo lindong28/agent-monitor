@@ -64,6 +64,32 @@ class AutomaticEgressTests(unittest.TestCase):
         with mock.patch.object(gate, '_observed_probe', return_value=({'country_code': 'US'}, {})):
             with self.assertRaises(gate.Skipped): gate.Batch().environment()
 
+    def test_renewal_reuses_original_pair_without_probing_or_extending_admission(self):
+        with self.probe(('US', 'SG')) as probes, mock.patch.object(network_policy, 'narrow_automatic',
+                return_value='auto-' + 'a' * 32) as narrow:
+            batch = gate.Batch()
+            self.assertIsNone(batch.renewal_environment())
+            original = batch.environment()[network_policy.INTERNAL]
+            strict = batch.renewal_environment()
+            self.assertEqual(batch.renewal_environment(), strict)
+            self.assertNotEqual(strict[network_policy.INTERNAL], original)
+            self.assertEqual(strict['HTTPS_PROXY'], strict[network_policy.INTERNAL])
+            narrow.assert_called_once_with(original)
+            self.admit.assert_called_once()
+            self.assertEqual(set(self.admit.call_args.kwargs['origins']), {
+                'https://chatgpt.com', 'https://auth.openai.com'})
+            self.assertEqual(probes.call_count, 2)
+            with network_policy.using_route(strict[network_policy.INTERNAL]):
+                self.assertEqual(network_policy.child_environment({})[network_policy.INTERNAL], strict['HTTPS_PROXY'])
+        gate._cache = None
+        with self.probe(('US', None)) as probes, mock.patch.object(network_policy, 'narrow_automatic') as narrow:
+            batch = gate.Batch()
+            self.assertIsNotNone(batch.environment())
+            self.assertIsNone(batch.renewal_environment())
+            narrow.assert_not_called()
+            self.assertEqual(probes.call_count, 2)
+            self.assertIsNone(self.admit.call_args.kwargs['origins'])
+
     def test_midbatch_denial_is_sticky_and_missing_bridge_is_unknown(self):
         with self.probe(('US', 'US')):
             batch = gate.Batch(); batch.environment()
@@ -162,3 +188,11 @@ class AutomaticTransportTests(unittest.TestCase):
                                 quota_refresh.load_rate_limits('claude', Account('fixture'), root=tmp, automatic_batch=batch)
                     self.assertEqual(len(received), expected)
                     self.assertNotIn('pause', Controls(Path(tmp) / 'state/upstream_controls').read('claude'))
+            # Exercise the Python parent and inherited worker API against a real
+            # loopback bridge. The ready check resolves locally and sends no traffic.
+            original = batch.environment()
+            strict = batch.renewal_environment()
+            self.assertIsNotNone(strict)
+            self.assertFalse(gate.check_renewal_route(original))
+            self.assertTrue(gate.check_renewal_route(strict))
+            self.assertEqual(len(received), 2)

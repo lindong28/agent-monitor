@@ -31,10 +31,10 @@ function get(port, url, auth = authorization) {
     request.on('error', reject); request.setTimeout(3000, () => request.destroy(new Error('test timeout')));
   });
 }
-async function tunnel(port, target, scheme, confirmation) {
+async function tunnel(port, target, scheme, confirmation, auth = authorization) {
   const socket = net.connect(port, '127.0.0.1');
   await once(socket, 'connect');
-  socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: ${authorization}\r\n${scheme ? `X-Agent-Monitor-Target-Scheme: ${scheme}\r\n` : ''}${confirmation ? `X-Agent-Monitor-Confirmation: ${Buffer.from(JSON.stringify(confirmation)).toString('base64url')}\r\n` : ''}\r\n`);
+  socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\nProxy-Authorization: ${auth}\r\n${scheme ? `X-Agent-Monitor-Target-Scheme: ${scheme}\r\n` : ''}${confirmation ? `X-Agent-Monitor-Confirmation: ${Buffer.from(JSON.stringify(confirmation)).toString('base64url')}\r\n` : ''}\r\n`);
   const [data] = await once(socket, 'data');
   return {socket, response: data.toString()};
 }
@@ -356,6 +356,76 @@ test('automatic scopes fail closed without admission, on expiry and generation c
   assert.equal(JSON.parse((await get(proxy.port, '/status', automaticAuth(next))).body).automatic_rejection, 'automatic_route_changed');
   assert.equal((await get(proxy.port, url)).status, 200); assert.equal(received, 2);
   assert.equal(await admit(proxy, 'auto-' + 'c'.repeat(32), ['DIRECT'], 60, 0), 409);
+});
+
+test('renewal scopes pin each origin, reject fallback and expire with the original quota batch', async t => {
+  const counts = [0, 0], keys = [];
+  for (let i = 0; i < 2; i++) {
+    const upstream = net.createServer(socket => {
+      counts[i]++; socket.once('data', () => socket.write('HTTP/1.1 200 OK\r\n\r\n'));
+    });
+    keys.push('PROXY 127.0.0.1:' + await listen(upstream)); dispose(t, upstream);
+  }
+  let now = 1000;
+  const origins = {'https://chatgpt.com': keys[0], 'https://auth.openai.com': keys[1]};
+  const current = {...origins};
+  const proxy = await bridge(t, async url => current[new URL(url).origin], {now: () => now});
+  const parent = 'auto-' + 'a'.repeat(32);
+  proxy.router.admit(parent, 0, keys, 60, origins);
+  now += 50000;
+  const child = proxy.router.narrow(parent), auth = automaticAuth(child);
+  assert.equal(proxy.router.narrow(parent), child);
+  assert.deepEqual(JSON.parse((await get(proxy.port, '/automatic-renewal-ready', auth)).body), {ready: true});
+  for (const origin of Object.keys(origins)) {
+    const connected = await tunnel(proxy.port, new URL(origin).host + ':443', undefined, undefined, auth);
+    assert.match(connected.response, /^HTTP\/1.1 200/); connected.socket.destroy();
+  }
+  assert.deepEqual(counts, [1, 1]);
+  current['https://auth.openai.com'] = keys[0]; // Same allowed set and generation, wrong origin.
+  const refused = await tunnel(proxy.port, 'auth.openai.com:443', undefined, undefined, auth);
+  assert.match(refused.response, /automatic_route_unobserved/); refused.socket.destroy();
+  assert.deepEqual(counts, [1, 1]);
+  assert.deepEqual(JSON.parse((await get(proxy.port, '/automatic-renewal-ready', auth)).body), {ready: false});
+  const ordinary = await tunnel(proxy.port, 'auth.openai.com:443', undefined, undefined, automaticAuth(parent));
+  assert.match(ordinary.response, /^HTTP\/1.1 200/); ordinary.socket.destroy();
+  assert.deepEqual(counts, [2, 1]);
+
+  const next = 'auto-' + 'b'.repeat(32);
+  proxy.router.admit(next, 0, keys, 60, origins);
+  const unchecked = proxy.router.narrow(next);
+  assert.equal(await proxy.router.renewalReady(unchecked), false); // Local resolution detects the swap before any CONNECT.
+  assert.deepEqual(counts, [2, 1]);
+  current['https://auth.openai.com'] = keys[1];
+  const last = 'auto-' + 'c'.repeat(32);
+  proxy.router.admit(last, 0, keys, 60, origins);
+  now += 59000;
+  const expiring = proxy.router.narrow(last);
+  assert.equal(await proxy.router.renewalReady(expiring), true);
+  now += 1001;
+  assert.equal(await proxy.router.renewalReady(expiring), false);
+  assert.throws(() => proxy.router.narrow(last));
+  const failed = net.createServer();
+  const failedKey = 'PROXY 127.0.0.1:' + await listen(failed);
+  await new Promise(resolve => failed.close(resolve));
+  const fallback = 'auto-' + 'e'.repeat(32);
+  proxy.router.admit(fallback, 0, [keys[0], failedKey], 60, {...origins, 'https://auth.openai.com': failedKey});
+  const fallbackScope = proxy.router.narrow(fallback);
+  current['https://auth.openai.com'] = failedKey + '; ' + keys[0];
+  assert.equal(await proxy.router.renewalReady(fallbackScope), true);
+  const blocked = await tunnel(proxy.port, 'auth.openai.com:443', undefined, undefined, automaticAuth(fallbackScope));
+  assert.match(blocked.response, /automatic_route_unobserved/); blocked.socket.destroy();
+  assert.deepEqual(counts, [2, 1]);
+
+  const changed = 'auto-' + 'f'.repeat(32);
+  current['https://auth.openai.com'] = keys[1];
+  proxy.router.admit(changed, 0, keys, 60, origins);
+  const changedScope = proxy.router.narrow(changed);
+  proxy.router.invalidate();
+  assert.equal(await proxy.router.renewalReady(changedScope), false);
+  const partial = 'auto-' + 'd'.repeat(32);
+  proxy.router.admit(partial, proxy.router.generation, [keys[0]], 60);
+  assert.throws(() => proxy.router.narrow(partial));
+  assert.equal(await proxy.router.renewalReady(partial), false);
 });
 
 test('automatic fallback cannot reach an unobserved proxy; ordinary scope retains fallback', async t => {

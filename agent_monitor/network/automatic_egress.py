@@ -66,13 +66,14 @@ def _evidence(route):
         targets = [{key: result.get(key) for key in ("host", "country_code", "observed_at", "error")}
                    for result, _event in readings]
         after = network_policy.observations(route)
-        routes = sorted({event["route"] for result, event in readings
-                         if result.get("country_code") and not result.get("error") and event.get("route")
-                         and event.get("generation") == generation})
+        origins = {"https://" + host: event["route"]
+                   for host, (result, event) in zip(account_egress.TARGETS, readings)
+                   if result.get("country_code") and not result.get("error") and event.get("route")
+                   and event.get("generation") == generation}
         reason = ("china" if any(row.get("country_code") == "CN" for row in targets) else
-                  "unknown" if not routes else
+                  "unknown" if not origins else
                   "route_changed" if after.get("generation") != generation else None)
-        return generation, routes, targets, reason
+        return generation, origins, targets, reason
 
 
 class Batch:
@@ -81,6 +82,9 @@ class Batch:
         self.env = None
         self.skipped = None
         self.targets = []
+        self.renewal_env = None
+        self.renewal_available = False
+        self.route = None
 
     def environment(self):
         with self.lock:
@@ -89,11 +93,14 @@ class Batch:
             if self.env is None:
                 try:
                     route = network_policy.endpoint()
-                    generation, routes, self.targets, reason = _evidence(route)
+                    generation, origins, self.targets, reason = _evidence(route)
                     if reason:
                         raise Skipped(reason, self.targets)
                     scope = "auto-" + uuid.uuid4().hex
-                    network_policy.admit_automatic(route, scope, generation, routes, 120)
+                    self.route = route
+                    self.renewal_available = len(origins) == len(account_egress.TARGETS)
+                    network_policy.admit_automatic(route, scope, generation, sorted(set(origins.values())), 120,
+                                                   origins=origins if self.renewal_available else None)
                     with network_policy.using_route(route):
                         self.env = network_policy.child_environment(os.environ, scope=scope)
                 except network_policy.NetworkPolicyError:
@@ -104,6 +111,20 @@ class Batch:
                     raise
             self.check()
             return dict(self.env)
+
+    def renewal_environment(self):
+        """Narrow the original admission; a renewal cannot start a new quota batch."""
+        with self.lock:
+            if not self.env or self.skipped or not self.renewal_available:
+                return None
+            if self.renewal_env is None:
+                try:
+                    scope = network_policy.narrow_automatic(self.env[network_policy.INTERNAL])
+                    with network_policy.using_route(self.route):
+                        self.renewal_env = network_policy.child_environment(self.env, scope=scope)
+                except network_policy.NetworkPolicyError:
+                    return None
+            return dict(self.renewal_env)
 
     def check(self):
         """Bridge rejection is local admission, never a provider failure/pause."""
@@ -117,3 +138,9 @@ class Batch:
             if status.get("automatic_rejection"):
                 self.skipped = Skipped("route_changed", self.targets)
                 raise self.skipped
+
+
+def check_renewal_route(env):
+    """Locally resolve both pinned origins on the original scoped bridge."""
+    route = env.get(network_policy.INTERNAL)
+    return bool(route and network_policy.renewal_ready(route))

@@ -190,6 +190,12 @@ async function handshake(socket, route, target, tunnel, signal, timeout) {
   } finally { reader.release(); }
 }
 
+const quotaOrigins = ['https://auth.openai.com', 'https://chatgpt.com'];
+function validOrigins(routes) {
+  return routes && Object.keys(routes).sort().join(',') === quotaOrigins.join(',')
+    && Object.values(routes).every(key => typeof key === 'string' && key.length > 0 && key.length <= 512);
+}
+
 class Router {
   constructor(resolve, {timeout = 10000, now = Date.now} = {}) {
     this.resolve = resolve; this.timeout = timeout; this.now = now;
@@ -202,7 +208,7 @@ class Router {
     for (const scope of this.automatic.keys()) this.deny(scope, 'automatic_route_changed');
     for (const socket of this.confirmedSockets) socket.destroy();
   }
-  admit(scope, generation, routes, seconds) {
+  admit(scope, generation, routes, seconds, origins = null) {
     // Automatic scope names remain fail-closed even after their record expires.
     for (const [key, value] of this.automatic) {
       if (value.until + 60000 < this.now()) { clearTimeout(value.timer); this.automatic.delete(key); }
@@ -210,18 +216,57 @@ class Router {
     if (!/^auto-[a-f0-9]{32}$/.test(scope) || this.automatic.has(scope)
         || generation !== this.generation || !Array.isArray(routes) || !routes.length || routes.length > 2
         || routes.some(key => typeof key !== 'string' || key.length > 512)
+        || (origins && (!validOrigins(origins) || !Object.values(origins).every(key => routes.includes(key))))
         || !Number.isFinite(seconds) || seconds <= 0 || seconds > 120 || this.automatic.size >= 256) {
       throw new RouteError('automatic_admission_invalid');
     }
-    const value = {generation, routes: new Set(routes), until: this.now() + seconds * 1000,
+    const value = {generation, origins, routes: new Set(routes), until: this.now() + seconds * 1000,
       rejection: null, sockets: new Set()};
     value.timer = setTimeout(() => this.deny(scope, 'automatic_admission_expired'), seconds * 1000);
     value.timer.unref(); this.automatic.set(scope, value);
+  }
+  narrow(scope) {
+    const parent = this.automatic.get(scope);
+    if (!parent?.origins || parent.parent || this.rejection(scope)) throw new RouteError('automatic_admission_invalid');
+    if (!parent.child) {
+      const child = 'auto-' + crypto.randomBytes(16).toString('hex');
+      this.admit(child, parent.generation, [...parent.routes], (parent.until - this.now()) / 1000, parent.origins);
+      const value = this.automatic.get(child);
+      value.until = parent.until;
+      value.parent = scope;
+      parent.child = child;
+    }
+    if (this.rejection(parent.child)) throw new RouteError('automatic_admission_invalid');
+    return parent.child;
+  }
+  async renewalReady(scope) {
+    const admission = this.automatic.get(scope);
+    if (!admission?.parent || this.rejection(scope)) return false;
+    try {
+      const {routes} = await this.resolveOrigins();
+      if (quotaOrigins.every(origin => routes[origin] === admission.origins[origin]) && !this.rejection(scope)) return true;
+    } catch {}
+    this.deny(scope, 'automatic_route_unobserved');
+    return false;
+  }
+  async resolveOrigins() {
+    const generation = this.generation;
+    const routes = {};
+    let timer;
+    try {
+      await Promise.race([
+        Promise.all(quotaOrigins.map(async origin => { routes[origin] = (await this.routes(origin + '/'))[0].key; })),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new RouteError('proxy_resolution_timeout')), this.timeout); }),
+      ]);
+    } finally { clearTimeout(timer); }
+    if (generation !== this.generation) throw new RouteError('confirmed_generation_changed');
+    return {generation, routes};
   }
   deny(scope, reason) {
     const value = this.automatic.get(scope);
     if (value) {
       value.rejection ||= reason;
+      if (value.child) this.deny(value.child, reason);
       for (const socket of value.sockets) socket.destroy();
     }
   }
@@ -233,10 +278,15 @@ class Router {
     if (value.until <= this.now()) this.deny(scope, 'automatic_admission_expired');
     return value.rejection;
   }
-  require(scope, route) {
+  require(scope, target, route) {
     if (!scope.startsWith('auto-')) return;
     let reason = this.rejection(scope);
-    if (!reason && !this.automatic.get(scope).routes.has(route.key)) reason = 'automatic_route_unobserved';
+    if (!reason) {
+      const value = this.automatic.get(scope);
+      if (!value.routes.has(route.key) || (value.parent && value.origins[target.url.origin] !== route.key)) {
+        reason = 'automatic_route_unobserved';
+      }
+    }
     if (reason) { this.deny(scope, reason); throw new RouteError(reason); }
   }
   async routes(url) {
@@ -268,14 +318,14 @@ class Router {
       if (signal.aborted) throw new RouteError('client_cancelled');
       let socket;
       try {
-        this.require(scope, route);
+        this.require(scope, target, route);
         this.requireConfirmation(confirmation, target, route);
         socket = await connected(route, target, signal, this.timeout);
-        this.require(scope, route);
+        this.require(scope, target, route);
         this.requireConfirmation(confirmation, target, route);
         this.sockets.add(socket); socket.once('close', () => this.sockets.delete(socket));
         await handshake(socket, route, target, tunnel, signal, this.timeout);
-        this.require(scope, route);
+        this.require(scope, target, route);
         this.requireConfirmation(confirmation, target, route);
         if (confirmation) {
           this.confirmedSockets.add(socket); socket.once('close', () => this.confirmedSockets.delete(socket));
@@ -335,8 +385,7 @@ function confirmedRoute(req) {
     if (typeof encoded !== 'string' || encoded.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(encoded)) throw new Error();
     const value = JSON.parse(Buffer.from(encoded, 'base64url').toString());
     if (!Number.isSafeInteger(value.generation) || value.generation < 0 || !value.routes
-        || Object.keys(value.routes).sort().join(',') !== 'https://auth.openai.com,https://chatgpt.com'
-        || Object.values(value.routes).some(key => typeof key !== 'string' || !key || key.length > 512)) throw new Error();
+        || !validOrigins(value.routes)) throw new Error();
     return value;
   } catch { throw new RouteError('confirmed_route_invalid'); }
 }
@@ -362,11 +411,24 @@ function createBridge(resolve, token, options) {
           if (body.length > 4096) throw new RouteError('automatic_admission_invalid');
         }
         const value = JSON.parse(body);
-        router.admit(value.scope, value.generation, value.routes, value.seconds);
+        router.admit(value.scope, value.generation, value.routes, value.seconds, value.origins);
         res.writeHead(201, {'content-type': 'application/json'}); res.end('{"admitted":true}');
       } catch {
         res.writeHead(409); res.end();
       }
+      return;
+    }
+    if (req.url === '/automatic-renewal' && req.method === 'POST') {
+      req.resume();
+      try {
+        const child = router.narrow(scope);
+        res.writeHead(201, {'content-type': 'application/json'}); res.end(JSON.stringify({scope: child}));
+      } catch { res.writeHead(409); res.end(); }
+      return;
+    }
+    if (req.url === '/automatic-renewal-ready' && req.method === 'GET') {
+      const ready = await router.renewalReady(scope);
+      res.writeHead(200, {'content-type': 'application/json'}); res.end(JSON.stringify({ready}));
       return;
     }
     if (req.url === '/resolve' && req.method === 'POST' && scope === 'shared') {
@@ -378,18 +440,9 @@ function createBridge(resolve, token, options) {
         }
         const {targets} = JSON.parse(body);
         if (!Array.isArray(targets) || targets.length !== 2
-            || [...targets].sort().join(',') !== 'https://auth.openai.com,https://chatgpt.com') throw new RouteError('invalid_target');
-        const generation = router.generation;
-        const routes = {};
-        let timer;
-        try {
-          await Promise.race([
-            Promise.all(targets.map(async origin => { routes[origin] = (await router.routes(origin + '/'))[0].key; })),
-            new Promise((_, reject) => { timer = setTimeout(() => reject(new RouteError('proxy_resolution_timeout')), router.timeout); }),
-          ]);
-        } finally { clearTimeout(timer); }
-        if (generation !== router.generation) throw new RouteError('confirmed_generation_changed');
-        res.writeHead(200, {'content-type': 'application/json'}); res.end(JSON.stringify({generation, routes}));
+            || [...targets].sort().join(',') !== quotaOrigins.join(',')) throw new RouteError('invalid_target');
+        const result = await router.resolveOrigins();
+        res.writeHead(200, {'content-type': 'application/json'}); res.end(JSON.stringify(result));
       } catch { res.writeHead(409); res.end(); }
       return;
     }
