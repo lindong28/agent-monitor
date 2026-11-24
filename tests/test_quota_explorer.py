@@ -186,7 +186,13 @@ const now=1000, provider={key:'codex'};
 const samples=[['full',100,1001],['unknown',null,1002],['later',0,1200],['soon',90,1100],
   ['tie-more',20,1100],['expired',0,999],['invalid',101,1003],['no-reset',0,null]]
   .map(([id,used,reset])=>({...account(id),five_hour_used_pct:used,five_hour_resets_at:reset}));
-ui.quotaFilter.sort='reset';
+assert.equal(ui.quotaFilter.window,'seven_day');
+assert.equal(ui.quotaFilter.sort,'reset');
+ui.renderQuotaAccounts({claude:{accounts:[{...account('later'),seven_day_resets_at:4102444801}]},
+  codex:{accounts:[account('sooner'),{...account('unknown'),seven_day_resets_at:null}]}});
+assert.deepEqual(table.tBodies.flatMap(b=>b.children).filter(r=>r.dataset.accountId).map(r=>r.dataset.accountId),['sooner','later','unknown']);
+assert.equal(headers[3].parentNode.getAttribute('aria-sort'),'ascending');
+ui.quotaFilter.window='five_hour';
 assert.deepEqual(ui.sortQuotaAccounts(provider,samples,now).map(a=>a.account_id),
   ['full','unknown','invalid','soon','tie-more','later','expired','no-reset']);
 ui.quotaFilter.sort='reset_desc';
@@ -219,7 +225,7 @@ assert.equal(ui.quotaFilter.sort,'observed');
 headers[4].click();
 assert.equal(ui.quotaFilter.sort,'observed_asc');
 nodes['#quota-clear'].click();
-assert(headers.every(b=>b.parentNode.getAttribute('aria-sort')==='none'));
+assert.deepEqual(headers.map(b=>b.parentNode.getAttribute('aria-sort')),['none','none','none','ascending','none']);
 }
 
 // Current state must supersede historical collection failures without touching quota.
@@ -583,8 +589,8 @@ nodes['#quota-sort'].value='remaining_desc'; nodes['#quota-sort'].listeners.chan
 assert.equal(nodes['#quota-clear'].hidden,false);
 ui.removeRenderedAccount('claude','past','2026-01-01T00:00:00Z');
 nodes['#quota-clear'].click(); assert(!count().includes('匹配')); assert(table.textContent.includes('bob@example.test')); assert(table.textContent.includes('alice@example.test'));
-assert.equal(nodes['#quota-window'].value,'five_hour','reset restores the contracted default window');
-assert.equal(nodes['#quota-sort'].value,'default','reset restores the contracted default order');
+assert.equal(nodes['#quota-window'].value,'seven_day','reset restores the contracted default window');
+assert.equal(nodes['#quota-sort'].value,'reset','reset restores the contracted default order');
 assert.equal(nodes['#quota-clear'].hidden,true,'no active filter needs no reset action');
 assert.equal(JSON.stringify(data),original);
 // A client-side route return replaces controls while retaining module state.

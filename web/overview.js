@@ -3,9 +3,9 @@
   if (typeof module === "object" && module.exports) module.exports = factory;
   else (root.AgentMonitorModules ||= {}).overview = factory;
 })(typeof window === "undefined" ? globalThis : window, function createOverview(dependencies) {
-  const { platform, assetVersion, qs, qsa, params, getRange, api, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal } = dependencies;
+  const { platform, assetVersion, qs, qsa, params, getRange, api, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, restoreQuotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal } = dependencies;
   const { window, document } = platform;
-  let trendMetric = "cost";
+  let preferredTrendMetric = null;
   let latestTrend = null;
 
   function missingPrices(coverage) {
@@ -227,7 +227,7 @@
   function renderTrend() {
     if (!latestTrend) return;
     const { data, selectedRange } = latestTrend;
-    if (trendMetric === "total" && !data.tokens_over_time) trendMetric = "cost";
+    const trendMetric = preferredTrendMetric !== "cost" && data.tokens_over_time ? "total" : "cost";
     const tokens = trendMetric === "total";
     const costHistory = tokens ? data.tokens_over_time : data.cost_over_time || legacyCostHistory(data.daily_cost_30d || []);
     const title = tokens ? "Token 趋势" : "成本趋势";
@@ -301,11 +301,11 @@
   }
 
   async function initOverview() {
-    trendMetric = "cost";
+    preferredTrendMetric = null;
     latestTrend = null;
     qsa("[data-trend-metric]").forEach(button => {
       button.addEventListener("click", () => {
-        trendMetric = button.dataset.trendMetric;
+        preferredTrendMetric = button.dataset.trendMetric;
         renderTrend();
       });
     });
@@ -313,12 +313,7 @@
     await dependencies.runtimeContext?.();
     if (!initializationCurrent()) return;
     const restored = params();
-    if (restored.has("quota_provider")) {
-      quotaFilter.provider = ["all", "claude", "codex"].includes(restored.get("quota_provider")) ? restored.get("quota_provider") : "all";
-      quotaFilter.search = restored.get("quota_search") || "";
-      quotaFilter.window = restored.get("quota_window") === "seven_day" ? "seven_day" : "five_hour";
-      quotaFilter.sort = ["default", "remaining", "remaining_desc", "reset", "reset_desc", "observed", "observed_asc"].includes(restored.get("quota_sort")) ? restored.get("quota_sort") : "default";
-    }
+    restoreQuotaFilter(restored);
     let restoreQuotaReading = true;
     resetQuotaReadings({rememberedExpanded: restored.get("quota_history") === "true"});
     onPageCleanup(resetQuotaReadings);

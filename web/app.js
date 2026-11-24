@@ -465,7 +465,7 @@
     }
   }
 
-  const overview = modules.overview({ platform, assetVersion, qs, qsa, params, getRange, api, runtimeContext, hubUrl, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, quotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal });
+  const overview = modules.overview({ platform, assetVersion, qs, qsa, params, getRange, api, runtimeContext, hubUrl, bindShell, pageScope, onPageCleanup, watchPageData, money, integer, compactNumber, barValueLabels, chart, dataset, chartOptions, categoryTick, chartMoneyTick, chartReading, costReading, costTableReading, renderChartTable, agentLabel, escapeHtml, restoreQuotaFilter: quota.restoreQuotaFilter, resetQuotaReadings, renderQuotaAccounts, renderSyncStatus, waitForSyncTerminal });
   const { initOverview: initOverviewPage, renderOverview, renderRangeCost, showOverviewLoadError } = overview;
 
   const sessions = modules.sessions({ platform, qs, qsa, params, getRange, setParam, copyText, api, bindShell, moneyPrecise, integer, codexSessionAccountLabel, collectionUrl, renderSyncStatus, waitForSyncTerminal, refreshStatistics, formatDate, dayKey, timeOfDay, escapeHtml, pageScope, watchPageData, replaceCurrentUrl });

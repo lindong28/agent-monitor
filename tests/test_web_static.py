@@ -1240,7 +1240,7 @@ process.stdout.write(JSON.stringify({
         header = re.search(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", prose).group(1)
         self.assertEqual(
             [re.sub(r"<[^>]+>", "", cell).replace("↕", "").strip() for cell in re.findall(r"<th[^>]*>(.*?)</th>", header)],
-            ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间", "reset 额度", "机器", "配额更新"],
+            ["账号", "服务商", "套餐记录", "5 小时已用", "5 小时重置时间", "7 天已用", "7 天重置时间 ↑", "reset 额度", "机器", "配额更新"],
         )
         # Two files decide one thing. The header row is static markup; the cells
         # under it are emitted in QUOTA_COLUMNS order. Reorder one and every

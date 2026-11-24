@@ -51,7 +51,19 @@
   let quotaStateTargets = "";
   let initialQuotaHistoryExpanded = false;
   let accountRefreshes = new Map();
-  const quotaFilter = { provider: "all", search: "", window: "five_hour", sort: "default" };
+  const defaultQuotaFilter = { provider: "all", search: "", window: "seven_day", sort: "reset" };
+  const quotaFilter = { ...defaultQuotaFilter };
+
+  function restoreQuotaFilter(params) {
+    if (!params.has("quota_provider")) return;
+    const provider = params.get("quota_provider");
+    const window = params.get("quota_window");
+    const sort = params.get("quota_sort");
+    quotaFilter.provider = ["all", "claude", "codex"].includes(provider) ? provider : defaultQuotaFilter.provider;
+    quotaFilter.search = params.get("quota_search") || "";
+    quotaFilter.window = ["five_hour", "seven_day"].includes(window) ? window : defaultQuotaFilter.window;
+    quotaFilter.sort = ["default", "remaining", "remaining_desc", "reset", "reset_desc", "observed", "observed_asc"].includes(sort) ? sort : defaultQuotaFilter.sort;
+  }
   let boundQuotaExplorer = null;
 
   function latestCodexQuotaReading(account) {
@@ -282,11 +294,7 @@
       refresh();
     });
     qs("#quota-clear").addEventListener("click", () => {
-      quotaFilter.provider = "all";
-      quotaFilter.search = "";
-      quotaFilter.window = "five_hour";
-      quotaFilter.sort = "default";
-      ["window", "sort"].forEach(key => { const el = qs("#quota-" + key); if (el) el.value = quotaFilter[key]; });
+      Object.assign(quotaFilter, defaultQuotaFilter);
       search.value = "";
       refresh();
     });
@@ -470,8 +478,7 @@
     const reset = qs("#quota-clear");
     const windowControl = qs("#quota-window-control");
     if (windowControl) windowControl.hidden = !["remaining", "remaining_desc", "reset", "reset_desc"].includes(quotaFilter.sort);
-    if (reset) reset.hidden = quotaFilter.provider === "all" && !quotaFilter.search
-      && quotaFilter.window === "five_hour" && quotaFilter.sort === "default";
+    if (reset) reset.hidden = Object.entries(defaultQuotaFilter).every(([key, value]) => quotaFilter[key] === value);
     if (!table) {
       return;
     }
@@ -2504,5 +2511,5 @@
     initialQuotaHistoryExpanded = Boolean(options.rememberedExpanded);
   }
   function quotaSnapshot() { return renderedQuotaRateLimits; }
-  return { updateQuotaMachineState, refreshQuotaMachineStates, renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaResetCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, resetQuotaReadings };
+  return { updateQuotaMachineState, refreshQuotaMachineStates, renderQuotaDiagnostics, createQuotaSettingsPanel, renderQuotaSettings, createRecoveryPanel, recoveryDiagnostics, codexPauseTarget, showCodexPauseRecovery, quotaSnapshot, QUOTA_PROVIDERS, QUOTA_WINDOW_5H, resetText, latestCodexQuotaReading, updateCodexQuotaReadings, quotaDisplayReading, sortQuotaAccounts, quotaMatches, bindQuotaExplorer, quotaPresence, codexSessionAccountLabel, renderQuotaAccounts, quotaFailureKind, quotaFailureDetails, quotaRefreshNotice, renderQuotaSignedOut, appendRememberedAccounts, quotaBody, quotaAccountRow, quotaProviderCell, quotaPlanCell, quotaAccountCell, quotaRemovalReading, removeRenderedAccount, refreshRememberedAccountSummary, removeRememberedAccount, quotaUsage, quotaBandPill, quotaWindowCell, quotaResetCell, quotaMeter, quotaResetText, quotaResetState, formatQuotaReset, quotaMachinesCell, quotaObservationAge, quotaUpdatedCell, quotaPlanLabel, quotaAccountName, quotaIsStale, quotaProviderPill, renderQuotaMachineRecords, renderQuotaMachineNotice, quotaWorstUsage, quotaUnavailableBody, quotaFilter, restoreQuotaFilter, resetQuotaReadings };
 });

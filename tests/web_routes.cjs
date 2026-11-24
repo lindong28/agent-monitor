@@ -264,7 +264,6 @@ async function run() {
   assert.equal(trendButtons.length, 2);
   const [costButton, tokenButton] = trendButtons;
   const requestsBeforeSwitch = env.requests.length;
-  tokenButton.listeners.click();
   assert.match(ui.qs('#daily-cost-chart').getAttribute('aria-label'), /Token/);
   assert.equal(tokenButton['aria-pressed'], 'true');
   assert.equal(costButton['aria-pressed'], 'false');
@@ -295,6 +294,8 @@ async function run() {
   assert.match(trend.options.scales.y.ticks.callback(2), /^\$/);
   assert.equal(ui.qs('#trend-cost-notes').hidden, false);
   assert.match(ui.qs('#cost-over-time-link').href, /metric=cost/);
+  tokenButton.listeners.click();
+  assert.equal(env.window.ttWebCharts.dailyCost.config.data.datasets[0].data[0], 3200);
   assert.equal(env.requests.length, requestsBeforeSwitch + 2, 'only the periodic overview/account reads may request data');
   assert.equal(env.intervals.size, 1);
   assert.equal([...env.intervals][0].ms, 30000);
@@ -311,6 +312,19 @@ async function run() {
   await enter(returnUrl, false);
   assert.equal(ui.quotaFilter.provider, 'codex');
   assert.equal(ui.quotaFilter.search, 'fixture');
+  assert.equal(ui.quotaFilter.window, 'seven_day');
+  assert.equal(ui.quotaFilter.sort, 'reset');
+  const tokenHistory = env.overview.tokens_over_time;
+  delete env.overview.tokens_over_time;
+  await [...env.intervals][0].handler();
+  assert.equal(ui.qs('#trend-metric-cost')['aria-pressed'], 'true');
+  assert.equal(ui.qs('#trend-metric-total').disabled, true);
+  assert.match(ui.qs('#cost-over-time-link').href, /metric=cost/);
+  env.overview.tokens_over_time = tokenHistory;
+  await [...env.intervals][0].handler();
+  assert.equal(ui.qs('#trend-metric-total')['aria-pressed'], 'true');
+  assert.equal(ui.qs('#trend-metric-total').disabled, false);
+  assert.equal(env.window.ttWebCharts.dailyCost.config.data.datasets[0].data[0], 3200);
   assert.equal(env.intervals.size, 1, 'Back must establish one fresh watcher');
   assert(env.charts.length > firstCharts.length, 'Back recreates chart instances');
   assert.equal(env.windowEvents.get('focus').size, 1);

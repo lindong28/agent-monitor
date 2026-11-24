@@ -208,6 +208,7 @@ require("./web/app.js")();
 const ui=window.AgentMonitor,provider={key:'codex'},now=1000;
 const records=[{account_id:'unknown',five_hour_used_pct:null}, {account_id:'zero',five_hour_used_pct:0}, {account_id:'full',five_hour_used_pct:100}, {account_id:'updated',account_label:'a@test',account_state:'known',five_hour_used_pct:5,updated_at:'2026-01-01'}];
 ui.updateCodexQuotaReadings([{account_id:'updated',email:'a@test',last_quota:{observed_at:'2026-01-02',five_hour_used_pct:99}}]);
+ui.quotaFilter.window='five_hour';
 ui.quotaFilter.sort='remaining';
 assert.deepEqual(ui.sortQuotaAccounts(provider,records,now).map(r=>r.account_id),['full','updated','zero','unknown']);
 ui.quotaFilter.sort='remaining_desc';
