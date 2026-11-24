@@ -12,6 +12,7 @@ from unittest import mock
 
 from agent_monitor.ingestion import IDENTITY_STORE, USAGE_LOADER, project_identity, usage_loader
 from agent_monitor.accounting import rollup
+from agent_monitor.accounting.pricing_fetcher import get_pricing
 from parsers import UsageEntry
 from agent_monitor.ingestion.usage_archive import UsageArchive
 
@@ -62,6 +63,36 @@ class UsageArchiveTests(unittest.TestCase):
 
     def run_rollup(self):
         return rollup.run(db_path=self.db, entries_loader=self.load, now=lambda: self.now)
+
+    def test_collection_rechecks_catalog_for_observed_models_and_reprices_history(self):
+        self.seed()
+        self.session("old", model="known")
+        self.session("new", model="new-release")
+        cache = self.root / "prices.json"
+        rates = {"input_cost_per_token": 0.01, "output_cost_per_token": 0.02}
+        catalog = {"known": rates}
+        clock = [1000]
+        fetch = mock.Mock(side_effect=lambda: dict(catalog))
+
+        def prices(**kwargs):
+            return get_pricing(cache, fetcher=fetch, now=lambda: clock[0], **kwargs)
+
+        with mock.patch("agent_monitor.accounting.pricing_fetcher.get_pricing", side_effect=prices), \
+                mock.patch.object(usage_loader.codex_profiles, "sources", return_value=[
+                    (self.sessions, self.metadata, None)]), \
+                mock.patch.object(usage_loader.codex_profiles, "session_links",
+                                  return_value=usage_loader.codex_profiles.SessionLinks()):
+            self.assertEqual({e.model: e.cost_usd for e in self.load()},
+                             {"known": 1.04, "new-release": None})
+            clock[0] += 86400
+            catalog["new-release"] = dict(rates, input_cost_per_token=0.02)
+            prepared = USAGE_LOADER.load_rollup_entries()
+            buckets = {key[-1]: row for key, row in prepared.usage_buckets.items()}
+            self.assertEqual(buckets["new-release"]["cost_known_count"], 1)
+            self.assertAlmostEqual(buckets["new-release"]["cost_usd"], 2.04)
+            self.assertEqual({e.model: e.cost_usd for e in self.load()},
+                             {"known": 1.04, "new-release": 2.04})
+            self.assertEqual(fetch.call_count, 2)
 
     def rows(self, table="daily_usage_rollup"):
         with sqlite3.connect(self.db) as conn:

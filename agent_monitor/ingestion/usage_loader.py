@@ -55,9 +55,10 @@ class UsageLoader:
                         from agent_monitor.accounting.pricing_fetcher import get_pricing, PreparedPricing
                         from agent_monitor.accounting.usage_projection import prepare_usage
 
-                        pricing = PreparedPricing(get_pricing())
-
                         def prepare(conn):
+                            models = [json.loads(row[0]) for row in conn.execute(
+                                "SELECT model FROM usage_model_counts WHERE event_count > 0")]
+                            pricing = PreparedPricing(get_pricing(required_models=models))
                             paths = [json.loads(row[0]) for row in conn.execute(
                                 "SELECT project FROM usage_project_counts WHERE event_count > 0")]
                             context = self.enrichment_context(sorted(
@@ -196,7 +197,8 @@ class UsageLoader:
                 scan_complete=not source_errors,
             )
 
-        pricing = PreparedPricing(get_pricing(persist=not read_only))
+        models = {entry.model for entry in entries} if not read_only else ()
+        pricing = PreparedPricing(get_pricing(persist=not read_only, required_models=models))
         project_paths = sorted({entry.project for entry in entries if self.looks_like_path(entry.project)})
         context = self.enrichment_context(project_paths, read_only=read_only, diagnostic=diagnostic)
         enriched = []

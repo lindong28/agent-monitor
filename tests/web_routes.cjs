@@ -277,7 +277,11 @@ async function run() {
   assert.equal(ui.qs('#trend-token-note').hidden, false);
   // A new range/refresh must keep the chosen metric and use its new data.
   env.overview.tokens_over_time.rows[0].values.codex = 3200;
+  env.overview.today.cost_coverage = {known: 2, unknown: 5};
+  env.overview.cost_over_time.rows[0].cost_coverage = {codex: {known: 2, unknown: 5}};
   await [...env.intervals][0].handler();
+  assert.equal(ui.qs('#today-pricing').textContent, '5 条记录未计价');
+  assert.equal(ui.qs('#today-pricing').hidden, false);
   assert.equal(env.window.ttWebCharts.dailyCost.config.data.datasets[0].data[0], 3200);
   costButton.listeners.click();
   assert.match(ui.qs('#daily-cost-chart').getAttribute('aria-label'), /成本/);
@@ -285,6 +289,9 @@ async function run() {
   assert.equal(tokenButton['aria-pressed'], 'false');
   trend = env.window.ttWebCharts.dailyCost.config;
   assert.deepEqual(trend.data.datasets.map(series => series.data), [[2, 0], [null, 3]]);
+  assert.match(trend.options.plugins.tooltip.callbacks.label({
+    dataset: {label: 'Codex'}, raw: 2, dataIndex: 0, datasetIndex: 0
+  }), /5 条记录未计价/);
   assert.match(trend.options.scales.y.ticks.callback(2), /^\$/);
   assert.equal(ui.qs('#trend-cost-notes').hidden, false);
   assert.match(ui.qs('#cost-over-time-link').href, /metric=cost/);

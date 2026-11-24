@@ -79,6 +79,35 @@ class CostTests(unittest.TestCase):
             self.assertIn("fetched_at", payload)
             self.assertIn("data", payload)
 
+    def test_unsuccessful_early_refresh_keeps_rates_and_limits_rechecks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "prices.json"
+            clock = [1000]
+            known = {"fixture": {"input_cost_per_token": 0.01}}
+            fetch = mock.Mock(side_effect=[known, OSError("offline"), known])
+
+            def lookup(models, *, persist=True):
+                return get_pricing(cache, fetcher=fetch, now=lambda: clock[0],
+                                   required_models=models, persist=persist)
+
+            lookup(["fixture"])
+            clock[0] += 86400
+            for models in (["fixture"], [None, "unknown"], ["glm-5.2"]):
+                self.assertIn("fixture", lookup(models))
+            lookup(["missing"], persist=False)
+            self.assertEqual(fetch.call_count, 1)
+            for attempt in range(2):
+                with self.subTest(attempt=attempt):
+                    result = lookup(["missing"])
+                    self.assertEqual(result["fixture"], known["fixture"])
+                    self.assertIsNone(resolve_model_key("missing", result))
+                    self.assertEqual(fetch.call_count, 2)
+                    self.assertEqual(json.loads(cache.read_text())["fetched_at"], 1000)
+            clock[0] += 3600
+            self.assertIsNone(resolve_model_key("missing", lookup(["missing"])))
+            self.assertIsNone(resolve_model_key("missing", lookup(["missing"])))
+            self.assertEqual(fetch.call_count, 3)
+
     def test_fresh_cache_is_supplemented_by_bundled_glm_estimates(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

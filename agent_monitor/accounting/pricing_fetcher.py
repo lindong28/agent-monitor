@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import ssl
+import tempfile
 import time
 import urllib.request
 from agent_monitor.network import network_policy
@@ -15,6 +16,7 @@ import token_cost
 # cache with fetched_at and enforces a 7-day TTL.
 LITELLM_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 TTL_SECONDS = 7 * 24 * 3600
+MISSING_MODEL_RECHECK_SECONDS = 3600
 from agent_monitor.paths import PROJECT_ROOT
 
 ROOT = PROJECT_ROOT
@@ -27,21 +29,33 @@ _PARTIAL_LOGGED = set()
 _UNKNOWN_LOGGED = set()
 
 
-def get_pricing(cache_path=CACHE_PATH, fetcher=None, now=None, persist=True):
+def get_pricing(cache_path=CACHE_PATH, fetcher=None, now=None, persist=True, *, required_models=()):
     now_fn = now or time.time
     cache_path = Path(cache_path)
-    cached = _read_fresh_cache(cache_path, now_fn())
+    timestamp = now_fn()
+    cached = _read_fresh_cache(cache_path, timestamp)
     if cached is not None:
-        return _with_bundled_supplements(cached)
+        table, fetched_at, checked_at = cached
+        merged = _with_bundled_supplements(table)
+        if (not persist or timestamp - checked_at < MISSING_MODEL_RECHECK_SECONDS
+                or all(resolve_model_key(model, merged) is not None
+                       for model in required_models if model and model != "unknown")):
+            return merged
 
     fetch = fetcher or _fetch_litellm_pricing
     try:
         data = fetch()
+        if not isinstance(data, dict) or not data:
+            raise ValueError("empty or invalid pricing catalog")
         data = PricingTable(data, {key: LITELLM_URL if fetcher is None else "configured" for key in data})
         if persist:
             _write_cache(cache_path, data, now_fn())
         return _with_bundled_supplements(data)
     except Exception as exc:
+        if cached is not None:
+            logger.warning("Pricing refresh failed, retaining cached rates: %s", exc)
+            _write_cache(cache_path, table, fetched_at, checked_at=now_fn())
+            return merged
         logger.warning("Pricing fetch failed, using bundled fallback: %s", exc)
         return _fallback_pricing()
 
@@ -201,21 +215,34 @@ def _read_fresh_cache(cache_path, now):
     if not isinstance(payload, dict) or "fetched_at" not in payload or "data" not in payload:
         return None
 
-    if now - float(payload.get("fetched_at", 0)) > TTL_SECONDS:
+    fetched_at = payload["fetched_at"]
+    checked_at = payload.get("checked_at", fetched_at)
+    if (not all(isinstance(value, (float, int)) and math.isfinite(value)
+                for value in (fetched_at, checked_at))
+            or now - fetched_at > TTL_SECONDS or not isinstance(payload["data"], dict)):
         return None
     data = payload["data"]
-    return PricingTable(data, payload.get("sources") or {key: "cached_catalog" for key in data})
+    table = PricingTable(data, payload.get("sources") or {key: "cached_catalog" for key in data})
+    return table, fetched_at, checked_at
 
 
-def _write_cache(cache_path, data, fetched_at):
+def _write_cache(cache_path, data, fetched_at, *, checked_at=None):
+    payload = {"fetched_at": fetched_at, "data": data, "sources": getattr(data, "sources", {})}
+    if checked_at is not None:
+        payload["checked_at"] = checked_at
+    temporary = None
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(
-            json.dumps({"fetched_at": fetched_at, "data": data, "sources": getattr(data, "sources", {})}, sort_keys=True),
-            encoding="utf-8",
-        )
+        with tempfile.NamedTemporaryFile(mode="w", dir=cache_path.parent, delete=False,
+                                         encoding="utf-8") as stream:
+            temporary = Path(stream.name)
+            stream.write(json.dumps(payload, sort_keys=True))
+        temporary.replace(cache_path)
     except OSError:
         logger.warning("Could not write pricing cache to %s", cache_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _with_bundled_supplements(data):

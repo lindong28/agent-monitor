@@ -8,6 +8,10 @@
   let trendMetric = "cost";
   let latestTrend = null;
 
+  function missingPrices(coverage) {
+    return coverage?.unknown > 0 ? `${integer(coverage.unknown)} 条记录未计价` : "";
+  }
+
   function renderOverview(data, selectedRange) {
     let firstData = qs('#initial-data-notice');
     const missingData = data.sync?.coverage?.admitted === 0 && !data.rollup_coverage?.earliest_date && !data.range?.total_tokens && !data.range?.cost_usd;
@@ -21,6 +25,13 @@
     }
     qs("#today-cost").textContent = money(data.today.cost_usd);
     qs("#week-cost").textContent = money(data.week.cost_usd);
+    for (const period of ["today", "week", "range"]) {
+      const note = qs(`#${period}-pricing`);
+      if (note) {
+        note.textContent = missingPrices(data[period]?.cost_coverage);
+        note.hidden = !note.textContent;
+      }
+    }
     const weekContext = qs("#week-context");
     if (weekContext) {
       weekContext.textContent = data.week.window && data.week.window.start
@@ -231,9 +242,13 @@
       button.disabled = button.dataset.trendMetric === "total" && !data.tokens_over_time;
     });
     if (!costHistory) return;
+    function trendReading(value, coverage) {
+      if (tokens) return chartReading(value, "tokens");
+      return [costReading(value, coverage), missingPrices(coverage)].filter(Boolean).join(" · ");
+    }
     const costGranularity = data.cost_over_time_granularity || "day";
     renderChartTable("daily-cost-data", ["时间", ...costHistory.columns.map((column) => `${agentLabel(column)} · ${tokens ? "tokens" : "USD"}`)],
-      costHistory.rows.map((row) => [row.x, ...costHistory.columns.map((column) => tokens ? chartReading(row.values[column], "tokens") : costTableReading(row.values[column], row.cost_coverage?.[column]))]));
+      costHistory.rows.map((row) => [row.x, ...costHistory.columns.map((column) => trendReading(row.values[column], row.cost_coverage?.[column]))]));
     chart("dailyCost", "daily-cost-chart", {
       type: "line",
       data: {
@@ -247,7 +262,7 @@
         ),
       },
       options: chartOptions({ plugins: { tooltip: { callbacks: {
-        label: (context) => `${context.dataset.label}: ${tokens ? chartReading(context.raw, "tokens") : costReading(context.raw, costHistory.rows[context.dataIndex].cost_coverage?.[costHistory.columns[context.datasetIndex]])}`,
+        label: (context) => `${context.dataset.label}: ${trendReading(context.raw, costHistory.rows[context.dataIndex]?.cost_coverage?.[costHistory.columns[context.datasetIndex]])}`,
       } } }, scales: { y: { ticks: { callback: (value) => tokens ? compactNumber(value) : chartMoneyTick(value) } }, x: { ticks: { maxTicksLimit: 7,
         callback(value) {
           const label = String(this.getLabelForValue(value));
