@@ -302,6 +302,14 @@ class Router {
     if (route && key && route.key !== key) throw new RouteError('confirmed_route_changed');
   }
   async connect(target, tunnel, signal, scope = 'shared', confirmation = null) {
+    const admission = this.automatic.get(scope);
+    if (admission?.parent && !Object.hasOwn(admission.origins, target.url.origin)) {
+      // An auxiliary client request is outside this capability. Refuse it
+      // before resolution without revoking the two independently pinned origins.
+      const reason = this.rejection(scope) || 'automatic_origin_not_admitted';
+      this.record(target, {key: null}, reason, scope);
+      throw new RouteError(reason);
+    }
     let list;
     try {
       this.requireConfirmation(confirmation, target);

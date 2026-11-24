@@ -123,6 +123,11 @@ for line in sys.stdin:
                 edit_grant(mode)
             result = {}
         elif method == "account/rateLimits/read":
+            if mode in {"denied_transport", "unexplained_transport", "late_revocation", "other_rpc_error"}:
+                msg = ("unrelated internal error" if mode == "other_rpc_error" else
+                       "failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage)")
+                print(json.dumps({"id":m["id"], "error":{"code":-32603, "message":msg}}), flush=True)
+                continue
             if mode == "refused_again" or (mode != "healthy" and not auth["tokens"]["access_token"].endswith("-new")):
                 if mode in {"revoke", "follow_idle"}:
                     edit_grant(mode)
@@ -149,7 +154,9 @@ for line in sys.stdin:
         shim.chmod(0o700)
         route = "http://agent-monitor.auto-" + "a" * 32 + ":test@127.0.0.1:9"
         env = {"HOME": str(self.root), "PATH": os.defpath, network_policy.INTERNAL: route}
-        batch = SimpleNamespace(environment=lambda: env, renewal_environment=lambda: env, check=lambda: None)
+        strict_route = route.replace("a" * 32, "b" * 32)
+        batch = SimpleNamespace(environment=lambda: env, targets=[], check=lambda: None,
+                                renewal_environment=lambda: {**env, network_policy.INTERNAL: strict_route})
         real_command = quota_refresh.module_command
         # The real isolated child and stdio peer see mutable, offline consent and route authorities.
         def child_command(*args):
@@ -171,7 +178,8 @@ import runpy;""")
 
         homes = {name: self.profile(name) for name in ("alpha", "beta")}
         for mode, expected, scope in [
-                ("expired", 3, None), ("no_consent", 1, "account"), ("revoke", 1, "account"), ("follow_idle", 1, "account"),
+                ("denied_transport", 1, "skip"), ("unexplained_transport", 1, "machine"),
+                ("late_revocation", 1, "machine"), ("other_rpc_error", 1, "machine"), ("expired", 3, None), ("no_consent", 1, "account"), ("revoke", 1, "account"), ("follow_idle", 1, "account"),
                 ("changed_route", 1, "account"), ("revoke_during_check", 1, "account"), ("changed_file", 1, "machine"),
                 ("no_change", 2, "account"), ("late_revoke", 2, "machine"),
                 ("wrong_result", 3, "machine"), ("revoked", 1, "account"), ("manual", 1, "machine"),
@@ -211,8 +219,17 @@ import runpy;""")
                         raise OSError("fixture cache unavailable")
                     return save_cache(path, data, **options)
 
+                def observations(endpoint):
+                    from datetime import datetime, timezone
+                    denied = endpoint == strict_route and mode in {"denied_transport", "late_revocation", "other_rpc_error"}
+                    at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                    event = {"at": at, "target": "https://chatgpt.com", "result": "automatic_route_unobserved"}
+                    return {"generation": 1, "automatic_rejection": event["result"] if denied else None,
+                            "events": [event] if denied and mode != "late_revocation" else []}
+
                 def run():
-                    with mock.patch.object(quota_service, "save_cache", side_effect=save), \
+                    with mock.patch.object(network_policy, "observations", side_effect=observations), \
+                            mock.patch.object(quota_service, "save_cache", side_effect=save), \
                             mock.patch.object(quota_refresh, "module_command", side_effect=child_command), network_policy.using_route(route), \
                             mock.patch.object(quota_service.accounts, "CODEX_AUTH", native_auth), \
                             mock.patch.object(quota_service.accounts, "claude_account", return_value=None), \
@@ -237,6 +254,10 @@ import runpy;""")
                 if scope:
                     self.assertEqual(saved[0]["five_hour_pct"], 8)
                     self.assertEqual(saved[0]["updated_at"], old["updated_at"])
+                if scope == "skip":
+                    self.assertEqual(alpha["query_state"], "skipped")
+                    self.assertEqual(alpha["refresh_skip"]["reason"], "route_changed")
+                    self.assertIsNone(alpha["refresh_pause"])
                 if scope == "account":
                     pause = account_holds.controls(root / "state", "shared-workspace", "alpha@example.test").read("codex")["pause"]
                     self.assertEqual(alpha["refresh_pause"]["scope"], scope)

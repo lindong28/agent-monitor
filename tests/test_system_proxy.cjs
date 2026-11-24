@@ -369,13 +369,28 @@ test('renewal scopes pin each origin, reject fallback and expire with the origin
   let now = 1000;
   const origins = {'https://chatgpt.com': keys[0], 'https://auth.openai.com': keys[1]};
   const current = {...origins};
-  const proxy = await bridge(t, async url => current[new URL(url).origin], {now: () => now});
+  const resolved = [];
+  const proxy = await bridge(t, async url => {
+    const origin = new URL(url).origin;
+    resolved.push(origin);
+    return current[origin] || keys[0];
+  }, {now: () => now});
   const parent = 'auto-' + 'a'.repeat(32);
   proxy.router.admit(parent, 0, keys, 60, origins);
   now += 50000;
   const child = proxy.router.narrow(parent), auth = automaticAuth(child);
   assert.equal(proxy.router.narrow(parent), child);
   assert.deepEqual(JSON.parse((await get(proxy.port, '/automatic-renewal-ready', auth)).body), {ready: true});
+  const extra = 'attachment.example.test';
+  const denied = await tunnel(proxy.port, extra + ':443', undefined, undefined, auth);
+  assert.match(denied.response, /^HTTP\/1.1 502/);
+  denied.socket.destroy();
+  const status = JSON.parse((await get(proxy.port, '/status', auth)).body);
+  assert.equal(status.automatic_rejection, null);
+  assert.equal(status.events.at(-1).target, 'https://' + extra);
+  assert.equal(status.events.at(-1).result, 'automatic_origin_not_admitted');
+  assert.equal(resolved.includes('https://' + extra), false);
+  assert.deepEqual(counts, [0, 0]);
   for (const origin of Object.keys(origins)) {
     const connected = await tunnel(proxy.port, new URL(origin).host + ':443', undefined, undefined, auth);
     assert.match(connected.response, /^HTTP\/1.1 200/); connected.socket.destroy();

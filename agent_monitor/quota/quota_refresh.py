@@ -219,6 +219,8 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                     env = strict_env
                     auto_renewal = {"root": str(root.absolute()), "profile": account_profile, "records": scheduled_records}
         deadline = time.monotonic() + TIMEOUT
+        # Bridge events use UTC timestamps with millisecond precision.
+        started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         parent_read, parent_write = os.pipe()
         child = subprocess.Popen(
             module_command("agent_monitor.quota.quota_refresh", provider, parent_read, deadline),
@@ -280,7 +282,18 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 # A sibling can revoke this batch after our provider has already
                 # answered. Retain that result and its existing pause semantics.
                 # RPC transport errors alone do not prove an upstream response.
-                bridge_explainable = _bridge_explainable_failure(detail)
+                if (auto_renewal and payload.get("quota_transport_failure") is True
+                        and not detail.get("authentication_recovery") and _bridge_explainable_failure(detail)):
+                    # A pinned renewal scope can be revoked while its parent
+                    # remains usable. Check the bridge the quota reader used.
+                    status = network_policy.observations(env[network_policy.INTERNAL])
+                    rejection = status.get("automatic_rejection")
+                    if rejection and any(
+                        event.get("target") == "https://chatgpt.com" and event.get("result") == rejection
+                        and event.get("at", "") >= started_at for event in status.get("events", [])
+                    ):
+                        raise automatic_egress.Skipped("route_changed", automatic_batch.targets)
+                bridge_explainable = _bridge_explainable_failure(detail) and not detail.get("authentication_recovery")
                 kind = (NotSignedIn if payload.get("signed_out") is True else
                         LocalUnavailable if payload.get("local_unavailable") is True else RefreshError)
                 raise kind(payload.get("error") or "配额读取失败，请核对后解除本地暂停。",
@@ -876,6 +889,7 @@ if __name__ == "__main__":
         # different process and only sees this line.
         print(json.dumps({"error": str(exc), "signed_out": isinstance(exc, NotSignedIn),
                           "local_unavailable": isinstance(exc, LocalUnavailable),
+                          "quota_transport_failure": getattr(exc, "quota_transport_failure", False),
                           "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery,
                           "official_quota_rejection": getattr(exc, "official_quota_rejection", False),
                           "account_quota_rejection": getattr(exc, "account_quota_rejection", None)}))
