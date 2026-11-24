@@ -197,8 +197,11 @@ class UsageLoader:
                 scan_complete=not source_errors,
             )
 
-        models = {entry.model for entry in entries} if not read_only else ()
-        pricing = PreparedPricing(get_pricing(persist=not read_only, required_models=models))
+        if read_only:
+            table = get_pricing(persist=False)
+        else:
+            table = get_pricing(required_models={entry.model for entry in entries})
+        pricing = PreparedPricing(table)
         project_paths = sorted({entry.project for entry in entries if self.looks_like_path(entry.project)})
         context = self.enrichment_context(project_paths, read_only=read_only, diagnostic=diagnostic)
         enriched = []
