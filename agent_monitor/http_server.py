@@ -1006,8 +1006,10 @@ class Handler(BaseHTTPRequestHandler):
                                 send_body=send_body, compress=True)
             except Exception as exc:
                 logger.warning('Hub read failed: %s', type(exc).__name__)
-                self._send_json({'error': '统计服务暂不可用；请稍后重试。网络诊断仍可使用。',
-                                 'failure_type': type(exc).__name__}, status=502, send_body=send_body)
+                message = (str(exc) if isinstance(exc, hub_reads.HubConnectTimeout) else
+                           '统计服务暂不可用；请稍后重试。网络诊断仍可使用。')
+                self._send_json({'error': message, 'failure_type': type(exc).__name__},
+                                status=502, send_body=send_body)
             return
         if parsed.path == "/api/quota-settings":
             self._handle_quota_settings(parsed, send_body=send_body)

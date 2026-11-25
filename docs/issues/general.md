@@ -2,6 +2,10 @@
 
 Reader: Agent. These source observations are outside the 2026-10-28 recovery guidance change; they are not evidence of the incident's root cause.
 
+## Hub forwarding loop detection through the HTTP bridge
+
+Owner: Hub forwarding maintenance. The existing adapter test observes the hop marker before the HTTP bridge. Verify end-to-end loop detection across the supported forwarding path when maintaining this boundary. The observed overview connection timeout occurred before forwarding and has a [separate recovery path](../adr/20261125-7c58-hub-read-timeout.md).
+
 ## ISSUE-DIAGNOSTICS-20261116-e43e — Automatic quota transport failure needs causal evidence
 
 Status: diagnostic gaps repaired; original transport cause remains unknown. Owner: agent-monitor quota maintenance.

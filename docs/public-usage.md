@@ -405,6 +405,8 @@ On failure, restoration is attempted for every original component; the command e
 
 ## Troubleshooting
 
+If a client dashboard reports that both connections to the statistics Hub timed out, check connectivity from that machine to the configured Hub. A visible local overview retries its read on the existing 30-second interval and when it regains focus. Opening it again also reads saved Hub statistics. This recovery requires no collection or quota refresh.
+
 - Installer dependency errors: resolve the named Python/runtime/library error and rerun the installer. Missing optional fonts use system fallback and are reported as degraded; this is distinct from a failed proxy-runtime startup.
 - Python older than 3.10: use the external-interpreter [runtime rebuild](#python-runtime-rebuild) entry; preserve state and local configuration.
 - Chart.js download/checksum failure: rerun the installer. It validates the pinned asset on every install, downloads replacements to a temporary file, and publishes them only after verification; a failed download cannot become an installed asset.

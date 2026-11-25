@@ -51,6 +51,36 @@ test('empty/malformed/unsupported results never become DIRECT', async t => {
   assert.equal(response.headers['x-agent-monitor-error'], 'proxy_resolution_failed');
 });
 
+test('statistics clients can distinguish a bridge connect timeout from a Hub HTTP error', async t => {
+  let requests = 0;
+  const hub = http.createServer((_req, res) => {
+    requests++;
+    res.writeHead(502, {'x-agent-monitor-error': 'proxy_connect_timeout'});
+    res.end();
+  });
+  const hubPort = await listen(hub); dispose(t, hub);
+  const proxy = await bridge(t, async () => 'DIRECT', {timeout: 100});
+  const url = `http://127.0.0.1:${hubPort}/api/overview?sync=0`;
+
+  // Leave only the outbound connection pending. The bridge's own timer and
+  // both HTTP handlers run normally, without depending on a blackholed IP.
+  const connect = net.connect;
+  const stalled = t.mock.method(net, 'connect', function (...args) {
+    if (args[0]?.port === hubPort) return new net.Socket();
+    return connect.apply(this, args);
+  });
+  const timeout = await get(proxy.port, url);
+  assert.equal(timeout.status, 502);
+  assert.equal(timeout.headers['x-agent-monitor-error'], 'proxy_connect_timeout');
+  assert.equal(requests, 0);
+
+  stalled.mock.restore();
+  const response = await get(proxy.port, url);
+  assert.equal(requests, 1);
+  assert.equal(response.status, 502);
+  assert.equal(response.headers['x-agent-monitor-error'], undefined);
+});
+
 test('confirmed routes reject same-generation changes and never fall back to an unconfirmed proxy', async t => {
   const unused = net.createServer(); const dead = await listen(unused); await new Promise(resolve => unused.close(resolve));
   let reached = 0;

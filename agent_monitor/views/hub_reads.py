@@ -1,4 +1,5 @@
 """Fixed-origin read adapter; account and collection actions stay at the Hub."""
+import logging
 from urllib.parse import urlencode, unquote, quote
 
 from agent_monitor import hub_config
@@ -11,6 +12,10 @@ QUERY_KEYS = frozenset(('range', 'start', 'end', 'machine', 'agent', 'project', 
                        'cost_status', 'sort', 'order', 'scope', 'session_agent', 'sync'))
 # Existing Web navigation carries these local presentation fields into API reads.
 NAVIGATION_KEYS = frozenset(('session', 'session_machine', 'page', 'usage_page', 'usage_model', 'return'))
+
+
+class HubConnectTimeout(ValueError):
+    """The product bridge could not establish a connection on either attempt."""
 
 
 def origin():
@@ -39,9 +44,18 @@ def read(path, query, *, target=None, session_factory=None):
     if path.startswith('/api/session/'):
         path = '/api/session/' + quote(unquote(path[len('/api/session/'):]), safe='')
     # This is the project's existing system-proxy path, not a new personal proxy.
+    url = target + path + '?' + urlencode(params, doseq=True)
     with (session_factory or network_policy.session)() as session:
-        response = session.get(target + path + '?' + urlencode(params, doseq=True),
-                               headers={'X-Agent-Monitor-Read-Hop': '1'}, timeout=(3, 20), allow_redirects=False)
+        for attempt in (1, 2):
+            response = session.get(url, headers={'X-Agent-Monitor-Read-Hop': '1'},
+                                   timeout=(3, 20), allow_redirects=False)
+            # The bridge strips this header from upstream responses. Its own
+            # connection timeout occurs before it forwards the statistics GET.
+            if response.status_code != 502 or response.headers.get('X-Agent-Monitor-Error') != 'proxy_connect_timeout':
+                break
+            if attempt == 2:
+                raise HubConnectTimeout('两次连接统计 Hub 均超时。请检查本机到 Hub 的网络连接。网络诊断仍可使用。')
+            logging.getLogger(__name__).warning('Hub statistics read: proxy_connect_timeout; retrying once')
         if response.status_code != 200:
             raise ValueError(f'Hub 读取返回 HTTP {response.status_code}；未改用本机统计。')
         result = response.json()

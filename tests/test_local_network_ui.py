@@ -154,6 +154,40 @@ class LocalHTTPTests(unittest.TestCase):
             self.assertEqual(self.request('/api/session/%2e%2e')[0], 400)
             self.assertEqual(read.call_count, 1)
 
+    def test_hub_overview_retries_only_bridge_connect_timeout(self):
+        target = 'http://hub.test:39001'
+        saved = {'range': {'cost_usd': 42}}
+        success = mock.Mock(status_code=200, headers={}, json=lambda: saved)
+        connect_timeout = mock.Mock(status_code=502, headers={'X-Agent-Monitor-Error': 'proxy_connect_timeout'})
+        bad_gateway = mock.Mock(status_code=502, headers={})
+        other_failure = mock.Mock(status_code=502, headers={'X-Agent-Monitor-Error': 'upstream_transport_failed'})
+
+        for responses, expected_status in (
+            ([success], 200),
+            ([connect_timeout, success], 200),
+            ([connect_timeout, connect_timeout], 502),
+            ([bad_gateway], 502),
+            ([other_failure], 502),
+        ):
+            with self.subTest(responses=[(r.status_code, r.headers) for r in responses]):
+                session = mock.Mock()
+                session.get.side_effect = responses
+                with mock.patch.object(hub_reads, 'origin', return_value=target), \
+                     mock.patch.object(hub_reads.network_policy, 'session', return_value=contextlib.nullcontext(session)):
+                    status, result = self.request('/api/overview?range=30d&sync=1')
+                self.assertEqual(status, expected_status)
+                self.assertEqual(session.get.call_count, len(responses))
+                for call in session.get.call_args_list:
+                    self.assertEqual(call.args, (target + '/api/overview?range=30d&sync=0',))
+                    self.assertFalse(call.kwargs['allow_redirects'])
+                if status == 200:
+                    self.assertEqual(result, saved)
+                elif responses[-1] is connect_timeout:
+                    self.assertIn('连接', result['error'])
+                    self.assertIn('超时', result['error'])
+                else:
+                    self.assertNotIn('连接超时', result['error'])
+
     def test_standalone_normal_read_keeps_existing_data_without_triggering_collection(self):
         route = mock.Mock(return_value={'existing_cost': 42})
         with mock.patch.dict(self.http.routes, {'/api/overview': route}):
