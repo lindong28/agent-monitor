@@ -16,6 +16,12 @@ Managed deployment checks the Hub's `/api/health?asset_watch=1` and the connecto
 
 Ordinary Web, Hub and collector log retention is configured in [ordinary service logs](../public-usage.md#ordinary-service-logs). The capacity is checked at existing service boundaries, with possible temporary overshoot and concurrent-write loss during truncation. It does not govern diagnostic events or accounting history. Rotation success is not service-health evidence.
 
+## Read-only post-release overview check
+
+On the machine that serves the reader's local dashboard, run `python3 scripts/verify_overview_release.py --url http://127.0.0.1:39001` after deployment. Supply the actual numeric loopback origin and port if they differ. The optional verifier uses the public `agent-browser` CLI and Chrome or Chromium. It looks for the development CLI installed by `npm ci` or one on PATH. A scheduler can pass absolute executable paths with `--agent-browser` and `--browser`. It uses a disposable headless browser and does not need a logged-in profile.
+
+The check selects 30 and 7 days, opens the trend table, and compares its token values and recorded dates with each overview response and the GMT+8 calendar window. A sparse installation can have fewer rows than days. An empty trend supplies no data for this acceptance. A successful run emits one JSON line on stdout with `status` equal to `passed` and the row count and first/last recorded dates for both ranges. A failure returns nonzero. This checks reading the deployed dashboard. Collection, provider availability and the deployed revision have separate checks.
+
 ## Network diagnostic findings
 
 The `/network` page and `agent-monitor network` report describe the server machine's latest diagnostic observation, not a historical range, the browser device's IP or provider-account availability. A `range=30d` URL parameter does not change this page's data. Read the observation timestamp, cache receipt and missing-observation messages before acting on a risk label.
