@@ -437,6 +437,15 @@ test('renewal scopes pin each origin, reject fallback and expire with the origin
 
   const next = 'auto-' + 'b'.repeat(32);
   proxy.router.admit(next, 0, keys, 60, origins);
+  const oneOrigin = proxy.router.narrow(next, true);
+  const quotaOnlyAuth = automaticAuth(oneOrigin);
+  assert.notEqual(oneOrigin, proxy.router.narrow(next));
+  for (const target of ['auth.openai.com:443', 'other.example:443']) {
+    const denied = await tunnel(proxy.port, target, undefined, undefined, quotaOnlyAuth);
+    assert.match(denied.response, /automatic_origin_not_admitted/);
+    denied.socket.destroy();
+  }
+  assert.deepEqual(counts, [2, 1]);
   const unchecked = proxy.router.narrow(next);
   assert.equal(await proxy.router.renewalReady(unchecked), false); // Local resolution detects the swap before any CONNECT.
   assert.deepEqual(counts, [2, 1]);
@@ -464,6 +473,16 @@ test('renewal scopes pin each origin, reject fallback and expire with the origin
   const changed = 'auto-' + 'f'.repeat(32);
   current['https://auth.openai.com'] = keys[1];
   proxy.router.admit(changed, 0, keys, 60, origins);
+  const isolated = automaticAuth(proxy.router.narrow(changed, true));
+  assert.equal(JSON.parse((await get(proxy.port, '/status', isolated)).body).quota_connected, false);
+  const quota = await tunnel(proxy.port, 'chatgpt.com:443', undefined, undefined, isolated);
+  assert.match(quota.response, /^HTTP\/1\.1 200/);
+  quota.socket.destroy();
+  assert.equal(JSON.parse((await get(proxy.port, '/status', isolated)).body).quota_connected, true);
+  assert.deepEqual(counts, [3, 1]);
+  const another = automaticAuth(proxy.router.narrow(changed, true));
+  assert.notEqual(another, isolated);
+  assert.equal(JSON.parse((await get(proxy.port, '/status', another)).body).quota_connected, false);
   const changedScope = proxy.router.narrow(changed);
   proxy.router.invalidate();
   assert.equal(await proxy.router.renewalReady(changedScope), false);

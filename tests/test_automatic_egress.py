@@ -36,6 +36,27 @@ class AutomaticEgressTests(unittest.TestCase):
                 self.assertEqual(probe.call_count, 2)
                 self.admit.assert_not_called()
 
+    def test_quota_only_requires_complete_evidence_bridge_support_and_current_route(self):
+        for countries, supported, ready, reason in [
+                (('US', None), True, True, 'unknown'),
+                (('US', 'US'), False, True, 'unknown'),
+                (('US', 'US'), True, False, 'route_changed'),
+                (('US', 'US'), True, True, None)]:
+            gate._cache = None
+            with self.subTest(reason=reason, supported=supported), self.probe(countries), \
+                    mock.patch.object(network_policy, 'narrow_automatic', return_value='auto-' + 'b' * 32) as narrow, \
+                    mock.patch.object(network_policy, 'renewal_ready', return_value=ready):
+                if not supported:
+                    narrow.side_effect = network_policy.NetworkPolicyError('automatic_admission_unavailable')
+                batch = gate.Batch()
+                if reason:
+                    with self.assertRaises(gate.Skipped) as skipped:
+                        batch.replacement_environment()
+                    self.assertEqual(skipped.exception.details['reason'], reason)
+                else:
+                    self.assertIn('b' * 32, batch.replacement_environment()[network_policy.INTERNAL])
+                    narrow.assert_called_once_with(batch.env[network_policy.INTERNAL], quota_only=True)
+
     def test_concurrent_batch_reuses_pair_and_binds_inherited_capability(self):
         with self.probe(('US', 'SG')) as probe:
             batch = gate.Batch()

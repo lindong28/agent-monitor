@@ -55,11 +55,11 @@ def remember_rejection(state_root, account_id, label, digest):
         lease.close()
 
 
-def acquire(state_root, account_id, label, *, pause_id, **options):
+def acquire(state_root, account_id, label, *, pause_id, replacement=False, **options):
     """Keep the shared lane authoritative while probing one account pause."""
     shared = Controls(Path(state_root) / "upstream_controls").acquire("codex", **options)
     try:
-        local = controls(state_root, account_id, label).acquire("codex", probe_pause_id=pause_id, **options)
+        local = controls(state_root, account_id, label).acquire("codex", probe_pause_id=pause_id, replacement=replacement, **options)
     except BaseException:
         shared.close()
         raise

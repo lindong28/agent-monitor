@@ -394,6 +394,9 @@
         form.append(unavailable);
       }
       if (value.accounts.some(row => row.renewal_key)) form.append(renewalHelp);
+      if (value.unavailable_replacements) {
+        form.append(document.createTextNode(`有 ${value.unavailable_replacements} 项替换凭据复验授权已无法匹配来源，保存后将撤销。`));
+      }
       for (const row of value.accounts) {
         const label = document.createElement("label"), checkbox = document.createElement("input");
         checkbox.type = "checkbox"; checkbox.dataset.quotaProfile = ""; checkbox.value = row.key; checkbox.checked = row.enabled;
@@ -415,8 +418,17 @@
           renewal.checked = row.renewal_enabled;
           const updateEligibility = () => {
             renewal.disabled = !checkbox.checked && !follow.checked;
-            if (renewal.disabled) renewal.checked = false;
+            replacement.disabled = renewal.disabled;
+            if (renewal.disabled) { renewal.checked = false; replacement.checked = false; }
           };
+          const replacement = document.createElement("input");
+          if ("replacement_enabled" in row) {
+            replacement.type = "checkbox"; replacement.dataset.quotaReplacement = ""; replacement.value = row.renewal_key;
+            replacement.checked = row.replacement_enabled;
+            const permission = document.createElement("label");
+            permission.append(replacement, document.createTextNode(` 允许 ${row.profile} 在凭据被拒并更换后自动复验一次配额`));
+            line.append(document.createElement("br"), permission);
+          }
           updateEligibility();
           checkbox.addEventListener("change", updateEligibility);
           follow.addEventListener("change", updateEligibility);
@@ -446,24 +458,27 @@
       const follow_running = form.querySelector("[data-follow-running]").checked;
       const renewals = Array.from(form.querySelectorAll("[data-quota-renewal]:checked"), node => node.value).sort();
       const previousRenewals = state.accounts.filter(row => row.renewal_enabled).map(row => row.renewal_key).sort();
-      if (!state.unavailable_renewals && follow_running === Boolean(state.follow_running) && JSON.stringify(selected) === JSON.stringify(previous)
+      const replacements = Array.from(form.querySelectorAll("[data-quota-replacement]:checked"), node => node.value).sort();
+      const previousChecks = state.accounts.filter(row => row.replacement_enabled).map(row => row.renewal_key).sort();
+      if (!state.unavailable_replacements && JSON.stringify(replacements) === JSON.stringify(previousChecks)
+          && !state.unavailable_renewals && follow_running === Boolean(state.follow_running) && JSON.stringify(selected) === JSON.stringify(previous)
           && JSON.stringify(renewals) === JSON.stringify(previousRenewals)) { notice.textContent = "设置未变化。"; return; }
       busy = true; read.disabled = save.disabled = true;
       let submitted = false;
       try {
         let confirmation;
         if (selected.some(key => !previous.includes(key)) || (follow_running && !state.follow_running)
-            || renewals.some(key => !previousRenewals.includes(key))) {
-          const rows = state.accounts.filter(row => selected.includes(row.key) || renewals.includes(row.renewal_key));
+            || renewals.some(key => !previousRenewals.includes(key)) || replacements.some(key => !previousChecks.includes(key))) {
+          const rows = state.accounts.filter(row => selected.includes(row.key) || renewals.includes(row.renewal_key) || replacements.includes(row.renewal_key));
           confirmation = await window.AgentMonitor.previewUpstream?.(
             rows.map(row => ({email: row.account_label, account_id: row.account_id, profile: row.profile,
-              fixed: selected.includes(row.key), renewal: renewals.includes(row.renewal_key)})),
-            {approval_action: "quota-settings", approval_scope: [machine, ...selected, ...(follow_running ? ["follow-running"] : []), ...renewals.map(key => "renew:" + key)], approval_expected: state.revision, approval_machine: machine});
+              fixed: selected.includes(row.key), renewal: renewals.includes(row.renewal_key), replacement: replacements.includes(row.renewal_key)})),
+            {approval_action: "quota-settings", approval_scope: [machine, ...selected, ...(follow_running ? ["follow-running"] : []), ...renewals.map(key => "renew:" + key), ...replacements.map(key => "replace:" + key)], approval_expected: state.revision, approval_machine: machine});
           if (!confirmation) { notice.textContent = "已取消，设置未改变。"; return; }
         }
         submitted = true;
-        render(await request({method: "POST", body: JSON.stringify({machine, revision: state.revision, selected, follow_running, renewals, confirmation})}));
-        notice.textContent = `设置已保存。${renewals.length} 个账号已授权自动续期。关闭查询或撤销续期后，已发出的请求会完成。`;
+        render(await request({method: "POST", body: JSON.stringify({machine, revision: state.revision, selected, follow_running, renewals, replacements, confirmation})}));
+        notice.textContent = `设置已保存。${renewals.length} 个账号已授权自动续期，${replacements.length} 个账号已授权替换凭据复验。关闭查询或撤销续期后，已发出的请求会完成。`;
       } catch (error) {
         notice.textContent = submitted && !error.rejected ? "保存结果未确认；请先更新设置状态，勿重复提交。" : error.message;
         if (submitted) state = null;

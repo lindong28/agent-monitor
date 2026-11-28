@@ -123,7 +123,7 @@ def load_rate_limits(provider, account, *, codex_home=None, **options):
 
 def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_account_id=None, admitted_probe=None,
                      codex_home=None, root=None, account_profile=None, renew_auth=False, pause_scope=None, automatic_batch=None, source_digest=None,
-                     post_send_operation_id=None, scheduled_records=None):
+                     post_send_operation_id=None, scheduled_records=None, replacement=None):
     root = Path(root) if root is not None else ROOT
     if account is None:
         raise NotSignedIn("这台机器没有登录任何账号。")
@@ -156,7 +156,8 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                         or first.get("source_digest") != source_digest
                         or source_digest != codex_quota.recovery_source_digest(auth_path)):
                     raise LocalUnavailable("账号恢复来源已变化，未发出请求。")
-            lease = account_holds.acquire(root / "state", account.account_id, account.label, pause_id=probe_pause_id)
+            lease = account_holds.acquire(root / "state", account.account_id, account.label, pause_id=probe_pause_id,
+                                          replacement=bool(replacement))
         else:
             lease = upstream_controls.Controls(root / "state/upstream_controls").acquire(provider, **options)
         if admitted_probe is not None and probe_pause_id is not None:
@@ -177,6 +178,8 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
     parent_read = parent_write = None
     failure = None
     stage = "child_start"
+    replacement_unspent = False
+    replacement_dispatched = False
     bridge_explainable = False
     account_rejection = None
     try:
@@ -238,6 +241,8 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                 target["discovered_source_digest"] = source_at_start
                 if auto_renewal:
                     target["automatic_renewal"] = auto_renewal
+            if replacement:
+                target["replacement"] = replacement
             if probe_pause_id is not None:
                 target["recovery_probe"] = True
             if source_digest:
@@ -277,12 +282,15 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                             and proof == codex_quota.credential_digest(auth_path)):
                         codex_quota.check_identity(auth_path, account.account_id, account.label)
                         account_rejection = proof
+                if replacement and payload.get("replacement_rpc_started") is False:
+                    replacement_unspent = True
+                    raise LocalUnavailable("替换凭据复验未发出，原暂停保留。", failure=detail)
                 if auto_renewal and payload.get("authentication_recovery"):
                     detail["authentication_recovery"] = codex_quota.safe_auth_recovery(payload["authentication_recovery"])
                 # A sibling can revoke this batch after our provider has already
                 # answered. Retain that result and its existing pause semantics.
                 # RPC transport errors alone do not prove an upstream response.
-                if (auto_renewal and payload.get("quota_transport_failure") is True
+                if ((auto_renewal or replacement) and payload.get("quota_transport_failure") is True
                         and not detail.get("authentication_recovery") and _bridge_explainable_failure(detail)):
                     # A pinned renewal scope can be revoked while its parent
                     # remains usable. Check the bridge the quota reader used.
@@ -292,7 +300,9 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
                         event.get("target") == "https://chatgpt.com" and event.get("result") == rejection
                         and event.get("at", "") >= started_at for event in status.get("events", [])
                     ):
-                        raise automatic_egress.Skipped("route_changed", automatic_batch.targets)
+                        replacement_dispatched = bool(replacement)
+                        replacement_unspent = bool(replacement and status.get("quota_connected") is False)
+                        raise automatic_egress.Skipped("route_changed", automatic_batch.targets if automatic_batch else ())
                 bridge_explainable = _bridge_explainable_failure(detail) and not detail.get("authentication_recovery")
                 kind = (NotSignedIn if payload.get("signed_out") is True else
                         LocalUnavailable if payload.get("local_unavailable") is True else RefreshError)
@@ -401,6 +411,14 @@ def _load_rate_limits(provider, account, *, probe_pause_id=None, recovery_accoun
         for fd in (parent_read, parent_write):
             if fd is not None:
                 os.close(fd)
+        if replacement and (child is None or replacement_unspent) and admitted_probe:
+            pause = lease.state.get("pause") or {}
+            if pause.get("id") == probe_pause_id and (pause.get("probe_attempt") or {}).get("id") == admitted_probe.get("id"):
+                attempt = pause.pop("probe_attempt")
+                if replacement_dispatched:
+                    pause["replacement_attempt"] = attempt
+                else:
+                    admitted_probe.clear()
         try:
             lease.close(completed=child is None or child.returncode is not None)
         except OSError as exc:
@@ -680,6 +698,7 @@ def _codex(account, *, recovery=None):
     env["CODEX_HOME"] = str(home)
     original_digest = codex_quota.credential_digest(auth_path)
     auto = account.get("automatic_renewal")
+    replacement = account.get("replacement")
     initial_source = account.get("discovered_source_digest")
     original_file = _file_digest(auth_path) if auto else None
     env = {key: value for key, value in env.items()
@@ -693,7 +712,7 @@ def _codex(account, *, recovery=None):
     command = str(shim) if shim.is_file() else shutil.which("codex", path=env["PATH"])
     if not command:
         raise LocalUnavailable("Codex CLI 不可用，请在这台机器上安装后刷新。")
-    if auto and not automatic_egress.check_renewal_route(env):
+    if (auto or replacement) and not automatic_egress.check_renewal_route(env):
         raise LocalUnavailable("无法确认本次自动查询的原出口，未发出请求。")
     try:
         arguments = [command, "app-server", "--listen", "stdio://", "-c", "features.respect_system_proxy=false",
@@ -788,8 +807,28 @@ def _codex(account, *, recovery=None):
                     raise RefreshError("本次检查已达到总时限，未发出下一阶段请求。", failure={"kind": "timeout", "timeout_seconds": CODEX_RPC_SECONDS})
                 redactions += codex_quota.credential_secrets(auth_path)
                 sequence += 1
-                with admission or nullcontext():
-                    send({"id": sequence, "method": method, "params": params})
+                if replacement:
+                    from agent_monitor.quota import quota_settings
+                    from agent_monitor.accounts import account_holds
+                    root = Path(replacement["root"])
+                    identity = Account(account["account_id"], account["label"])
+                    with quota_settings.renewal_dispatch(root, replacement["profile"], identity, auth_path,
+                            activity_records=replacement["records"], replacement=True) as allowed:
+                        if (not allowed or method != "account/rateLimits/read" or sequence != 2
+                                or original_digest != replacement["digest"]
+                                or codex_quota.credential_digest(auth_path) != replacement["digest"]
+                                or codex_quota.recovery_source_digest(auth_path) != account["source_digest"]
+                                or account_holds.rejected_credential(root / "state", auth_path)
+                                or not automatic_egress.check_renewal_route(env)):
+                            raise LocalUnavailable("替换凭据复验条件已变化，未查询额度。")
+                        codex_quota.check_identity(auth_path, identity.account_id, identity.label)
+                        codex_quota.file_auth_recovery_preflight(auth_path)
+                        # A broken pipe can leave the result unknown. Mark before writing.
+                        replacement["rpc_started"] = True
+                        send({"id": sequence, "method": method, "params": params})
+                else:
+                    with admission or nullcontext():
+                        send({"id": sequence, "method": method, "params": params})
                 return receive(sequence, method)
             try:
                 retry = {"original_digest": original_digest, "deadline": deadline, "client_info": client_info}
@@ -878,6 +917,7 @@ def _safe_client_excerpt(value, secrets, *, truncated=False, limit=512):
 
 if __name__ == "__main__":
     recovery = {}
+    target = {}
     try:
         reader = {"claude": _claude, "codex": _codex}[sys.argv[1]]
         with _reader_lifetime(int(sys.argv[2]), float(sys.argv[3])):
@@ -887,7 +927,8 @@ if __name__ == "__main__":
     except RefreshError as exc:
         # `signed_out` is the class, carried as data because the parent runs in a
         # different process and only sees this line.
-        print(json.dumps({"error": str(exc), "signed_out": isinstance(exc, NotSignedIn),
+        print(json.dumps({"replacement_rpc_started": (target.get("replacement") or {}).get("rpc_started", False),
+                          "error": str(exc), "signed_out": isinstance(exc, NotSignedIn),
                           "local_unavailable": isinstance(exc, LocalUnavailable),
                           "quota_transport_failure": getattr(exc, "quota_transport_failure", False),
                           "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery,
@@ -896,7 +937,8 @@ if __name__ == "__main__":
         sys.exit(1)
     except Exception as exc:
         # External errors can contain request headers or provider payloads.
-        print(json.dumps({"error": "配额请求失败，请检查这台机器的网络与登录状态后刷新。",
+        print(json.dumps({"replacement_rpc_started": (target.get("replacement") or {}).get("rpc_started", False),
+                          "error": "配额请求失败，请检查这台机器的网络与登录状态后刷新。",
                           "failure": diagnostics.failure_details(exc), "authentication_recovery": recovery,
                           "official_quota_rejection": getattr(exc, "official_quota_rejection", False),
                           "account_quota_rejection": getattr(exc, "account_quota_rejection", None)}))

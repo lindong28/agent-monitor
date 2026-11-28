@@ -57,6 +57,8 @@ def _load(root):
             or not isinstance(state.get('selected'), list) or not isinstance(state.get('renewals', []), list)
             or any(not isinstance(key, str) for key in state['selected'])
             or any(not isinstance(key, str) for key in state.get('renewals', []))
+            or not isinstance(state.get('replacements', []), list)
+            or any(not isinstance(key, str) for key in state.get('replacements', []))
             or type(state.get('follow_running', False)) is not bool):
         raise ValueError('自动查询设置文件无效。')
     return state
@@ -74,14 +76,16 @@ def read(root=None, *, activity_records=False, include_activity=True):
     for row in rows:
         row['enabled'] = row['key'] in selected
         row['renewal_enabled'] = bool(row.get('renewal_key') and row['renewal_key'] in state.get('renewals', []))
+        row['replacement_enabled'] = bool(row.get('renewal_key') and row['renewal_key'] in state.get('replacements', []))
         row['effective_enabled'] = row['enabled'] or (follow and row.get('running_tasks', 0) > 0)
     # Live activity changes must not invalidate a user's pending settings edit.
     grants = set(state.get('renewals', []))
     unavailable_renewals = len(grants - {row.get('renewal_key') for row in rows})
-    configuration = [(row['key'], row.get('renewal_key'), row['enabled'], row['renewal_enabled']) for row in rows]
+    unavailable_replacements = len(set(state.get('replacements', [])) - {row.get('renewal_key') for row in rows})
+    configuration = [(row['key'], row.get('renewal_key'), row['enabled'], row['renewal_enabled'], row['replacement_enabled']) for row in rows]
     fingerprint = hashlib.sha256(json.dumps([state['revision'], configuration, unavailable_renewals, follow, hub_config.quota_interval()], sort_keys=True).encode()).hexdigest()
     return {'revision': fingerprint, 'accounts': rows, 'follow_running': follow,
-            'unavailable_renewals': unavailable_renewals, 'interval_seconds': hub_config.quota_interval()}
+            'unavailable_renewals': unavailable_renewals, 'unavailable_replacements': unavailable_replacements, 'interval_seconds': hub_config.quota_interval()}
 
 
 def selected(profile, root=None):
@@ -102,7 +106,7 @@ def dispatch_selected(profile, records, root=None):
     return bool(row and (row['enabled'] or (current['follow_running'] and codex_activity.live(records))))
 
 
-def renewal_authorized(root, profile, account, auth_path, *, activity_records=()):
+def renewal_authorized(root, profile, account, auth_path, *, activity_records=(), replacement=False):
     """Recheck the owning machine's grant immediately before automatic credential renewal."""
     from parsers import codex_activity
     key = _digest([profile, account.account_id, account.label])
@@ -111,12 +115,12 @@ def renewal_authorized(root, profile, account, auth_path, *, activity_records=()
         state = _load(root if root is not None else PROJECT_ROOT)
     except (OSError, ValueError, RecursionError):
         return False
-    return bool(renewal_key and renewal_key in state.get('renewals', [])
+    return bool(renewal_key and renewal_key in state.get('replacements' if replacement else 'renewals', [])
                 and (key in (state['selected'] or []) or (state.get('follow_running') and codex_activity.live(activity_records))))
 
 
 @contextmanager
-def renewal_dispatch(root, profile, account, auth_path, *, activity_records=()):
+def renewal_dispatch(root, profile, account, auth_path, *, activity_records=(), replacement=False):
     """Serialize handing one RPC to Codex with saving or revoking its grant."""
     try:
         lock = (Path(root) / "state/quota-settings.lock").open("rb")
@@ -125,7 +129,7 @@ def renewal_dispatch(root, profile, account, auth_path, *, activity_records=()):
         return
     with lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_SH)
-        yield renewal_authorized(root, profile, account, auth_path, activity_records=activity_records)
+        yield renewal_authorized(root, profile, account, auth_path, activity_records=activity_records, replacement=replacement)
 
 
 def settings_selection(request, current):
@@ -144,7 +148,13 @@ def settings_selection(request, current):
     if (not isinstance(renewals, list) or any(not isinstance(key, str) for key in renewals)
             or len(set(renewals)) != len(renewals) or not set(renewals).issubset(eligible)):
         raise ValueError('请为已启用自动查询的账号选择当前凭据来源，然后更新设置。')
-    return sorted(keys), follow, sorted(renewals)
+    previous_checks = {row['renewal_key'] for row in rows if row.get('replacement_enabled')}
+    replacements = request.get('replacements', sorted(previous_checks & eligible))
+    if (not isinstance(replacements, list) or any(not isinstance(key, str) for key in replacements)
+            or len(set(replacements)) != len(replacements) or not set(replacements).issubset(eligible)
+            or replacements and 'unavailable_replacements' not in current):
+        raise ValueError('请选择支持替换凭据复验的账号和机器，然后更新设置。')
+    return sorted(keys), follow, sorted(renewals), sorted(replacements)
 
 
 def change(request, root=None):
@@ -154,8 +164,9 @@ def change(request, root=None):
     with path.with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         current = read(root)
-        keys, follow, renewals = settings_selection(request, current)
+        keys, follow, renewals, replacements = settings_selection(request, current)
         added = set(renewals) - {row['renewal_key'] for row in current['accounts'] if row.get('renewal_enabled')}
+        added.update(set(replacements) - {row['renewal_key'] for row in current['accounts'] if row.get('replacement_enabled')})
         if added:
             from parsers import codex_profiles
             from agent_monitor.quota import codex_quota
@@ -175,7 +186,7 @@ def change(request, root=None):
             if added:
                 raise ValueError('凭据来源已变化，请更新设置后重新选择。')
         write_message(path, {'version': 1, 'revision': uuid.uuid4().hex, 'selected': keys,
-                             'follow_running': follow, 'renewals': renewals})
+                             'follow_running': follow, 'renewals': renewals, 'replacements': replacements})
         return read(root)
 
 

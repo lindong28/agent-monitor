@@ -16,7 +16,7 @@ export async function previewEgress(request, targets, signal, payload = {}) {
   const sending = Array.isArray(targets) && ["batch-start", "batch-retry"].includes(payload.approval_action);
   const needsApproval = Boolean(payload.approval_action);
   const hasRenewals = payload.approval_action === "quota-settings" && targets?.some(account => account.renewal);
-  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","refresh-selected":"查询所选账号配额","refresh-retry":"继续未完成的配额查询","login":"单独登录","quota-recovery":"检查并恢复配额","quota-auth-recovery":"刷新认证并检查配额","quota-login-recovery":"重新授权并复验配额","quota-settings":hasRenewals ? "授权自动查询和认证续期" : "启用所选账号的自动查询"})[payload.approval_action] || "发起上游操作";
+  const actionLabel = ({"batch-start":"发送消息","batch-retry":"继续发送未发送账号","refresh":"刷新配额","refresh-all":"刷新全部账号配额","refresh-selected":"查询所选账号配额","refresh-retry":"继续未完成的配额查询","login":"单独登录","quota-recovery":"检查并恢复配额","quota-auth-recovery":"刷新认证并检查配额","quota-login-recovery":"重新授权并复验配额","quota-settings":targets?.some(account => account.replacement) ? "保存自动查询与凭据授权" : hasRenewals ? "授权自动查询和认证续期" : "启用所选账号的自动查询"})[payload.approval_action] || "发起上游操作";
   const followRunning = payload.approval_action === "quota-settings" && payload.approval_scope?.includes("follow-running");
   const operationPending = ({"quota-settings":"自动查询设置尚未改变","quota-recovery":"尚未发送配额检查请求","quota-auth-recovery":"尚未刷新认证或查询配额","quota-login-recovery":"尚未申请设备码或查询配额", refresh:"尚未发送配额刷新请求", "refresh-all":"尚未发送配额刷新请求", "refresh-selected":"尚未发送配额刷新请求", "refresh-retry":"尚未发送配额刷新请求", login:"尚未发送登录请求"})[payload.approval_action] || "尚未发送账号消息";
   let receipt = null;
@@ -60,6 +60,13 @@ export async function previewEgress(request, targets, signal, payload = {}) {
       const identities = node("ul", undefined, "account-egress-identities");
       for (const account of fixed) identities.append(node("li", `${account.email}（${account.account_id}）`));
       dialog.append(identities);
+      const replacements = settings ? targets.filter(account => account.replacement) : [];
+      if (replacements.length) {
+        dialog.append(node("p", "以下账号定时查询遇到 401 token_revoked 后，如原位置已有同账号的新凭据，允许沿已核实的配额出口检查一次。有效读数保存后解除账号暂停。可在自动刷新中撤销。"));
+        const list = node("ul", undefined, "account-egress-identities");
+        for (const account of replacements) list.append(node("li", `${account.profile} · ${account.email}（${account.account_id}）`));
+        dialog.append(list);
+      }
       const renewals = settings ? targets.filter(account => account.renewal) : [];
       if (renewals.length) {
         dialog.append(node("p", "以下账号自动查询遇到 token_expired 时，允许在原时限内按已核实的路由调用一次官方认证刷新，同身份新凭据保存后复验一次配额。官方刷新可能包含多次网络请求。授权仅限此机器上列出的账号及其当前凭据来源，可在自动查询设置中撤销。"));

@@ -88,7 +88,7 @@ class Controls:
             handle.close()
             raise
 
-    def acquire(self, provider, *, cancelled=None, timeout=0, interval=0, probe_pause_id=None):
+    def acquire(self, provider, *, cancelled=None, timeout=0, interval=0, probe_pause_id=None, replacement=False):
         cancelled = cancelled or threading.Event()
         handle = self._lock(provider, cancelled, timeout)
         try:
@@ -101,7 +101,7 @@ class Controls:
                 pause = state.get("pause")
                 if not pause or pause["id"] != probe_pause_id or pause["id"] == "unreadable":
                     raise Paused("暂停状态已变化或无法读取，未开始探测。")
-                if "probe_attempt" in pause or state.get("active"):
+                if "probe_attempt" in pause or state.get("active") or (replacement and pause.get("replacement_attempt")):
                     raise Paused("该暂停的探测机会已使用或有未闭合操作，未开始新的请求。")
                 # Consumed in the same durable write as active, before any child.
                 pause["probe_attempt"] = {"id": uuid.uuid4().hex, "at": time.time()}
@@ -143,7 +143,7 @@ class Controls:
             requested = receipt["request"]["pause_id"]
             matching = next((p for p in (state.get("pause") or {}, state.get("last_pause") or {})
                            if p.get("id") == requested and attempt_id
-                           and (p.get("probe_attempt") or {}).get("id") == attempt_id
+                           and (p.get("probe_attempt") or p.get("replacement_attempt") or {}).get("id") == attempt_id
                            ), None)
             if (state.get("active") or not matching
                     or (state.get("pause") or {}).get("id") != receipt.get("pause_id")):

@@ -1,0 +1,7 @@
+# Quota verification after a refused credential is replaced
+
+A scheduled quota read for a discovered profile on November 27 returned HTTP 401 `token_revoked`. The next day an operator-confirmed quota read on the same machine with replacement credentials from the same source saved a valid reading and cleared the account hold. The separate automatic renewal grant applies to `token_expired`.
+
+Use an independent, revocable, default-off grant in the existing machine-owned automatic query settings. An enrolled profile on its usual schedule can verify a replacement once after the original account-local refusal. Bind the grant to the machine, profile, full account identity and credential location. Preserve the rejected generations. Require the same source, a new credential, valid route evidence and a quota-only child scope on the existing bridge. Refuse the authentication origin and auxiliary origins. Do not issue renewal, login, send or retry RPCs. Keep shared protection and operator recovery. Save a valid same-account reading before releasing the original hold. Existing installations retain their existing permissions.
+
+The independent decision review required an origin restriction before starting the official client, since a single quota RPC alone cannot constrain its implicit network traffic. Isolated scheduler and bridge checks can exercise recurrence without deliberately invalidating a real user's credentials. A future naturally occurring incident remains a separate source of production evidence.

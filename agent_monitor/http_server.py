@@ -790,14 +790,17 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("请选择已配置的机器。")
             current = quota_settings.on_machine(machine)
             if post:
-                selected, follow, renewals = quota_settings.settings_selection(raw, current)
+                selected, follow, renewals, replacements = quota_settings.settings_selection(raw, current)
                 previous = {row["key"] for row in current["accounts"] if row["enabled"]}
                 previous_renewals = {row["renewal_key"] for row in current["accounts"] if row.get("renewal_enabled")}
-                if set(selected) - previous or (follow and not current.get('follow_running')) or set(renewals) - previous_renewals:
-                    scope = [name, *selected, *(["follow-running"] if follow else []), *["renew:" + key for key in renewals]]
+                previous_checks = {row['renewal_key'] for row in current['accounts'] if row.get('replacement_enabled')}
+                if (set(selected) - previous or (follow and not current.get('follow_running'))
+                        or set(renewals) - previous_renewals or set(replacements) - previous_checks):
+                    scope = [name, *selected, *(["follow-running"] if follow else []), *["renew:" + key for key in renewals],
+                             *["replace:" + key for key in replacements]]
                     UPSTREAM_APPROVALS.consume(raw.get("confirmation"), "quota-settings", scope, current["revision"])
                 current = quota_settings.on_machine(machine, {"revision": current["revision"], "selected": selected,
-                                                            "follow_running": follow, "renewals": renewals})
+                                                            "follow_running": follow, "renewals": renewals, "replacements": replacements})
             self._send_json({**current, "machine": machine.name}, send_body=send_body)
         except (ValueError, UnicodeDecodeError) as exc:
             self._send_json({"error": str(exc)}, status=400, send_body=send_body)

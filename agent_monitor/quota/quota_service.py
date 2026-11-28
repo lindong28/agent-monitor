@@ -278,7 +278,17 @@ def rate_limits(refresh=False, *, blocked_accounts=None, use_cache=False, root=N
         deadline=deadline, scheduled=scheduled, enrollment=True, automatic_batch=automatic_batch, settings=settings,
     )
     if managed:
-        result["codex"] = dict(result.get("codex") or {}, managed_accounts=managed)
+        native = result.get("codex") or {}
+        pause = native.get("refresh_pause") or {}
+        if pause.get("scope") == "account":
+            recovered = next((row for row in managed if row.get("query_state") == "succeeded"
+                              and row.get("account_profile") == pause.get("profile")
+                              and row.get("account_id") == native.get("account_id")
+                              and row.get("account_label") == native.get("account_label")), None)
+            if recovered and not _discovered_pause(root, accounts.Account(native["account_id"], native["account_label"]))[0]:
+                native = dict(recovered)
+                native.pop("account_profile", None)
+        result["codex"] = dict(native, managed_accounts=managed)
     if refresh:
         save_cache(cache_path, result, session_links=links)
     return result
@@ -298,6 +308,62 @@ def _discovered_pause(root, account):
         projection.update(scope="account", profile=failure["account_profile"])
         return pause, projection
     return None, None
+
+
+def scheduled_replacement(root, profile, account, pause, records, batch):
+    """Use the original account hold and one probe after its rejected token changes."""
+    from agent_monitor import diagnostics, hub_config
+    from agent_monitor.accounts import account_holds
+    from agent_monitor.network import network_policy
+    from agent_monitor.quota import codex_quota, quota_settings
+
+    name = profile.account["name"]
+    auth = profile.home / "auth.json"
+    failure = pause.get("failure") or {}
+    if (pause.get("reason") != "quotaRefreshFailed" or pause.get("probe_attempt") or pause.get("replacement_attempt")
+            or type(pause.get("at")) not in (int, float) or not time.time() >= pause["at"] + hub_config.quota_interval()
+            or not codex_quota.authentication_quota_failure(failure) or failure["upstream_code"] != "token_revoked"
+            or (failure.get("network") or {}).get("scope") != "automatic_batch"
+            or failure.get("account_profile") != name or not failure.get("source_digest")
+            or failure["source_digest"] != codex_quota.recovery_source_digest(auth)
+            or failure.get("account_fingerprint") != quota_refresh.account_fingerprint("codex", account)):
+        return None
+    controls = account_holds.controls(root / "state", account.account_id, account.label)
+    held = controls.read("codex")
+    digest = codex_quota.credential_digest(auth)
+    if (held.get("pause") != pause or held.get("active") or not held.get("rejected_credentials")
+            or not digest or digest in held["rejected_credentials"]
+            or not quota_settings.renewal_authorized(root, name, account, auth, activity_records=records, replacement=True)):
+        return None
+    codex_quota.check_identity(auth, account.account_id, account.label)
+    codex_quota.file_auth_recovery_preflight(auth)
+    env = batch.replacement_environment()
+    route = env[network_policy.INTERNAL]
+    request = {"profile": name, "account_id": account.account_id, "account_label": account.label,
+               "pause_id": pause["id"], "pause_scope": "profile"}
+    admitted = {}
+    error = {"kind": "interrupted"}
+    try:
+        with network_policy.using_route(route):
+            block = recover_codex_quota(account.label, pause["id"], expected_id=account.account_id,
+                root=root, admitted_probe=admitted, profile=name, pause_scope="profile",
+                replacement={"root": str(root.absolute()), "profile": name, "records": records, "digest": digest})
+    except Exception as exc:
+        error = diagnostics.failure_details(exc)
+        raise
+    else:
+        error = None
+        return block
+    finally:
+        if admitted.get("id"):
+            current = controls.read("codex").get("pause") or {}
+            receipt = {"ok": error is None, "request": request, "observed_at": datetime.now(timezone.utc).isoformat(),
+                       "pause_id": current.get("id"), "failure": error, "automatic": True,
+                       "network": diagnostics.safe_network(network_policy.observations(route))}
+            try:
+                controls.record_recovery(receipt, attempt_id=admitted["id"])
+            except (OSError, RuntimeError) as exc:
+                diagnostics.monitor.record_failure("recovery_receipt", exc)
 
 
 def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, blocked_accounts=None, deadline=None, scheduled=False, enrollment=False, automatic_batch=None, settings=None):
@@ -390,6 +456,21 @@ def managed_codex_rate_limits(session_links=None, *, refresh=False, root=None, b
             if not block.get("refresh_error"):
                 from agent_monitor.accounts import upstream_controls
                 block["refresh_error"] = "本机已暂停该服务的自动请求；" + upstream_controls.pause_summary(pause)
+            if (refresh and scheduled and enrollment and automatic_batch and enrolled
+                    and selection.get("replacement_enabled") and projection.get("scope") == "account"
+                    and identity_key not in queried and time.monotonic() + quota_refresh.TIMEOUT + 2 <= deadline):
+                try:
+                    recovered = scheduled_replacement(root, profile, account, pause, selection.get("_records", []), automatic_batch)
+                except automatic_egress.Skipped as exc:
+                    block["refresh_skip"] = exc.details
+                except (ValueError, OSError, RuntimeError) as exc:
+                    remaining, projection = _discovered_pause(root, account)
+                    block.update(refresh_error="替换凭据复验未完成，请查看当前状态与恢复。", refresh_pause=projection,
+                                 refresh_failure=(remaining or {}).get("failure") or getattr(exc, "failure", None))
+                else:
+                    if recovered:
+                        block = recovered
+                        queried[identity_key] = block
         elif do_refresh and time.monotonic() + quota_refresh.TIMEOUT + 2 > deadline:
             block.update(query_state="pending", refresh_error="本轮查询时间已用完，此账号尚未查询；后续采集将继续。")
         elif do_refresh and (not enrollment or quota_settings.dispatch_selected(profile, selection.get('_records', []), root)):
@@ -718,7 +799,7 @@ def resolve_recovery_source(failure, root=None, *, discovered=False):
     return None, auth, None, "ambiguous" if candidates else reason
 
 
-def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None, profile=None, renew_auth=False, pause_scope=None, source_digest=None, confirmed_operation_id=None):
+def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None, admitted_probe=None, profile=None, renew_auth=False, pause_scope=None, source_digest=None, confirmed_operation_id=None, replacement=None):
     """One operator-approved probe; retain the pause until its reading is saved."""
     root = Path(root) if root is not None else ROOT
     from agent_monitor.accounts.upstream_controls import Controls
@@ -758,6 +839,8 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
                 raise quota_refresh.LocalUnavailable("凭据来源与暂停时不一致，请核对原账号目录。")
             options["source_digest"] = bound_source
         options["pause_scope"] = "account"
+    if replacement:
+        options["replacement"] = replacement
     recovery_operation = None
     source = pause.get("source") or {}
     if source.get("action") == "send" and pause.get("reason") in {"quotaReadFailed", "quotaRefreshFailed"}:
@@ -804,6 +887,8 @@ def recover_codex_quota(expected_label, pause_id, *, expected_id=None, root=None
     if current is None or accounts.quota_identity("codex", current.account_id, current.label) != accounts.quota_identity(
             "codex", account.account_id, account.label):
         raise quota_refresh.RefreshError("探测期间账号已变化；未保存读数，暂停保留。")
+    if replacement and codex_quota.credential_digest(home / "auth.json") != replacement["digest"]:
+        raise quota_refresh.LocalUnavailable("复验期间凭据已变化，暂停保留。")
     block = rate_limit_block(value, account)
     if not quota_applicability.current_window(block):
         raise quota_refresh.RefreshError("探测未返回当前有效额度窗口；暂停保留。")

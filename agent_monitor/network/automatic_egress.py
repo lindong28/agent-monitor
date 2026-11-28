@@ -126,6 +126,22 @@ class Batch:
                     return None
             return dict(self.renewal_env)
 
+    def replacement_environment(self):
+        """Admit a quota-only child of this batch, without the OAuth origin."""
+        self.environment()
+        with self.lock:
+            if not self.renewal_available or self.skipped:
+                raise Skipped("unknown", self.targets)
+            try:
+                scope = network_policy.narrow_automatic(self.env[network_policy.INTERNAL], quota_only=True)
+                with network_policy.using_route(self.route):
+                    env = network_policy.child_environment(self.env, scope=scope)
+            except network_policy.NetworkPolicyError:
+                raise Skipped("unknown", self.targets) from None
+            if not check_renewal_route(env):
+                raise Skipped("route_changed", self.targets)
+            return env
+
     def check(self):
         """Bridge rejection is local admission, never a provider failure/pause."""
         if self.skipped:

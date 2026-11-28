@@ -243,8 +243,9 @@ def admit_automatic(route, scope, generation, routes, seconds, *, origins=None):
         raise NetworkPolicyError("automatic_admission_unavailable")
 
 
-def narrow_automatic(route):
-    scope = _automatic_request(route, "automatic-renewal", {}).get("scope")
+def narrow_automatic(route, *, quota_only=False):
+    path = "automatic-quota-only" if quota_only else "automatic-renewal"
+    scope = _automatic_request(route, path, {}).get("scope")
     if not isinstance(scope, str) or not re.fullmatch(r"auto-[a-f0-9]{32}", scope):
         raise NetworkPolicyError("automatic_admission_unavailable")
     return scope

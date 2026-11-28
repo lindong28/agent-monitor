@@ -225,15 +225,21 @@ class Router {
     value.timer = setTimeout(() => this.deny(scope, 'automatic_admission_expired'), seconds * 1000);
     value.timer.unref(); this.automatic.set(scope, value);
   }
-  narrow(scope) {
+  narrow(scope, quotaOnly = false) {
     const parent = this.automatic.get(scope);
     if (!parent?.origins || parent.parent || this.rejection(scope)) throw new RouteError('automatic_admission_invalid');
-    if (!parent.child) {
+    if (quotaOnly || !parent.child) {
       const child = 'auto-' + crypto.randomBytes(16).toString('hex');
       this.admit(child, parent.generation, [...parent.routes], (parent.until - this.now()) / 1000, parent.origins);
       const value = this.automatic.get(child);
       value.until = parent.until;
       value.parent = scope;
+      if (quotaOnly) {
+        value.origins = {'https://chatgpt.com': parent.origins['https://chatgpt.com']};
+        value.quotaConnected = false;
+        (parent.quotaChildren ||= new Set()).add(child);
+        return child;
+      }
       parent.child = child;
     }
     if (this.rejection(parent.child)) throw new RouteError('automatic_admission_invalid');
@@ -244,7 +250,7 @@ class Router {
     if (!admission?.parent || this.rejection(scope)) return false;
     try {
       const {routes} = await this.resolveOrigins();
-      if (quotaOrigins.every(origin => routes[origin] === admission.origins[origin]) && !this.rejection(scope)) return true;
+      if (Object.keys(admission.origins).every(origin => routes[origin] === admission.origins[origin]) && !this.rejection(scope)) return true;
     } catch {}
     this.deny(scope, 'automatic_route_unobserved');
     return false;
@@ -267,6 +273,7 @@ class Router {
     if (value) {
       value.rejection ||= reason;
       if (value.child) this.deny(value.child, reason);
+      for (const child of value.quotaChildren || []) this.deny(child, reason);
       for (const socket of value.sockets) socket.destroy();
     }
   }
@@ -355,6 +362,8 @@ class Router {
     throw last;
   }
   record(target, route, result, scope) {
+    const admission = this.automatic.get(scope);
+    if (admission?.quotaConnected === false && result === 'connected') admission.quotaConnected = true;
     this.events.push({scope, target: target.url.origin, route: route.key, result, at: new Date().toISOString(), generation: this.generation});
     if (this.events.length > 64) this.events.shift();
   }
@@ -409,7 +418,8 @@ function createBridge(resolve, token, options) {
       res.setHeader('content-type', 'application/json');
       const events = router.events.filter(row => scope === 'shared' || row.scope === scope).map(({scope, ...row}) => row);
       res.end(JSON.stringify({policy: 'chromium-system', generation: router.generation,
-        coverage: 'recent_connections_only', automatic_rejection: router.rejection(scope), events})); return;
+        coverage: 'recent_connections_only', automatic_rejection: router.rejection(scope),
+        quota_connected: router.automatic.get(scope)?.quotaConnected, events})); return;
     }
     if (req.url === '/automatic-egress' && req.method === 'POST' && scope === 'shared') {
       try {
@@ -426,10 +436,10 @@ function createBridge(resolve, token, options) {
       }
       return;
     }
-    if (req.url === '/automatic-renewal' && req.method === 'POST') {
+    if (['/automatic-renewal', '/automatic-quota-only'].includes(req.url) && req.method === 'POST') {
       req.resume();
       try {
-        const child = router.narrow(scope);
+        const child = router.narrow(scope, req.url === '/automatic-quota-only');
         res.writeHead(201, {'content-type': 'application/json'}); res.end(JSON.stringify({scope: child}));
       } catch { res.writeHead(409); res.end(); }
       return;

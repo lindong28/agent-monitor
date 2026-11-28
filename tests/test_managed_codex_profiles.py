@@ -107,6 +107,9 @@ for line in sys.stdin:
         continue
     method = m["method"]
     if method == "initialize":
+        if (home / "mode").read_text() == "init_failed":
+            print(json.dumps({"id":m["id"],"error":{"code":-32603,"message":"fixture initialize failure"}}), flush=True)
+            continue
         result = {"userAgent": "codex/0.167.0"}
     else:
         with (home / "calls").open("a") as f:
@@ -136,7 +139,7 @@ for line in sys.stdin:
                 if mode == "changed_file":
                     auth["tokens"]["refresh_token"] += "-replacement"
                     path.write_text(json.dumps(auth))
-                code = "token_revoked" if mode == "revoked" else "token_expired"
+                code = "token_revoked" if mode in {"revoked", "native_replaced", "replaced_offline", "replaced_changed"} else "token_expired"
                 body = json.dumps({"error":{"code":code}})
                 prefix = "failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; content-type=application/json; body="
                 print(json.dumps({"id":m["id"],"error":{"code":-32603,"message":prefix+body}}),flush=True)
@@ -156,7 +159,8 @@ for line in sys.stdin:
         env = {"HOME": str(self.root), "PATH": os.defpath, network_policy.INTERNAL: route}
         strict_route = route.replace("a" * 32, "b" * 32)
         batch = SimpleNamespace(environment=lambda: env, targets=[], check=lambda: None,
-                                renewal_environment=lambda: {**env, network_policy.INTERNAL: strict_route})
+                                renewal_environment=lambda: {**env, network_policy.INTERNAL: strict_route},
+                                replacement_environment=lambda: {**env, network_policy.INTERNAL: strict_route})
         real_command = quota_refresh.module_command
         # The real isolated child and stdio peer see mutable, offline consent and route authorities.
         def child_command(*args):
@@ -171,6 +175,10 @@ def check_route(env):
         root = Path((home / 'fixture_root').read_text())
         current = quota_settings.read(root)
         quota_settings.change({'revision':current['revision'],'selected':[r['key'] for r in current['accounts']], 'renewals':[]}, root)
+    if (home / 'mode').read_text() == 'revoke_replacement':
+        root = Path((home / 'fixture_root').read_text())
+        current = quota_settings.read(root)
+        quota_settings.change({'revision':current['revision'],'selected':[r['key'] for r in current['accounts']], 'replacements':[]}, root)
     return (home / 'route').is_file()
 automatic_egress.check_renewal_route = check_route
 import runpy;""")
@@ -184,7 +192,7 @@ import runpy;""")
                 ("no_change", 2, "account"), ("late_revoke", 2, "machine"),
                 ("wrong_result", 3, "machine"), ("revoked", 1, "account"), ("manual", 1, "machine"),
                 ("missing_reset", 3, "machine"), ("expired_window", 3, "machine"), ("cache_failure", 3, "machine"), ("refused_again", 3, "account"),
-                ("native_alias", 3, None), ("native_no_grant", 1, "account"), ("other_source", 0, "machine")]:
+                ("native_replaced", 1, "account"), ("replaced_offline", 1, "account"), ("replaced_changed", 1, "account"), ("native_alias", 3, None), ("native_no_grant", 1, "account"), ("other_source", 0, "machine")]:
             with self.subTest(mode=mode):
                 root = self.root / mode
                 old = {"account_profile": "alpha", "account_id": "shared-workspace", "account_label": "alpha@example.test",
@@ -221,13 +229,14 @@ import runpy;""")
 
                 def observations(endpoint):
                     from datetime import datetime, timezone
-                    denied = endpoint == strict_route and mode in {"denied_transport", "late_revocation", "other_rpc_error"}
+                    replacement_denied = (homes["alpha"] / "mode").read_text() == "denied_transport" and mode == "replaced_offline"
+                    denied = replacement_denied or endpoint == strict_route and mode in {"denied_transport", "late_revocation", "other_rpc_error"}
                     at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
                     event = {"at": at, "target": "https://chatgpt.com", "result": "automatic_route_unobserved"}
-                    return {"generation": 1, "automatic_rejection": event["result"] if denied else None,
+                    return {"generation": 1, "quota_connected": False, "automatic_rejection": event["result"] if denied else None,
                             "events": [event] if denied and mode != "late_revocation" else []}
 
-                def run():
+                def run(*, recovered=False):
                     with mock.patch.object(network_policy, "observations", side_effect=observations), \
                             mock.patch.object(quota_service, "save_cache", side_effect=save), \
                             mock.patch.object(quota_refresh, "module_command", side_effect=child_command), network_policy.using_route(route), \
@@ -236,8 +245,8 @@ import runpy;""")
                             mock.patch.object(quota_service.automatic_egress, "Batch", return_value=batch):
                         snapshot = quota_service.rate_limits(root=root, refresh=True, scheduled=mode != "manual", automatic=mode != "manual")
                         if mode.startswith("native_"):
-                            self.assertEqual(snapshot["codex"]["query_state"], "paused" if scope else "succeeded")
-                            if scope:
+                            self.assertEqual(snapshot["codex"]["query_state"], "paused" if scope and not recovered else "succeeded")
+                            if scope and not recovered:
                                 self.assertEqual(snapshot["codex"]["refresh_pause"]["scope"], "account")
                         return snapshot["codex"]["managed_accounts"]
                 alpha, beta = run()
@@ -264,9 +273,99 @@ import runpy;""")
                     self.assertEqual(alpha["refresh_pause"]["profile"], "alpha")
                     self.assertEqual(alpha["refresh_pause"]["id"], pause["id"])
                     self.assertEqual(pause["failure"]["source_digest"], codex_quota.recovery_source_digest(homes["alpha"] / "auth.json"))
-                    self.assertEqual(pause["failure"]["upstream_code"], "token_revoked" if mode == "revoked" else "token_expired")
+                    self.assertEqual(pause["failure"]["upstream_code"], "token_revoked" if mode in {"revoked", "native_replaced", "replaced_offline", "replaced_changed"} else "token_expired")
                     self.assertEqual(run()[0]["refresh_pause"]["id"], pause["id"])
                     self.assertEqual((homes["alpha"] / "calls").read_text().splitlines(), calls)
+                if mode in {"revoked", "native_replaced", "replaced_offline", "replaced_changed"}:
+                    auth_path = homes["alpha"] / "auth.json"
+                    replacement = json.loads(auth_path.read_text())
+                    replacement["tokens"]["access_token"] += "-new"
+                    auth_path.write_text(json.dumps(replacement))
+                    def alpha_state(*, due=True, **options):
+                        with mock.patch("agent_monitor.hub_config.quota_interval", return_value=0 if due else 3600):
+                            return next(r["query_state"] for r in run(**options) if r["account_profile"] == "alpha")
+                    self.assertEqual(alpha_state(), "paused")  # Old renewal grant alone.
+                    selected = [r["key"] for r in current["accounts"]]
+                    key = next(r["renewal_key"] for r in current["accounts"] if r["profile"] == "alpha")
+                    with self.assertRaises(ValueError):
+                        quota_settings.settings_selection({"revision": current["revision"], "selected": selected,
+                            "replacements": ["unknown-source"]}, current)
+                    def grant(keys):
+                        quota_settings.change({"revision": quota_settings.read(root)["revision"],
+                                               "selected": selected, "replacements": keys}, root)
+                    grant([key])
+                    grant([])
+                    self.assertEqual(alpha_state(), "paused")
+                    self.assertEqual(call_file.read_text().splitlines(), calls)
+                    grant([key])
+                    self.assertEqual(alpha_state(due=False), "paused")
+                    self.assertEqual(call_file.read_text().splitlines(), calls)
+                    if mode == "revoked":
+                        (homes["alpha"] / "mode").write_text("init_failed")
+                        self.assertEqual(alpha_state(), "paused")
+                        self.assertFalse(Controls(root / "state/upstream_controls").read("codex").get("pause"))
+                        (homes["alpha"] / "mode").write_text("revoke_replacement")
+                        self.assertEqual(alpha_state(), "paused")
+                        held = account_holds.controls(root / "state", "shared-workspace", "alpha@example.test")
+                        self.assertNotIn("probe_attempt", held.read("codex")["pause"])
+                        self.assertEqual(call_file.read_text().splitlines(), calls)
+                        grant([key])
+                    if mode == "replaced_changed":
+                        read_limits = quota_refresh.load_rate_limits
+                        def rotate_after_read(*args, **options):
+                            value = read_limits(*args, **options)
+                            if options.get("replacement"):
+                                replacement["tokens"]["access_token"] += "-other"
+                                auth_path.write_text(json.dumps(replacement))
+                            return value
+                        with mock.patch.object(quota_refresh, "load_rate_limits", side_effect=rotate_after_read):
+                            self.assertEqual(alpha_state(), "paused")
+                        self.assertEqual(call_file.read_text().splitlines(), calls + [quota_rpc])
+                        self.assertTrue(account_holds.controls(root / "state", "shared-workspace", "alpha@example.test").read("codex")["pause"])
+                        continue
+                    if mode == "replaced_offline":
+                        held = account_holds.controls(root / "state", "shared-workspace", "alpha@example.test")
+                        (homes["alpha"] / "mode").write_text("denied_transport")
+                        self.assertEqual(alpha_state(), "paused")
+                        self.assertFalse(Controls(root / "state/upstream_controls").read("codex").get("pause"))
+                        self.assertNotIn("probe_attempt", held.read("codex")["pause"])
+                        self.assertEqual(call_file.read_text().splitlines(), calls + [quota_rpc])
+                        (homes["alpha"] / "mode").write_text("healthy")
+                        self.assertEqual(alpha_state(), "paused")
+                        self.assertEqual(call_file.read_text().splitlines(), calls + [quota_rpc])
+                        self.assertTrue(held.read("codex")["pause"]["replacement_attempt"])
+                        self.assertTrue(held.read("codex")["last_recovery"]["automatic"])
+                        manual = account_holds.acquire(root / "state", "shared-workspace", "alpha@example.test", pause_id=pause["id"])
+                        manual_id = manual.state["pause"]["probe_attempt"]["id"]
+                        auto_id = manual.state["pause"]["replacement_attempt"]["id"]
+                        manual.close()
+                        held.resume("codex", pause["id"])
+                        success = {"ok": True, "request": {"pause_id": pause["id"]}, "pause_id": None}
+                        held.record_recovery(success, attempt_id=manual_id)
+                        from agent_monitor.accounts.upstream_controls import Paused
+                        with self.assertRaises(Paused):
+                            held.record_recovery(dict(success, ok=False, automatic=True), attempt_id=auto_id)
+                        self.assertTrue(held.read("codex")["last_recovery"]["ok"])
+                        self.assertEqual(beta["query_state"], "succeeded")
+                        continue
+                    if mode == "revoked":
+                        (homes["alpha"] / "mode").write_text("healthy")
+                    if mode == "native_replaced":
+                        with mock.patch.object(Controls, "record_recovery", side_effect=OSError("fixture unavailable")), \
+                                mock.patch("agent_monitor.diagnostics.monitor.record_failure") as recorded:
+                            self.assertEqual(alpha_state(recovered=True), "succeeded")
+                            self.assertEqual(recorded.call_args.args[0], "recovery_receipt")
+                    else:
+                        self.assertEqual(alpha_state(recovered=True), "succeeded")
+                    control = account_holds.controls(root / "state", "shared-workspace", "alpha@example.test").read("codex")
+                    self.assertNotIn("pause", control)
+                    if mode == "revoked":
+                        self.assertTrue(control["last_recovery"]["ok"])
+                        self.assertTrue(control["last_recovery"]["automatic"])
+                        self.assertEqual(control["last_recovery"]["original_pause"]["id"], pause["id"])
+                    self.assertEqual(call_file.read_text().splitlines(), [quota_rpc, quota_rpc])
+                    rows = quota_service.read_cache(root / "state/quota_snapshot.json")["codex"]["managed_accounts"]
+                    self.assertEqual(next(r["five_hour_pct"] for r in rows if r["account_profile"] == "alpha"), 17)
                 if scope != "machine":
                     self.assertEqual(beta["query_state"], "succeeded")
                 else:
